@@ -5,6 +5,7 @@ use codex_extension_api::ToolFinishInput;
 use codex_extension_api::ToolTimingBoundary;
 use codex_extension_api::ToolTimingInput;
 use codex_protocol::protocol::Op;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use test_case::test_case;
 
@@ -67,41 +68,48 @@ async fn dispatch_and_timing_surround_tool_execution(
     expected: &[&str],
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call("plan", tool_name, &json!({"plan": []}).to_string()),
-                responses::ev_completed("first"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("answer", "done"),
-                responses::ev_completed("last"),
-            ]),
-        ],
-    )
-    .await;
-    let observations = Arc::new(Observations::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(observations.clone());
-    let test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| config.update_plan_enabled = true)
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_text_turn("update the plan").await?;
-    assert_eq!(requests.requests().len(), 2);
-    assert_eq!(
-        *observations
-            .events
-            .lock()
-            .expect("observation lock should not be poisoned"),
-        expected
-            .iter()
-            .map(|event| ("plan".into(), *event))
-            .collect::<Vec<_>>()
-    );
-    Ok(())
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        "plan",
+                        tool_name,
+                        &json!({"plan": []}).to_string(),
+                    ),
+                    responses::ev_completed("first"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("answer", "done"),
+                    responses::ev_completed("last"),
+                ]),
+            ],
+        )
+        .await;
+        let observations = Arc::new(Observations::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(observations.clone());
+        let test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| config.update_plan_enabled = true)
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_text_turn("update the plan").await?;
+        assert_eq!(requests.requests().len(), 2);
+        assert_eq!(
+            *observations
+                .events
+                .lock()
+                .expect("observation lock should not be poisoned"),
+            expected
+                .iter()
+                .map(|event| ("plan".into(), *event))
+                .collect::<Vec<_>>()
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -154,67 +162,70 @@ async fn cancelled_tool_still_reports_handler_timing() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_reports_host_timing_without_nested_dispatch_timing() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_custom_tool_call(
-                    "exec",
-                    "exec",
-                    "text(await tools.test_sync_tool({sleep_after_ms: 1}));",
-                ),
-                responses::ev_completed("first"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("answer", "done"),
-                responses::ev_completed("last"),
-            ]),
-        ],
-    )
-    .await;
-    let observations = Arc::new(Observations::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(observations.clone());
-    let test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_model("test-gpt-5.1-codex")
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("code mode should be enabled");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_text_turn("run the nested tool").await?;
-    let requests = requests.requests();
-    assert_eq!(requests.len(), 2);
-    let events = observations
-        .events
-        .lock()
-        .expect("observation lock should not be poisoned");
-    let outer = events
-        .iter()
-        .filter(|(id, _)| id == "exec")
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(
-        outer,
-        vec![
-            ("exec".into(), "dispatch"),
-            ("exec".into(), "start"),
-            ("exec".into(), "host"),
-            ("exec".into(), "finish"),
-            ("exec".into(), "handler"),
-        ],
-        "tool output: {:?}",
-        requests[1].custom_tool_call_output("exec")
-    );
-    let nested = events
-        .iter()
-        .filter(|(id, _)| id != "exec")
-        .map(|(_, event)| *event)
-        .collect::<Vec<_>>();
-    assert_eq!(nested, vec!["start", "finish"]);
-    Ok(())
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_custom_tool_call(
+                        "exec",
+                        "exec",
+                        "text(await tools.test_sync_tool({sleep_after_ms: 1}));",
+                    ),
+                    responses::ev_completed("first"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("answer", "done"),
+                    responses::ev_completed("last"),
+                ]),
+            ],
+        )
+        .await;
+        let observations = Arc::new(Observations::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(observations.clone());
+        let test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_model("test-gpt-5.1-codex")
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("code mode should be enabled");
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_text_turn("run the nested tool").await?;
+        let requests = requests.requests();
+        assert_eq!(requests.len(), 2);
+        let events = observations
+            .events
+            .lock()
+            .expect("observation lock should not be poisoned");
+        let outer = events
+            .iter()
+            .filter(|(id, _)| id == "exec")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outer,
+            vec![
+                ("exec".into(), "dispatch"),
+                ("exec".into(), "start"),
+                ("exec".into(), "host"),
+                ("exec".into(), "finish"),
+                ("exec".into(), "handler"),
+            ],
+            "tool output: {:?}",
+            requests[1].custom_tool_call_output("exec")
+        );
+        let nested = events
+            .iter()
+            .filter(|(id, _)| id != "exec")
+            .map(|(_, event)| *event)
+            .collect::<Vec<_>>();
+        assert_eq!(nested, vec!["start", "finish"]);
+        Ok(())
+    })
+    .await
 }

@@ -17,6 +17,7 @@ use codex_app_server_protocol::UserInput;
 use codex_config::types::AuthCredentialsStoreMode;
 use codex_features::Feature;
 use codex_utils_path_uri::PathUri;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::stdio_server_bin;
 use pretty_assertions::assert_eq;
@@ -46,6 +47,7 @@ enum AccessCall {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn daybreak_access_respects_plugin_provenance(case: AccessCall) -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let home = TempDir::new()?;
     let selected_package = TempDir::new()?;
     let selected = matches!(case, AccessCall::Selected);
@@ -226,4 +228,6 @@ async fn daybreak_access_respects_plugin_provenance(case: AccessCall) -> Result<
     }
     server.verify().await;
     Ok(())
+    })
+    .await
 }

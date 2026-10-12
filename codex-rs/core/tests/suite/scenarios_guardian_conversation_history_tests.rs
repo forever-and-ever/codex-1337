@@ -1,5 +1,6 @@
 //! Parent-backed history retrieval and live authorization on a reused reviewer.
 
+use core_test_support::mock_server;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -43,6 +44,7 @@ async fn guardian_conversation_history(scenario: HistoryScenario) -> anyhow::Res
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     let history_server = MockServer::start().await;
+    mock_server::run(&[&server, &history_server], async {
     let large = !matches!(scenario, HistoryScenario::PermissionChanges);
     let smaller_reviewer_budget = matches!(scenario, HistoryScenario::SmallerReviewerBudget);
     let actions = [
@@ -230,6 +232,8 @@ async fn guardian_conversation_history(scenario: HistoryScenario) -> anyhow::Res
         }
     }
     Ok(())
+    })
+    .await
 }
 
 fn review_responses(label: &str, actions: &[(&str, Value)]) -> Vec<String> {

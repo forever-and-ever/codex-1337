@@ -16,6 +16,7 @@ use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
 use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use serde_json::json;
 use tokio::time::timeout;
@@ -76,104 +77,107 @@ async fn request_user_input_round_trip_for_mode(
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .write(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            config: enable_default_mode_feature.then(|| {
-                std::collections::HashMap::from([(
-                    "features.default_mode_request_user_input".to_string(),
-                    json!(true),
-                )])
-            }),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn, .. } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "ask something".to_string(),
-                    text_elements: Vec::new(),
-                }],
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
                 model: Some("mock-model".to_string()),
-                effort: Some(ReasoningEffort::Medium),
-                collaboration_mode: Some(CollaborationMode {
-                    mode,
-                    settings: Settings {
-                        model: "mock-model".to_string(),
-                        reasoning_effort: Some(ReasoningEffort::Medium),
-                        developer_instructions: None,
-                    },
+                config: enable_default_mode_feature.then(|| {
+                    std::collections::HashMap::from([(
+                        "features.default_mode_request_user_input".to_string(),
+                        json!(true),
+                    )])
                 }),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::ToolRequestUserInput { request_id, params } = server_req else {
-        panic!("expected ToolRequestUserInput request, got: {server_req:?}");
-    };
+        let TurnStartResponse { turn, .. } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "ask something".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    model: Some("mock-model".to_string()),
+                    effort: Some(ReasoningEffort::Medium),
+                    collaboration_mode: Some(CollaborationMode {
+                        mode,
+                        settings: Settings {
+                            model: "mock-model".to_string(),
+                            reasoning_effort: Some(ReasoningEffort::Medium),
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    assert_eq!(params.thread_id, thread.id);
-    assert_eq!(params.turn_id, turn.id);
-    assert_eq!(params.item_id, "call1");
-    assert_eq!(params.questions.len(), 1);
-    assert_eq!(params.is_blocking, expected_is_blocking);
-    assert_eq!(params.auto_resolution_ms, None);
-    let resolved_request_id = request_id.clone();
-
-    mcp.send_response(
-        request_id,
-        serde_json::json!({
-            "answers": {
-                "confirm_path": { "answers": ["yes"] }
-            }
-        }),
-    )
-    .await?;
-    let mut saw_resolved = false;
-    loop {
-        let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
-        let JSONRPCMessage::Notification(notification) = message else {
-            continue;
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::ToolRequestUserInput { request_id, params } = server_req else {
+            panic!("expected ToolRequestUserInput request, got: {server_req:?}");
         };
-        match notification.method.as_str() {
-            "serverRequest/resolved" => {
-                let resolved: ServerRequestResolvedNotification = serde_json::from_value(
-                    notification
-                        .params
-                        .clone()
-                        .expect("serverRequest/resolved params"),
-                )?;
-                assert_eq!(resolved.thread_id, thread.id);
-                assert_eq!(resolved.request_id, resolved_request_id);
-                saw_resolved = true;
-            }
-            "turn/completed" => {
-                assert!(saw_resolved, "serverRequest/resolved should arrive first");
-                break;
-            }
-            _ => {}
-        }
-    }
 
-    Ok(())
+        assert_eq!(params.thread_id, thread.id);
+        assert_eq!(params.turn_id, turn.id);
+        assert_eq!(params.item_id, "call1");
+        assert_eq!(params.questions.len(), 1);
+        assert_eq!(params.is_blocking, expected_is_blocking);
+        assert_eq!(params.auto_resolution_ms, None);
+        let resolved_request_id = request_id.clone();
+
+        mcp.send_response(
+            request_id,
+            serde_json::json!({
+                "answers": {
+                    "confirm_path": { "answers": ["yes"] }
+                }
+            }),
+        )
+        .await?;
+        let mut saw_resolved = false;
+        loop {
+            let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
+            let JSONRPCMessage::Notification(notification) = message else {
+                continue;
+            };
+            match notification.method.as_str() {
+                "serverRequest/resolved" => {
+                    let resolved: ServerRequestResolvedNotification = serde_json::from_value(
+                        notification
+                            .params
+                            .clone()
+                            .expect("serverRequest/resolved params"),
+                    )?;
+                    assert_eq!(resolved.thread_id, thread.id);
+                    assert_eq!(resolved.request_id, resolved_request_id);
+                    saw_resolved = true;
+                }
+                "turn/completed" => {
+                    assert!(saw_resolved, "serverRequest/resolved should arrive first");
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    })
+    .await
 }

@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -162,50 +163,57 @@ async fn environment_context_uses_external_current_time_on_each_turn() -> Result
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let time_provider = Arc::new(TestTimeProvider::default());
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(config, /*interval*/ 0, CurrentTimeSource::External);
-            config.include_environment_context = true;
-        })
-        .with_external_time_provider(time_provider.clone())
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let time_provider = Arc::new(TestTimeProvider::default());
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 0,
+                    CurrentTimeSource::External,
+                );
+                config.include_environment_context = true;
+            })
+            .with_external_time_provider(time_provider.clone())
+            .build_with_auto_env(&server)
+            .await?;
 
-    test.submit_turn("first simulated day").await?;
-    time_provider
-        .current_time
-        .store(FIRST_TIME_UNIX_SECONDS + 86_400, Ordering::Relaxed);
-    test.submit_turn("second simulated day").await?;
+        test.submit_turn("first simulated day").await?;
+        time_provider
+            .current_time
+            .store(FIRST_TIME_UNIX_SECONDS + 86_400, Ordering::Relaxed);
+        test.submit_turn("second simulated day").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    for (request, timestamp) in requests
-        .iter()
-        .zip([FIRST_TIME_UNIX_SECONDS, FIRST_TIME_UNIX_SECONDS + 86_400])
-    {
-        assert!(request.has_content_kinds(&["environments.environment_context"]));
-        let current_date = DateTime::<Utc>::from_timestamp(timestamp, 0)
-            .expect("test timestamp should be valid")
-            .with_timezone(&Local)
-            .format("%Y-%m-%d")
-            .to_string();
-        assert!(request.message_input_texts("user").iter().any(|text| {
-            text.contains("<environment_context>")
-                && text.contains(&format!("<current_date>{current_date}</current_date>"))
-        }));
-    }
-    assert_eq!(current_time_reminders(&requests[0]), vec![SECOND_REMINDER]);
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        for (request, timestamp) in requests
+            .iter()
+            .zip([FIRST_TIME_UNIX_SECONDS, FIRST_TIME_UNIX_SECONDS + 86_400])
+        {
+            assert!(request.has_content_kinds(&["environments.environment_context"]));
+            let current_date = DateTime::<Utc>::from_timestamp(timestamp, 0)
+                .expect("test timestamp should be valid")
+                .with_timezone(&Local)
+                .format("%Y-%m-%d")
+                .to_string();
+            assert!(request.message_input_texts("user").iter().any(|text| {
+                text.contains("<environment_context>")
+                    && text.contains(&format!("<current_date>{current_date}</current_date>"))
+            }));
+        }
+        assert_eq!(current_time_reminders(&requests[0]), vec![SECOND_REMINDER]);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -213,52 +221,59 @@ async fn current_time_reminders_follow_time_interval_and_persist_in_history() ->
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let tool_args = json!({
-        "cmd": "echo current time",
-        "yield_time_ms": 1_000,
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    "current-time-tool-call",
-                    "exec_command",
-                    &serde_json::to_string(&tool_args)?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-            sse(vec![ev_response_created("resp-3"), ev_completed("resp-3")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(config, /*interval*/ 120, CurrentTimeSource::External)
-        })
-        .with_external_time_provider(Arc::new(TestTimeProvider::default()))
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let tool_args = json!({
+            "cmd": "echo current time",
+            "yield_time_ms": 1_000,
+        });
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        "current-time-tool-call",
+                        "exec_command",
+                        &serde_json::to_string(&tool_args)?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+                sse(vec![ev_response_created("resp-3"), ev_completed("resp-3")]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 120,
+                    CurrentTimeSource::External,
+                )
+            })
+            .with_external_time_provider(Arc::new(TestTimeProvider::default()))
+            .build(&server)
+            .await?;
 
-    test.submit_turn_with_permission_profile("first turn", PermissionProfile::Disabled)
-        .await?;
-    test.submit_turn("second turn").await?;
+        test.submit_turn_with_permission_profile("first turn", PermissionProfile::Disabled)
+            .await?;
+        test.submit_turn("second turn").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
-    assert_eq!(current_time_reminders(&requests[1]), vec![FIRST_REMINDER]);
-    assert_eq!(
-        current_time_reminders(&requests[2]),
-        vec![FIRST_REMINDER, THIRD_REMINDER]
-    );
-    Ok(())
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
+        assert_eq!(current_time_reminders(&requests[1]), vec![FIRST_REMINDER]);
+        assert_eq!(
+            current_time_reminders(&requests[2]),
+            vec![FIRST_REMINDER, THIRD_REMINDER]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -266,37 +281,44 @@ async fn zero_current_time_reminder_interval_delivers_when_time_moves_backward()
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let time_provider = Arc::new(TestTimeProvider::default());
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(config, /*interval*/ 0, CurrentTimeSource::External)
-        })
-        .with_external_time_provider(time_provider.clone())
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let time_provider = Arc::new(TestTimeProvider::default());
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 0,
+                    CurrentTimeSource::External,
+                )
+            })
+            .with_external_time_provider(time_provider.clone())
+            .build(&server)
+            .await?;
 
-    test.submit_turn("first turn").await?;
-    time_provider
-        .current_time
-        .store(FIRST_TIME_UNIX_SECONDS - 60, Ordering::Relaxed);
-    test.submit_turn("second turn").await?;
+        test.submit_turn("first turn").await?;
+        time_provider
+            .current_time
+            .store(FIRST_TIME_UNIX_SECONDS - 60, Ordering::Relaxed);
+        test.submit_turn("second turn").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
-    assert_eq!(
-        current_time_reminders(&requests[1]),
-        vec![FIRST_REMINDER, EARLIER_REMINDER]
-    );
-    Ok(())
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
+        assert_eq!(
+            current_time_reminders(&requests[1]),
+            vec![FIRST_REMINDER, EARLIER_REMINDER]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -304,126 +326,133 @@ async fn current_time_reminders_can_follow_only_user_or_tool_outputs() -> Result
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let tool_args = json!({
-        "cmd": "echo current time",
-        "yield_time_ms": 1_000,
-    });
-    let mut continue_response = ev_completed("resp-2");
-    // Ask for another inference without recording a new user message or tool output.
-    continue_response["response"]["end_turn"] = json!(false);
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    "current-time-tool-call",
-                    "exec_command",
-                    &serde_json::to_string(&tool_args)?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "continue"),
-                continue_response,
-            ]),
-            sse(vec![ev_response_created("resp-3"), ev_completed("resp-3")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(config, /*interval*/ 0, CurrentTimeSource::External);
-            config
-                .current_time_reminder
-                .as_mut()
-                .expect("current-time reminder should be configured")
-                .delivery_mode = CurrentTimeReminderDeliveryMode::AfterUserOrToolOutput;
-        })
-        .with_external_time_provider(Arc::new(TestTimeProvider::default()))
-        .build(&server)
-        .await?;
-
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, test.config.cwd.as_path());
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "first turn".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                ..Default::default()
-            }),
+    mock_server::run(&[&server], async {
+        let tool_args = json!({
+            "cmd": "echo current time",
+            "yield_time_ms": 1_000,
+        });
+        let mut continue_response = ev_completed("resp-2");
+        // Ask for another inference without recording a new user message or tool output.
+        continue_response["response"]["end_turn"] = json!(false);
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        "current-time-tool-call",
+                        "exec_command",
+                        &serde_json::to_string(&tool_args)?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "continue"),
+                    continue_response,
+                ]),
+                sse(vec![ev_response_created("resp-3"), ev_completed("resp-3")]),
+            ],
         )
-        .await?;
-    // The first step's seal is measured off-thread and may follow turn completion.
-    let mut announced = Vec::new();
-    let mut sealed = None;
-    let mut completed = false;
-    while sealed.is_none() || !completed {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::ItemCompleted(ItemCompletedEvent {
-                item: TurnItem::Arrival(item),
-                ..
-            }) => announced.push(item),
-            EventMsg::ItemCompleted(ItemCompletedEvent {
-                item: TurnItem::StepAdmission(item),
-                ..
-            }) if item.response_id == "resp-1" && item.admission != Admission::Pending => {
-                sealed = Some(item.admission);
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 0,
+                    CurrentTimeSource::External,
+                );
+                config
+                    .current_time_reminder
+                    .as_mut()
+                    .expect("current-time reminder should be configured")
+                    .delivery_mode = CurrentTimeReminderDeliveryMode::AfterUserOrToolOutput;
+            })
+            .with_external_time_provider(Arc::new(TestTimeProvider::default()))
+            .build(&server)
+            .await?;
+
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, test.config.cwd.as_path());
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "first turn".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        // The first step's seal is measured off-thread and may follow turn completion.
+        let mut announced = Vec::new();
+        let mut sealed = None;
+        let mut completed = false;
+        while sealed.is_none() || !completed {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::ItemCompleted(ItemCompletedEvent {
+                    item: TurnItem::Arrival(item),
+                    ..
+                }) => announced.push(item),
+                EventMsg::ItemCompleted(ItemCompletedEvent {
+                    item: TurnItem::StepAdmission(item),
+                    ..
+                }) if item.response_id == "resp-1" && item.admission != Admission::Pending => {
+                    sealed = Some(item.admission);
+                }
+                EventMsg::TurnComplete(_) => completed = true,
+                _ => {}
             }
-            EventMsg::TurnComplete(_) => completed = true,
-            _ => {}
         }
-    }
-    // The reminder written after the tool output is announced as the second request reads
-    // it, and the first step's seal bills it under the same id.
-    let [arrival] = announced.as_slice() else {
-        panic!("expected one announced arrival, got {announced:?}");
-    };
-    assert_eq!(
-        (
-            arrival.response_id.as_str(),
-            arrival.kind,
-            arrival.label.as_str(),
-            arrival.text.as_deref(),
-        ),
-        (
-            "resp-1",
-            ArrivalKind::Injection,
-            "current_time_reminder",
-            Some(SECOND_REMINDER),
-        )
-    );
-    let Some(Admission::Sealed(sealed)) = sealed else {
-        panic!("first step severed: {sealed:?}");
-    };
-    assert_eq!(
-        sealed
-            .arrivals
-            .iter()
-            .map(|billed| (billed.id.as_str(), billed.kind))
-            .collect::<Vec<_>>(),
-        vec![(arrival.id.as_str(), ArrivalKind::Injection)]
-    );
+        // The reminder written after the tool output is announced as the second request reads
+        // it, and the first step's seal bills it under the same id.
+        let [arrival] = announced.as_slice() else {
+            panic!("expected one announced arrival, got {announced:?}");
+        };
+        assert_eq!(
+            (
+                arrival.response_id.as_str(),
+                arrival.kind,
+                arrival.label.as_str(),
+                arrival.text.as_deref(),
+            ),
+            (
+                "resp-1",
+                ArrivalKind::Injection,
+                "current_time_reminder",
+                Some(SECOND_REMINDER),
+            )
+        );
+        let Some(Admission::Sealed(sealed)) = sealed else {
+            panic!("first step severed: {sealed:?}");
+        };
+        assert_eq!(
+            sealed
+                .arrivals
+                .iter()
+                .map(|billed| (billed.id.as_str(), billed.kind))
+                .collect::<Vec<_>>(),
+            vec![(arrival.id.as_str(), ArrivalKind::Injection)]
+        );
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
-    assert_eq!(
-        current_time_reminders(&requests[1]),
-        vec![FIRST_REMINDER, SECOND_REMINDER]
-    );
-    assert_eq!(
-        current_time_reminders(&requests[2]),
-        vec![FIRST_REMINDER, SECOND_REMINDER]
-    );
-    Ok(())
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(current_time_reminders(&requests[0]), vec![FIRST_REMINDER]);
+        assert_eq!(
+            current_time_reminders(&requests[1]),
+            vec![FIRST_REMINDER, SECOND_REMINDER]
+        );
+        assert_eq!(
+            current_time_reminders(&requests[2]),
+            vec![FIRST_REMINDER, SECOND_REMINDER]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(ClockSetup::Configured; "configured")]
@@ -634,58 +663,62 @@ async fn current_time_reminder_is_refreshed_after_compaction() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![
-                ev_response_created("resp-compact"),
-                ev_assistant_message("msg-compact", "compact summary"),
-                ev_completed("resp-compact"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.name = "OpenAI-compatible test provider".to_string();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    model_provider.supports_websockets = false;
-    let test = test_codex()
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-            enable_current_time_reminder(
-                config,
-                /*interval*/ 3_000,
-                CurrentTimeSource::External,
-            );
-            config
-                .current_time_reminder
-                .as_mut()
-                .expect("current-time reminder should be configured")
-                .delivery_mode = CurrentTimeReminderDeliveryMode::AfterUserOrToolOutput;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![
+                    ev_response_created("resp-compact"),
+                    ev_assistant_message("msg-compact", "compact summary"),
+                    ev_completed("resp-compact"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let mut model_provider =
+            built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+        model_provider.name = "OpenAI-compatible test provider".to_string();
+        model_provider.base_url = Some(format!("{}/v1", server.uri()));
+        model_provider.supports_websockets = false;
+        let test = test_codex()
+            .with_config(move |config| {
+                config.model_provider = model_provider;
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 3_000,
+                    CurrentTimeSource::External,
+                );
+                config
+                    .current_time_reminder
+                    .as_mut()
+                    .expect("current-time reminder should be configured")
+                    .delivery_mode = CurrentTimeReminderDeliveryMode::AfterUserOrToolOutput;
+            })
+            .with_external_time_provider(Arc::new(TestTimeProvider::default()))
+            .build(&server)
+            .await?;
+
+        test.submit_turn("before compact").await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .with_external_time_provider(Arc::new(TestTimeProvider::default()))
-        .build(&server)
-        .await?;
+        .await;
+        test.submit_turn("after compact").await?;
 
-    test.submit_turn("before compact").await?;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            current_time_reminders(&requests[2]),
+            vec![SECOND_REMINDER],
+            "a new context window should force a fresh reminder before the next model request"
+        );
+
+        Ok(())
     })
-    .await;
-    test.submit_turn("after compact").await?;
-
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    assert_eq!(
-        current_time_reminders(&requests[2]),
-        vec![SECOND_REMINDER],
-        "a new context window should force a fresh reminder before the next model request"
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -743,78 +776,91 @@ async fn opted_in_clock_failures_reach_the_model_without_aborting() -> Result<()
 
     const CALL_ID: &str = "failed-current-time";
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call_with_namespace(CALL_ID, "clock", "curr_time", "{}"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 80),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_function_call_with_namespace("clock-before-compact", "clock", "curr_time", "{}"),
-                ev_completed_with_tokens("resp-2", /*total_tokens*/ 500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-compact"),
-                ev_assistant_message("msg-compact", "compact summary"),
-                ev_completed("resp-compact"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-3"),
-                ev_completed_with_tokens("resp-3", /*total_tokens*/ 80),
-            ]),
-        ],
-    )
-    .await;
-    let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.name = "OpenAI-compatible test provider".to_string();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    model_provider.supports_websockets = false;
-    let test = test_codex()
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-            config.model_auto_compact_token_limit = Some(200);
-            enable_current_time_reminder(config, /*interval*/ 0, CurrentTimeSource::External);
-            config.include_environment_context = true;
-            config
-                .features
-                .enable(Feature::NonfatalClockReadErrors)
-                .unwrap();
-        })
-        .with_external_time_provider(Arc::new(FailingTimeProvider))
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call_with_namespace(CALL_ID, "clock", "curr_time", "{}"),
+                    ev_completed_with_tokens("resp-1", /*total_tokens*/ 80),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_function_call_with_namespace(
+                        "clock-before-compact",
+                        "clock",
+                        "curr_time",
+                        "{}",
+                    ),
+                    ev_completed_with_tokens("resp-2", /*total_tokens*/ 500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-compact"),
+                    ev_assistant_message("msg-compact", "compact summary"),
+                    ev_completed("resp-compact"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_completed_with_tokens("resp-3", /*total_tokens*/ 80),
+                ]),
+            ],
+        )
+        .await;
+        let mut model_provider =
+            built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+        model_provider.name = "OpenAI-compatible test provider".to_string();
+        model_provider.base_url = Some(format!("{}/v1", server.uri()));
+        model_provider.supports_websockets = false;
+        let test = test_codex()
+            .with_config(move |config| {
+                config.model_provider = model_provider;
+                config.model_auto_compact_token_limit = Some(200);
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 0,
+                    CurrentTimeSource::External,
+                );
+                config.include_environment_context = true;
+                config
+                    .features
+                    .enable(Feature::NonfatalClockReadErrors)
+                    .unwrap();
+            })
+            .with_external_time_provider(Arc::new(FailingTimeProvider))
+            .build_with_auto_env(&server)
+            .await?;
 
-    test.submit_turn("continue in a new context window").await?;
+        test.submit_turn("continue in a new context window").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 4);
-    assert_eq!(
-        requests[1].function_call_output_text(CALL_ID),
-        Some("failed to read current time".to_string()),
-    );
-    for index in [0, 1, 3] {
-        let request = &requests[index];
-        let developer_messages = request.message_input_texts("developer");
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 4);
         assert_eq!(
-            developer_messages
-                .iter()
-                .map(|text| text.matches(CLOCK_UNAVAILABLE).count())
-                .sum::<usize>(),
-            1,
-            "request {index} developer messages: {developer_messages:?}",
+            requests[1].function_call_output_text(CALL_ID),
+            Some("failed to read current time".to_string()),
         );
-        assert!(current_time_reminders(request).is_empty());
-        assert!(
-            !request
-                .message_input_texts("user")
-                .iter()
-                .any(|text| text.contains("<current_date>"))
-        );
-    }
-    Ok(())
+        for index in [0, 1, 3] {
+            let request = &requests[index];
+            let developer_messages = request.message_input_texts("developer");
+            assert_eq!(
+                developer_messages
+                    .iter()
+                    .map(|text| text.matches(CLOCK_UNAVAILABLE).count())
+                    .sum::<usize>(),
+                1,
+                "request {index} developer messages: {developer_messages:?}",
+            );
+            assert!(current_time_reminders(request).is_empty());
+            assert!(
+                !request
+                    .message_input_texts("user")
+                    .iter()
+                    .any(|text| text.contains("<current_date>"))
+            );
+        }
+        Ok(())
+    })
+    .await
 }
 
 /// Consecutive failures share one notice, but a new outage after recovery is reported in the same turn.
@@ -823,72 +869,79 @@ async fn opted_in_clock_failures_are_reported_again_after_recovery() -> Result<(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut model_responses = Vec::new();
-    for (response_id, message_id) in [
-        ("resp-1", "msg-1"),
-        ("resp-2", "msg-2"),
-        ("resp-3", "msg-3"),
-    ] {
-        let mut completion = ev_completed(response_id);
-        completion["response"]["end_turn"] = json!(false);
+    mock_server::run(&[&server], async {
+        let mut model_responses = Vec::new();
+        for (response_id, message_id) in [
+            ("resp-1", "msg-1"),
+            ("resp-2", "msg-2"),
+            ("resp-3", "msg-3"),
+        ] {
+            let mut completion = ev_completed(response_id);
+            completion["response"]["end_turn"] = json!(false);
+            model_responses.push(sse(vec![
+                ev_response_created(response_id),
+                ev_assistant_message(message_id, "continue"),
+                completion,
+            ]));
+        }
         model_responses.push(sse(vec![
-            ev_response_created(response_id),
-            ev_assistant_message(message_id, "continue"),
-            completion,
+            ev_response_created("resp-4"),
+            ev_completed("resp-4"),
         ]));
-    }
-    model_responses.push(sse(vec![
-        ev_response_created("resp-4"),
-        ev_completed("resp-4"),
-    ]));
-    let responses = mount_sse_sequence(&server, model_responses).await;
-    let clock = TestTimeProvider {
-        scripted_current_time: Some(Mutex::new(VecDeque::from([
-            Err("test clock unavailable"),
-            Err("test clock unavailable"),
-            Ok(FIRST_TIME_UNIX_SECONDS),
-            Err("test clock unavailable"),
-        ]))),
-        ..TestTimeProvider::default()
-    };
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(config, /*interval*/ 0, CurrentTimeSource::External);
-            config
-                .features
-                .enable(Feature::NonfatalClockReadErrors)
-                .unwrap();
-        })
-        .with_external_time_provider(Arc::new(clock))
-        .build_with_auto_env(&server)
-        .await?;
+        let responses = mount_sse_sequence(&server, model_responses).await;
+        let clock = TestTimeProvider {
+            scripted_current_time: Some(Mutex::new(VecDeque::from([
+                Err("test clock unavailable"),
+                Err("test clock unavailable"),
+                Ok(FIRST_TIME_UNIX_SECONDS),
+                Err("test clock unavailable"),
+            ]))),
+            ..TestTimeProvider::default()
+        };
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 0,
+                    CurrentTimeSource::External,
+                );
+                config
+                    .features
+                    .enable(Feature::NonfatalClockReadErrors)
+                    .unwrap();
+            })
+            .with_external_time_provider(Arc::new(clock))
+            .build_with_auto_env(&server)
+            .await?;
 
-    test.submit_turn("keep going while the clock changes")
-        .await?;
+        test.submit_turn("keep going while the clock changes")
+            .await?;
 
-    let clock_messages = responses
-        .requests()
-        .iter()
-        .map(|request| {
-            request
-                .message_input_texts("developer")
-                .into_iter()
-                .filter(|text| {
-                    text == CLOCK_UNAVAILABLE || text.starts_with("<current_time_reminder>")
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        clock_messages,
-        vec![
-            vec![CLOCK_UNAVAILABLE],
-            vec![CLOCK_UNAVAILABLE],
-            vec![CLOCK_UNAVAILABLE, FIRST_REMINDER],
-            vec![CLOCK_UNAVAILABLE, FIRST_REMINDER, CLOCK_UNAVAILABLE],
-        ]
-    );
-    Ok(())
+        let clock_messages = responses
+            .requests()
+            .iter()
+            .map(|request| {
+                request
+                    .message_input_texts("developer")
+                    .into_iter()
+                    .filter(|text| {
+                        text == CLOCK_UNAVAILABLE || text.starts_with("<current_time_reminder>")
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            clock_messages,
+            vec![
+                vec![CLOCK_UNAVAILABLE],
+                vec![CLOCK_UNAVAILABLE],
+                vec![CLOCK_UNAVAILABLE, FIRST_REMINDER],
+                vec![CLOCK_UNAVAILABLE, FIRST_REMINDER, CLOCK_UNAVAILABLE],
+            ]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -898,43 +951,46 @@ async fn current_time_tool_returns_the_latest_time() -> Result<()> {
     const CALL_ID: &str = "current-time";
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call_with_namespace(CALL_ID, "clock", "curr_time", "{}"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            enable_current_time_reminder(
-                config,
-                /*interval*/ 3_000,
-                CurrentTimeSource::External,
-            )
-        })
-        .with_external_time_provider(Arc::new(TestTimeProvider::default()))
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call_with_namespace(CALL_ID, "clock", "curr_time", "{}"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 3_000,
+                    CurrentTimeSource::External,
+                )
+            })
+            .with_external_time_provider(Arc::new(TestTimeProvider::default()))
+            .build(&server)
+            .await?;
 
-    test.submit_turn("check the current time").await?;
+        test.submit_turn("check the current time").await?;
 
-    let requests = responses.requests();
-    assert!(
-        requests[0].tool_by_name("clock", "curr_time").is_some(),
-        "clock.curr_time should be exposed when current-time reminders are enabled"
-    );
-    assert_eq!(
-        requests[1].function_call_output_text(CALL_ID),
-        Some("It is 2026-06-17 17:35:15 UTC.".to_string())
-    );
+        let requests = responses.requests();
+        assert!(
+            requests[0].tool_by_name("clock", "curr_time").is_some(),
+            "clock.curr_time should be exposed when current-time reminders are enabled"
+        );
+        assert_eq!(
+            requests[1].function_call_output_text(CALL_ID),
+            Some("It is 2026-06-17 17:35:15 UTC.".to_string())
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(false; "direct")]
@@ -947,122 +1003,125 @@ async fn sleep_tool_uses_configured_time_provider(inside_exec: bool) -> Result<(
     const DURATION_MS: u64 = 12 * 60 * 60 * 1000;
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                if inside_exec {
-                    ev_custom_tool_call(
-                        CALL_ID,
-                        "exec",
-                        &format!(
-                            r#"text(await tools.clock__sleep({{duration_ms: {DURATION_MS}}}));
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    if inside_exec {
+                        ev_custom_tool_call(
+                            CALL_ID,
+                            "exec",
+                            &format!(
+                                r#"text(await tools.clock__sleep({{duration_ms: {DURATION_MS}}}));
 await tools.update_work_status({{activity: "Sleep finished"}});"#
-                        ),
-                    )
-                } else {
-                    ev_function_call_with_namespace(
-                        CALL_ID,
-                        "clock",
-                        "sleep",
-                        &json!({ "duration_ms": DURATION_MS }).to_string(),
-                    )
-                },
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let time_provider = Arc::new(TestTimeProvider::default());
-    let test = test_codex()
-        .with_config(move |config| {
-            if inside_exec {
+                            ),
+                        )
+                    } else {
+                        ev_function_call_with_namespace(
+                            CALL_ID,
+                            "clock",
+                            "sleep",
+                            &json!({ "duration_ms": DURATION_MS }).to_string(),
+                        )
+                    },
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let time_provider = Arc::new(TestTimeProvider::default());
+        let test = test_codex()
+            .with_config(move |config| {
+                if inside_exec {
+                    config
+                        .features
+                        .enable(Feature::CodeModeOnly)
+                        .expect("test config should allow Code Mode");
+                }
+                enable_current_time_reminder(
+                    config,
+                    /*interval*/ 3_000,
+                    CurrentTimeSource::External,
+                );
                 config
-                    .features
-                    .enable(Feature::CodeModeOnly)
-                    .expect("test config should allow Code Mode");
+                    .current_time_reminder
+                    .as_mut()
+                    .expect("current-time reminder config should be present")
+                    .sleep_tool = true;
+            })
+            .with_external_time_provider(time_provider.clone())
+            .build(&server)
+            .await?;
+
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "sleep".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let mut sleep_events = Vec::new();
+        let mut activities = Vec::new();
+        wait_for_event(&test.codex, |event| {
+            let native = match event {
+                EventMsg::CodeModeOwned(owned) => {
+                    assert!(inside_exec);
+                    owned.payload().as_ref()
+                }
+                event => event,
+            };
+            let item = match native {
+                EventMsg::ItemStarted(started) => Some((false, &started.item)),
+                EventMsg::ItemCompleted(completed) => Some((true, &completed.item)),
+                _ => None,
+            };
+            if let Some((completed, TurnItem::Extension(ExtensionItem::Sleep(item)))) = item {
+                assert_eq!(matches!(event, EventMsg::CodeModeOwned(_)), inside_exec);
+                sleep_events.push((completed, item.clone()));
             }
-            enable_current_time_reminder(
-                config,
-                /*interval*/ 3_000,
-                CurrentTimeSource::External,
-            );
-            config
-                .current_time_reminder
-                .as_mut()
-                .expect("current-time reminder config should be present")
-                .sleep_tool = true;
+            if let EventMsg::WorkStatusUpdated(status) = native {
+                activities.push(status.activity.clone());
+            }
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .with_external_time_provider(time_provider.clone())
-        .build(&server)
-        .await?;
-
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "sleep".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let mut sleep_events = Vec::new();
-    let mut activities = Vec::new();
-    wait_for_event(&test.codex, |event| {
-        let native = match event {
-            EventMsg::CodeModeOwned(owned) => {
-                assert!(inside_exec);
-                owned.payload().as_ref()
+        .await;
+        assert_eq!(sleep_events.len(), 2);
+        assert!(!sleep_events[0].0);
+        assert!(sleep_events[1].0);
+        assert_eq!(sleep_events[0].1, sleep_events[1].1);
+        assert_eq!(sleep_events[0].1.duration_ms, DURATION_MS);
+        assert_eq!(
+            activities,
+            if inside_exec {
+                vec!["Sleep finished".to_string()]
+            } else {
+                Vec::new()
             }
-            event => event,
-        };
-        let item = match native {
-            EventMsg::ItemStarted(started) => Some((false, &started.item)),
-            EventMsg::ItemCompleted(completed) => Some((true, &completed.item)),
-            _ => None,
-        };
-        if let Some((completed, TurnItem::Extension(ExtensionItem::Sleep(item)))) = item {
-            assert_eq!(matches!(event, EventMsg::CodeModeOwned(_)), inside_exec);
-            sleep_events.push((completed, item.clone()));
-        }
-        if let EventMsg::WorkStatusUpdated(status) = native {
-            activities.push(status.activity.clone());
-        }
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    assert_eq!(sleep_events.len(), 2);
-    assert!(!sleep_events[0].0);
-    assert!(sleep_events[1].0);
-    assert_eq!(sleep_events[0].1, sleep_events[1].1);
-    assert_eq!(sleep_events[0].1.duration_ms, DURATION_MS);
-    assert_eq!(
-        activities,
-        if inside_exec {
-            vec!["Sleep finished".to_string()]
+        );
+
+        assert_eq!(
+            time_provider.sleep_seconds.load(Ordering::Relaxed),
+            DURATION_MS / 1_000
+        );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        let output = if inside_exec {
+            super::code_mode::custom_tool_output_last_non_empty_text(&requests[1], CALL_ID)
+                .expect("exec output")
         } else {
-            Vec::new()
-        }
-    );
+            requests[1]
+                .function_call_output_text(CALL_ID)
+                .expect("sleep output")
+        };
+        assert!(output.contains("Sleep completed."), "{output}");
 
-    assert_eq!(
-        time_provider.sleep_seconds.load(Ordering::Relaxed),
-        DURATION_MS / 1_000
-    );
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    let output = if inside_exec {
-        super::code_mode::custom_tool_output_last_non_empty_text(&requests[1], CALL_ID)
-            .expect("exec output")
-    } else {
-        requests[1]
-            .function_call_output_text(CALL_ID)
-            .expect("sleep output")
-    };
-    assert!(output.contains("Sleep completed."), "{output}");
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }

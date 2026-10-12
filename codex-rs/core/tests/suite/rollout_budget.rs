@@ -7,6 +7,7 @@ use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -64,63 +65,66 @@ async fn adds_weighted_initial_and_threshold_reminders(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                json!({
-                    "type": "response.completed",
-                    "response": {
-                        "id": "resp-1",
-                        "usage": {
-                            "input_tokens": 60,
-                            "input_tokens_details": { "cached_tokens": 40 },
-                            "output_tokens": 15,
-                            "output_tokens_details": null,
-                            "total_tokens": 75,
-                            "codex_rollout_budget_units": rollout_budget_units
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    json!({
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-1",
+                            "usage": {
+                                "input_tokens": 60,
+                                "input_tokens_details": { "cached_tokens": 40 },
+                                "output_tokens": 15,
+                                "output_tokens_details": null,
+                                "total_tokens": 75,
+                                "codex_rollout_budget_units": rollout_budget_units
+                            }
                         }
-                    }
+                    }),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.rollout_budget = Some(RolloutBudgetConfig {
+                    sampling_token_weight: 2.0,
+                    prefill_token_weight: 0.5,
+                    ..rollout_budget()
+                });
+            })
+            .build(&server)
+            .await?;
+
+        test.submit_turn("first turn").await?;
+        test.submit_turn("second turn").await?;
+
+        let requests = responses.requests();
+        assert!(requests[0].has_content_kinds(&["rollout_budget.remaining_tokens"]));
+        assert_eq!(
+            rollout_budget_texts(&requests[0]),
+            vec![rollout_budget_message(/*remaining_tokens*/ 100)]
+        );
+        assert_eq!(
+            rollout_budget_texts(&requests[1]),
+            vec![
+                rollout_budget_message(/*remaining_tokens*/ 100),
+                rollout_budget_message(if rollout_budget_units.is_some() {
+                    59
+                } else {
+                    60
                 }),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.rollout_budget = Some(RolloutBudgetConfig {
-                sampling_token_weight: 2.0,
-                prefill_token_weight: 0.5,
-                ..rollout_budget()
-            });
-        })
-        .build(&server)
-        .await?;
+            ]
+        );
 
-    test.submit_turn("first turn").await?;
-    test.submit_turn("second turn").await?;
-
-    let requests = responses.requests();
-    assert!(requests[0].has_content_kinds(&["rollout_budget.remaining_tokens"]));
-    assert_eq!(
-        rollout_budget_texts(&requests[0]),
-        vec![rollout_budget_message(/*remaining_tokens*/ 100)]
-    );
-    assert_eq!(
-        rollout_budget_texts(&requests[1]),
-        vec![
-            rollout_budget_message(/*remaining_tokens*/ 100),
-            rollout_budget_message(if rollout_budget_units.is_some() {
-                59
-            } else {
-                60
-            }),
-        ]
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -281,54 +285,57 @@ async fn exhausted_budget_fails_current_and_later_turns() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("exhaust-budget"),
-                ev_completed_with_tokens("exhaust-budget", /*total_tokens*/ 30),
-            ]),
-            sse(vec![
-                ev_response_created("already-exhausted"),
-                ev_completed_with_tokens("already-exhausted", /*total_tokens*/ 1),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.rollout_budget = Some(RolloutBudgetConfig {
-                limit_tokens: 30,
-                reminder_at_remaining_tokens: vec![20, 10],
-                ..rollout_budget()
-            });
-        })
-        .build(&server)
-        .await?;
-
-    for prompt in ["exhaust the budget", "try another turn"] {
-        test.codex
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: prompt.to_string(),
-                text_elements: Vec::new(),
-            }]))
+    mock_server::run(&[&server], async {
+        mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("exhaust-budget"),
+                    ev_completed_with_tokens("exhaust-budget", /*total_tokens*/ 30),
+                ]),
+                sse(vec![
+                    ev_response_created("already-exhausted"),
+                    ev_completed_with_tokens("already-exhausted", /*total_tokens*/ 1),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.rollout_budget = Some(RolloutBudgetConfig {
+                    limit_tokens: 30,
+                    reminder_at_remaining_tokens: vec![20, 10],
+                    ..rollout_budget()
+                });
+            })
+            .build(&server)
             .await?;
 
-        wait_for_event(&test.codex, |event| {
-            matches!(
-                event,
-                EventMsg::Error(error)
-                    if error.codex_error_info == Some(CodexErrorInfo::SessionBudgetExceeded)
-            )
-        })
-        .await;
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
-        })
-        .await;
-    }
+        for prompt in ["exhaust the budget", "try another turn"] {
+            test.codex
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: prompt.to_string(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
 
-    Ok(())
+            wait_for_event(&test.codex, |event| {
+                matches!(
+                    event,
+                    EventMsg::Error(error)
+                        if error.codex_error_info == Some(CodexErrorInfo::SessionBudgetExceeded)
+                )
+            })
+            .await;
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::TurnComplete(_))
+            })
+            .await;
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(false, false ; "local token usage")]
@@ -406,62 +413,66 @@ async fn restates_the_current_remainder_after_compaction() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 20),
-            ]),
-            sse(vec![
-                ev_response_created("resp-compact"),
-                ev_assistant_message("msg-compact", "compact summary"),
-                ev_completed_with_tokens("resp-compact", /*total_tokens*/ 10),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.name = "OpenAI-compatible test provider".to_string();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    model_provider.supports_websockets = false;
-    let test = test_codex()
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-            config.rollout_budget = Some(RolloutBudgetConfig {
-                reminder_at_remaining_tokens: vec![50],
-                ..rollout_budget()
-            });
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_completed_with_tokens("resp-1", /*total_tokens*/ 20),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-compact"),
+                    ev_assistant_message("msg-compact", "compact summary"),
+                    ev_completed_with_tokens("resp-compact", /*total_tokens*/ 10),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let mut model_provider =
+            built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+        model_provider.name = "OpenAI-compatible test provider".to_string();
+        model_provider.base_url = Some(format!("{}/v1", server.uri()));
+        model_provider.supports_websockets = false;
+        let test = test_codex()
+            .with_config(move |config| {
+                config.model_provider = model_provider;
+                config.rollout_budget = Some(RolloutBudgetConfig {
+                    reminder_at_remaining_tokens: vec![50],
+                    ..rollout_budget()
+                });
+            })
+            .build(&server)
+            .await?;
+
+        test.submit_turn("first turn").await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .build(&server)
-        .await?;
+        .await;
+        test.submit_turn("second turn").await?;
 
-    test.submit_turn("first turn").await?;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = responses.requests();
+        assert_eq!(
+            rollout_budget_texts(&requests[2]),
+            vec![rollout_budget_message(/*remaining_tokens*/ 70)],
+            "a new context window should restate the current remainder"
+        );
+        let request_body = requests[2].body_json().to_string();
+        let summary_position = request_body
+            .find("compact summary")
+            .expect("post-compaction request should contain the summary");
+        let reminder_position = request_body
+            .find("You have 70 weighted tokens left in the shared session token budget.")
+            .expect("post-compaction request should contain the current remainder");
+        assert!(
+            summary_position < reminder_position,
+            "the current remainder should follow the compaction summary"
+        );
+
+        Ok(())
     })
-    .await;
-    test.submit_turn("second turn").await?;
-
-    let requests = responses.requests();
-    assert_eq!(
-        rollout_budget_texts(&requests[2]),
-        vec![rollout_budget_message(/*remaining_tokens*/ 70)],
-        "a new context window should restate the current remainder"
-    );
-    let request_body = requests[2].body_json().to_string();
-    let summary_position = request_body
-        .find("compact summary")
-        .expect("post-compaction request should contain the summary");
-    let reminder_position = request_body
-        .find("You have 70 weighted tokens left in the shared session token budget.")
-        .expect("post-compaction request should contain the current remainder");
-    assert!(
-        summary_position < reminder_position,
-        "the current remainder should follow the compaction summary"
-    );
-
-    Ok(())
+    .await
 }

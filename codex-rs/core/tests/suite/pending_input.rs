@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::num::NonZeroU64;
 use std::sync::Arc;
@@ -482,167 +483,170 @@ async fn queue_only_agent_mail_wakes_sleeping_root_with_previous_turn_context(
     const CHILD_MESSAGE: &str = "worker completed";
 
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse_completed("resp-earlier-human"),
-            responses::sse_completed("resp-initial"),
-            responses::sse_completed("resp-wake"),
-        ],
-    )
-    .await;
-    let mut extensions =
-        codex_extension_api::ExtensionRegistryBuilder::<codex_core::config::Config>::new();
-    extensions.thread_lifecycle_contributor(Arc::new(SleepingRootExtension));
-    let mut builder = test_codex()
-        .with_model("gpt-5.4")
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_extensions(Arc::new(extensions.build()));
-    let mut test = builder.build_with_auto_env(&server).await?;
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse_completed("resp-earlier-human"),
+                responses::sse_completed("resp-initial"),
+                responses::sse_completed("resp-wake"),
+            ],
+        )
+        .await;
+        let mut extensions =
+            codex_extension_api::ExtensionRegistryBuilder::<codex_core::config::Config>::new();
+        extensions.thread_lifecycle_contributor(Arc::new(SleepingRootExtension));
+        let mut builder = test_codex()
+            .with_model("gpt-5.4")
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_extensions(Arc::new(extensions.build()));
+        let mut test = builder.build_with_auto_env(&server).await?;
 
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "establish an earlier human context".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .on_start(TurnStartOptions {
-                turn_trigger: Some("composer".to_string()),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_turn_complete(&test.codex).await;
-    // Automatic turns need not replace the model-context baseline on replay.
-    let TurnInputSubmission::Started { turn_id, .. } = test
-        .codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(Vec::new()).on_start(TurnStartOptions {
-                turn_trigger: trigger.map(str::to_owned),
-                parent_turn_id: parent.map(str::to_owned),
-                root_turn_id: parent.map(|_| "original-root".to_string()),
-                cyber_access_program: Some(CyberAccessProgram::Standard),
-                ..Default::default()
-            }),
-        )
-        .await?
-    else {
-        panic!("expected an automatic turn");
-    };
-    wait_for_turn_complete(&test.codex).await;
-    if reload {
-        if let Some(url) = test.executor_environment().exec_server_url() {
-            builder = builder.with_exec_server_url(url);
-        }
-        test = builder.restart(&server, &test).await?;
-    }
-    if update_settings {
-        core_test_support::submit_thread_settings(
-            &test.codex,
-            ThreadSettingsOverrides {
-                effort: Some(Some(ReasoningEffort::Low)),
-                ..Default::default()
-            },
-        )
-        .await?;
-    }
-    enqueue_queue_only_agent_mail(&test.codex, CHILD_MESSAGE).await;
-    wait_for_turn_complete(&test.codex).await;
-
-    let captured = requests.requests();
-    let metadata = captured
-        .iter()
-        .skip(1)
-        .map(|request| {
-            serde_json::from_str::<Value>(
-                &request.header("x-codex-turn-metadata").expect("metadata"),
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "establish an earlier human context".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .on_start(TurnStartOptions {
+                    turn_trigger: Some("composer".to_string()),
+                    ..Default::default()
+                }),
             )
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let root = parent.map_or(turn_id.as_str(), |_| "original-root");
-    assert_eq!(
-        metadata
-            .iter()
-            .map(|value| (
-                value["turn_trigger"].as_str(),
-                value["parent_turn_id"].as_str(),
-                value["root_turn_id"].as_str(),
+            .await?;
+        wait_for_turn_complete(&test.codex).await;
+        // Automatic turns need not replace the model-context baseline on replay.
+        let TurnInputSubmission::Started { turn_id, .. } = test
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(Vec::new()).on_start(
+                TurnStartOptions {
+                    turn_trigger: trigger.map(str::to_owned),
+                    parent_turn_id: parent.map(str::to_owned),
+                    root_turn_id: parent.map(|_| "original-root".to_string()),
+                    cyber_access_program: Some(CyberAccessProgram::Standard),
+                    ..Default::default()
+                },
             ))
-            .collect::<Vec<_>>(),
-        vec![(trigger, parent, Some(root)); 2],
-    );
-    assert_ne!(metadata[0]["turn_id"], metadata[1]["turn_id"]);
-    // Live wake keeps the existing execution-setting behavior. Attribution after
-    // reload must use the automatic turn, not the earlier human context baseline.
-    if !reload {
-        assert_eq!(
-            captured
-                .iter()
-                .skip(1)
-                .map(|request| request.body_json()["access_programs"].clone())
-                .collect::<Vec<_>>(),
-            vec![json!({"cyber": "standard"}); 2],
-        );
-    }
-    let history = test
-        .codex
-        .load_history(/*include_archived*/ true)
-        .await
-        .expect("load persisted thread history");
-    assert!(history.items.iter().any(|item| {
-        matches!(
-            item,
-            RolloutItem::ResponseItem(envelope)
-                if matches!(
-                    &envelope.item,
-                    codex_protocol::models::ResponseItem::AgentMessage { content, .. }
-                        if content.iter().any(|content| matches!(
-                            content,
-                            codex_protocol::models::AgentMessageInputContent::InputText { text }
-                                if text == CHILD_MESSAGE
-                        ))
-                )
-        )
-    }));
+            .await?
+        else {
+            panic!("expected an automatic turn");
+        };
+        wait_for_turn_complete(&test.codex).await;
+        if reload {
+            if let Some(url) = test.executor_environment().exec_server_url() {
+                builder = builder.with_exec_server_url(url);
+            }
+            test = builder.restart(&server, &test).await?;
+        }
+        if update_settings {
+            core_test_support::submit_thread_settings(
+                &test.codex,
+                ThreadSettingsOverrides {
+                    effort: Some(Some(ReasoningEffort::Low)),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        }
+        enqueue_queue_only_agent_mail(&test.codex, CHILD_MESSAGE).await;
+        wait_for_turn_complete(&test.codex).await;
 
-    if parent.is_none() {
-        return Ok(());
-    }
-    let followup =
-        responses::mount_sse_once(&server, responses::sse_completed("resp-followup")).await;
-    test.codex
-        .submit(Op::InterAgentCommunication {
-            communication: InterAgentCommunication::new(
-                AgentPath::try_from("/root/worker").expect("worker path should parse"),
-                AgentPath::root(),
-                Vec::new(),
-                "start different work".to_string(),
-                /*trigger_turn*/ true,
+        let captured = requests.requests();
+        let metadata = captured
+            .iter()
+            .skip(1)
+            .map(|request| {
+                serde_json::from_str::<Value>(
+                    &request.header("x-codex-turn-metadata").expect("metadata"),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let root = parent.map_or(turn_id.as_str(), |_| "original-root");
+        assert_eq!(
+            metadata
+                .iter()
+                .map(|value| (
+                    value["turn_trigger"].as_str(),
+                    value["parent_turn_id"].as_str(),
+                    value["root_turn_id"].as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![(trigger, parent, Some(root)); 2],
+        );
+        assert_ne!(metadata[0]["turn_id"], metadata[1]["turn_id"]);
+        // Live wake keeps the existing execution-setting behavior. Attribution after
+        // reload must use the automatic turn, not the earlier human context baseline.
+        if !reload {
+            assert_eq!(
+                captured
+                    .iter()
+                    .skip(1)
+                    .map(|request| request.body_json()["access_programs"].clone())
+                    .collect::<Vec<_>>(),
+                vec![json!({"cyber": "standard"}); 2],
+            );
+        }
+        let history = test
+            .codex
+            .load_history(/*include_archived*/ true)
+            .await
+            .expect("load persisted thread history");
+        assert!(history.items.iter().any(|item| {
+            matches!(
+                item,
+                RolloutItem::ResponseItem(envelope)
+                    if matches!(
+                        &envelope.item,
+                        codex_protocol::models::ResponseItem::AgentMessage { content, .. }
+                            if content.iter().any(|content| matches!(
+                                content,
+                                codex_protocol::models::AgentMessageInputContent::InputText { text }
+                                    if text == CHILD_MESSAGE
+                            ))
+                    )
+            )
+        }));
+
+        if parent.is_none() {
+            return Ok(());
+        }
+        let followup =
+            responses::mount_sse_once(&server, responses::sse_completed("resp-followup")).await;
+        test.codex
+            .submit(Op::InterAgentCommunication {
+                communication: InterAgentCommunication::new(
+                    AgentPath::try_from("/root/worker").expect("worker path should parse"),
+                    AgentPath::root(),
+                    Vec::new(),
+                    "start different work".to_string(),
+                    /*trigger_turn*/ true,
+                ),
+                start_options: TurnStartOptions {
+                    turn_trigger: Some("composer".to_string()),
+                    parent_turn_id: Some("new-parent".to_string()),
+                    root_turn_id: Some("new-root".to_string()),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        wait_for_turn_complete(&test.codex).await;
+        let followup: Value = serde_json::from_str(
+            &followup
+                .single_request()
+                .header("x-codex-turn-metadata")
+                .expect("metadata"),
+        )?;
+        assert_eq!(
+            (
+                followup["turn_trigger"].as_str(),
+                followup["parent_turn_id"].as_str(),
+                followup["root_turn_id"].as_str(),
             ),
-            start_options: TurnStartOptions {
-                turn_trigger: Some("composer".to_string()),
-                parent_turn_id: Some("new-parent".to_string()),
-                root_turn_id: Some("new-root".to_string()),
-                ..Default::default()
-            },
-        })
-        .await?;
-    wait_for_turn_complete(&test.codex).await;
-    let followup: Value = serde_json::from_str(
-        &followup
-            .single_request()
-            .header("x-codex-turn-metadata")
-            .expect("metadata"),
-    )?;
-    assert_eq!(
-        (
-            followup["turn_trigger"].as_str(),
-            followup["parent_turn_id"].as_str(),
-            followup["root_turn_id"].as_str(),
-        ),
-        (Some("composer"), Some("new-parent"), Some("new-root")),
-    );
-    Ok(())
+            (Some("composer"), Some("new-parent"), Some("new-root")),
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]

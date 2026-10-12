@@ -1,4 +1,5 @@
 use codex_core::TurnInputRequest;
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::path::Path;
 use std::sync::Arc;
@@ -60,6 +61,7 @@ async fn guardian_reused_reviewer_avoids_stale_catalog_lookup() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = MockServer::start().await;
+    mock_server::run(&[&server], async {
     let bundled = codex_models_manager::bundled_models_response()?;
     let catalog = ModelsResponse {
         models: bundled
@@ -153,6 +155,8 @@ async fn guardian_reused_reviewer_avoids_stale_catalog_lookup() -> Result<()> {
     );
     assert_eq!(repeat_models.requests().len(), 0);
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

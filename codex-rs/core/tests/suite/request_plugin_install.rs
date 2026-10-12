@@ -36,6 +36,7 @@ use codex_utils_path_uri::PathUri;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -740,53 +741,56 @@ async fn unavailable_recommendations_preserve_legacy_workflow(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_recommendations(&server, response).await;
-    let call_id = "list-installable-tools";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(call_id, LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME, "{}"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
-    test.submit_turn_with_approval_and_permission_profile(
-        "list tools",
-        AskForApproval::Never,
-        PermissionProfile::Disabled,
-    )
-    .await?;
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_recommendations(&server, response).await;
+        let call_id = "list-installable-tools";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(call_id, LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME, "{}"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = build_test(&server, &apps_server).await?;
+        test.submit_turn_with_approval_and_permission_profile(
+            "list tools",
+            AskForApproval::Never,
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    let request = &requests[0];
-    assert!(
-        !request
-            .message_input_texts("developer")
-            .join("\n")
-            .contains("<recommended_plugins>")
-    );
-    assert_legacy_tools(&request.body_json());
-    let output = requests[1]
-        .function_call_output_text(call_id)
-        .expect("list tool output");
-    let output: Value = serde_json::from_str(&output)?;
-    assert!(output["tools"].as_array().is_some_and(|tools| {
-        tools
-            .iter()
-            .any(|tool| tool["id"] == DISCOVERABLE_GMAIL_ID && tool["tool_type"] == "connector")
-    }));
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        let request = &requests[0];
+        assert!(
+            !request
+                .message_input_texts("developer")
+                .join("\n")
+                .contains("<recommended_plugins>")
+        );
+        assert_legacy_tools(&request.body_json());
+        let output = requests[1]
+            .function_call_output_text(call_id)
+            .expect("list tool output");
+        let output: Value = serde_json::from_str(&output)?;
+        assert!(output["tools"].as_array().is_some_and(|tools| {
+            tools
+                .iter()
+                .any(|tool| tool["id"] == DISCOVERABLE_GMAIL_ID && tool["tool_type"] == "connector")
+        }));
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(false; "legacy connector")]
@@ -798,106 +802,109 @@ async fn subagent_install_request_returns_root_only_error(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    let (recommendations, arguments) = if recommended_plugins_enabled {
-        (
-            json!({
-                "enabled": true,
-                "plugins": [{
-                    "id": REMOTE_CALENDAR_PLUGIN_ID,
-                    "name": "calendar",
-                    "display_name": "Calendar"
-                }]
-            }),
-            json!({
-                "plugin_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
-                "suggest_reason": "Use Calendar for this task"
-            }),
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        let (recommendations, arguments) = if recommended_plugins_enabled {
+            (
+                json!({
+                    "enabled": true,
+                    "plugins": [{
+                        "id": REMOTE_CALENDAR_PLUGIN_ID,
+                        "name": "calendar",
+                        "display_name": "Calendar"
+                    }]
+                }),
+                json!({
+                    "plugin_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
+                    "suggest_reason": "Use Calendar for this task"
+                }),
+            )
+        } else {
+            (
+                json!({"enabled": false, "plugins": []}),
+                json!({
+                    "tool_type": "connector",
+                    "action_type": "install",
+                    "tool_id": DISCOVERABLE_GMAIL_ID,
+                    "suggest_reason": "Use Gmail for this task"
+                }),
+            )
+        };
+        mount_recommendations(
+            &server,
+            ResponseTemplate::new(200).set_body_json(recommendations),
         )
-    } else {
-        (
-            json!({"enabled": false, "plugins": []}),
-            json!({
-                "tool_type": "connector",
-                "action_type": "install",
-                "tool_id": DISCOVERABLE_GMAIL_ID,
-                "suggest_reason": "Use Gmail for this task"
-            }),
+        .await;
+        let call_id = "subagent-plugin-install";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        call_id,
+                        REQUEST_PLUGIN_INSTALL_TOOL_NAME,
+                        &arguments.to_string(),
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
         )
-    };
-    mount_recommendations(
-        &server,
-        ResponseTemplate::new(200).set_body_json(recommendations),
-    )
-    .await;
-    let call_id = "subagent-plugin-install";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    call_id,
-                    REQUEST_PLUGIN_INSTALL_TOOL_NAME,
-                    &arguments.to_string(),
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
-    let NewThread {
-        thread: subagent, ..
-    } = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id: test.session_configured.thread_id,
-                depth: 1,
-                agent_path: None,
-                agent_nickname: None,
-                agent_role: None,
-            })),
-            ..StartThreadOptions::new(test.config.clone())
+        .await;
+        let test = build_test(&server, &apps_server).await?;
+        let NewThread {
+            thread: subagent, ..
+        } = test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id: test.session_configured.thread_id,
+                    depth: 1,
+                    agent_path: None,
+                    agent_nickname: None,
+                    agent_role: None,
+                })),
+                ..StartThreadOptions::new(test.config.clone())
+            })
+            .await?;
+        subagent
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "Use the requested integration.".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(AskForApproval::Never),
+                    permission_profile: Some(PermissionProfile::Disabled),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&subagent, |event| {
+            assert!(
+                !matches!(event, EventMsg::ElicitationRequest(_)),
+                "subagents must not request plugin installation"
+            );
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .await?;
-    subagent
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "Use the requested integration.".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(AskForApproval::Never),
-                permission_profile: Some(PermissionProfile::Disabled),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_event(&subagent, |event| {
-        assert!(
-            !matches!(event, EventMsg::ElicitationRequest(_)),
-            "subagents must not request plugin installation"
-        );
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+        .await;
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1].function_call_output_text(call_id).as_deref(),
-        Some("request_plugin_install can only be used by the root thread")
-    );
-    subagent.shutdown_and_wait().await?;
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].function_call_output_text(call_id).as_deref(),
+            Some("request_plugin_install can only be used by the root thread")
+        );
+        subagent.shutdown_and_wait().await?;
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(true; "enabled plugin skill")]
@@ -909,6 +916,7 @@ async fn local_plugin_skill_availability_reaches_tool_suggestion_candidates(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let apps_server = AppsTestServer::mount(&server).await?;
     let codex_home = Arc::new(TempDir::new()?);
     let curated_root = curated_plugins_repo_path(codex_home.path());
@@ -1010,6 +1018,8 @@ async fn local_plugin_skill_availability_reaches_tool_suggestion_candidates(
         })
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1017,90 +1027,93 @@ async fn endpoint_mode_injects_candidates_hides_list_and_rejects_invented_ids() 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_recommendations(
-        &server,
-        ResponseTemplate::new(200).set_body_json(json!({
-            "enabled": true,
-            "plugins": [
-                {
-                    "id": "plugin_google_calendar",
-                    "name": "google-calendar",
-                    "display_name": "Google Calendar"
-                },
-                {
-                    "id": "plugin_github",
-                    "name": "github",
-                    "display_name": "GitHub"
-                }
-            ]
-        })),
-    )
-    .await;
-    let call_id = "invented-plugin";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    call_id,
-                    REQUEST_PLUGIN_INSTALL_TOOL_NAME,
-                    &serde_json::to_string(&json!({
-                        "plugin_id": "invented@openai-curated-remote",
-                        "suggest_reason": "Try this"
-                    }))?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_recommendations(
+            &server,
+            ResponseTemplate::new(200).set_body_json(json!({
+                "enabled": true,
+                "plugins": [
+                    {
+                        "id": "plugin_google_calendar",
+                        "name": "google-calendar",
+                        "display_name": "Google Calendar"
+                    },
+                    {
+                        "id": "plugin_github",
+                        "name": "github",
+                        "display_name": "GitHub"
+                    }
+                ]
+            })),
+        )
+        .await;
+        let call_id = "invented-plugin";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        call_id,
+                        REQUEST_PLUGIN_INSTALL_TOOL_NAME,
+                        &serde_json::to_string(&json!({
+                            "plugin_id": "invented@openai-curated-remote",
+                            "suggest_reason": "Try this"
+                        }))?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = build_test(&server, &apps_server).await?;
 
-    test.submit_turn("suggest a plugin").await?;
+        test.submit_turn("suggest a plugin").await?;
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    for request in &requests {
-        let recommendations = request
-            .message_input_texts("developer")
-            .into_iter()
-            .filter(|text| text.starts_with("<recommended_plugins>"))
-            .collect::<Vec<_>>();
-        assert_eq!(
-            recommendations,
-            vec![concat!(
-                "<recommended_plugins>\n",
-                "Here is a list of plugins that are available but not installed.\n\n",
-                "- GitHub (github@openai-curated-remote)\n",
-                "- Google Calendar (google-calendar@openai-curated-remote)\n",
-                "</recommended_plugins>",
-            )]
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        for request in &requests {
+            let recommendations = request
+                .message_input_texts("developer")
+                .into_iter()
+                .filter(|text| text.starts_with("<recommended_plugins>"))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                recommendations,
+                vec![concat!(
+                    "<recommended_plugins>\n",
+                    "Here is a list of plugins that are available but not installed.\n\n",
+                    "- GitHub (github@openai-curated-remote)\n",
+                    "- Google Calendar (google-calendar@openai-curated-remote)\n",
+                    "</recommended_plugins>",
+                )]
+            );
+        }
+        let body = requests[0].body_json();
+        let tools = tool_names(&body);
+        assert!(
+            !tools
+                .iter()
+                .any(|name| name == LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME)
         );
-    }
-    let body = requests[0].body_json();
-    let tools = tool_names(&body);
-    assert!(
-        !tools
-            .iter()
-            .any(|name| name == LIST_AVAILABLE_PLUGINS_TO_INSTALL_TOOL_NAME)
-    );
-    assert!(
-        tools
-            .iter()
-            .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME)
-    );
-    let output = requests[1]
-        .function_call_output_text(call_id)
-        .expect("request tool output");
-    assert!(output.contains("<recommended_plugins> list"));
-    Ok(())
+        assert!(
+            tools
+                .iter()
+                .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME)
+        );
+        let output = requests[1]
+            .function_call_output_text(call_id)
+            .expect("request tool output");
+        assert!(output.contains("<recommended_plugins> list"));
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1115,133 +1128,136 @@ async fn run_remote_plugin_install_metadata_case() -> Result<()> {
     const APP_CONNECTOR_ID: &str = "connector_github";
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_recommendations(
-        &server,
-        ResponseTemplate::new(200).set_body_json(json!({
-            "enabled": true,
-            "plugins": [{
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_recommendations(
+            &server,
+            ResponseTemplate::new(200).set_body_json(json!({
+                "enabled": true,
+                "plugins": [{
+                    "id": REMOTE_PLUGIN_ID,
+                    "name": "github",
+                    "display_name": "GitHub"
+                }]
+            })),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/ps/plugins/{REMOTE_PLUGIN_ID}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": REMOTE_PLUGIN_ID,
                 "name": "github",
-                "display_name": "GitHub"
-            }]
-        })),
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path(format!("/ps/plugins/{REMOTE_PLUGIN_ID}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": REMOTE_PLUGIN_ID,
-            "name": "github",
-            "scope": "GLOBAL",
-            "status": "ENABLED",
-            "installation_policy": "AVAILABLE",
-            "authentication_policy": "ON_USE",
-            "release": {
-                "display_name": "GitHub",
-                "description": "Work with GitHub repositories.",
-                "app_ids": [APP_CONNECTOR_ID],
-                "interface": {}
-            }
-        })))
-        .expect(1)
-        .mount(&server)
+                "scope": "GLOBAL",
+                "status": "ENABLED",
+                "installation_policy": "AVAILABLE",
+                "authentication_policy": "ON_USE",
+                "release": {
+                    "display_name": "GitHub",
+                    "description": "Work with GitHub repositories.",
+                    "app_ids": [APP_CONNECTOR_ID],
+                    "interface": {}
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let call_id = "install-github";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        call_id,
+                        REQUEST_PLUGIN_INSTALL_TOOL_NAME,
+                        &serde_json::to_string(&json!({
+                            "plugin_id": "github@openai-curated-remote",
+                            "suggest_reason": "Use GitHub for this request"
+                        }))?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
         .await;
-    let call_id = "install-github";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    call_id,
-                    REQUEST_PLUGIN_INSTALL_TOOL_NAME,
-                    &serde_json::to_string(&json!({
-                        "plugin_id": "github@openai-curated-remote",
-                        "suggest_reason": "Use GitHub for this request"
-                    }))?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
-    let elicitation = start_install_turn(&test, "use GitHub").await?;
-    let ElicitationRequest::Form {
-        meta: Some(meta), ..
-    } = &elicitation.request
-    else {
-        panic!("expected form elicitation metadata");
-    };
-    assert_eq!(meta["remote_plugin_id"], REMOTE_PLUGIN_ID);
-    assert_eq!(meta["app_connector_ids"], json!([APP_CONNECTOR_ID]));
+        let test = build_test(&server, &apps_server).await?;
+        let elicitation = start_install_turn(&test, "use GitHub").await?;
+        let ElicitationRequest::Form {
+            meta: Some(meta), ..
+        } = &elicitation.request
+        else {
+            panic!("expected form elicitation metadata");
+        };
+        assert_eq!(meta["remote_plugin_id"], REMOTE_PLUGIN_ID);
+        assert_eq!(meta["app_connector_ids"], json!([APP_CONNECTOR_ID]));
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let analytics_event = loop {
-        let requests = server.received_requests().await.unwrap_or_default();
-        if let Some(event) = requests
-            .into_iter()
-            .filter(|request| request.url.path() == "/codex/analytics-events/events")
-            .find_map(|request| {
-                let payload: Value = serde_json::from_slice(&request.body).ok()?;
-                payload["events"].as_array().and_then(|events| {
-                    events
-                        .iter()
-                        .find(|event| event["event_type"] == "codex_plugin_install_requested")
-                        .cloned()
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let analytics_event = loop {
+            let requests = server.received_requests().await.unwrap_or_default();
+            if let Some(event) = requests
+                .into_iter()
+                .filter(|request| request.url.path() == "/codex/analytics-events/events")
+                .find_map(|request| {
+                    let payload: Value = serde_json::from_slice(&request.body).ok()?;
+                    payload["events"].as_array().and_then(|events| {
+                        events
+                            .iter()
+                            .find(|event| event["event_type"] == "codex_plugin_install_requested")
+                            .cloned()
+                    })
                 })
-            })
-        {
-            break event;
-        }
-        if Instant::now() >= deadline {
-            panic!("timed out waiting for plugin install request analytics");
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    };
-    assert_eq!(
-        meta["suggestion_id"],
-        analytics_event["event_params"]["suggestion_id"]
-    );
-    let thread_id = analytics_event["event_params"]["thread_id"].clone();
-    let turn_id = analytics_event["event_params"]["turn_id"].clone();
-    assert_eq!(
-        analytics_event,
-        json!({
-            "event_type": "codex_plugin_install_requested",
-            "event_params": {
-                "suggestion_id": "request_plugin_install_install-github",
-                "plugins": [{
-                    "plugin_id": "github@openai-curated-remote",
-                    "remote_plugin_id": REMOTE_PLUGIN_ID,
-                    "plugin_name": "GitHub",
-                    "connector_ids": [APP_CONNECTOR_ID],
-                }],
-                "source": "endpoint_recommendation",
-                "thread_id": thread_id,
-                "turn_id": turn_id,
-                "model_slug": "gpt-5.5",
-                "product_client_id": codex_login::default_client::originator().value,
+            {
+                break event;
             }
-        })
-    );
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for plugin install request analytics");
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        assert_eq!(
+            meta["suggestion_id"],
+            analytics_event["event_params"]["suggestion_id"]
+        );
+        let thread_id = analytics_event["event_params"]["thread_id"].clone();
+        let turn_id = analytics_event["event_params"]["turn_id"].clone();
+        assert_eq!(
+            analytics_event,
+            json!({
+                "event_type": "codex_plugin_install_requested",
+                "event_params": {
+                    "suggestion_id": "request_plugin_install_install-github",
+                    "plugins": [{
+                        "plugin_id": "github@openai-curated-remote",
+                        "remote_plugin_id": REMOTE_PLUGIN_ID,
+                        "plugin_name": "GitHub",
+                        "connector_ids": [APP_CONNECTOR_ID],
+                    }],
+                    "source": "endpoint_recommendation",
+                    "thread_id": thread_id,
+                    "turn_id": turn_id,
+                    "model_slug": "gpt-5.5",
+                    "product_client_id": codex_login::default_client::originator().value,
+                }
+            })
+        );
 
-    resolve_install_elicitation(&test, elicitation, ElicitationAction::Decline).await?;
+        resolve_install_elicitation(&test, elicitation, ElicitationAction::Decline).await?;
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    for request in requests {
-        let body = request.body_json().to_string();
-        assert!(!body.contains(REMOTE_PLUGIN_ID));
-        assert!(!body.contains(APP_CONNECTOR_ID));
-    }
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        for request in requests {
+            let body = request.body_json().to_string();
+            assert!(!body.contains(REMOTE_PLUGIN_ID));
+            assert!(!body.contains(APP_CONNECTOR_ID));
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1251,73 +1267,76 @@ async fn endpoint_recommendation_skips_unavailable_plugin_elicitation() -> Resul
     const REMOTE_PLUGIN_ID: &str = "plugin_connector_github";
 
     let server = start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    mount_recommendations(
-        &server,
-        ResponseTemplate::new(200).set_body_json(json!({
-            "enabled": true,
-            "plugins": [{
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        mount_recommendations(
+            &server,
+            ResponseTemplate::new(200).set_body_json(json!({
+                "enabled": true,
+                "plugins": [{
+                    "id": REMOTE_PLUGIN_ID,
+                    "name": "github",
+                    "display_name": "GitHub"
+                }]
+            })),
+        )
+        .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/ps/plugins/{REMOTE_PLUGIN_ID}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "id": REMOTE_PLUGIN_ID,
                 "name": "github",
-                "display_name": "GitHub"
-            }]
-        })),
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path(format!("/ps/plugins/{REMOTE_PLUGIN_ID}")))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": REMOTE_PLUGIN_ID,
-            "name": "github",
-            "scope": "GLOBAL",
-            "status": "DISABLED_BY_ADMIN",
-            "installation_policy": "AVAILABLE",
-            "authentication_policy": "ON_USE",
-            "release": {
-                "display_name": "GitHub",
-                "description": "Work with GitHub repositories.",
-                "app_ids": ["connector_github"],
-                "interface": {}
-            }
-        })))
-        .expect(1)
-        .mount(&server)
+                "scope": "GLOBAL",
+                "status": "DISABLED_BY_ADMIN",
+                "installation_policy": "AVAILABLE",
+                "authentication_policy": "ON_USE",
+                "release": {
+                    "display_name": "GitHub",
+                    "description": "Work with GitHub repositories.",
+                    "app_ids": ["connector_github"],
+                    "interface": {}
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let call_id = "install-unavailable-github";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        call_id,
+                        REQUEST_PLUGIN_INSTALL_TOOL_NAME,
+                        &serde_json::to_string(&json!({
+                            "plugin_id": "github@openai-curated-remote",
+                            "suggest_reason": "Use GitHub for this request"
+                        }))?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
         .await;
-    let call_id = "install-unavailable-github";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    call_id,
-                    REQUEST_PLUGIN_INSTALL_TOOL_NAME,
-                    &serde_json::to_string(&json!({
-                        "plugin_id": "github@openai-curated-remote",
-                        "suggest_reason": "Use GitHub for this request"
-                    }))?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
+        let test = build_test(&server, &apps_server).await?;
 
-    test.submit_turn("use GitHub").await?;
+        test.submit_turn("use GitHub").await?;
 
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1].function_call_output_text(call_id).as_deref(),
-        Some("The recommended plugins for this turn are no longer available.")
-    );
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[1].function_call_output_text(call_id).as_deref(),
+            Some("The recommended plugins for this turn are no longer available.")
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -1336,114 +1355,120 @@ async fn remote_plugin_install_refreshes_plugin_and_apps_tool_caches() -> Result
 
 async fn run_remote_plugin_install_refresh_case(refreshed_tools: RefreshedAppsTools) -> Result<()> {
     let server = start_mock_server().await;
-    let tools_available = Arc::new(AtomicBool::new(false));
-    let apps_server = match refreshed_tools {
-        RefreshedAppsTools::Available => {
-            AppsTestServer::mount_with_tools_available_when(&server, Arc::clone(&tools_available))
+    mock_server::run(&[&server], async {
+        let tools_available = Arc::new(AtomicBool::new(false));
+        let apps_server = match refreshed_tools {
+            RefreshedAppsTools::Available => {
+                AppsTestServer::mount_with_tools_available_when(
+                    &server,
+                    Arc::clone(&tools_available),
+                )
                 .await?
-        }
-        RefreshedAppsTools::Missing => AppsTestServer::mount_without_tools(&server).await?,
-    };
-    mount_remote_calendar_recommendation(&server).await;
-    let initial_remote_installed_plugins = mount_empty_remote_installed_plugins(&server).await;
+            }
+            RefreshedAppsTools::Missing => AppsTestServer::mount_without_tools(&server).await?,
+        };
+        mount_remote_calendar_recommendation(&server).await;
+        let initial_remote_installed_plugins = mount_empty_remote_installed_plugins(&server).await;
 
-    let install_call_id = "install-calendar";
-    let suggest_reason = "Use Calendar for this request";
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    install_call_id,
-                    REQUEST_PLUGIN_INSTALL_TOOL_NAME,
-                    &serde_json::to_string(&json!({
-                        "plugin_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
-                        "suggest_reason": suggest_reason
-                    }))?,
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-3"),
-                ev_assistant_message("msg-2", "catalog still current"),
-                ev_completed("resp-3"),
-            ]),
-        ],
-    )
-    .await;
-    let test = build_test(&server, &apps_server).await?;
-
-    let elicitation = start_install_turn(&test, "use Calendar").await?;
-    mount_remote_calendar_installed_plugins(&server).await;
-    drop(initial_remote_installed_plugins);
-    tools_available.store(
-        matches!(refreshed_tools, RefreshedAppsTools::Available),
-        Ordering::SeqCst,
-    );
-    resolve_install_elicitation(&test, elicitation, ElicitationAction::Accept).await?;
-
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        requests[0]
-            .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
-            .is_none(),
-        "calendar tool should be absent before the remote install"
-    );
-    let completed = matches!(refreshed_tools, RefreshedAppsTools::Available);
-    assert_eq!(
-        serde_json::from_str::<Value>(
-            &requests[1]
-                .function_call_output_text(install_call_id)
-                .expect("install tool output")
-        )?,
-        json!({
-            "completed": completed,
-            "user_confirmed": true,
-            "tool_type": "plugin",
-            "action_type": "install",
-            "tool_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
-            "tool_name": "Calendar",
-            "suggest_reason": suggest_reason
-        })
-    );
-    assert_eq!(
-        requests[1]
-            .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
-            .is_some(),
-        completed,
-        "the resumed router should reflect the refreshed Apps tools"
-    );
-    assert!(
-        !tool_names(&requests[1].body_json())
-            .iter()
-            .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME),
-        "the refreshed installed-plugin cache should filter the cached recommendation"
-    );
-    drop(requests);
-    let current_config = test.codex.config().await;
-    let _ = test
-        .codex
-        .refresh_runtime_config(current_config, test.config.clone())
+        let install_call_id = "install-calendar";
+        let suggest_reason = "Use Calendar for this request";
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        install_call_id,
+                        REQUEST_PLUGIN_INSTALL_TOOL_NAME,
+                        &serde_json::to_string(&json!({
+                            "plugin_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
+                            "suggest_reason": suggest_reason
+                        }))?,
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_assistant_message("msg-2", "catalog still current"),
+                    ev_completed("resp-3"),
+                ]),
+            ],
+        )
         .await;
-    test.submit_turn("check whether Calendar is still installed")
-        .await?;
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 3);
-    assert_eq!(
-        requests[2]
-            .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
-            .is_some(),
-        completed,
-        "an unrelated runtime publication must retain the refreshed Apps catalog"
-    );
-    Ok(())
+        let test = build_test(&server, &apps_server).await?;
+
+        let elicitation = start_install_turn(&test, "use Calendar").await?;
+        mount_remote_calendar_installed_plugins(&server).await;
+        drop(initial_remote_installed_plugins);
+        tools_available.store(
+            matches!(refreshed_tools, RefreshedAppsTools::Available),
+            Ordering::SeqCst,
+        );
+        resolve_install_elicitation(&test, elicitation, ElicitationAction::Accept).await?;
+
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[0]
+                .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
+                .is_none(),
+            "calendar tool should be absent before the remote install"
+        );
+        let completed = matches!(refreshed_tools, RefreshedAppsTools::Available);
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &requests[1]
+                    .function_call_output_text(install_call_id)
+                    .expect("install tool output")
+            )?,
+            json!({
+                "completed": completed,
+                "user_confirmed": true,
+                "tool_type": "plugin",
+                "action_type": "install",
+                "tool_id": REMOTE_CALENDAR_PLUGIN_CONFIG_ID,
+                "tool_name": "Calendar",
+                "suggest_reason": suggest_reason
+            })
+        );
+        assert_eq!(
+            requests[1]
+                .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
+                .is_some(),
+            completed,
+            "the resumed router should reflect the refreshed Apps tools"
+        );
+        assert!(
+            !tool_names(&requests[1].body_json())
+                .iter()
+                .any(|name| name == REQUEST_PLUGIN_INSTALL_TOOL_NAME),
+            "the refreshed installed-plugin cache should filter the cached recommendation"
+        );
+        drop(requests);
+        let current_config = test.codex.config().await;
+        let _ = test
+            .codex
+            .refresh_runtime_config(current_config, test.config.clone())
+            .await;
+        test.submit_turn("check whether Calendar is still installed")
+            .await?;
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2]
+                .tool_by_name(CALENDAR_NAMESPACE, CALENDAR_CREATE_EVENT_TOOL)
+                .is_some(),
+            completed,
+            "an unrelated runtime publication must retain the refreshed Apps catalog"
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

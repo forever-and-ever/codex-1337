@@ -17,6 +17,7 @@ use codex_protocol::openai_models::TruncationPolicyConfig;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
@@ -54,104 +55,112 @@ async fn dynamic_tool_audio_exceeding_the_output_budget_is_omitted() -> Result<(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let call_id = "audio-call";
-    let tool_name = "recording";
-    let responses_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(call_id, "codex_app", tool_name, "{}"),
-                responses::ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                responses::ev_response_created("resp-2"),
-                responses::ev_assistant_message("msg-1", "done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let call_id = "audio-call";
+        let tool_name = "recording";
+        let responses_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "codex_app",
+                        tool_name,
+                        "{}",
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    responses::ev_response_created("resp-2"),
+                    responses::ev_assistant_message("msg-1", "done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let mut builder = test_codex().with_model_info_override("gpt-5.5", |model_info| {
-        model_info.input_modalities.push(InputModality::Audio);
-        model_info.truncation_policy = TruncationPolicyConfig::tokens(/*limit*/ 50);
-    });
-    let base_test = builder.build_with_auto_env(&server).await?;
-    let dynamic_tool = DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
-        name: "codex_app".to_string(),
-        description: "Audio tools.".to_string(),
-        tools: vec![DynamicToolNamespaceTool::Function(
-            DynamicToolFunctionSpec {
-                name: tool_name.to_string(),
-                description: "Returns a recording.".to_string(),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {},
-                    "additionalProperties": false,
-                }),
-                defer_loading: false,
-            },
-        )],
-    });
-    let new_thread = base_test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            dynamic_tools: vec![dynamic_tool],
-            ..StartThreadOptions::new(base_test.config.clone())
+        let mut builder = test_codex().with_model_info_override("gpt-5.5", |model_info| {
+            model_info.input_modalities.push(InputModality::Audio);
+            model_info.truncation_policy = TruncationPolicyConfig::tokens(/*limit*/ 50);
+        });
+        let base_test = builder.build_with_auto_env(&server).await?;
+        let dynamic_tool = DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
+            name: "codex_app".to_string(),
+            description: "Audio tools.".to_string(),
+            tools: vec![DynamicToolNamespaceTool::Function(
+                DynamicToolFunctionSpec {
+                    name: tool_name.to_string(),
+                    description: "Returns a recording.".to_string(),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": false,
+                    }),
+                    defer_loading: false,
+                },
+            )],
+        });
+        let new_thread = base_test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                dynamic_tools: vec![dynamic_tool],
+                ..StartThreadOptions::new(base_test.config.clone())
+            })
+            .await?;
+        let mut test = base_test;
+        test.codex = new_thread.thread;
+        test.session_configured = new_thread.session_configured;
+
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Return a recording".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let EventMsg::DynamicToolCallRequest(request) = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::DynamicToolCallRequest(_))
         })
-        .await?;
-    let mut test = base_test;
-    test.codex = new_thread.thread;
-    test.session_configured = new_thread.session_configured;
+        .await
+        else {
+            unreachable!("event guard guarantees DynamicToolCallRequest");
+        };
+        test.codex
+            .submit(Op::DynamicToolResponse {
+                id: request.call_id,
+                response: DynamicToolResponse {
+                    content_items: vec![DynamicToolCallOutputContentItem::InputAudio {
+                        audio_url: pcm_wav_data_url(/*sample_count*/ 80_000),
+                    }],
+                    success: true,
+                },
+            })
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Return a recording".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let EventMsg::DynamicToolCallRequest(request) = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::DynamicToolCallRequest(_))
+        let requests = responses_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let output = requests[1]
+            .function_call_output(call_id)
+            .get("output")
+            .cloned()
+            .expect("follow-up request should contain the dynamic tool output");
+        assert_eq!(
+            serde_json::from_value::<FunctionCallOutputPayload>(output)?,
+            FunctionCallOutputPayload {
+                body: FunctionCallOutputBody::ContentItems(vec![
+                    FunctionCallOutputContentItem::InputText {
+                        text: OMITTED_AUDIO_MARKER.to_string(),
+                    },
+                ]),
+                success: None,
+            }
+        );
+
+        Ok(())
     })
     .await
-    else {
-        unreachable!("event guard guarantees DynamicToolCallRequest");
-    };
-    test.codex
-        .submit(Op::DynamicToolResponse {
-            id: request.call_id,
-            response: DynamicToolResponse {
-                content_items: vec![DynamicToolCallOutputContentItem::InputAudio {
-                    audio_url: pcm_wav_data_url(/*sample_count*/ 80_000),
-                }],
-                success: true,
-            },
-        })
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let requests = responses_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let output = requests[1]
-        .function_call_output(call_id)
-        .get("output")
-        .cloned()
-        .expect("follow-up request should contain the dynamic tool output");
-    assert_eq!(
-        serde_json::from_value::<FunctionCallOutputPayload>(output)?,
-        FunctionCallOutputPayload {
-            body: FunctionCallOutputBody::ContentItems(vec![
-                FunctionCallOutputContentItem::InputText {
-                    text: OMITTED_AUDIO_MARKER.to_string(),
-                },
-            ]),
-            success: None,
-        }
-    );
-
-    Ok(())
 }

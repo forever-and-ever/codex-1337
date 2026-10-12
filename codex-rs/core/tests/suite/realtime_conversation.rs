@@ -45,6 +45,7 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::ListTimelineParams;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::WebSocketConnectionConfig;
 use core_test_support::responses::start_mock_server;
@@ -5058,6 +5059,7 @@ async fn inbound_handoff_request_sends_transcript_delta_after_each_handoff() -> 
     skip_if_no_network!(Ok(()));
 
     let api_server = start_mock_server().await;
+    mock_server::run(&[&api_server], async {
     let response_mock = responses::mount_sse_sequence(
         &api_server,
         vec![
@@ -5191,6 +5193,8 @@ async fn inbound_handoff_request_sends_transcript_delta_after_each_handoff() -> 
 
     realtime_server.shutdown().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5198,6 +5202,7 @@ async fn conversation_close_routes_only_remaining_transcript_tail_once() -> Resu
     skip_if_no_network!(Ok(()));
 
     let api_server = start_mock_server().await;
+    mock_server::run(&[&api_server], async {
     let response_mock = responses::mount_sse_sequence(
         &api_server,
         vec![
@@ -5323,6 +5328,8 @@ async fn conversation_close_routes_only_remaining_transcript_tail_once() -> Resu
 
     realtime_server.shutdown().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

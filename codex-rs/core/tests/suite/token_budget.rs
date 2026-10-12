@@ -30,6 +30,7 @@ use core_test_support::assert_regex_match;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -191,48 +192,51 @@ async fn token_budget_context_is_only_emitted_with_full_context() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("first turn").await?;
+        test.submit_turn("first turn").await?;
 
-    let second_cwd = test.workspace_path("second-cwd");
-    std::fs::create_dir_all(&second_cwd)?;
-    test.submit_turn_with_environments("second turn", Some(vec![local(second_cwd.abs())]))
-        .await?;
+        let second_cwd = test.workspace_path("second-cwd");
+        std::fs::create_dir_all(&second_cwd)?;
+        test.submit_turn_with_environments("second turn", Some(vec![local(second_cwd.abs())]))
+            .await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
 
-    let initial_token_budget = token_budget_contexts(&requests[0]);
-    assert_eq!(initial_token_budget.len(), 1);
-    let (first_window_id, previous_window_id, window_id) =
-        token_budget_window_ids(&initial_token_budget[0], "/root");
-    assert_eq!(previous_window_id, None);
-    assert_eq!(first_window_id, window_id);
-    assert_eq!(
-        token_budget_contexts(&requests[1]),
-        initial_token_budget,
-        "steady-state context update should not advance the context window"
-    );
+        let initial_token_budget = token_budget_contexts(&requests[0]);
+        assert_eq!(initial_token_budget.len(), 1);
+        let (first_window_id, previous_window_id, window_id) =
+            token_budget_window_ids(&initial_token_budget[0], "/root");
+        assert_eq!(previous_window_id, None);
+        assert_eq!(first_window_id, window_id);
+        assert_eq!(
+            token_budget_contexts(&requests[1]),
+            initial_token_budget,
+            "steady-state context update should not advance the context window"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[test_case("features.token_budget.enabled = true"; "token_budget")]
@@ -244,6 +248,7 @@ async fn token_budget_guidance_precedes_standalone_context_window(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response = mount_sse_sequence(
         &server,
         vec![sse(vec![
@@ -304,6 +309,8 @@ async fn token_budget_guidance_precedes_standalone_context_window(
     assert!(guidance_index < context_window_index);
 
     Ok(())
+    })
+    .await
 }
 
 #[test_case("OpenAI", "/backend-api/codex", None, true, true; "codex_backend")]
@@ -379,6 +386,7 @@ async fn token_budget_history_notes_can_be_enabled_without_experimental_context(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let backend_url = format!("{}/backend-api/codex", server.uri());
     let mut builder = test_codex()
         .with_auth(CodexAuth::from_external_chatgpt_tokens(
@@ -456,6 +464,8 @@ async fn token_budget_history_notes_can_be_enabled_without_experimental_context(
         );
     }
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -555,6 +565,7 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![sse_completed("resp-1"), sse_completed("resp-2")],
@@ -646,6 +657,8 @@ async fn token_budget_defaults_follow_the_active_model(activation: Feature) -> R
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -749,6 +762,7 @@ async fn token_budget_context_injects_plain_thread_hint_text() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let rmcp_test_server_bin = stdio_server_bin()?;
     let test = test_codex()
         .with_config(move |config| {
@@ -829,6 +843,8 @@ async fn token_budget_context_injects_plain_thread_hint_text() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -836,6 +852,7 @@ async fn token_budget_reminder_emits_after_crossing_compaction_threshold() -> Re
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -881,6 +898,8 @@ async fn token_budget_reminder_emits_after_crossing_compaction_threshold() -> Re
     assert_eq!(token_budget_contexts(&requests[1]), initial_context);
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -888,6 +907,7 @@ async fn token_budget_reminder_uses_body_after_prefix_window() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -945,6 +965,8 @@ async fn token_budget_reminder_uses_body_after_prefix_window() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -952,61 +974,64 @@ async fn get_context_remaining_returns_token_budget_remaining_fragment() -> Resu
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = "remaining-call";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "noted"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 2_500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_function_call(call_id, "get_context_remaining", "{}"),
-                ev_completed_with_tokens("resp-2", /*total_tokens*/ 2_500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-3"),
-                ev_assistant_message("msg-3", "done"),
-                ev_completed("resp-3"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_context_window = Some(10_000);
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let call_id = "remaining-call";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "noted"),
+                    ev_completed_with_tokens("resp-1", /*total_tokens*/ 2_500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_function_call(call_id, "get_context_remaining", "{}"),
+                    ev_completed_with_tokens("resp-2", /*total_tokens*/ 2_500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_assistant_message("msg-3", "done"),
+                    ev_completed("resp-3"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_context_window = Some(10_000);
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("spend some tokens").await?;
-    test.submit_turn("check remaining context").await?;
+        test.submit_turn("spend some tokens").await?;
+        test.submit_turn("check remaining context").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    assert!(
-        tool_names(&requests[1])
-            .iter()
-            .any(|name| name == "get_context_remaining"),
-        "get_context_remaining should be exposed when token budget is enabled"
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        assert!(
+            tool_names(&requests[1])
+                .iter()
+                .any(|name| name == "get_context_remaining"),
+            "get_context_remaining should be exposed when token budget is enabled"
+        );
 
-    let remaining_context = "You have 6500 tokens left in this context window.".to_string();
-    let token_budgets = token_budget_contexts(&requests[1]);
-    assert_eq!(token_budgets.len(), 1);
-    token_budget_window_ids(&token_budgets[0], "/root");
-    assert_eq!(
-        requests[2].function_call_output_content_and_success(call_id),
-        Some((Some(remaining_context), None))
-    );
+        let remaining_context = "You have 6500 tokens left in this context window.".to_string();
+        let token_budgets = token_budget_contexts(&requests[1]);
+        assert_eq!(token_budgets.len(), 1);
+        token_budget_window_ids(&token_budgets[0], "/root");
+        assert_eq!(
+            requests[2].function_call_output_content_and_success(call_id),
+            Some((Some(remaining_context), None))
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1014,63 +1039,66 @@ async fn get_context_remaining_uses_body_after_prefix_window() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = "remaining-call";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "noted"),
-                ev_completed_with_usage(
-                    "resp-1", /*input_tokens*/ 2_000, /*output_tokens*/ 500,
-                ),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_function_call(call_id, "get_context_remaining", "{}"),
-                ev_completed_with_tokens("resp-2", /*total_tokens*/ 2_500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-3"),
-                ev_assistant_message("msg-3", "done"),
-                ev_completed("resp-3"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_context_window = Some(10_000);
-            config.model_auto_compact_token_limit = Some(7_000);
-            config.model_auto_compact_token_limit_scope =
-                AutoCompactTokenLimitScope::BodyAfterPrefix;
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let call_id = "remaining-call";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "noted"),
+                    ev_completed_with_usage(
+                        "resp-1", /*input_tokens*/ 2_000, /*output_tokens*/ 500,
+                    ),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_function_call(call_id, "get_context_remaining", "{}"),
+                    ev_completed_with_tokens("resp-2", /*total_tokens*/ 2_500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_assistant_message("msg-3", "done"),
+                    ev_completed("resp-3"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_context_window = Some(10_000);
+                config.model_auto_compact_token_limit = Some(7_000);
+                config.model_auto_compact_token_limit_scope =
+                    AutoCompactTokenLimitScope::BodyAfterPrefix;
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("spend some tokens").await?;
-    test.submit_turn("check remaining context").await?;
+        test.submit_turn("spend some tokens").await?;
+        test.submit_turn("check remaining context").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    assert!(
-        tool_names(&requests[1])
-            .iter()
-            .any(|name| name == "get_context_remaining"),
-        "get_context_remaining should be exposed when token budget is enabled"
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        assert!(
+            tool_names(&requests[1])
+                .iter()
+                .any(|name| name == "get_context_remaining"),
+            "get_context_remaining should be exposed when token budget is enabled"
+        );
 
-    let remaining_context = "You have 6500 tokens left in this context window.".to_string();
-    assert_eq!(
-        requests[2].function_call_output_content_and_success(call_id),
-        Some((Some(remaining_context), None))
-    );
+        let remaining_context = "You have 6500 tokens left in this context window.".to_string();
+        assert_eq!(
+            requests[2].function_call_output_content_and_success(call_id),
+            Some((Some(remaining_context), None))
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1078,59 +1106,62 @@ async fn get_context_remaining_returns_unknown_when_threshold_is_unbounded() -> 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = "remaining-call";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(call_id, "get_context_remaining", "{}"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_model_info_override("gpt-5.2", |model_info| {
-            model_info.context_window = None;
-            model_info.max_context_window = None;
-        })
-        .with_config(|config| {
-            config.model_context_window = None;
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let call_id = "remaining-call";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(call_id, "get_context_remaining", "{}"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_model_info_override("gpt-5.2", |model_info| {
+                model_info.context_window = None;
+                model_info.max_context_window = None;
+            })
+            .with_config(|config| {
+                config.model_context_window = None;
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("check remaining context").await?;
+        test.submit_turn("check remaining context").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        tool_names(&requests[0])
-            .iter()
-            .any(|name| name == "get_context_remaining"),
-        "get_context_remaining should be exposed when token budget is enabled"
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            tool_names(&requests[0])
+                .iter()
+                .any(|name| name == "get_context_remaining"),
+            "get_context_remaining should be exposed when token budget is enabled"
+        );
 
-    assert_eq!(token_budget_contexts(&requests[0]), Vec::<String>::new());
-    assert_eq!(
-        requests[1].function_call_output_content_and_success(call_id),
-        Some((
-            Some("You have unknown tokens left in this context window.".to_string()),
-            None,
-        ))
-    );
+        assert_eq!(token_budget_contexts(&requests[0]), Vec::<String>::new());
+        assert_eq!(
+            requests[1].function_call_output_content_and_success(call_id),
+            Some((
+                Some("You have unknown tokens left in this context window.".to_string()),
+                None,
+            ))
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(false; "token_budget_only")]
@@ -1142,113 +1173,117 @@ async fn token_budget_context_uses_new_window_after_compaction(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "assistant before compact"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let mut model_provider = built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
-    model_provider.base_url = Some(format!("{}/v1", server.uri()));
-    model_provider.supports_websockets = false;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "assistant before compact"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let mut model_provider =
+            built_in_model_providers(/*openai_base_url*/ None)["openai"].clone();
+        model_provider.base_url = Some(format!("{}/v1", server.uri()));
+        model_provider.supports_websockets = false;
 
-    let test = test_codex()
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-            config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-            if retain_client_developer_messages {
+        let test = test_codex()
+            .with_config(move |config| {
+                config.model_provider = model_provider;
+                config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
                 config
                     .features
-                    .enable(Feature::RetainClientDeveloperMessages)
-                    .expect("test config should allow client developer retention");
-            }
-        })
-        .build(&server)
-        .await?;
-
-    if retain_client_developer_messages {
-        test.codex
-            .inject_response_items(vec![serde_json::from_value(json!({
-                "type": "message",
-                "role": "developer",
-                "content": [{"type": "input_text", "text": "CLIENT_DEVELOPER_INSTRUCTIONS"}]
-            }))?])
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+                if retain_client_developer_messages {
+                    config
+                        .features
+                        .enable(Feature::RetainClientDeveloperMessages)
+                        .expect("test config should allow client developer retention");
+                }
+            })
+            .build(&server)
             .await?;
-    }
-    test.submit_turn("before compact").await?;
-    test.codex.submit(Op::Compact).await?;
-    assert_context_compaction_item_lifecycle(&test.codex).await;
-    test.submit_turn("after compact").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
+        if retain_client_developer_messages {
+            test.codex
+                .inject_response_items(vec![serde_json::from_value(json!({
+                    "type": "message",
+                    "role": "developer",
+                    "content": [{"type": "input_text", "text": "CLIENT_DEVELOPER_INSTRUCTIONS"}]
+                }))?])
+                .await?;
+        }
+        test.submit_turn("before compact").await?;
+        test.codex.submit(Op::Compact).await?;
+        assert_context_compaction_item_lifecycle(&test.codex).await;
+        test.submit_turn("after compact").await?;
 
-    let initial_token_budget = token_budget_contexts(&requests[0]);
-    assert_eq!(initial_token_budget.len(), 1);
-    let (initial_first_window_id, initial_previous_window_id, initial_window_id) =
-        token_budget_window_ids(&initial_token_budget[0], "/root");
-    let initial_turn_metadata: Value = serde_json::from_str(
-        &requests[0]
-            .header("x-codex-turn-metadata")
-            .expect("initial context window metadata"),
-    )?;
-    assert_eq!(
-        initial_turn_metadata["context_window_id"].as_str(),
-        Some(initial_window_id.as_str())
-    );
-    let post_compaction_token_budget = token_budget_contexts(&requests[1]);
-    assert_eq!(post_compaction_token_budget.len(), 1);
-    let (
-        post_compaction_first_window_id,
-        post_compaction_previous_window_id,
-        post_compaction_window_id,
-    ) = token_budget_window_ids(&post_compaction_token_budget[0], "/root");
-    let post_compaction_turn_metadata: Value = serde_json::from_str(
-        &requests[1]
-            .header("x-codex-turn-metadata")
-            .expect("post-compaction context window metadata"),
-    )?;
-    assert_eq!(
-        post_compaction_turn_metadata["context_window_id"].as_str(),
-        Some(post_compaction_window_id.as_str())
-    );
-    assert_eq!(initial_previous_window_id, None);
-    assert_eq!(initial_first_window_id, initial_window_id);
-    assert_eq!(post_compaction_first_window_id, initial_first_window_id);
-    assert_eq!(
-        post_compaction_previous_window_id.as_deref(),
-        Some(initial_window_id.as_str())
-    );
-    assert_ne!(post_compaction_window_id, initial_window_id);
-    assert!(
-        !requests[1].body_contains_text("before compact"),
-        "token budget compaction should drop prior user messages"
-    );
-    assert!(
-        !requests[1].body_contains_text("assistant before compact"),
-        "token budget compaction should drop prior assistant messages"
-    );
-    assert_eq!(
-        requests[1].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
-        retain_client_developer_messages,
-        "token budget compaction should retain client-authored developer messages when enabled"
-    );
-    assert!(
-        requests[1].body_contains_text("after compact"),
-        "follow-up should still include the new turn input"
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
 
-    Ok(())
+        let initial_token_budget = token_budget_contexts(&requests[0]);
+        assert_eq!(initial_token_budget.len(), 1);
+        let (initial_first_window_id, initial_previous_window_id, initial_window_id) =
+            token_budget_window_ids(&initial_token_budget[0], "/root");
+        let initial_turn_metadata: Value = serde_json::from_str(
+            &requests[0]
+                .header("x-codex-turn-metadata")
+                .expect("initial context window metadata"),
+        )?;
+        assert_eq!(
+            initial_turn_metadata["context_window_id"].as_str(),
+            Some(initial_window_id.as_str())
+        );
+        let post_compaction_token_budget = token_budget_contexts(&requests[1]);
+        assert_eq!(post_compaction_token_budget.len(), 1);
+        let (
+            post_compaction_first_window_id,
+            post_compaction_previous_window_id,
+            post_compaction_window_id,
+        ) = token_budget_window_ids(&post_compaction_token_budget[0], "/root");
+        let post_compaction_turn_metadata: Value = serde_json::from_str(
+            &requests[1]
+                .header("x-codex-turn-metadata")
+                .expect("post-compaction context window metadata"),
+        )?;
+        assert_eq!(
+            post_compaction_turn_metadata["context_window_id"].as_str(),
+            Some(post_compaction_window_id.as_str())
+        );
+        assert_eq!(initial_previous_window_id, None);
+        assert_eq!(initial_first_window_id, initial_window_id);
+        assert_eq!(post_compaction_first_window_id, initial_first_window_id);
+        assert_eq!(
+            post_compaction_previous_window_id.as_deref(),
+            Some(initial_window_id.as_str())
+        );
+        assert_ne!(post_compaction_window_id, initial_window_id);
+        assert!(
+            !requests[1].body_contains_text("before compact"),
+            "token budget compaction should drop prior user messages"
+        );
+        assert!(
+            !requests[1].body_contains_text("assistant before compact"),
+            "token budget compaction should drop prior assistant messages"
+        );
+        assert_eq!(
+            requests[1].body_contains_text("CLIENT_DEVELOPER_INSTRUCTIONS"),
+            retain_client_developer_messages,
+            "token budget compaction should retain client-authored developer messages when enabled"
+        );
+        assert!(
+            requests[1].body_contains_text("after compact"),
+            "follow-up should still include the new turn input"
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1309,6 +1344,7 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let call_id = "remaining-call";
     let responses = mount_sse_sequence(
         &server,
@@ -1427,6 +1463,8 @@ async fn token_budget_mid_turn_auto_compaction_resets_before_active_follow_up(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1434,98 +1472,104 @@ async fn token_budget_auto_compact_fallback_uses_buffer_until_new_context() -> R
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let trigger_call_id = "trigger-call";
-    let fallback_call_id = "fallback-call";
-    let new_context_call_id = "new-context-call";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(trigger_call_id, "get_context_remaining", "{}"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
-            ]),
-            sse(vec![
-                ev_response_created("fallback-tool-resp"),
-                ev_exec_command_call(fallback_call_id, "echo fallback-note > fallback-note.txt"),
-                ev_completed_with_tokens("fallback-tool-resp", /*total_tokens*/ 10_000),
-            ]),
-            sse(vec![
-                ev_response_created("new-context-resp"),
-                ev_function_call(new_context_call_id, "new_context", "{}"),
-                ev_completed_with_tokens("new-context-resp", /*total_tokens*/ 10_500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
-            config.model_context_window = Some(50_000);
-            config.model_auto_compact_token_limit = Some(9_000);
-            config.token_budget = Some(TokenBudgetConfig {
-                auto_compact_fallback_prompt: Some(AUTO_COMPACT_FALLBACK_PROMPT.to_string()),
-                auto_compact_fallback_buffer_tokens: Some(4_000),
-                ..TokenBudgetConfig::default()
-            });
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let trigger_call_id = "trigger-call";
+        let fallback_call_id = "fallback-call";
+        let new_context_call_id = "new-context-call";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(trigger_call_id, "get_context_remaining", "{}"),
+                    ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
+                ]),
+                sse(vec![
+                    ev_response_created("fallback-tool-resp"),
+                    ev_exec_command_call(
+                        fallback_call_id,
+                        "echo fallback-note > fallback-note.txt",
+                    ),
+                    ev_completed_with_tokens("fallback-tool-resp", /*total_tokens*/ 10_000),
+                ]),
+                sse(vec![
+                    ev_response_created("new-context-resp"),
+                    ev_function_call(new_context_call_id, "new_context", "{}"),
+                    ev_completed_with_tokens("new-context-resp", /*total_tokens*/ 10_500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.name = "OpenAI (test)".into();
+                config.model_context_window = Some(50_000);
+                config.model_auto_compact_token_limit = Some(9_000);
+                config.token_budget = Some(TokenBudgetConfig {
+                    auto_compact_fallback_prompt: Some(AUTO_COMPACT_FALLBACK_PROMPT.to_string()),
+                    auto_compact_fallback_buffer_tokens: Some(4_000),
+                    ..TokenBudgetConfig::default()
+                });
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("trigger auto compact fallback").await?;
+        test.submit_turn("trigger auto compact fallback").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 4);
-    let fallback_request = &requests[1];
-    assert!(
-        fallback_request
-            .message_input_texts("developer")
-            .iter()
-            .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT),
-        "fallback prompt should be injected as a developer message"
-    );
-    assert!(
-        tool_names(fallback_request)
-            .iter()
-            .any(|name| name == "get_context_remaining"),
-        "fallback should preserve the normal tool surface"
-    );
-    // The tool may finish before this response reports usage; fallback admission,
-    // not its earlier remaining-token sample, owns the exhausted-window decision.
-    let initial_context = token_budget_contexts(&requests[0]);
-    assert_eq!(token_budget_contexts(fallback_request), initial_context);
-    assert_eq!(token_budget_contexts(&requests[2]), initial_context);
-    assert!(requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
-    assert!(requests[2].body_contains_text(fallback_call_id));
-    let (_, _, initial_window_id) = token_budget_window_ids(&initial_context[0], "/root");
-    let follow_up_context = token_budget_contexts(&requests[3]);
-    let (_, previous_window_id, follow_up_window_id) =
-        token_budget_window_ids(&follow_up_context[0], "/root");
-    assert_eq!(
-        previous_window_id.as_deref(),
-        Some(initial_window_id.as_str())
-    );
-    assert_ne!(follow_up_window_id, initial_window_id);
-    assert!(!requests[3].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
-    assert_eq!(
-        requests[3].function_call_output_text(fallback_call_id),
-        None
-    );
-    assert_eq!(
-        std::fs::read_to_string(test.workspace_path("fallback-note.txt"))?.trim(),
-        "fallback-note"
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 4);
+        let fallback_request = &requests[1];
+        assert!(
+            fallback_request
+                .message_input_texts("developer")
+                .iter()
+                .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT),
+            "fallback prompt should be injected as a developer message"
+        );
+        assert!(
+            tool_names(fallback_request)
+                .iter()
+                .any(|name| name == "get_context_remaining"),
+            "fallback should preserve the normal tool surface"
+        );
+        // The tool may finish before this response reports usage; fallback admission,
+        // not its earlier remaining-token sample, owns the exhausted-window decision.
+        let initial_context = token_budget_contexts(&requests[0]);
+        assert_eq!(token_budget_contexts(fallback_request), initial_context);
+        assert_eq!(token_budget_contexts(&requests[2]), initial_context);
+        assert!(requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+        assert!(requests[2].body_contains_text(fallback_call_id));
+        let (_, _, initial_window_id) = token_budget_window_ids(&initial_context[0], "/root");
+        let follow_up_context = token_budget_contexts(&requests[3]);
+        let (_, previous_window_id, follow_up_window_id) =
+            token_budget_window_ids(&follow_up_context[0], "/root");
+        assert_eq!(
+            previous_window_id.as_deref(),
+            Some(initial_window_id.as_str())
+        );
+        assert_ne!(follow_up_window_id, initial_window_id);
+        assert!(!requests[3].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+        assert_eq!(
+            requests[3].function_call_output_text(fallback_call_id),
+            None
+        );
+        assert_eq!(
+            std::fs::read_to_string(test.workspace_path("fallback-note.txt"))?.trim(),
+            "fallback-note"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1533,61 +1577,64 @@ async fn token_budget_auto_compact_fallback_rolls_over_after_buffer() -> Result<
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call("trigger-call", "get_context_remaining", "{}"),
-                ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
-            ]),
-            sse(vec![
-                ev_response_created("fallback-resp"),
-                ev_function_call("buffer-call", "get_context_remaining", "{}"),
-                ev_completed_with_tokens("fallback-resp", /*total_tokens*/ 13_500),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.model_provider.name = "OpenAI (test)".into();
-            config.model_context_window = Some(50_000);
-            config.model_auto_compact_token_limit = Some(9_000);
-            config.token_budget = Some(TokenBudgetConfig {
-                auto_compact_fallback_prompt: Some(AUTO_COMPACT_FALLBACK_PROMPT.to_string()),
-                auto_compact_fallback_buffer_tokens: Some(4_000),
-                ..TokenBudgetConfig::default()
-            });
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("test config should allow token budget");
-        })
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call("trigger-call", "get_context_remaining", "{}"),
+                    ev_completed_with_tokens("resp-1", /*total_tokens*/ 9_500),
+                ]),
+                sse(vec![
+                    ev_response_created("fallback-resp"),
+                    ev_function_call("buffer-call", "get_context_remaining", "{}"),
+                    ev_completed_with_tokens("fallback-resp", /*total_tokens*/ 13_500),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                config.model_provider.name = "OpenAI (test)".into();
+                config.model_context_window = Some(50_000);
+                config.model_auto_compact_token_limit = Some(9_000);
+                config.token_budget = Some(TokenBudgetConfig {
+                    auto_compact_fallback_prompt: Some(AUTO_COMPACT_FALLBACK_PROMPT.to_string()),
+                    auto_compact_fallback_buffer_tokens: Some(4_000),
+                    ..TokenBudgetConfig::default()
+                });
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("test config should allow token budget");
+            })
+            .build(&server)
+            .await?;
 
-    test.submit_turn("exhaust the fallback buffer").await?;
+        test.submit_turn("exhaust the fallback buffer").await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    let fallback_request = &requests[1];
-    assert!(
-        fallback_request
-            .message_input_texts("developer")
-            .iter()
-            .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT)
-    );
-    assert!(!requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
-    assert!(!requests[2].body_contains_text("exhaust the fallback buffer"));
-    assert_eq!(requests[2].function_call_output_text("buffer-call"), None);
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        let fallback_request = &requests[1];
+        assert!(
+            fallback_request
+                .message_input_texts("developer")
+                .iter()
+                .any(|text| text == AUTO_COMPACT_FALLBACK_PROMPT)
+        );
+        assert!(!requests[2].body_contains_text(AUTO_COMPACT_FALLBACK_PROMPT));
+        assert!(!requests[2].body_contains_text("exhaust the fallback buffer"));
+        assert_eq!(requests[2].function_call_output_text("buffer-call"), None);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1595,6 +1642,7 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let call_id = "new-window-call";
     let continue_call_id = "continue-call";
     let continue_args = json!({
@@ -1694,4 +1742,6 @@ async fn new_context_tool_skips_auto_compact_fallback() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }

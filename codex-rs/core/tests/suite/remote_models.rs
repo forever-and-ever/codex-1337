@@ -29,6 +29,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::TempDirExt;
 use core_test_support::load_default_config_for_test;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -565,174 +566,176 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
         .body_print_limit(BodyPrintLimit::Limited(80_000))
         .start()
         .await;
+    mock_server::run(&[&server], async {
+        let remote_model = ModelInfo {
+            slug: REMOTE_MODEL_SLUG.to_string(),
+            display_name: "Remote Test".to_string(),
+            description: Some("A remote model that requires the test shell".to_string()),
+            default_reasoning_level: Some(ReasoningEffort::Medium),
+            supported_reasoning_levels: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium,
+                description: ReasoningEffort::Medium.to_string(),
+            }],
+            shell_type: ConfigShellToolType::UnifiedExec,
+            visibility: ModelVisibility::List,
+            supported_in_api: true,
+            input_modalities: default_input_modalities(),
+            used_fallback_model_metadata: false,
+            supports_search_tool: false,
+            supports_experimental_context: false,
+            use_responses_lite: false,
+            supports_reasoning_effort_updates: false,
+            guardian: None,
+            node_repl_auto_review_required: false,
+            node_repl_disabled: false,
+            auto_review_model_override: None,
+            model_specialty: None,
+            tool_mode: None,
+            multi_agent_version: None,
+            multi_agent_reasoning_effort: None,
+            priority: 1,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            available_access_programs: None,
+            upgrade: None,
+            model_messages: None,
+            include_skills_usage_instructions: false,
+            include_plugin_usage_instructions: false,
+            include_apps_usage_instructions: false,
+            supports_reasoning_summary_parameter: true,
+            default_reasoning_summary: ReasoningSummary::Auto,
+            support_verbosity: false,
+            default_verbosity: None,
+            availability_nux: None,
+            apply_patch_tool_type: None,
+            web_search_tool_type: Default::default(),
+            truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+            supports_image_detail_original: false,
+            context_window: Some(272_000),
+            max_context_window: None,
+            auto_compact_token_limit: None,
+            supports_native_compaction: false,
+            anthropic: None,
+            comp_hash: None,
+            effective_context_window_percent: 95,
+            experimental_supported_tools: Vec::new(),
+        };
 
-    let remote_model = ModelInfo {
-        slug: REMOTE_MODEL_SLUG.to_string(),
-        display_name: "Remote Test".to_string(),
-        description: Some("A remote model that requires the test shell".to_string()),
-        default_reasoning_level: Some(ReasoningEffort::Medium),
-        supported_reasoning_levels: vec![ReasoningEffortPreset {
-            effort: ReasoningEffort::Medium,
-            description: ReasoningEffort::Medium.to_string(),
-        }],
-        shell_type: ConfigShellToolType::UnifiedExec,
-        visibility: ModelVisibility::List,
-        supported_in_api: true,
-        input_modalities: default_input_modalities(),
-        used_fallback_model_metadata: false,
-        supports_search_tool: false,
-        supports_experimental_context: false,
-        use_responses_lite: false,
-        supports_reasoning_effort_updates: false,
-        guardian: None,
-        node_repl_auto_review_required: false,
-        node_repl_disabled: false,
-        auto_review_model_override: None,
-        model_specialty: None,
-        tool_mode: None,
-        multi_agent_version: None,
-        multi_agent_reasoning_effort: None,
-        priority: 1,
-        additional_speed_tiers: Vec::new(),
-        service_tiers: Vec::new(),
-        default_service_tier: None,
-        available_access_programs: None,
-        upgrade: None,
-        model_messages: None,
-        include_skills_usage_instructions: false,
-        include_plugin_usage_instructions: false,
-        include_apps_usage_instructions: false,
-        supports_reasoning_summary_parameter: true,
-        default_reasoning_summary: ReasoningSummary::Auto,
-        support_verbosity: false,
-        default_verbosity: None,
-        availability_nux: None,
-        apply_patch_tool_type: None,
-        web_search_tool_type: Default::default(),
-        truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
-        supports_image_detail_original: false,
-        context_window: Some(272_000),
-        max_context_window: None,
-        auto_compact_token_limit: None,
-        supports_native_compaction: false,
-        anthropic: None,
-        comp_hash: None,
-        effective_context_window_percent: 95,
-        experimental_supported_tools: Vec::new(),
-    };
+        let mut models_response = serde_json::to_value(ModelsResponse {
+            models: vec![remote_model],
+        })?;
+        models_response["models"][0]["shell_type"] = json!("shell_command");
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(models_response))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let mut models_response = serde_json::to_value(ModelsResponse {
-        models: vec![remote_model],
-    })?;
-    models_response["models"][0]["shell_type"] = json!("shell_command");
-    Mock::given(method("GET"))
-        .and(path("/v1/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(models_response))
-        .up_to_n_times(1)
-        .expect(1)
-        .mount(&server)
-        .await;
+        let mut builder = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config.model = Some("gpt-5.4".to_string());
+            });
+        let TestCodex {
+            codex,
+            cwd,
+            config,
+            thread_manager,
+            ..
+        } = builder.build(&server).await?;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config.model = Some("gpt-5.4".to_string());
-        });
-    let TestCodex {
-        codex,
-        cwd,
-        config,
-        thread_manager,
-        ..
-    } = builder.build(&server).await?;
+        let models_manager = thread_manager.get_models_manager();
+        let available_model = wait_for_model_available(&models_manager, REMOTE_MODEL_SLUG).await;
 
-    let models_manager = thread_manager.get_models_manager();
-    let available_model = wait_for_model_available(&models_manager, REMOTE_MODEL_SLUG).await;
+        assert_eq!(available_model.model, REMOTE_MODEL_SLUG);
 
-    assert_eq!(available_model.model, REMOTE_MODEL_SLUG);
+        let model_info = models_manager
+            .get_model_info(REMOTE_MODEL_SLUG, &config.to_models_manager_config())
+            .await;
+        assert_eq!(model_info.shell_type, ConfigShellToolType::UnifiedExec);
 
-    let model_info = models_manager
-        .get_model_info(REMOTE_MODEL_SLUG, &config.to_models_manager_config())
-        .await;
-    assert_eq!(model_info.shell_type, ConfigShellToolType::UnifiedExec);
-
-    core_test_support::submit_thread_settings(
-        &codex,
-        ThreadSettingsOverrides {
-            model: Some(REMOTE_MODEL_SLUG.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    let call_id = "call";
-    let args = json!({
-        "cmd": "/bin/echo call",
-        "yield_time_ms": 250,
-    });
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let response_mock = mount_sse_sequence(&server, responses).await;
-
-    let cwd_path = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run call".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(cwd_path)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                summary: Some(ReasoningSummary::Auto),
+        core_test_support::submit_thread_settings(
+            &codex,
+            ThreadSettingsOverrides {
+                model: Some(REMOTE_MODEL_SLUG.to_string()),
                 ..Default::default()
-            }),
+            },
         )
         .await?;
 
-    let begin_event = wait_for_event_match(&codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        let call_id = "call";
+        let args = json!({
+            "cmd": "/bin/echo call",
+            "yield_time_ms": 250,
+        });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let response_mock = mount_sse_sequence(&server, responses).await;
+
+        let cwd_path = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run call".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(cwd_path)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    summary: Some(ReasoningSummary::Auto),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let begin_event = wait_for_event_match(&codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
+
+        assert_eq!(begin_event.source, ExecCommandSource::UnifiedExecStartup);
+
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+        let request = response_mock
+            .requests()
+            .into_iter()
+            .next()
+            .expect("remote model should receive an inference request");
+        let body = request.body_json();
+        let tools = body["tools"]
+            .as_array()
+            .expect("remote model tools should be present");
+        for tool_name in ["exec_command", "write_stdin"] {
+            assert!(
+                tools
+                    .iter()
+                    .any(|tool| tool["name"].as_str() == Some(tool_name)),
+                "legacy remote model metadata should expose {tool_name}: {tools:?}"
+            );
+        }
+
+        Ok(())
     })
-    .await;
-
-    assert_eq!(begin_event.source, ExecCommandSource::UnifiedExecStartup);
-
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-    let request = response_mock
-        .requests()
-        .into_iter()
-        .next()
-        .expect("remote model should receive an inference request");
-    let body = request.body_json();
-    let tools = body["tools"]
-        .as_array()
-        .expect("remote model tools should be present");
-    for tool_name in ["exec_command", "write_stdin"] {
-        assert!(
-            tools
-                .iter()
-                .any(|tool| tool["name"].as_str() == Some(tool_name)),
-            "legacy remote model metadata should expose {tool_name}: {tools:?}"
-        );
-    }
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -839,194 +842,196 @@ async fn remote_models_apply_legacy_instructions(auth: CodexAuth) -> Result<()> 
         .body_print_limit(BodyPrintLimit::Limited(80_000))
         .start()
         .await;
+    mock_server::run(&[&server], async {
+        let model = "test-gpt-5-remote";
 
-    let model = "test-gpt-5-remote";
-
-    let remote_instructions = "Use the remote instructions template only.";
-    let remote_model = ModelInfo {
-        slug: model.to_string(),
-        display_name: "Parallel Remote".to_string(),
-        description: Some("A remote model with custom instructions".to_string()),
-        default_reasoning_level: Some(ReasoningEffort::Medium),
-        supported_reasoning_levels: vec![ReasoningEffortPreset {
-            effort: ReasoningEffort::Medium,
-            description: ReasoningEffort::Medium.to_string(),
-        }],
-        shell_type: ConfigShellToolType::UnifiedExec,
-        visibility: ModelVisibility::List,
-        supported_in_api: true,
-        input_modalities: default_input_modalities(),
-        used_fallback_model_metadata: false,
-        supports_search_tool: false,
-        supports_experimental_context: false,
-        use_responses_lite: false,
-        supports_reasoning_effort_updates: false,
-        guardian: None,
-        node_repl_auto_review_required: false,
-        node_repl_disabled: false,
-        auto_review_model_override: None,
-        model_specialty: None,
-        tool_mode: None,
-        multi_agent_version: None,
-        multi_agent_reasoning_effort: None,
-        priority: 1,
-        additional_speed_tiers: Vec::new(),
-        service_tiers: Vec::new(),
-        default_service_tier: None,
-        available_access_programs: None,
-        upgrade: None,
-        model_messages: Some(ModelMessages {
-            instructions_template: Some(remote_instructions.to_string()),
-            ..Default::default()
-        }),
-        include_skills_usage_instructions: false,
-        include_plugin_usage_instructions: false,
-        include_apps_usage_instructions: false,
-        supports_reasoning_summary_parameter: true,
-        default_reasoning_summary: ReasoningSummary::Auto,
-        support_verbosity: false,
-        default_verbosity: None,
-        availability_nux: None,
-        apply_patch_tool_type: None,
-        web_search_tool_type: Default::default(),
-        truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
-        supports_image_detail_original: false,
-        context_window: Some(272_000),
-        max_context_window: None,
-        auto_compact_token_limit: None,
-        supports_native_compaction: false,
-        anthropic: None,
-        comp_hash: None,
-        effective_context_window_percent: 95,
-        experimental_supported_tools: Vec::new(),
-    };
-    let mut models_response = serde_json::to_value(ModelsResponse {
-        models: vec![remote_model],
-    })?;
-    models_response["models"][0]
-        .as_object_mut()
-        .expect("model should serialize as an object")
-        .remove("model_messages");
-    Mock::given(method("GET"))
-        .and(path("/v1/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(models_response))
-        .up_to_n_times(1)
-        .mount(&server)
-        .await;
-
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-
-    let mut builder = test_codex().with_auth(auth).with_config(|config| {
-        config
-            .features
-            .enable(Feature::ApiKeyModelDiscovery)
-            .expect("enable API-key model discovery");
-        config.model_provider.model_catalog_url = config
-            .model_provider
-            .base_url
-            .as_ref()
-            .map(|base_url| format!("{base_url}/models").into());
-        config.update_plan_enabled = true;
-        config.model = Some("gpt-5.2".to_string());
-    });
-    let TestCodex {
-        codex,
-        cwd,
-        config,
-        thread_manager,
-        home: _home,
-        ..
-    } = builder.build(&server).await?;
-
-    let models_manager = thread_manager.get_models_manager();
-    wait_for_model_available(&models_manager, model).await;
-
-    let cwd_path = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "hello base".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(cwd_path.clone())),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                summary: Some(ReasoningSummary::Auto),
+        let remote_instructions = "Use the remote instructions template only.";
+        let remote_model = ModelInfo {
+            slug: model.to_string(),
+            display_name: "Parallel Remote".to_string(),
+            description: Some("A remote model with custom instructions".to_string()),
+            default_reasoning_level: Some(ReasoningEffort::Medium),
+            supported_reasoning_levels: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium,
+                description: ReasoningEffort::Medium.to_string(),
+            }],
+            shell_type: ConfigShellToolType::UnifiedExec,
+            visibility: ModelVisibility::List,
+            supported_in_api: true,
+            input_modalities: default_input_modalities(),
+            used_fallback_model_metadata: false,
+            supports_search_tool: false,
+            supports_experimental_context: false,
+            use_responses_lite: false,
+            supports_reasoning_effort_updates: false,
+            guardian: None,
+            node_repl_auto_review_required: false,
+            node_repl_disabled: false,
+            auto_review_model_override: None,
+            model_specialty: None,
+            tool_mode: None,
+            multi_agent_version: None,
+            multi_agent_reasoning_effort: None,
+            priority: 1,
+            additional_speed_tiers: Vec::new(),
+            service_tiers: Vec::new(),
+            default_service_tier: None,
+            available_access_programs: None,
+            upgrade: None,
+            model_messages: Some(ModelMessages {
+                instructions_template: Some(remote_instructions.to_string()),
                 ..Default::default()
             }),
+            include_skills_usage_instructions: false,
+            include_plugin_usage_instructions: false,
+            include_apps_usage_instructions: false,
+            supports_reasoning_summary_parameter: true,
+            default_reasoning_summary: ReasoningSummary::Auto,
+            support_verbosity: false,
+            default_verbosity: None,
+            availability_nux: None,
+            apply_patch_tool_type: None,
+            web_search_tool_type: Default::default(),
+            truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+            supports_image_detail_original: false,
+            context_window: Some(272_000),
+            max_context_window: None,
+            auto_compact_token_limit: None,
+            supports_native_compaction: false,
+            anthropic: None,
+            comp_hash: None,
+            effective_context_window_percent: 95,
+            experimental_supported_tools: Vec::new(),
+        };
+        let mut models_response = serde_json::to_value(ModelsResponse {
+            models: vec![remote_model],
+        })?;
+        models_response["models"][0]
+            .as_object_mut()
+            .expect("model should serialize as an object")
+            .remove("model_messages");
+        Mock::given(method("GET"))
+            .and(path("/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(models_response))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+
+        let mut builder = test_codex().with_auth(auth).with_config(|config| {
+            config
+                .features
+                .enable(Feature::ApiKeyModelDiscovery)
+                .expect("enable API-key model discovery");
+            config.model_provider.model_catalog_url = config
+                .model_provider
+                .base_url
+                .as_ref()
+                .map(|base_url| format!("{base_url}/models").into());
+            config.update_plan_enabled = true;
+            config.model = Some("gpt-5.2".to_string());
+        });
+        let TestCodex {
+            codex,
+            cwd,
+            config,
+            thread_manager,
+            home: _home,
+            ..
+        } = builder.build(&server).await?;
+
+        let models_manager = thread_manager.get_models_manager();
+        wait_for_model_available(&models_manager, model).await;
+
+        let cwd_path = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "hello base".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(cwd_path.clone())),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    summary: Some(ReasoningSummary::Auto),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+        core_test_support::submit_thread_settings(
+            &codex,
+            ThreadSettingsOverrides {
+                model: Some(model.to_string()),
+                ..Default::default()
+            },
         )
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "hello remote".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(cwd_path)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    summary: Some(ReasoningSummary::Auto),
+                    ..Default::default()
+                }),
+            )
+            .await?;
 
-    core_test_support::submit_thread_settings(
-        &codex,
-        ThreadSettingsOverrides {
-            model: Some(model.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd_path.as_path());
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "hello remote".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(cwd_path)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                summary: Some(ReasoningSummary::Auto),
-                ..Default::default()
-            }),
-        )
-        .await?;
+        let base_model_info = models_manager
+            .get_model_info("gpt-5.2", &config.to_models_manager_config())
+            .await;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2, "expected two model requests");
+        let request = requests.last().expect("expected second model request");
+        assert_eq!(
+            request.instructions_text(),
+            render_model_instructions(&base_model_info)
+        );
+        assert!(
+            request
+                .message_input_texts("developer")
+                .iter()
+                .any(|text| text.contains(remote_instructions)),
+            "expected the model switch message to contain the remote instructions template"
+        );
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-    let base_model_info = models_manager
-        .get_model_info("gpt-5.2", &config.to_models_manager_config())
-        .await;
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2, "expected two model requests");
-    let request = requests.last().expect("expected second model request");
-    assert_eq!(
-        request.instructions_text(),
-        render_model_instructions(&base_model_info)
-    );
-    assert!(
-        request
-            .message_input_texts("developer")
-            .iter()
-            .any(|text| text.contains(remote_instructions)),
-        "expected the model switch message to contain the remote instructions template"
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

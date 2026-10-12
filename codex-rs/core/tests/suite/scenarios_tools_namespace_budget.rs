@@ -10,6 +10,7 @@ use codex_protocol::dynamic_tools::DynamicToolSpec;
 use core_test_support::apps_test_server::configure_search_capable_model;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
@@ -21,6 +22,7 @@ async fn descriptions_share_space_without_hiding_late_namespaces() -> Result<()>
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let description = "Find records & retrieve <details> from this service. Search by project, owner, date, or status, then read the matching record to answer questions with its title, summary, source link, and relevant activity from the connected workspace.";
     let namespaces = (0..19)
         .map(|index| format!("service_{index:02}"))
@@ -154,4 +156,6 @@ async fn descriptions_share_space_without_hiding_late_namespaces() -> Result<()>
         )
     );
     Ok(())
+    })
+    .await
 }

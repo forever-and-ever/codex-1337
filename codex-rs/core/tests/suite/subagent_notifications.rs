@@ -30,6 +30,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::LoadThreadHistoryParams;
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::assert_parent_turn;
 use core_test_support::responses::assert_root_turn;
@@ -995,186 +996,191 @@ async fn spawned_child_receives_forked_parent_context(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-
-    let seed_turn = mount_sse_once_match(
-        &server,
-        |req: &wiremock::Request| body_contains(req, TURN_0_FORK_PROMPT),
-        sse(vec![
-            ev_response_created("resp-seed-1"),
-            ev_assistant_message("msg-seed-1", "seeded"),
-            ev_completed("resp-seed-1"),
-        ]),
-    )
-    .await;
-
-    let spawn_args = serde_json::to_string(&json!({
-        "message": CHILD_PROMPT,
-        "fork_context": true,
-    }))?;
-    let spawn_turn = mount_sse_once_match(
-        &server,
-        |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
-        sse(vec![
-            ev_response_created("resp-turn1-1"),
-            ev_function_call_with_namespace(
-                SPAWN_CALL_ID,
-                MULTI_AGENT_V1_NAMESPACE,
-                "spawn_agent",
-                &spawn_args,
-            ),
-            ev_completed("resp-turn1-1"),
-        ]),
-    )
-    .await;
-
-    let child_request_log = mount_sse_once_match(
-        &server,
-        |req: &wiremock::Request| {
-            body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
-        },
-        sse(vec![
-            ev_response_created("resp-child-1"),
-            ev_assistant_message("msg-child-1", "child done"),
-            ev_completed("resp-child-1"),
-        ]),
-    )
-    .await;
-
-    let _turn1_followup = mount_sse_once_match(
-        &server,
-        |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
-        sse(vec![
-            ev_response_created("resp-turn1-2"),
-            ev_assistant_message("msg-turn1-2", "parent done"),
-            ev_completed("resp-turn1-2"),
-        ]),
-    )
-    .await;
-
-    let mut builder = test_codex()
-        .with_model_info_override(INHERITED_MODEL, |model| model.comp_hash = None)
-        .with_history_mode(history_mode)
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::Collab)
-                .expect("test config should allow feature update");
-            config.model = Some(INHERITED_MODEL.to_string());
-            config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
-            config.agent_default_subagent_model = Some(REQUESTED_MODEL.to_string());
-            config.agent_default_subagent_reasoning_effort = Some(REQUESTED_REASONING_EFFORT);
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-
-    test.submit_turn(TURN_0_FORK_PROMPT).await?;
-    let _ = seed_turn.single_request();
-
-    submit_turn_with_trigger(&test, TURN_1_PROMPT, "composer").await?;
-    let parent_body = spawn_turn.single_request().body_json();
-
-    let child_request = wait_for_request_with_model(&child_request_log, REQUESTED_MODEL).await?;
-    assert!(child_request.body_contains_text(TURN_0_FORK_PROMPT));
-    let child_body = child_request.body_json();
-    let child_metadata: serde_json::Value = serde_json::from_str(
-        child_body["client_metadata"]["x-codex-turn-metadata"]
-            .as_str()
-            .expect("child turn metadata"),
-    )?;
-    assert_eq!(
-        (
-            &child_metadata["thread_source"],
-            &child_metadata["turn_trigger"]
-        ),
-        (&json!("subagent"), &json!("composer")),
-    );
-    let original_parent_turn_id = parent_body["client_metadata"]["turn_id"]
-        .as_str()
-        .expect("legacy spawn parent turn id");
-    assert_parent_turn(&parent_body, /*expected*/ None)?;
-    assert_parent_turn(&child_body, Some(original_parent_turn_id))?;
-    assert_root_turn(&parent_body, Some(original_parent_turn_id))?;
-    assert_root_turn(&child_body, Some(original_parent_turn_id))?;
-    assert_eq!(
-        (
-            child_body["model"].clone(),
-            child_body["reasoning"]["effort"].clone(),
-        ),
-        (
-            json!(REQUESTED_MODEL),
-            json!(REQUESTED_REASONING_EFFORT.to_string()),
+    mock_server::run(&[&server], async {
+        let seed_turn = mount_sse_once_match(
+            &server,
+            |req: &wiremock::Request| body_contains(req, TURN_0_FORK_PROMPT),
+            sse(vec![
+                ev_response_created("resp-seed-1"),
+                ev_assistant_message("msg-seed-1", "seeded"),
+                ev_completed("resp-seed-1"),
+            ]),
         )
-    );
-    let child_thread_id = ThreadId::from_string(
-        child_body["client_metadata"]["thread_id"]
+        .await;
+
+        let spawn_args = serde_json::to_string(&json!({
+            "message": CHILD_PROMPT,
+            "fork_context": true,
+        }))?;
+        let spawn_turn = mount_sse_once_match(
+            &server,
+            |req: &wiremock::Request| body_contains(req, TURN_1_PROMPT),
+            sse(vec![
+                ev_response_created("resp-turn1-1"),
+                ev_function_call_with_namespace(
+                    SPAWN_CALL_ID,
+                    MULTI_AGENT_V1_NAMESPACE,
+                    "spawn_agent",
+                    &spawn_args,
+                ),
+                ev_completed("resp-turn1-1"),
+            ]),
+        )
+        .await;
+
+        let child_request_log = mount_sse_once_match(
+            &server,
+            |req: &wiremock::Request| {
+                body_contains(req, CHILD_PROMPT) && !body_contains(req, SPAWN_CALL_ID)
+            },
+            sse(vec![
+                ev_response_created("resp-child-1"),
+                ev_assistant_message("msg-child-1", "child done"),
+                ev_completed("resp-child-1"),
+            ]),
+        )
+        .await;
+
+        let _turn1_followup = mount_sse_once_match(
+            &server,
+            |req: &wiremock::Request| body_contains(req, SPAWN_CALL_ID),
+            sse(vec![
+                ev_response_created("resp-turn1-2"),
+                ev_assistant_message("msg-turn1-2", "parent done"),
+                ev_completed("resp-turn1-2"),
+            ]),
+        )
+        .await;
+
+        let mut builder = test_codex()
+            .with_model_info_override(INHERITED_MODEL, |model| model.comp_hash = None)
+            .with_history_mode(history_mode)
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::Collab)
+                    .expect("test config should allow feature update");
+                config.model = Some(INHERITED_MODEL.to_string());
+                config.model_reasoning_effort = Some(INHERITED_REASONING_EFFORT);
+                config.agent_default_subagent_model = Some(REQUESTED_MODEL.to_string());
+                config.agent_default_subagent_reasoning_effort = Some(REQUESTED_REASONING_EFFORT);
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+
+        test.submit_turn(TURN_0_FORK_PROMPT).await?;
+        let _ = seed_turn.single_request();
+
+        submit_turn_with_trigger(&test, TURN_1_PROMPT, "composer").await?;
+        let parent_body = spawn_turn.single_request().body_json();
+
+        let child_request =
+            wait_for_request_with_model(&child_request_log, REQUESTED_MODEL).await?;
+        assert!(child_request.body_contains_text(TURN_0_FORK_PROMPT));
+        let child_body = child_request.body_json();
+        let child_metadata: serde_json::Value = serde_json::from_str(
+            child_body["client_metadata"]["x-codex-turn-metadata"]
+                .as_str()
+                .expect("child turn metadata"),
+        )?;
+        assert_eq!(
+            (
+                &child_metadata["thread_source"],
+                &child_metadata["turn_trigger"]
+            ),
+            (&json!("subagent"), &json!("composer")),
+        );
+        let original_parent_turn_id = parent_body["client_metadata"]["turn_id"]
             .as_str()
-            .expect("legacy child thread id"),
-    )?;
-    // Read the acknowledged fork from storage without flushing the live child first.
-    let reopened_store = codex_core::thread_store_from_config(&test.config, /*state_db*/ None);
-    let persisted = reopened_store
-        .load_latest_model_context(LoadThreadHistoryParams {
-            thread_id: child_thread_id,
-            include_archived: false,
+            .expect("legacy spawn parent turn id");
+        assert_parent_turn(&parent_body, /*expected*/ None)?;
+        assert_parent_turn(&child_body, Some(original_parent_turn_id))?;
+        assert_root_turn(&parent_body, Some(original_parent_turn_id))?;
+        assert_root_turn(&child_body, Some(original_parent_turn_id))?;
+        assert_eq!(
+            (
+                child_body["model"].clone(),
+                child_body["reasoning"]["effort"].clone(),
+            ),
+            (
+                json!(REQUESTED_MODEL),
+                json!(REQUESTED_REASONING_EFFORT.to_string()),
+            )
+        );
+        let child_thread_id = ThreadId::from_string(
+            child_body["client_metadata"]["thread_id"]
+                .as_str()
+                .expect("legacy child thread id"),
+        )?;
+        // Read the acknowledged fork from storage without flushing the live child first.
+        let reopened_store =
+            codex_core::thread_store_from_config(&test.config, /*state_db*/ None);
+        let persisted = reopened_store
+            .load_latest_model_context(LoadThreadHistoryParams {
+                thread_id: child_thread_id,
+                include_archived: false,
+            })
+            .await?;
+        assert!(serde_json::to_string(&persisted.items)?.contains(TURN_0_FORK_PROMPT));
+        let child_thread = test.thread_manager.get_thread(child_thread_id).await?;
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !matches!(child_thread.agent_status().await, AgentStatus::Completed(_)) {
+                sleep(Duration::from_millis(10)).await;
+            }
         })
         .await?;
-    assert!(serde_json::to_string(&persisted.items)?.contains(TURN_0_FORK_PROMPT));
-    let child_thread = test.thread_manager.get_thread(child_thread_id).await?;
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while !matches!(child_thread.agent_status().await, AgentStatus::Completed(_)) {
-            sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await?;
-    let args = serde_json::to_string(&json!({
-        "target": child_thread_id.to_string(),
-        "message": "legacy child follow-up",
-    }))?;
-    let parent = mount_sse_once_match(
-        &server,
-        |request: &wiremock::Request| body_contains(request, "reuse the legacy child"),
-        sse(vec![
-            ev_response_created("resp-legacy-reuse"),
-            ev_function_call_with_namespace(
-                "legacy-reuse-call",
-                MULTI_AGENT_V1_NAMESPACE,
-                "send_input",
-                &args,
-            ),
-            ev_completed("resp-legacy-reuse"),
-        ]),
-    )
-    .await;
-    let followup = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_completed("resp-legacy-child-reuse")]),
-            sse(vec![ev_completed("resp-legacy-reuse-complete")]),
-        ],
-    )
-    .await;
+        let args = serde_json::to_string(&json!({
+            "target": child_thread_id.to_string(),
+            "message": "legacy child follow-up",
+        }))?;
+        let parent = mount_sse_once_match(
+            &server,
+            |request: &wiremock::Request| body_contains(request, "reuse the legacy child"),
+            sse(vec![
+                ev_response_created("resp-legacy-reuse"),
+                ev_function_call_with_namespace(
+                    "legacy-reuse-call",
+                    MULTI_AGENT_V1_NAMESPACE,
+                    "send_input",
+                    &args,
+                ),
+                ev_completed("resp-legacy-reuse"),
+            ]),
+        )
+        .await;
+        let followup = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_completed("resp-legacy-child-reuse")]),
+                sse(vec![ev_completed("resp-legacy-reuse-complete")]),
+            ],
+        )
+        .await;
 
-    submit_turn_with_trigger(&test, "reuse the legacy child", "automation_cron_scheduled").await?;
-    let followup_parent_body = parent.single_request().body_json();
-    let reused_child_body = wait_for_request_with_model(&followup, REQUESTED_MODEL)
-        .await?
-        .body_json();
-    let followup_parent_turn_id = followup_parent_body["client_metadata"]["turn_id"]
-        .as_str()
-        .expect("legacy follow-up parent turn id");
-    assert_ne!(followup_parent_turn_id, original_parent_turn_id);
-    let metadata = &reused_child_body["client_metadata"];
-    assert_eq!(metadata["thread_id"], json!(child_thread_id));
-    assert_parent_turn(&followup_parent_body, /*expected*/ None)?;
-    assert_parent_turn(&reused_child_body, Some(followup_parent_turn_id))?;
-    assert_root_turn(&followup_parent_body, Some(followup_parent_turn_id))?;
-    assert_root_turn(&reused_child_body, Some(followup_parent_turn_id))?;
-    let reused_metadata: Value = serde_json::from_str(
-        reused_child_body["client_metadata"]["x-codex-turn-metadata"]
+        submit_turn_with_trigger(&test, "reuse the legacy child", "automation_cron_scheduled")
+            .await?;
+        let followup_parent_body = parent.single_request().body_json();
+        let reused_child_body = wait_for_request_with_model(&followup, REQUESTED_MODEL)
+            .await?
+            .body_json();
+        let followup_parent_turn_id = followup_parent_body["client_metadata"]["turn_id"]
             .as_str()
-            .expect("reused child turn metadata"),
-    )?;
-    assert_eq!(reused_metadata["turn_trigger"], "automation_cron_scheduled");
-    Ok(())
+            .expect("legacy follow-up parent turn id");
+        assert_ne!(followup_parent_turn_id, original_parent_turn_id);
+        let metadata = &reused_child_body["client_metadata"];
+        assert_eq!(metadata["thread_id"], json!(child_thread_id));
+        assert_parent_turn(&followup_parent_body, /*expected*/ None)?;
+        assert_parent_turn(&reused_child_body, Some(followup_parent_turn_id))?;
+        assert_root_turn(&followup_parent_body, Some(followup_parent_turn_id))?;
+        assert_root_turn(&reused_child_body, Some(followup_parent_turn_id))?;
+        let reused_metadata: Value = serde_json::from_str(
+            reused_child_body["client_metadata"]["x-codex-turn-metadata"]
+                .as_str()
+                .expect("reused child turn metadata"),
+        )?;
+        assert_eq!(reused_metadata["turn_trigger"], "automation_cron_scheduled");
+        Ok(())
+    })
+    .await
 }
 
 async fn submit_turn_with_trigger(test: &TestCodex, prompt: &str, trigger: &str) -> Result<()> {
@@ -3532,6 +3538,7 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let call_id = "tool-search-spawn-agent";
     let resp_mock = mount_sse_sequence(
         &server,
@@ -3598,4 +3605,6 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
     );
 
     Ok(())
+    })
+    .await
 }

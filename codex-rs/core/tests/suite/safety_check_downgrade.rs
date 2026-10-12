@@ -13,6 +13,7 @@ use codex_protocol::protocol::ModelRerouteReason;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_model_verification_metadata;
@@ -233,55 +234,58 @@ async fn openai_model_header_mismatch_only_emits_one_warning_per_turn() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let tool_args = serde_json::json!({
-        "cmd": "echo hello",
-        "yield_time_ms": 1_000
-    });
+    mock_server::run(&[&server], async {
+        let tool_args = serde_json::json!({
+            "cmd": "echo hello",
+            "yield_time_ms": 1_000
+        });
 
-    let first_response = sse_response(sse(vec![
-        ev_response_created("resp-1"),
-        ev_function_call(
-            "call-1",
-            "exec_command",
-            &serde_json::to_string(&tool_args)?,
-        ),
-        core_test_support::responses::ev_completed("resp-1"),
-    ]))
-    .insert_header("OpenAI-Model", SERVER_MODEL);
-    let second_response = sse_response(sse(vec![
-        ev_response_created("resp-2"),
-        ev_assistant_message("msg-1", "done"),
-        core_test_support::responses::ev_completed("resp-2"),
-    ]))
-    .insert_header("OpenAI-Model", SERVER_MODEL);
-    let _mock = mount_response_sequence(&server, vec![first_response, second_response]).await;
+        let first_response = sse_response(sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(
+                "call-1",
+                "exec_command",
+                &serde_json::to_string(&tool_args)?,
+            ),
+            core_test_support::responses::ev_completed("resp-1"),
+        ]))
+        .insert_header("OpenAI-Model", SERVER_MODEL);
+        let second_response = sse_response(sse(vec![
+            ev_response_created("resp-2"),
+            ev_assistant_message("msg-1", "done"),
+            core_test_support::responses::ev_completed("resp-2"),
+        ]))
+        .insert_header("OpenAI-Model", SERVER_MODEL);
+        let _mock = mount_response_sequence(&server, vec![first_response, second_response]).await;
 
-    let mut builder = test_codex().with_model(REQUESTED_MODEL);
-    let test = builder.build(&server).await?;
+        let mut builder = test_codex().with_model(REQUESTED_MODEL);
+        let test = builder.build(&server).await?;
 
-    test.codex
-        .start_or_steer_turn(disabled_text_turn(&test, "trigger follow-up turn"))
-        .await?;
+        test.codex
+            .start_or_steer_turn(disabled_text_turn(&test, "trigger follow-up turn"))
+            .await?;
 
-    let mut warning_count = 0;
-    loop {
-        let event = wait_for_event(&test.codex, |_| true).await;
-        match event {
-            EventMsg::Warning(warning)
-                if warning
-                    .message
-                    .contains("flagged for potentially high-risk cyber activity") =>
-            {
-                warning_count += 1;
+        let mut warning_count = 0;
+        loop {
+            let event = wait_for_event(&test.codex, |_| true).await;
+            match event {
+                EventMsg::Warning(warning)
+                    if warning
+                        .message
+                        .contains("flagged for potentially high-risk cyber activity") =>
+                {
+                    warning_count += 1;
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
 
-    assert_eq!(warning_count, 1);
+        assert_eq!(warning_count, 1);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -390,53 +394,58 @@ async fn model_verification_only_emits_once_per_turn() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let tool_args = serde_json::json!({
-        "cmd": "echo hello",
-        "yield_time_ms": 1_000
-    });
+    mock_server::run(&[&server], async {
+        let tool_args = serde_json::json!({
+            "cmd": "echo hello",
+            "yield_time_ms": 1_000
+        });
 
-    let first_response = sse_response(sse(vec![
-        ev_response_created("resp-1"),
-        ev_function_call(
-            "call-1",
-            "exec_command",
-            &serde_json::to_string(&tool_args)?,
-        ),
-        ev_model_verification_metadata("resp-1", vec![TRUSTED_ACCESS_FOR_CYBER_VERIFICATION]),
-        core_test_support::responses::ev_completed("resp-1"),
-    ]));
-    let second_response = sse_response(sse(vec![
-        ev_response_created("resp-2"),
-        ev_model_verification_metadata("resp-2", vec![TRUSTED_ACCESS_FOR_CYBER_VERIFICATION]),
-        ev_assistant_message("msg-1", "done"),
-        core_test_support::responses::ev_completed("resp-2"),
-    ]));
-    let _mock = mount_response_sequence(&server, vec![first_response, second_response]).await;
+        let first_response = sse_response(sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(
+                "call-1",
+                "exec_command",
+                &serde_json::to_string(&tool_args)?,
+            ),
+            ev_model_verification_metadata("resp-1", vec![TRUSTED_ACCESS_FOR_CYBER_VERIFICATION]),
+            core_test_support::responses::ev_completed("resp-1"),
+        ]));
+        let second_response = sse_response(sse(vec![
+            ev_response_created("resp-2"),
+            ev_model_verification_metadata("resp-2", vec![TRUSTED_ACCESS_FOR_CYBER_VERIFICATION]),
+            ev_assistant_message("msg-1", "done"),
+            core_test_support::responses::ev_completed("resp-2"),
+        ]));
+        let _mock = mount_response_sequence(&server, vec![first_response, second_response]).await;
 
-    let mut builder = test_codex().with_model(SERVER_MODEL);
-    let test = builder.build(&server).await?;
+        let mut builder = test_codex().with_model(SERVER_MODEL);
+        let test = builder.build(&server).await?;
 
-    test.codex
-        .start_or_steer_turn(disabled_text_turn(
-            &test,
-            "trigger follow-up model verification",
-        ))
-        .await?;
+        test.codex
+            .start_or_steer_turn(disabled_text_turn(
+                &test,
+                "trigger follow-up model verification",
+            ))
+            .await?;
 
-    let mut verification_count = 0;
-    loop {
-        let event = wait_for_event(&test.codex, |_| true).await;
-        match event {
-            EventMsg::ModelVerification(_) => verification_count += 1,
-            EventMsg::Warning(warning) if warning.message.contains("high-risk cyber activity") => {
-                panic!("model verification should not emit a warning event");
+        let mut verification_count = 0;
+        loop {
+            let event = wait_for_event(&test.codex, |_| true).await;
+            match event {
+                EventMsg::ModelVerification(_) => verification_count += 1,
+                EventMsg::Warning(warning)
+                    if warning.message.contains("high-risk cyber activity") =>
+                {
+                    panic!("model verification should not emit a warning event");
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
 
-    assert_eq!(verification_count, 1);
+        assert_eq!(verification_count, 1);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }

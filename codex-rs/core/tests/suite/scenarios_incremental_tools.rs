@@ -10,6 +10,7 @@ use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
@@ -30,6 +31,7 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mock = responses::mount_sse_sequence(
         &server,
         (1..=4)
@@ -241,6 +243,8 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
         )
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -251,6 +255,7 @@ async fn tool_removal_appends_a_standalone_notice_without_rewriting_history() ->
     );
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let command = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let server_config = |enabled_tools: &[&str]| {
@@ -490,4 +495,6 @@ async fn tool_removal_appends_a_standalone_notice_without_rewriting_history() ->
         )
     );
     Ok(())
+    })
+    .await
 }

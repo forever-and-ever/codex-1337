@@ -25,6 +25,7 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::skip_if_no_network;
@@ -916,112 +917,115 @@ async fn reasoning_effort_override_unavailable_recovers_saved_history(
 ) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let reply = |id, text| {
-        responses::sse(vec![
-            responses::ev_assistant_message(id, text),
-            responses::ev_completed(id),
-        ])
-    };
-    let mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            reply("initial", "initial reply"),
-            reply("resumed", "resumed reply"),
+    mock_server::run(&[&server], async {
+        let reply = |id, text| {
             responses::sse(vec![
-                serde_json::json!({
-                    "type": "response.output_item.done",
-                    "item": {"type": "compaction", "encrypted_content": "compacted-history"},
-                }),
-                responses::ev_completed("compact"),
-            ]),
-            reply("after", "after compaction reply"),
-        ],
-    )
-    .await;
-    let initial = override_builder().build_with_auto_env(&server).await?;
-    let agent_message = serde_json::from_value(serde_json::json!({
-        "type": "agent_message",
-        "author": "/root/worker",
-        "recipient": "/root",
-        "content": [{"type": "input_text", "text": "The worker has finished."}],
-    }))?;
-    let submission = initial
-        .codex
-        .start_turn_if_idle(TurnInputRequest::new(TurnInput::ResponseItem(
-            agent_message,
-        )))
-        .await?;
-    assert!(matches!(submission, StartIfIdleSubmission::Started { .. }));
-    wait_for_event(&initial.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let mut builder = unavailable
-        .builder()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(move |config| {
-            config.model_reasoning_effort = Some(ReasoningEffort::High);
-            config.chatgpt_base_url = chatgpt_base_url;
-        });
-    if let Some(url) = initial.executor_environment().exec_server_url() {
-        builder = builder.with_exec_server_url(url);
-    }
-    let resumed = builder.restart(&server, &initial).await?;
-    resumed.submit_text_turn("after resume").await?;
-    let saved_updates = resumed
-        .codex
-        .load_history(/*include_archived*/ false)
-        .await?
-        .items
-        .into_iter()
-        .filter_map(|item| match item {
-            RolloutItem::ResponseItem(ResponseItemEnvelope {
-                item: item @ ResponseItem::ConfigurationUpdate { .. },
-                ..
-            }) => Some(serde_json::to_value(item).expect("serialize saved update")),
-            _ => None,
+                responses::ev_assistant_message(id, text),
+                responses::ev_completed(id),
+            ])
+        };
+        let mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                reply("initial", "initial reply"),
+                reply("resumed", "resumed reply"),
+                responses::sse(vec![
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "item": {"type": "compaction", "encrypted_content": "compacted-history"},
+                    }),
+                    responses::ev_completed("compact"),
+                ]),
+                reply("after", "after compaction reply"),
+            ],
+        )
+        .await;
+        let initial = override_builder().build_with_auto_env(&server).await?;
+        let agent_message = serde_json::from_value(serde_json::json!({
+            "type": "agent_message",
+            "author": "/root/worker",
+            "recipient": "/root",
+            "content": [{"type": "input_text", "text": "The worker has finished."}],
+        }))?;
+        let submission = initial
+            .codex
+            .start_turn_if_idle(TurnInputRequest::new(TurnInput::ResponseItem(
+                agent_message,
+            )))
+            .await?;
+        assert!(matches!(submission, StartIfIdleSubmission::Started { .. }));
+        wait_for_event(&initial.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .collect::<Vec<_>>();
-    assert_eq!(saved_updates, vec![effort_update(ReasoningEffort::Medium)]);
-    resumed.codex.submit(Op::Compact).await?;
-    wait_for_event(&resumed.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    resumed.submit_text_turn("after compaction").await?;
+        .await;
+        let chatgpt_base_url = format!("{}/backend-api", server.uri());
+        let mut builder = unavailable
+            .builder()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(move |config| {
+                config.model_reasoning_effort = Some(ReasoningEffort::High);
+                config.chatgpt_base_url = chatgpt_base_url;
+            });
+        if let Some(url) = initial.executor_environment().exec_server_url() {
+            builder = builder.with_exec_server_url(url);
+        }
+        let resumed = builder.restart(&server, &initial).await?;
+        resumed.submit_text_turn("after resume").await?;
+        let saved_updates = resumed
+            .codex
+            .load_history(/*include_archived*/ false)
+            .await?
+            .items
+            .into_iter()
+            .filter_map(|item| match item {
+                RolloutItem::ResponseItem(ResponseItemEnvelope {
+                    item: item @ ResponseItem::ConfigurationUpdate { .. },
+                    ..
+                }) => Some(serde_json::to_value(item).expect("serialize saved update")),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(saved_updates, vec![effort_update(ReasoningEffort::Medium)]);
+        resumed.codex.submit(Op::Compact).await?;
+        wait_for_event(&resumed.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        resumed.submit_text_turn("after compaction").await?;
 
-    let requests = mock.requests();
-    assert_eq!(
-        requests[1].inputs_of_type("agent_message"),
-        requests[0].inputs_of_type("agent_message")
-    );
-    assert_eq!(requests[1].inputs_of_type("agent_message").len(), 1);
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| (
-                request.body_json()["reasoning"]["effort"].clone(),
-                effort_updates(request),
-            ))
-            .collect::<Vec<_>>(),
-        [
-            (
-                Value::from("medium"),
-                vec![effort_update(ReasoningEffort::Medium)]
-            ),
-            (Value::from("high"), Vec::new()),
-            (Value::from("high"), Vec::new()),
-            (Value::from("high"), Vec::new()),
-        ],
-    );
-    assert!(
-        requests[3]
-            .input()
-            .iter()
-            .any(|item| item["type"] == "compaction")
-    );
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(
+            requests[1].inputs_of_type("agent_message"),
+            requests[0].inputs_of_type("agent_message")
+        );
+        assert_eq!(requests[1].inputs_of_type("agent_message").len(), 1);
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| (
+                    request.body_json()["reasoning"]["effort"].clone(),
+                    effort_updates(request),
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (
+                    Value::from("medium"),
+                    vec![effort_update(ReasoningEffort::Medium)]
+                ),
+                (Value::from("high"), Vec::new()),
+                (Value::from("high"), Vec::new()),
+                (Value::from("high"), Vec::new()),
+            ],
+        );
+        assert!(
+            requests[3]
+                .input()
+                .iter()
+                .any(|item| item["type"] == "compaction")
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(ReasoningEffort::Medium; "same selection")]
@@ -1291,116 +1295,119 @@ async fn reasoning_effort_override_compaction_fallback_uses_each_models_effort()
 -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let first = responses::mount_sse_once(
-        &server,
-        responses::sse(vec![responses::ev_completed("first")]),
-    )
-    .await;
-    let second = responses::mount_sse_once(
-        &server,
-        responses::sse(vec![responses::ev_completed("second")]),
-    )
-    .await;
-    let compaction = serde_json::json!({
-        "type": "compaction", "encrypted_content": "fallback-summary"
-    });
-    let failure = ResponseTemplate::new(/*s*/ 400).set_body_json(serde_json::json!({
-        "error": {"message": "previous model cannot compact this history"}
-    }));
-    let compactions = responses::mount_response_sequence(
-        &server,
-        vec![
-            failure,
-            responses::sse_response(responses::sse(vec![
-                serde_json::json!({"type": "response.output_item.done", "item": compaction}),
-                responses::ev_completed("fallback"),
-            ])),
-        ],
-    )
-    .await;
-    let after = responses::mount_sse_once(
-        &server,
-        responses::sse(vec![responses::ev_completed("after")]),
-    )
-    .await;
-    let chatgpt_base_url = format!("{}/backend-api", server.uri());
-    let test = override_builder()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model_info_override("gpt-5.4", |model| {
-            model.comp_hash = Some("original".to_string());
-        })
-        .with_model_info_override("gpt-5.2", |model| {
-            model.comp_hash = Some("fallback".to_string());
-            model.use_responses_lite = true;
-            model.supports_reasoning_effort_updates = true;
-        })
-        .with_model("gpt-5.4")
-        .with_config(move |config| {
-            config.chatgpt_base_url = chatgpt_base_url;
-            config.model_provider.stream_max_retries = Some(0);
-        })
-        .build_with_auto_env(&server)
+    mock_server::run(&[&server], async {
+        let first = responses::mount_sse_once(
+            &server,
+            responses::sse(vec![responses::ev_completed("first")]),
+        )
+        .await;
+        let second = responses::mount_sse_once(
+            &server,
+            responses::sse(vec![responses::ev_completed("second")]),
+        )
+        .await;
+        let compaction = serde_json::json!({
+            "type": "compaction", "encrypted_content": "fallback-summary"
+        });
+        let failure = ResponseTemplate::new(/*s*/ 400).set_body_json(serde_json::json!({
+            "error": {"message": "previous model cannot compact this history"}
+        }));
+        let compactions = responses::mount_response_sequence(
+            &server,
+            vec![
+                failure,
+                responses::sse_response(responses::sse(vec![
+                    serde_json::json!({"type": "response.output_item.done", "item": compaction}),
+                    responses::ev_completed("fallback"),
+                ])),
+            ],
+        )
+        .await;
+        let after = responses::mount_sse_once(
+            &server,
+            responses::sse(vec![responses::ev_completed("after")]),
+        )
+        .await;
+        let chatgpt_base_url = format!("{}/backend-api", server.uri());
+        let test = override_builder()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_model_info_override("gpt-5.4", |model| {
+                model.comp_hash = Some("original".to_string());
+            })
+            .with_model_info_override("gpt-5.2", |model| {
+                model.comp_hash = Some("fallback".to_string());
+                model.use_responses_lite = true;
+                model.supports_reasoning_effort_updates = true;
+            })
+            .with_model("gpt-5.4")
+            .with_config(move |config| {
+                config.chatgpt_base_url = chatgpt_base_url;
+                config.model_provider.stream_max_retries = Some(0);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_text_turn("first").await?;
+        submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                effort: Some(Some(ReasoningEffort::High)),
+                ..Default::default()
+            },
+        )
         .await?;
-    test.submit_text_turn("first").await?;
-    submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            effort: Some(Some(ReasoningEffort::High)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    test.submit_text_turn("second").await?;
-    submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some("gpt-5.2".to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    test.submit_text_turn("switch model").await?;
+        test.submit_text_turn("second").await?;
+        submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                model: Some("gpt-5.2".to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        test.submit_text_turn("switch model").await?;
 
-    let compaction_requests = compactions.requests();
-    assert_eq!(compaction_requests.len(), 2);
-    let requests = [
-        first.single_request(),
-        second.single_request(),
-        compaction_requests[0].clone(),
-        compaction_requests[1].clone(),
-        after.single_request(),
-    ];
-    assert_eq!(
-        requests.each_ref().map(|request| {
-            let body = request.body_json();
-            serde_json::json!([body["model"], body["reasoning"]["effort"]])
-        }),
-        [
-            serde_json::json!(["gpt-5.4", "medium"]),
-            serde_json::json!(["gpt-5.4", "medium"]),
-            serde_json::json!(["gpt-5.4", "medium"]),
-            serde_json::json!(["gpt-5.2", "high"]),
-            serde_json::json!(["gpt-5.2", "high"]),
-        ]
-    );
-    assert_eq!(
-        requests.each_ref().map(effort_updates),
-        [
-            vec![effort_update(ReasoningEffort::Medium)],
-            vec![
-                effort_update(ReasoningEffort::Medium),
-                effort_update(ReasoningEffort::High)
-            ],
-            vec![
-                effort_update(ReasoningEffort::Medium),
-                effort_update(ReasoningEffort::High)
-            ],
-            vec![
-                effort_update(ReasoningEffort::Medium),
-                effort_update(ReasoningEffort::High)
-            ],
-            vec![],
-        ]
-    );
-    Ok(())
+        let compaction_requests = compactions.requests();
+        assert_eq!(compaction_requests.len(), 2);
+        let requests = [
+            first.single_request(),
+            second.single_request(),
+            compaction_requests[0].clone(),
+            compaction_requests[1].clone(),
+            after.single_request(),
+        ];
+        assert_eq!(
+            requests.each_ref().map(|request| {
+                let body = request.body_json();
+                serde_json::json!([body["model"], body["reasoning"]["effort"]])
+            }),
+            [
+                serde_json::json!(["gpt-5.4", "medium"]),
+                serde_json::json!(["gpt-5.4", "medium"]),
+                serde_json::json!(["gpt-5.4", "medium"]),
+                serde_json::json!(["gpt-5.2", "high"]),
+                serde_json::json!(["gpt-5.2", "high"]),
+            ]
+        );
+        assert_eq!(
+            requests.each_ref().map(effort_updates),
+            [
+                vec![effort_update(ReasoningEffort::Medium)],
+                vec![
+                    effort_update(ReasoningEffort::Medium),
+                    effort_update(ReasoningEffort::High)
+                ],
+                vec![
+                    effort_update(ReasoningEffort::Medium),
+                    effort_update(ReasoningEffort::High)
+                ],
+                vec![
+                    effort_update(ReasoningEffort::Medium),
+                    effort_update(ReasoningEffort::High)
+                ],
+                vec![],
+            ]
+        );
+        Ok(())
+    })
+    .await
 }

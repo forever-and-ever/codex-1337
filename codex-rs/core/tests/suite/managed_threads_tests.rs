@@ -1,5 +1,6 @@
 //! Exercises owned thread startup and shutdown through the real runtime and persistence store.
 
+use core_test_support::mock_server;
 use std::future::Future;
 use std::sync::Arc;
 use std::task::Context as TaskContext;
@@ -257,117 +258,120 @@ async fn startup_allowlist_controls_advertising_and_execution(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let fixture = test_codex()
-        .with_config(|config| {
-            config.update_plan_enabled = true;
-            config
-                .features
-                .disable(codex_features::Feature::CodeMode)
-                .expect("disable Code Mode for direct-tool assertions");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let mut options = fixture.start_thread_options().await;
-    options
-        .thread_extension_init
-        .insert(SessionIsolation::Isolated);
-    if tools.is_empty() {
+    mock_server::run(&[&server], async {
+        let fixture = test_codex()
+            .with_config(|config| {
+                config.update_plan_enabled = true;
+                config
+                    .features
+                    .disable(codex_features::Feature::CodeMode)
+                    .expect("disable Code Mode for direct-tool assertions");
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let mut options = fixture.start_thread_options().await;
         options
             .thread_extension_init
-            .insert(codex_protocol::tool_policy::ToolPolicyCeiling::NoTools);
-    }
-    options.thread_extension_init.insert(ToolPolicy {
-        allowed_tools: Some(if tools.is_empty() {
-            vec![ToolName::plain("update_plan")]
-        } else {
-            tools.clone()
-        }),
-        require_managed_sandbox: tools.is_empty(),
-        require_unified_exec: true,
-        expose_additional_permissions: false,
-    });
-    let cancelled = CancellationToken::new();
-    let tasks = TaskTracker::new();
-    let agent = fixture
-        .thread_manager
-        .start_thread_until(options, cancelled.clone().cancelled_owned(), &tasks)
-        .await?;
-    let captured = agent
-        .thread
-        .thread_extension_data()
-        .get::<ToolPolicy>()
-        .expect("captured startup policy");
-    assert_eq!(captured.allowed_tools, Some(tools.clone()));
-    assert_eq!(captured.require_managed_sandbox, tools.is_empty());
-    assert!(captured.require_unified_exec);
-    assert!(!captured.expose_additional_permissions);
-    // Replacing extension state after startup must not change the captured ceiling.
-    agent.thread.thread_extension_data().insert(ToolPolicy {
-        allowed_tools: Some(vec![ToolName::plain("exec_command")]),
-        ..Default::default()
-    });
-    let response = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call(
-                    "plan",
-                    "update_plan",
-                    r#"{"plan":[{"step":"inspect","status":"completed"}]}"#,
-                ),
-                responses::ev_function_call(
-                    "excluded",
-                    "exec_command",
-                    r#"{"cmd":"echo should-not-run"}"#,
-                ),
-                responses::ev_completed("tools"),
-            ]),
-            responses::sse(vec![responses::ev_completed("done")]),
-        ],
-    )
-    .await;
-    agent
-        .thread
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Try both tools".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&agent.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let requests = response.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[0].body_json()["tools"]
-            .as_array()
-            .expect("request tools array")
-            .iter()
-            .map(|tool| tool["name"].as_str().expect("plain tool name"))
-            .collect::<Vec<_>>(),
-        tools
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>(),
-    );
-    assert_eq!(
-        requests[1].function_call_output("excluded")["output"],
-        "unsupported call: exec_command"
-    );
-    assert_eq!(
-        requests[1].function_call_output("plan")["output"],
+            .insert(SessionIsolation::Isolated);
         if tools.is_empty() {
-            "unsupported call: update_plan"
-        } else {
-            "Plan updated"
+            options
+                .thread_extension_init
+                .insert(codex_protocol::tool_policy::ToolPolicyCeiling::NoTools);
         }
-    );
-    cancelled.cancel();
-    tasks.close();
-    tasks.wait().await;
-    fixture.codex.shutdown_and_wait().await?;
-    Ok(())
+        options.thread_extension_init.insert(ToolPolicy {
+            allowed_tools: Some(if tools.is_empty() {
+                vec![ToolName::plain("update_plan")]
+            } else {
+                tools.clone()
+            }),
+            require_managed_sandbox: tools.is_empty(),
+            require_unified_exec: true,
+            expose_additional_permissions: false,
+        });
+        let cancelled = CancellationToken::new();
+        let tasks = TaskTracker::new();
+        let agent = fixture
+            .thread_manager
+            .start_thread_until(options, cancelled.clone().cancelled_owned(), &tasks)
+            .await?;
+        let captured = agent
+            .thread
+            .thread_extension_data()
+            .get::<ToolPolicy>()
+            .expect("captured startup policy");
+        assert_eq!(captured.allowed_tools, Some(tools.clone()));
+        assert_eq!(captured.require_managed_sandbox, tools.is_empty());
+        assert!(captured.require_unified_exec);
+        assert!(!captured.expose_additional_permissions);
+        // Replacing extension state after startup must not change the captured ceiling.
+        agent.thread.thread_extension_data().insert(ToolPolicy {
+            allowed_tools: Some(vec![ToolName::plain("exec_command")]),
+            ..Default::default()
+        });
+        let response = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        "plan",
+                        "update_plan",
+                        r#"{"plan":[{"step":"inspect","status":"completed"}]}"#,
+                    ),
+                    responses::ev_function_call(
+                        "excluded",
+                        "exec_command",
+                        r#"{"cmd":"echo should-not-run"}"#,
+                    ),
+                    responses::ev_completed("tools"),
+                ]),
+                responses::sse(vec![responses::ev_completed("done")]),
+            ],
+        )
+        .await;
+        agent
+            .thread
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Try both tools".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&agent.thread, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = response.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0].body_json()["tools"]
+                .as_array()
+                .expect("request tools array")
+                .iter()
+                .map(|tool| tool["name"].as_str().expect("plain tool name"))
+                .collect::<Vec<_>>(),
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            requests[1].function_call_output("excluded")["output"],
+            "unsupported call: exec_command"
+        );
+        assert_eq!(
+            requests[1].function_call_output("plan")["output"],
+            if tools.is_empty() {
+                "unsupported call: update_plan"
+            } else {
+                "Plan updated"
+            }
+        );
+        cancelled.cancel();
+        tasks.close();
+        tasks.wait().await;
+        fixture.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(None, Some(codex_guardian_reviewer::reviewer_tool_policy()), false; "explicit_policy")]

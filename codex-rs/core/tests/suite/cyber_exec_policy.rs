@@ -12,6 +12,7 @@ use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -121,69 +122,73 @@ async fn saved_prefix_only_bypasses_guardian_for_general_models(
     skip_if_wine_exec!(Ok(()), "Guardian command reviews require host-native paths");
 
     let server = start_mock_server().await;
-    let builder = match shell_backend {
-        ShellBackend::Standard => test_codex(),
-        ShellBackend::ZshFork => {
-            skip_if_host_windows!(Ok(()));
-            let Some(runtime) = zsh_fork_runtime("cyber model zsh-fork saved prefix")? else {
-                return Ok(());
-            };
-            zsh_fork_test_builder(runtime, AskForApproval::OnRequest)
-        }
-    };
-    let mut builder = builder
-        .with_model_info_override("gpt-5.4", move |model| {
-            if model_specialty == ModelSpecialty::Cyber {
-                model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+    mock_server::run(&[&server], async {
+        let builder = match shell_backend {
+            ShellBackend::Standard => test_codex(),
+            ShellBackend::ZshFork => {
+                skip_if_host_windows!(Ok(()));
+                let Some(runtime) = zsh_fork_runtime("cyber model zsh-fork saved prefix")? else {
+                    return Ok(());
+                };
+                zsh_fork_test_builder(runtime, AskForApproval::OnRequest)
             }
-        })
-        .with_config(configure_saved_prefix_and_guardian);
-    let test = builder.build_with_auto_env(&server).await?;
-    let expected_guardian_review_count = match (model_specialty, shell_backend) {
-        (ModelSpecialty::General, _) => 0,
-        (ModelSpecialty::Cyber, ShellBackend::Standard) => 1,
-        (ModelSpecialty::Cyber, ShellBackend::ZshFork) => 2,
-    };
+        };
+        let mut builder = builder
+            .with_model_info_override("gpt-5.4", move |model| {
+                if model_specialty == ModelSpecialty::Cyber {
+                    model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+                }
+            })
+            .with_config(configure_saved_prefix_and_guardian);
+        let test = builder.build_with_auto_env(&server).await?;
+        let expected_guardian_review_count = match (model_specialty, shell_backend) {
+            (ModelSpecialty::General, _) => 0,
+            (ModelSpecialty::Cyber, ShellBackend::Standard) => 1,
+            (ModelSpecialty::Cyber, ShellBackend::ZshFork) => 2,
+        };
 
-    let mut response_bodies = vec![command_response(
-        "parent-saved-prefix-command",
-        "saved-prefix-command",
-    )?];
-    for review_index in 0..expected_guardian_review_count {
-        response_bodies.push(guardian_allow_response(&format!(
-            "guardian-saved-prefix-review-{review_index}"
-        )));
-    }
-    response_bodies.push(sse_completed("parent-saved-prefix-complete"));
-    let responses = mount_sse_sequence(&server, response_bodies).await;
+        let mut response_bodies = vec![command_response(
+            "parent-saved-prefix-command",
+            "saved-prefix-command",
+        )?];
+        for review_index in 0..expected_guardian_review_count {
+            response_bodies.push(guardian_allow_response(&format!(
+                "guardian-saved-prefix-review-{review_index}"
+            )));
+        }
+        response_bodies.push(sse_completed("parent-saved-prefix-complete"));
+        let responses = mount_sse_sequence(&server, response_bodies).await;
 
-    submit_model_turn(&test, "gpt-5.4", "run the saved-prefix command").await?;
+        submit_model_turn(&test, "gpt-5.4", "run the saved-prefix command").await?;
 
-    let requests = responses.requests();
-    let guardian_request_count = requests
-        .iter()
-        .filter(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
-        })
-        .count();
-    assert_eq!(guardian_request_count, expected_guardian_review_count);
+        let requests = responses.requests();
+        let guardian_request_count = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .count();
+        assert_eq!(guardian_request_count, expected_guardian_review_count);
 
-    let advertised_saved_prefix = requests[0]
-        .message_input_texts("developer")
-        .iter()
-        .any(|message| message.contains(SAVED_PREFIX));
-    assert!(
-        !advertised_saved_prefix,
-        "approved prefixes stay out of the model context",
-    );
-    assert!(
-        responses
-            .function_call_output_text("saved-prefix-command")
-            .is_some_and(|output| output.contains(TEST_COMMAND)),
-        "approved test command should execute",
-    );
+        let advertised_saved_prefix = requests[0]
+            .message_input_texts("developer")
+            .iter()
+            .any(|message| message.contains(SAVED_PREFIX));
+        assert!(
+            !advertised_saved_prefix,
+            "approved prefixes stay out of the model context",
+        );
+        assert!(
+            responses
+                .function_call_output_text("saved-prefix-command")
+                .is_some_and(|output| output.contains(TEST_COMMAND)),
+            "approved test command should execute",
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -193,76 +198,79 @@ async fn cyber_model_user_approval_never_offers_a_reusable_prefix() -> Result<()
     skip_if_wine_exec!(Ok(()), "command approval requires host-native paths");
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+            })
+            .with_config(move |config| {
+                configure_saved_prefix_and_guardian(config);
+                config.approvals_reviewer = ApprovalsReviewer::User;
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        let policy_path = test.codex_home_path().join("rules/default.rules");
+        let initial_policy = fs::read_to_string(&policy_path)?;
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                command_response("parent-one-time-approval", "one-time-approval")?,
+                sse_completed("parent-one-time-complete"),
+            ],
+        )
+        .await;
+
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run a command with one-time approval".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(AskForApproval::OnRequest),
+                    approvals_reviewer: Some(ApprovalsReviewer::User),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+
+        let EventMsg::ExecApprovalRequest(approval) = wait_for_event(&test.codex, |event| {
+            matches!(
+                event,
+                EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
+            )
         })
-        .with_config(move |config| {
-            configure_saved_prefix_and_guardian(config);
-            config.approvals_reviewer = ApprovalsReviewer::User;
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    let policy_path = test.codex_home_path().join("rules/default.rules");
-    let initial_policy = fs::read_to_string(&policy_path)?;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            command_response("parent-one-time-approval", "one-time-approval")?,
-            sse_completed("parent-one-time-complete"),
-        ],
-    )
-    .await;
+        .await
+        else {
+            panic!("expected a one-time command approval request");
+        };
+        assert_eq!(approval.proposed_execpolicy_amendment, None);
+        assert_eq!(
+            approval.effective_available_decisions(),
+            vec![ReviewDecision::Approved, ReviewDecision::Abort],
+        );
+        test.codex
+            .submit(Op::ExecApproval {
+                id: approval.effective_approval_id(),
+                turn_id: None,
+                decision: ReviewDecision::Approved,
+            })
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run a command with one-time approval".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(AskForApproval::OnRequest),
-                approvals_reviewer: Some(ApprovalsReviewer::User),
-                ..Default::default()
-            }),
-        )
-        .await?;
+        assert!(
+            responses
+                .function_call_output_text("one-time-approval")
+                .is_some_and(|output| output.contains(TEST_COMMAND)),
+        );
+        assert_eq!(fs::read_to_string(policy_path)?, initial_policy);
+        assert_eq!(responses.requests().len(), 2);
 
-    let EventMsg::ExecApprovalRequest(approval) = wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
-            EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
-        )
+        Ok(())
     })
     .await
-    else {
-        panic!("expected a one-time command approval request");
-    };
-    assert_eq!(approval.proposed_execpolicy_amendment, None);
-    assert_eq!(
-        approval.effective_available_decisions(),
-        vec![ReviewDecision::Approved, ReviewDecision::Abort],
-    );
-    test.codex
-        .submit(Op::ExecApproval {
-            id: approval.effective_approval_id(),
-            turn_id: None,
-            decision: ReviewDecision::Approved,
-        })
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    assert!(
-        responses
-            .function_call_output_text("one-time-approval")
-            .is_some_and(|output| output.contains(TEST_COMMAND)),
-    );
-    assert_eq!(fs::read_to_string(policy_path)?, initial_policy);
-    assert_eq!(responses.requests().len(), 2);
-
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -272,54 +280,58 @@ async fn switching_models_suppresses_and_restores_saved_prefix_approvals() -> Re
     skip_if_wine_exec!(Ok(()), "Guardian command reviews require host-native paths");
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
-        })
-        .with_model("gpt-5.2")
-        .with_config(configure_saved_prefix_and_guardian);
-    let test = builder.build_with_auto_env(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.model_specialty = Some(MODEL_SPECIALTY_CYBER.to_string());
+            })
+            .with_model("gpt-5.2")
+            .with_config(configure_saved_prefix_and_guardian);
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            command_response("parent-general-first-command", "general-first-command")?,
-            sse_completed("parent-general-first-complete"),
-            command_response("parent-cyber-command", "cyber-command")?,
-            guardian_allow_response("guardian-cyber-review"),
-            sse_completed("parent-cyber-complete"),
-            command_response("parent-general-last-command", "general-last-command")?,
-            sse_completed("parent-general-last-complete"),
-        ],
-    )
-    .await;
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                command_response("parent-general-first-command", "general-first-command")?,
+                sse_completed("parent-general-first-complete"),
+                command_response("parent-cyber-command", "cyber-command")?,
+                guardian_allow_response("guardian-cyber-review"),
+                sse_completed("parent-cyber-complete"),
+                command_response("parent-general-last-command", "general-last-command")?,
+                sse_completed("parent-general-last-complete"),
+            ],
+        )
+        .await;
 
-    submit_model_turn(&test, "gpt-5.2", "run the first general-model command").await?;
-    submit_model_turn(&test, "gpt-5.4", "run the cyber-model command").await?;
-    submit_model_turn(&test, "gpt-5.2", "run the final general-model command").await?;
+        submit_model_turn(&test, "gpt-5.2", "run the first general-model command").await?;
+        submit_model_turn(&test, "gpt-5.4", "run the cyber-model command").await?;
+        submit_model_turn(&test, "gpt-5.2", "run the final general-model command").await?;
 
-    let requests = responses.requests();
-    let guardian_requests = requests
-        .iter()
-        .filter(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(guardian_requests.len(), 1);
-    assert!(guardian_requests[0].body_contains_text(TEST_COMMAND));
+        let requests = responses.requests();
+        let guardian_requests = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(guardian_requests.len(), 1);
+        assert!(guardian_requests[0].body_contains_text(TEST_COMMAND));
 
-    for call_id in [
-        "general-first-command",
-        "cyber-command",
-        "general-last-command",
-    ] {
-        assert!(
-            responses
-                .function_call_output_text(call_id)
-                .is_some_and(|output| output.contains(TEST_COMMAND)),
-            "approved {call_id} should execute",
-        );
-    }
+        for call_id in [
+            "general-first-command",
+            "cyber-command",
+            "general-last-command",
+        ] {
+            assert!(
+                responses
+                    .function_call_output_text(call_id)
+                    .is_some_and(|output| output.contains(TEST_COMMAND)),
+                "approved {call_id} should execute",
+            );
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }

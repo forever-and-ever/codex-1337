@@ -8,6 +8,7 @@ use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::TurnLifecycleContributor;
 use codex_extension_api::TurnStartInput;
 use codex_protocol::protocol::CollabAgentRef;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -55,6 +56,7 @@ impl TurnLifecycleContributor for RemoveChildOnTurnStart {
 #[tokio::test]
 async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Result<()> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -179,4 +181,6 @@ async fn spawn_reports_effective_settings_after_child_runtime_is_removed() -> Re
         json!({ "agent_id": child_id.to_string(), "nickname": "Captured" }),
     );
     Ok(())
+    })
+    .await
 }

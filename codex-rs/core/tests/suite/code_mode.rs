@@ -77,6 +77,7 @@ use core_test_support::apps_test_server::DIRECT_CALENDAR_APP_ONLY_TOOL;
 use core_test_support::apps_test_server::recorded_apps_tool_calls;
 use core_test_support::apps_test_server::search_capable_apps_builder;
 use core_test_support::assert_regex_match;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ResponsesRequest;
@@ -999,6 +1000,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
 
 pub(super) async fn mcp_schema_max_bytes_scenario() -> Result<Vec<ResponsesRequest>> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     AppsTestServer::mount(&server).await?;
     let parameter_description = format!(
         "{}budget_description_marker",
@@ -1103,6 +1105,8 @@ text(JSON.stringify(results));"#;
         custom_tool_output_last_non_empty_text(&requests[1], "lookup").expect("ALL_TOOLS output");
     assert_eq!(output, "[[false,true],[true,true],[true,true]]");
     Ok(requests)
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1790,6 +1794,7 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_model("test-gpt-5.1-codex")
         .with_config(|config| {
@@ -1909,6 +1914,8 @@ async fn code_mode_wait_id_stays_known_after_compaction(
     );
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 
 const RESULT_METADATA_TOOL: &str = "message_search";
@@ -3185,159 +3192,163 @@ async fn code_mode_resumed_wait_does_not_certify_a_reused_runtime_cell() -> Resu
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let configure = |config: &mut Config| {
-        let _ = config.features.enable(Feature::CodeMode);
-        let _ = config.features.enable(Feature::CodeModeHost);
-        let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
-        config.code_mode.disable_in_process_fallback = true;
-    };
-    let mut builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_history_mode(ThreadHistoryMode::Legacy)
-        .with_config(configure);
-    let initial = builder.build(&server).await?;
-    let seed = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_custom_tool_call(
-                    "call-a",
-                    "exec",
-                    r#"text("A"); yield_control(); await new Promise(() => {});"#,
-                ),
-                ev_completed("resp-a"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-a", "A is running"),
-                ev_completed("resp-a-done"),
-            ]),
-        ],
-    )
-    .await;
-    initial.submit_turn("Start A").await?;
-    let old_output = seed.requests()[1].custom_tool_call_output("call-a");
-    let old_items = custom_tool_output_items(&seed.requests()[1], "call-a");
-    let old_cell_id = extract_running_cell_id(text_item(&old_items, /*index*/ 0));
-    assert_eq!(old_cell_id, "1");
-    assert_eq!(text_item(&old_items, /*index*/ 1), "A");
+    mock_server::run(&[&server], async {
+        let configure = |config: &mut Config| {
+            let _ = config.features.enable(Feature::CodeMode);
+            let _ = config.features.enable(Feature::CodeModeHost);
+            let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
+            config.code_mode.disable_in_process_fallback = true;
+        };
+        let mut builder = test_codex()
+            .with_model("test-gpt-5.1-codex")
+            .with_history_mode(ThreadHistoryMode::Legacy)
+            .with_config(configure);
+        let initial = builder.build(&server).await?;
+        let seed = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_custom_tool_call(
+                        "call-a",
+                        "exec",
+                        r#"text("A"); yield_control(); await new Promise(() => {});"#,
+                    ),
+                    ev_completed("resp-a"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-a", "A is running"),
+                    ev_completed("resp-a-done"),
+                ]),
+            ],
+        )
+        .await;
+        initial.submit_turn("Start A").await?;
+        let old_output = seed.requests()[1].custom_tool_call_output("call-a");
+        let old_items = custom_tool_output_items(&seed.requests()[1], "call-a");
+        let old_cell_id = extract_running_cell_id(text_item(&old_items, /*index*/ 0));
+        assert_eq!(old_cell_id, "1");
+        assert_eq!(text_item(&old_items, /*index*/ 1), "A");
 
-    // Restart loads the old running-cell output, but starts a new host whose IDs reset.
-    let resumed = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_config(configure)
-        .restart(&server, &initial)
-        .await?;
-    assert_eq!(
-        resumed.session_configured.thread_id,
-        initial.session_configured.thread_id
-    );
-    let gate = resumed.workspace_path("release-cell-b");
-    let quoted_gate = shlex::try_join([gate.to_string_lossy().as_ref()])?;
-    let arguments = serde_json::json!({
-        "cmd": format!(
-            "attempt=0; while [ ! -f {quoted_gate} ] && [ \"$attempt\" -lt 1000 ]; \
-             do sleep 0.01; attempt=$((attempt + 1)); done; [ -f {quoted_gate} ] && printf B"
-        ),
-        "login": false,
-        "yield_time_ms": 30_000,
-        "max_output_tokens": 1000,
-    });
-    let code = format!("yield_control(); text((await tools.exec_command({arguments})).output);");
-    let continued = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_custom_tool_call("call-b", "exec", &code),
-                ev_completed("resp-b"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-b", "B is running"),
-                ev_completed("resp-b-done"),
-            ]),
-            sse(vec![
-                responses::ev_function_call(
-                    "call-stale-wait",
-                    "wait",
-                    &serde_json::json!({"cell_id": old_cell_id}).to_string(),
-                ),
-                ev_completed("resp-wait"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-wait", "done"),
-                ev_completed("resp-wait-done"),
-            ]),
-            sse(vec![
-                ev_custom_tool_call(
-                    "call-fresh",
-                    "exec",
-                    r#"await tools.test_sync_tool({}); text("fresh");"#,
-                ),
-                ev_completed("resp-fresh"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-fresh", "done"),
-                ev_completed("resp-fresh-done"),
-            ]),
-        ],
-    )
-    .await;
-    resumed.submit_turn("Start B").await?;
-    let requests = continued.requests();
-    assert_eq!(
-        requests[0].custom_tool_call_output("call-a")["output"],
-        old_output["output"]
-    );
-    let new_items = custom_tool_output_items(&requests[1], "call-b");
-    assert_eq!(
-        extract_running_cell_id(text_item(&new_items, /*index*/ 0)),
-        old_cell_id
-    );
+        // Restart loads the old running-cell output, but starts a new host whose IDs reset.
+        let resumed = test_codex()
+            .with_model("test-gpt-5.1-codex")
+            .with_config(configure)
+            .restart(&server, &initial)
+            .await?;
+        assert_eq!(
+            resumed.session_configured.thread_id,
+            initial.session_configured.thread_id
+        );
+        let gate = resumed.workspace_path("release-cell-b");
+        let quoted_gate = shlex::try_join([gate.to_string_lossy().as_ref()])?;
+        let arguments = serde_json::json!({
+            "cmd": format!(
+                "attempt=0; while [ ! -f {quoted_gate} ] && [ \"$attempt\" -lt 1000 ]; \
+                 do sleep 0.01; attempt=$((attempt + 1)); done; [ -f {quoted_gate} ] && printf B"
+            ),
+            "login": false,
+            "yield_time_ms": 30_000,
+            "max_output_tokens": 1000,
+        });
+        let code =
+            format!("yield_control(); text((await tools.exec_command({arguments})).output);");
+        let continued = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_custom_tool_call("call-b", "exec", &code),
+                    ev_completed("resp-b"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-b", "B is running"),
+                    ev_completed("resp-b-done"),
+                ]),
+                sse(vec![
+                    responses::ev_function_call(
+                        "call-stale-wait",
+                        "wait",
+                        &serde_json::json!({"cell_id": old_cell_id}).to_string(),
+                    ),
+                    ev_completed("resp-wait"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-wait", "done"),
+                    ev_completed("resp-wait-done"),
+                ]),
+                sse(vec![
+                    ev_custom_tool_call(
+                        "call-fresh",
+                        "exec",
+                        r#"await tools.test_sync_tool({}); text("fresh");"#,
+                    ),
+                    ev_completed("resp-fresh"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-fresh", "done"),
+                    ev_completed("resp-fresh-done"),
+                ]),
+            ],
+        )
+        .await;
+        resumed.submit_turn("Start B").await?;
+        let requests = continued.requests();
+        assert_eq!(
+            requests[0].custom_tool_call_output("call-a")["output"],
+            old_output["output"]
+        );
+        let new_items = custom_tool_output_items(&requests[1], "call-b");
+        assert_eq!(
+            extract_running_cell_id(text_item(&new_items, /*index*/ 0)),
+            old_cell_id
+        );
 
-    fs::write(&gate, "ready")?;
-    resumed.submit_turn("Wait using A's old cell ID").await?;
-    let requests = continued.requests();
-    assert_eq!(requests.len(), 4);
-    let items = function_tool_output_items(&requests[3], "call-stale-wait");
-    assert_eq!(items.len(), 2);
-    assert!(text_item(&items, /*index*/ 0).starts_with("Script completed\n"));
-    assert_eq!(text_item(&items, /*index*/ 1), "B");
-    let wait = requests[3].function_call_output("call-stale-wait");
-    let metadata = &wait["internal_chat_message_metadata_passthrough"];
-    assert!(metadata.get("tool_calls_complete").is_none());
-    let mut recorded = Vec::new();
-    for output in [requests[3].custom_tool_call_output("call-b"), wait] {
-        let metadata = &output["internal_chat_message_metadata_passthrough"];
-        if let Some(calls) = metadata
-            .get("executed_tool_calls")
-            .and_then(Value::as_array)
-            && !calls.is_empty()
-        {
-            assert_eq!(metadata["cell_id"], "call-b");
-            recorded.extend_from_slice(calls);
+        fs::write(&gate, "ready")?;
+        resumed.submit_turn("Wait using A's old cell ID").await?;
+        let requests = continued.requests();
+        assert_eq!(requests.len(), 4);
+        let items = function_tool_output_items(&requests[3], "call-stale-wait");
+        assert_eq!(items.len(), 2);
+        assert!(text_item(&items, /*index*/ 0).starts_with("Script completed\n"));
+        assert_eq!(text_item(&items, /*index*/ 1), "B");
+        let wait = requests[3].function_call_output("call-stale-wait");
+        let metadata = &wait["internal_chat_message_metadata_passthrough"];
+        assert!(metadata.get("tool_calls_complete").is_none());
+        let mut recorded = Vec::new();
+        for output in [requests[3].custom_tool_call_output("call-b"), wait] {
+            let metadata = &output["internal_chat_message_metadata_passthrough"];
+            if let Some(calls) = metadata
+                .get("executed_tool_calls")
+                .and_then(Value::as_array)
+                && !calls.is_empty()
+            {
+                assert_eq!(metadata["cell_id"], "call-b");
+                recorded.extend_from_slice(calls);
+            }
         }
-    }
-    assert_eq!(
-        recorded,
-        vec![serde_json::json!({"name": "exec_command", "arguments": arguments})]
-    );
+        assert_eq!(
+            recorded,
+            vec![serde_json::json!({"name": "exec_command", "arguments": arguments})]
+        );
 
-    resumed.submit_turn("Run a fresh immediate exec").await?;
-    let requests = continued.requests();
-    assert_eq!(requests.len(), 6);
-    assert_eq!(
-        custom_tool_output_last_non_empty_text(&requests[5], "call-fresh").as_deref(),
-        Some("fresh")
-    );
-    let fresh = requests[5].custom_tool_call_output("call-fresh");
-    let metadata = &fresh["internal_chat_message_metadata_passthrough"];
-    assert_eq!(
-        metadata["executed_tool_calls"],
-        serde_json::json!([{"name": "test_sync_tool", "arguments": {}}])
-    );
-    assert_eq!(metadata["cell_id"], "call-fresh");
-    assert_eq!(metadata["tool_calls_complete"], true);
-    resumed.codex.shutdown_and_wait().await?;
-    Ok(())
+        resumed.submit_turn("Run a fresh immediate exec").await?;
+        let requests = continued.requests();
+        assert_eq!(requests.len(), 6);
+        assert_eq!(
+            custom_tool_output_last_non_empty_text(&requests[5], "call-fresh").as_deref(),
+            Some("fresh")
+        );
+        let fresh = requests[5].custom_tool_call_output("call-fresh");
+        let metadata = &fresh["internal_chat_message_metadata_passthrough"];
+        assert_eq!(
+            metadata["executed_tool_calls"],
+            serde_json::json!([{"name": "test_sync_tool", "arguments": {}}])
+        );
+        assert_eq!(metadata["cell_id"], "call-fresh");
+        assert_eq!(metadata["tool_calls_complete"], true);
+        resumed.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 struct ExecCompletionObserver {
@@ -4086,15 +4097,17 @@ async fn code_mode_nested_tool_calls_can_run_in_parallel() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model("test-gpt-5.1-codex")
-        .with_config(move |config| {
-            let _ = config.features.enable(Feature::CodeMode);
-            let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
-        });
-    let test = builder.build(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder =
+            test_codex()
+                .with_model("test-gpt-5.1-codex")
+                .with_config(move |config| {
+                    let _ = config.features.enable(Feature::CodeMode);
+                    let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
+                });
+        let test = builder.build(&server).await?;
 
-    let warmup_code = r#"
+        let warmup_code = r#"
 const args = {
   sleep_after_ms: 10,
   barrier: {
@@ -4109,7 +4122,7 @@ await Promise.all([
   tools.test_sync_tool(args),
 ]);
 "#;
-    let code = r#"
+        let code = r#"
 const args = {
   sleep_after_ms: 300,
   barrier: {
@@ -4127,43 +4140,45 @@ const results = await Promise.all([
 text(JSON.stringify(results));
 "#;
 
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-warm-1"),
-                ev_custom_tool_call("call-warm-1", "exec", warmup_code),
-                ev_completed("resp-warm-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-warm-1", "warmup done"),
-                ev_completed("resp-warm-2"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_custom_tool_call("call-1", "exec", code),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-warm-1"),
+                    ev_custom_tool_call("call-warm-1", "exec", warmup_code),
+                    ev_completed("resp-warm-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-warm-1", "warmup done"),
+                    ev_completed("resp-warm-2"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_custom_tool_call("call-1", "exec", code),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    test.submit_turn("warm up nested tools in parallel").await?;
+        test.submit_turn("warm up nested tools in parallel").await?;
 
-    test.submit_turn("run nested tools in parallel").await?;
+        test.submit_turn("run nested tools in parallel").await?;
 
-    let req = response_mock
-        .last_request()
-        .expect("parallel code mode run should send a completion request");
-    let items = custom_tool_output_items(&req, "call-1");
-    assert_eq!(items.len(), 2);
-    assert_eq!(text_item(&items, /*index*/ 1), "[\"ok\",\"ok\"]");
+        let req = response_mock
+            .last_request()
+            .expect("parallel code mode run should send a completion request");
+        let items = custom_tool_output_items(&req, "call-1");
+        assert_eq!(items.len(), 2);
+        assert_eq!(text_item(&items, /*index*/ 1), "[\"ok\",\"ok\"]");
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
@@ -7197,6 +7212,7 @@ async fn code_mode_node_repl_screenshots_can_be_captured_without_guardian_transc
 
     const SCREENSHOT: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mcp_server_bin = remote_aware_stdio_server_bin()?;
     let mut builder = test_codex().with_config(move |config| {
         config
@@ -7259,6 +7275,8 @@ async fn code_mode_node_repl_screenshots_can_be_captured_without_guardian_transc
     assert!(!serde_json::to_string(&parent_request.input())?.contains(SCREENSHOT));
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
@@ -7276,6 +7294,7 @@ async fn code_mode_node_repl_image_flag_without_enhanced_stays_disabled(
     );
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mcp_server_bin = remote_aware_stdio_server_bin()?;
     let mut builder = test_codex()
         .with_model_info_override("gpt-5.5", |model| {
@@ -7359,6 +7378,8 @@ await tools.exec_command({ cmd: "true", sandbox_permissions: "require_escalated"
     }
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "no exec_command on Windows")]
@@ -7401,6 +7422,7 @@ async fn code_mode_node_repl_text_evidence_is_visible_only_to_guardian(
     const PRIVATE_IMAGE: &str = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     const COMPACTION_SUMMARY: &str = "Guardian browser evidence summary";
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mcp_server_bin = remote_aware_stdio_server_bin()?;
     let reviewer_compaction = reviewer_constraint == Some("compaction");
     let check_detail = enhanced_transcripts && transcript_images && reviewer_constraint.is_none();
@@ -7705,6 +7727,8 @@ await tools.exec_command({ cmd: "printf second", sandbox_permissions: "require_e
         "nested MCP responses leaked into parent model history: {parent_input}"
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -7983,6 +8007,7 @@ async fn code_mode_exposes_and_dispatches_namespaced_custom_tools() -> Result<()
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     extensions.tool_contributor(Arc::new(NamespacedCustomTool {
         generation: 0,
@@ -8102,6 +8127,8 @@ text(JSON.stringify({
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -11,6 +11,7 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -34,6 +35,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
     core_test_support::skip_if_sandbox!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_code_mode_host_program("codex-code-mode-host-does-not-exist".into())
         .with_config(|config| {
@@ -207,4 +209,6 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         "quote=' double=\" slash=\\ Unicode=λ\nscript-cwd\n"
     );
     Ok(())
+    })
+    .await
 }

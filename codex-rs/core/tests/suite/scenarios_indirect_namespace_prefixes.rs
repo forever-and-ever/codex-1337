@@ -12,6 +12,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
@@ -38,6 +39,7 @@ async fn catalog_namespace_prefixes_follow_the_selected_model(
     let include_search = tool_mode == ToolMode::CodeMode;
     let requests_per_turn = if include_search { 3 } else { 2 };
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let command = remote_aware_stdio_server_bin()?;
     let environment_id = remote_aware_environment_id();
     let mut builder = test_codex().with_config(move |config| {
@@ -274,4 +276,6 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
     }
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

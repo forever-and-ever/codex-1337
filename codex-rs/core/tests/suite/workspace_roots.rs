@@ -13,6 +13,7 @@ use codex_utils_path_uri::PathUri;
 #[cfg(windows)]
 use core_test_support::PathExt;
 use core_test_support::TestTargetOs;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponseMock;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
@@ -351,6 +352,7 @@ async fn workspace_roots_allow_patches_but_protect_metadata_directories() -> Res
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = workspace_roots_test(&server).await?;
     let cwd = PathUri::from_abs_path(&test.config.cwd);
     let allowed_path = cwd.join("workspace-root-allowed-patch.txt")?;
@@ -431,6 +433,8 @@ async fn workspace_roots_allow_patches_but_protect_metadata_directories() -> Res
     }
 
     remove_files(&test, &[&allowed_path]).await
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

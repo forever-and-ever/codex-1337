@@ -11,6 +11,7 @@ use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_features::Feature;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -88,6 +89,7 @@ async fn empty_goal_continuations_block_after_three_without_activity(
         }
     }
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let requests = responses::mount_sse_sequence(&server, scripts).await;
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
@@ -191,4 +193,6 @@ async fn empty_goal_continuations_block_after_three_without_activity(
         }
     }
     Ok(())
+    })
+    .await
 }

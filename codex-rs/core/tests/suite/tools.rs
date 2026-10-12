@@ -1,6 +1,7 @@
 #![cfg(not(target_os = "windows"))]
 #![allow(clippy::unwrap_used)]
 
+use core_test_support::mock_server;
 use std::fs;
 
 use anyhow::Context;
@@ -756,86 +757,89 @@ async fn sandbox_denied_exec_command_returns_original_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
-    let fixture = builder.build(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.4");
+        let fixture = builder.build(&server).await?;
 
-    let call_id = "sandbox-denied-exec-command";
-    let target_path = fixture.workspace_path("sandbox-denied.txt");
-    let sentinel = "sandbox-denied sentinel output";
-    let command = format!(
-        "printf {sentinel:?} >&2; printf {content:?} > {path:?}",
-        sentinel = format!("{sentinel}\n"),
-        content = "sandbox denied",
-        path = target_path
-    );
-    let args = json!({
-        "cmd": command,
-        "login": false,
-        "yield_time_ms": 5_000,
-    });
+        let call_id = "sandbox-denied-exec-command";
+        let target_path = fixture.workspace_path("sandbox-denied.txt");
+        let sentinel = "sandbox-denied sentinel output";
+        let command = format!(
+            "printf {sentinel:?} >&2; printf {content:?} > {path:?}",
+            sentinel = format!("{sentinel}\n"),
+            content = "sandbox denied",
+            path = target_path
+        );
+        let args = json!({
+            "cmd": command,
+            "login": false,
+            "yield_time_ms": 5_000,
+        });
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let mock = mount_sse_sequence(&server, responses).await;
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let mock = mount_sse_sequence(&server, responses).await;
 
-    fixture
-        .submit_turn_with_permission_profile(
-            "run a command that should be denied by the read-only sandbox",
-            PermissionProfile::read_only(),
-        )
-        .await?;
+        fixture
+            .submit_turn_with_permission_profile(
+                "run a command that should be denied by the read-only sandbox",
+                PermissionProfile::read_only(),
+            )
+            .await?;
 
-    let output_text = mock
-        .function_call_output_text(call_id)
-        .context("shell output present")?;
-    let exit_code = output_text
-        .lines()
-        .find_map(|line| line.strip_prefix("Exit "))
-        .context("exit code line present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
-    let body = output_text;
+        let output_text = mock
+            .function_call_output_text(call_id)
+            .context("shell output present")?;
+        let exit_code = output_text
+            .lines()
+            .find_map(|line| line.strip_prefix("Exit "))
+            .context("exit code line present")?
+            .trim()
+            .parse::<i32>()
+            .context("exit code is integer")?;
+        let body = output_text;
 
-    let body_lower = body.to_lowercase();
-    // Required for multi-OS.
-    let has_denial = body_lower.contains("permission denied")
-        || body_lower.contains("operation not permitted")
-        || body_lower.contains("read-only file system");
-    assert!(
-        has_denial,
-        "expected sandbox denial details in tool output: {body}"
-    );
-    assert!(
-        body.contains(sentinel),
-        "expected sentinel output from command to reach the model: {body}"
-    );
-    let target_path_str = target_path
-        .to_str()
-        .context("target path string representation")?;
-    assert!(
-        body.contains(target_path_str),
-        "expected sandbox error to mention denied path: {body}"
-    );
-    assert!(
-        !body_lower.contains("failed in sandbox"),
-        "expected original tool output, found fallback message: {body}"
-    );
-    assert_ne!(
-        exit_code, 0,
-        "sandbox denial should surface a non-zero exit code"
-    );
+        let body_lower = body.to_lowercase();
+        // Required for multi-OS.
+        let has_denial = body_lower.contains("permission denied")
+            || body_lower.contains("operation not permitted")
+            || body_lower.contains("read-only file system");
+        assert!(
+            has_denial,
+            "expected sandbox denial details in tool output: {body}"
+        );
+        assert!(
+            body.contains(sentinel),
+            "expected sentinel output from command to reach the model: {body}"
+        );
+        let target_path_str = target_path
+            .to_str()
+            .context("target path string representation")?;
+        assert!(
+            body.contains(target_path_str),
+            "expected sandbox error to mention denied path: {body}"
+        );
+        assert!(
+            !body_lower.contains("failed in sandbox"),
+            "expected original tool output, found fallback message: {body}"
+        );
+        assert_ne!(
+            exit_code, 0,
+            "sandbox denial should surface a non-zero exit code"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -844,101 +848,104 @@ async fn exec_command_enforces_glob_deny_read_policy() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model("gpt-5.4")
-        .with_config(move |config| {
-            let mut file_system_sandbox_policy = FileSystemSandboxPolicy::default();
-            file_system_sandbox_policy
-                .entries
-                .push(FileSystemSandboxEntry {
-                    path: FileSystemPath::GlobPattern {
-                        pattern: format!("{}/**/*.env", config.cwd.as_path().display()),
-                    },
-                    access: FileSystemAccessMode::Deny,
-                    missing_path_behavior: None,
-                });
-            config
-                .permissions
-                .set_permission_profile(PermissionProfile::from_runtime_permissions(
-                    &file_system_sandbox_policy,
-                    NetworkSandboxPolicy::Restricted,
-                ))
-                .expect("set permission profile");
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model("gpt-5.4")
+            .with_config(move |config| {
+                let mut file_system_sandbox_policy = FileSystemSandboxPolicy::default();
+                file_system_sandbox_policy
+                    .entries
+                    .push(FileSystemSandboxEntry {
+                        path: FileSystemPath::GlobPattern {
+                            pattern: format!("{}/**/*.env", config.cwd.as_path().display()),
+                        },
+                        access: FileSystemAccessMode::Deny,
+                        missing_path_behavior: None,
+                    });
+                config
+                    .permissions
+                    .set_permission_profile(PermissionProfile::from_runtime_permissions(
+                        &file_system_sandbox_policy,
+                        NetworkSandboxPolicy::Restricted,
+                    ))
+                    .expect("set permission profile");
+            });
+        let fixture = builder.build(&server).await?;
+
+        let fixture_dir = fixture.workspace_path("glob-deny-read");
+        fs::create_dir_all(&fixture_dir).context("create glob deny-read fixture directory")?;
+        let denied_path = fixture_dir.join("secret.env");
+        let allowed_path = fixture_dir.join("notes.txt");
+        let secret = "shell glob deny-read secret";
+        let allowed = "shell glob deny-read allowed";
+        fs::write(&denied_path, format!("{secret}\n")).context("write denied fixture")?;
+        fs::write(&allowed_path, format!("{allowed}\n")).context("write allowed fixture")?;
+
+        let call_id = "exec-command-glob-deny-read";
+        let command = format!(
+            "rc=0; cat {denied_path:?} || rc=$?; cat {allowed_path:?}; exit \"$rc\"",
+            denied_path = denied_path.to_string_lossy(),
+            allowed_path = allowed_path.to_string_lossy(),
+        );
+        let args = json!({
+            "cmd": command,
+            "login": false,
+            "yield_time_ms": 10_000,
         });
-    let fixture = builder.build(&server).await?;
 
-    let fixture_dir = fixture.workspace_path("glob-deny-read");
-    fs::create_dir_all(&fixture_dir).context("create glob deny-read fixture directory")?;
-    let denied_path = fixture_dir.join("secret.env");
-    let allowed_path = fixture_dir.join("notes.txt");
-    let secret = "shell glob deny-read secret";
-    let allowed = "shell glob deny-read allowed";
-    fs::write(&denied_path, format!("{secret}\n")).context("write denied fixture")?;
-    fs::write(&allowed_path, format!("{allowed}\n")).context("write allowed fixture")?;
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let mock = mount_sse_sequence(&server, responses).await;
 
-    let call_id = "exec-command-glob-deny-read";
-    let command = format!(
-        "rc=0; cat {denied_path:?} || rc=$?; cat {allowed_path:?}; exit \"$rc\"",
-        denied_path = denied_path.to_string_lossy(),
-        allowed_path = allowed_path.to_string_lossy(),
-    );
-    let args = json!({
-        "cmd": command,
-        "login": false,
-        "yield_time_ms": 10_000,
-    });
+        let permission_profile = fixture.session_configured.permission_profile.clone();
+        fixture
+            .submit_turn_with_permission_profile("read the fixture files", permission_profile)
+            .await?;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let mock = mount_sse_sequence(&server, responses).await;
+        let output_text = mock
+            .function_call_output_text(call_id)
+            .context("shell output present")?;
+        let exit_code = output_text
+            .lines()
+            .find_map(|line| line.strip_prefix("Exit "))
+            .context("exit code line present")?
+            .trim()
+            .parse::<i32>()
+            .context("exit code is integer")?;
 
-    let permission_profile = fixture.session_configured.permission_profile.clone();
-    fixture
-        .submit_turn_with_permission_profile("read the fixture files", permission_profile)
-        .await?;
+        assert_ne!(
+            exit_code, 0,
+            "glob deny-read should surface a non-zero exit code"
+        );
+        assert!(
+            output_text.contains(allowed),
+            "expected allowed file contents in shell output: {output_text}"
+        );
+        assert!(
+            !output_text.contains(secret),
+            "denied file contents leaked into shell output: {output_text}"
+        );
+        let output_lower = output_text.to_lowercase();
+        let has_denial = output_lower.contains("permission denied")
+            || output_lower.contains("operation not permitted")
+            || output_lower.contains("read-only file system");
+        assert!(
+            has_denial,
+            "expected sandbox denial details in shell output: {output_text}"
+        );
 
-    let output_text = mock
-        .function_call_output_text(call_id)
-        .context("shell output present")?;
-    let exit_code = output_text
-        .lines()
-        .find_map(|line| line.strip_prefix("Exit "))
-        .context("exit code line present")?
-        .trim()
-        .parse::<i32>()
-        .context("exit code is integer")?;
-
-    assert_ne!(
-        exit_code, 0,
-        "glob deny-read should surface a non-zero exit code"
-    );
-    assert!(
-        output_text.contains(allowed),
-        "expected allowed file contents in shell output: {output_text}"
-    );
-    assert!(
-        !output_text.contains(secret),
-        "denied file contents leaked into shell output: {output_text}"
-    );
-    let output_lower = output_text.to_lowercase();
-    let has_denial = output_lower.contains("permission denied")
-        || output_lower.contains("operation not permitted")
-        || output_lower.contains("read-only file system");
-    assert!(
-        has_denial,
-        "expected sandbox denial details in shell output: {output_text}"
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -951,49 +958,51 @@ enum CommandToolAvailability {
 
 async fn collect_tools(availability: CommandToolAvailability) -> Result<Vec<String>> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let responses = vec![sse(vec![
+            ev_response_created("resp-1"),
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-1"),
+        ])];
+        let mock = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![sse(vec![
-        ev_response_created("resp-1"),
-        ev_assistant_message("msg-1", "done"),
-        ev_completed("resp-1"),
-    ])];
-    let mock = mount_sse_sequence(&server, responses).await;
-
-    let mut builder = match availability {
-        CommandToolAvailability::Default => test_codex(),
-        CommandToolAvailability::ManagedUnifiedExecDisabled => test_codex()
-            .with_cloud_config_bundle(
-                CloudConfigBundleFixture::loader_with_enterprise_requirement(
-                    r#"
+        let mut builder = match availability {
+            CommandToolAvailability::Default => test_codex(),
+            CommandToolAvailability::ManagedUnifiedExecDisabled => test_codex()
+                .with_cloud_config_bundle(
+                    CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                        r#"
 [features]
 unified_exec = false
 shell_tool = true
 "#,
+                    ),
                 ),
-            ),
-        CommandToolAvailability::ShellToolDisabled => test_codex().with_config(|config| {
-            config
-                .features
-                .disable(Feature::ShellTool)
-                .expect("test config should allow feature update");
-        }),
-        CommandToolAvailability::ModelDisabled => {
-            test_codex().with_model_info_override("gpt-5.4", |model| {
-                model.shell_type = ConfigShellToolType::Disabled;
-            })
-        }
-    };
-    let test = builder.build(&server).await?;
+            CommandToolAvailability::ShellToolDisabled => test_codex().with_config(|config| {
+                config
+                    .features
+                    .disable(Feature::ShellTool)
+                    .expect("test config should allow feature update");
+            }),
+            CommandToolAvailability::ModelDisabled => {
+                test_codex().with_model_info_override("gpt-5.4", |model| {
+                    model.shell_type = ConfigShellToolType::Disabled;
+                })
+            }
+        };
+        let test = builder.build(&server).await?;
 
-    test.submit_turn_with_approval_and_permission_profile(
-        "list tools",
-        AskForApproval::Never,
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        test.submit_turn_with_approval_and_permission_profile(
+            "list tools",
+            AskForApproval::Never,
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    let first_body = mock.single_request().body_json();
-    Ok(tool_names(&first_body))
+        let first_body = mock.single_request().body_json();
+        Ok(tool_names(&first_body))
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

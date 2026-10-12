@@ -95,6 +95,7 @@ use codex_utils_absolute_path::test_support::PathExt;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_LIST_TOOL;
 use core_test_support::apps_test_server::SEARCH_CALENDAR_NAMESPACE;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
@@ -384,168 +385,171 @@ async fn tool_call_metadata_stays_out_of_raw_response_item_notifications(
         create_final_assistant_message_sse_response("Done")?,
     ];
     let server = responses::start_mock_server().await;
-    let model = responses::mount_sse_sequence(&server, responses).await;
-    let apps = AppsTestServer::mount(&server).await?;
-    let tool_result = json!({
-        "content": [{"type": "text", "text": "Calendar result"}],
-        "_meta": result_metadata,
-        "isError": false,
-    });
-    Mock::given(method("POST"))
-        .and(path("/api/codex/ps/mcp"))
-        .and(body_partial_json(json!({
-            "method": "tools/call",
-            "params": {"name": "calendar_list_events", "arguments": arguments},
-        })))
-        .respond_with(move |request: &Request| {
-            let request: Value =
-                serde_json::from_slice(&request.body).expect("valid MCP tool call JSON");
-            ResponseTemplate::new(200).set_body_json(json!({
-                "jsonrpc": "2.0",
-                "id": request["id"],
-                "result": tool_result,
-            }))
-        })
-        .with_priority(/*p*/ 1)
-        .expect(1)
-        .mount(&server)
-        .await;
-    let codex_home = TempDir::new()?;
-    let mut config = MockResponsesConfig::new(&server.uri())
-        .with_provider_name("OpenAI")
-        .with_provider_config("supports_websockets = false")
-        .with_root_config(&format!(
-            "chatgpt_base_url = \"{}\"\ncli_auth_credentials_store = \"file\"",
-            apps.chatgpt_base_url
-        ))
-        .enable_feature(Feature::Apps)
-        .enable_feature(Feature::ExecutedToolCallMetadata);
-    if let Some(enabled) = analytics_enabled {
-        config = config.with_extra_config(&format!("[analytics]\nenabled = {enabled}"));
-    }
-    config.write(codex_home.path())?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-test-token")
-            .account_id("account-123")
-            .chatgpt_account_id("account-123")
-            .chatgpt_user_id("user-123")
-            .email("employee@openai.com"),
-        AuthCredentialsStoreMode::File,
-    )?;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            experimental_raw_events: true,
-            history_mode: Some(ThreadHistoryMode::Legacy),
-            ..Default::default()
-        })
-        .await?;
-    let rollout_path = thread.path.context("thread rollout path")?;
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id,
-                input: vec![V2UserInput::Text {
-                    text: "list calendar events".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            },
-        })
-        .await?;
-
-    let raw_params = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let notification = mcp
-                .read_stream_until_matching_notification("raw output or turn completion", |n| {
-                    matches!(
-                        n.method.as_str(),
-                        "rawResponseItem/completed" | "turn/completed"
-                    )
-                })
-                .await?;
-            if notification.method == "turn/completed" {
-                anyhow::bail!("missing raw tool output notification");
-            }
-            let params = notification.params.context("raw notification params")?;
-            let item = &params["item"];
-            if item["type"] == "function_call_output" && item["call_id"] == "mcp-call" {
-                return Ok::<Value, anyhow::Error>(params);
-            }
+    mock_server::run(&[&server], async {
+        let model = responses::mount_sse_sequence(&server, responses).await;
+        let apps = AppsTestServer::mount(&server).await?;
+        let tool_result = json!({
+            "content": [{"type": "text", "text": "Calendar result"}],
+            "_meta": result_metadata,
+            "isError": false,
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/codex/ps/mcp"))
+            .and(body_partial_json(json!({
+                "method": "tools/call",
+                "params": {"name": "calendar_list_events", "arguments": arguments},
+            })))
+            .respond_with(move |request: &Request| {
+                let request: Value =
+                    serde_json::from_slice(&request.body).expect("valid MCP tool call JSON");
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": request["id"],
+                    "result": tool_result,
+                }))
+            })
+            .with_priority(/*p*/ 1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        let codex_home = TempDir::new()?;
+        let mut config = MockResponsesConfig::new(&server.uri())
+            .with_provider_name("OpenAI")
+            .with_provider_config("supports_websockets = false")
+            .with_root_config(&format!(
+                "chatgpt_base_url = \"{}\"\ncli_auth_credentials_store = \"file\"",
+                apps.chatgpt_base_url
+            ))
+            .enable_feature(Feature::Apps)
+            .enable_feature(Feature::ExecutedToolCallMetadata);
+        if let Some(enabled) = analytics_enabled {
+            config = config.with_extra_config(&format!("[analytics]\nenabled = {enabled}"));
         }
-    })
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        config.write(codex_home.path())?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-test-token")
+                .account_id("account-123")
+                .chatgpt_account_id("account-123")
+                .chatgpt_user_id("user-123")
+                .email("employee@openai.com"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let requests = model.requests();
-    assert_eq!(requests.len(), 2);
-    let follow_up = requests[1].body_json();
-    let output = follow_up["input"]
-        .as_array()
-        .context("follow-up model input")?
-        .iter()
-        .find(|item| item["type"] == "function_call_output" && item["call_id"] == "mcp-call")
-        .context("follow-up tool output")?;
-    assert!(serde_json::to_string(&output["output"])?.contains("Calendar result"));
-    assert_eq!(
-        output["internal_chat_message_metadata_passthrough"]["executed_tool_calls"],
-        json!([{"name": "mcp__codex_apps__calendar_list_events", "arguments": arguments}]),
-    );
-    assert_eq!(
-        output["internal_chat_message_metadata_passthrough"]["tool_calls_complete"],
-        true,
-    );
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                experimental_raw_events: true,
+                history_mode: Some(ThreadHistoryMode::Legacy),
+                ..Default::default()
+            })
+            .await?;
+        let rollout_path = thread.path.context("thread rollout path")?;
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id,
+                    input: vec![V2UserInput::Text {
+                        text: "list calendar events".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    let raw_output = &raw_params["item"];
-    assert_eq!(raw_output["output"], output["output"]);
-    assert!(!serde_json::to_string(&raw_params)?.contains("raw-result-metadata"));
-    let public_metadata = raw_output["internal_chat_message_metadata_passthrough"]
-        .as_object()
-        .context("public passthrough metadata")?;
-    assert_eq!(
-        public_metadata.get("turn_id").context("public turn id")?,
-        &output["internal_chat_message_metadata_passthrough"]["turn_id"],
-    );
-    for field in ["executed_tool_calls", "tool_calls_complete", "cell_id"] {
-        assert!(
-            public_metadata.get(field).is_none(),
-            "notification leaked {field}"
+        let raw_params = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let notification = mcp
+                    .read_stream_until_matching_notification("raw output or turn completion", |n| {
+                        matches!(
+                            n.method.as_str(),
+                            "rawResponseItem/completed" | "turn/completed"
+                        )
+                    })
+                    .await?;
+                if notification.method == "turn/completed" {
+                    anyhow::bail!("missing raw tool output notification");
+                }
+                let params = notification.params.context("raw notification params")?;
+                let item = &params["item"];
+                if item["type"] == "function_call_output" && item["call_id"] == "mcp-call" {
+                    return Ok::<Value, anyhow::Error>(params);
+                }
+            }
+        })
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let requests = model.requests();
+        assert_eq!(requests.len(), 2);
+        let follow_up = requests[1].body_json();
+        let output = follow_up["input"]
+            .as_array()
+            .context("follow-up model input")?
+            .iter()
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == "mcp-call")
+            .context("follow-up tool output")?;
+        assert!(serde_json::to_string(&output["output"])?.contains("Calendar result"));
+        assert_eq!(
+            output["internal_chat_message_metadata_passthrough"]["executed_tool_calls"],
+            json!([{"name": "mcp__codex_apps__calendar_list_events", "arguments": arguments}]),
         );
-    }
+        assert_eq!(
+            output["internal_chat_message_metadata_passthrough"]["tool_calls_complete"],
+            true,
+        );
 
-    let status = timeout(DEFAULT_READ_TIMEOUT, mcp.shutdown_gracefully()).await??;
-    assert!(status.success());
-    // Read raw JSON: ResponseItem deserialization intentionally discards host-owned metadata.
-    let rollout = std::fs::read_to_string(rollout_path)?;
-    let entries = rollout
-        .lines()
-        .map(serde_json::from_str::<Value>)
-        .collect::<serde_json::Result<Vec<_>>>()?;
-    let captured = entries
-        .iter()
-        .filter(|entry| entry["type"] == "response_item")
-        .map(|entry| &entry["payload"])
-        .find(|item| item["type"] == "function_call_output" && item["call_id"] == "mcp-call")
-        .context("persisted MCP output")?;
-    assert_eq!(captured["output"], raw_output["output"]);
-    // The custom inference endpoint omits raw metadata, so verify capture in the rollout.
-    assert_eq!(
-        captured["internal_chat_message_metadata_passthrough"]["executed_tool_calls"][0]
-            .get("tool_result_metadata"),
-        (analytics_enabled != Some(false)).then_some(&result_metadata),
-    );
-    Ok(())
+        let raw_output = &raw_params["item"];
+        assert_eq!(raw_output["output"], output["output"]);
+        assert!(!serde_json::to_string(&raw_params)?.contains("raw-result-metadata"));
+        let public_metadata = raw_output["internal_chat_message_metadata_passthrough"]
+            .as_object()
+            .context("public passthrough metadata")?;
+        assert_eq!(
+            public_metadata.get("turn_id").context("public turn id")?,
+            &output["internal_chat_message_metadata_passthrough"]["turn_id"],
+        );
+        for field in ["executed_tool_calls", "tool_calls_complete", "cell_id"] {
+            assert!(
+                public_metadata.get(field).is_none(),
+                "notification leaked {field}"
+            );
+        }
+
+        let status = timeout(DEFAULT_READ_TIMEOUT, mcp.shutdown_gracefully()).await??;
+        assert!(status.success());
+        // Read raw JSON: ResponseItem deserialization intentionally discards host-owned metadata.
+        let rollout = std::fs::read_to_string(rollout_path)?;
+        let entries = rollout
+            .lines()
+            .map(serde_json::from_str::<Value>)
+            .collect::<serde_json::Result<Vec<_>>>()?;
+        let captured = entries
+            .iter()
+            .filter(|entry| entry["type"] == "response_item")
+            .map(|entry| &entry["payload"])
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == "mcp-call")
+            .context("persisted MCP output")?;
+        assert_eq!(captured["output"], raw_output["output"]);
+        // The custom inference endpoint omits raw metadata, so verify capture in the rollout.
+        assert_eq!(
+            captured["internal_chat_message_metadata_passthrough"]["executed_tool_calls"][0]
+                .get("tool_result_metadata"),
+            (analytics_enabled != Some(false)).then_some(&result_metadata),
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -1392,237 +1396,244 @@ async fn thread_start_omits_empty_instruction_overrides_from_model_request() -> 
 #[tokio::test]
 async fn turn_start_tracks_thread_originator_in_analytics() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_response_sequence(
-        &server,
-        vec![
-            ResponseTemplate::new(500).set_body_json(json!({
-                "error": {
-                    "type": "server_error",
-                    "message": "synthetic retryable error"
-                }
-            })),
-            responses::sse_response(create_final_assistant_message_sse_response("Done")?),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_response_sequence(
+            &server,
+            vec![
+                ResponseTemplate::new(500).set_body_json(json!({
+                    "error": {
+                        "type": "server_error",
+                        "message": "synthetic retryable error"
+                    }
+                })),
+                responses::sse_response(create_final_assistant_message_sse_response("Done")?),
+            ],
+        )
+        .await;
 
-    let codex_home = TempDir::new()?;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        codex_home.path(),
-        &server.uri(),
-        &server.uri(),
-    )?;
-    let config_path = codex_home.path().join("config.toml");
-    let config = std::fs::read_to_string(&config_path)?
-        .replace("stream_max_retries = 0", "stream_max_retries = 1");
-    std::fs::write(config_path, config)?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
+        let codex_home = TempDir::new()?;
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            codex_home.path(),
+            &server.uri(),
+            &server.uri(),
+        )?;
+        let config_path = codex_home.path().join("config.toml");
+        let config = std::fs::read_to_string(&config_path)?
+            .replace("stream_max_retries = 0", "stream_max_retries = 1");
+        std::fs::write(config_path, config)?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            thread_source: Some(ThreadSource::User),
-            service_name: Some("codex_work_desktop".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Image {
-                    image: V2ImageReference::Inline {
-                        url: TINY_PNG_DATA_URL.to_string(),
-                    },
-                    detail: None,
-                }],
-                turn_trigger: Some("user".to_string()),
-                responsesapi_client_metadata: Some(HashMap::from([
-                    ("workspace_kind".to_string(), "projectless".to_string()),
-                    ("source".to_string(), "composer".to_string()),
-                ])),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                thread_source: Some(ThreadSource::User),
+                service_name: Some("codex_work_desktop".to_string()),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let TurnStartResponse { turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Image {
+                        image: V2ImageReference::Inline {
+                            url: TINY_PNG_DATA_URL.to_string(),
+                        },
+                        detail: None,
+                    }],
+                    turn_trigger: Some("user".to_string()),
+                    responsesapi_client_metadata: Some(HashMap::from([
+                        ("workspace_kind".to_string(), "projectless".to_string()),
+                        ("source".to_string(), "composer".to_string()),
+                    ])),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    let event = wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
-    assert_eq!(event["event_params"]["thread_id"], thread.id);
-    assert_eq!(event["event_params"]["session_id"], thread.session_id);
-    assert_eq!(event["event_params"]["turn_id"], turn.id);
-    assert_eq!(event["event_params"]["root_turn_id"], turn.id);
-    let request = response_mock.requests()[0].body_json();
-    let request_metadata: Value = serde_json::from_str(
-        request["client_metadata"]["x-codex-turn-metadata"]
-            .as_str()
-            .context("expected turn metadata")?,
-    )?;
-    assert_eq!(
-        json!({
-            "eventTrigger": event["event_params"]["turn_trigger"],
-            "eventSource": event["event_params"]["codex_turn_source"],
-            "requestTrigger": request_metadata["turn_trigger"],
-            "requestSource": request_metadata["source"],
-        }),
-        json!({
-            "eventTrigger": "user",
-            "eventSource": "composer",
-            "requestTrigger": "user",
-            "requestSource": "composer",
-        })
-    );
-    assert_eq!(
-        event["event_params"]["app_server_client"]["product_client_id"],
-        "codex_work_desktop"
-    );
-    assert_eq!(event["event_params"]["model"], "mock-model");
-    assert_eq!(event["event_params"]["model_provider"], "mock_provider");
-    assert_eq!(event["event_params"]["sandbox_policy"], "read_only");
-    assert_eq!(event["event_params"]["workspace_kind"], "projectless");
-    assert_eq!(event["event_params"]["ephemeral"], false);
-    assert_eq!(event["event_params"]["thread_source"], "user");
-    assert_eq!(event["event_params"]["initialization_mode"], "new");
-    assert_eq!(
-        event["event_params"]["subagent_source"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        event["event_params"]["parent_thread_id"],
-        serde_json::Value::Null
-    );
-    assert_eq!(event["event_params"]["num_input_images"], 1);
-    assert_eq!(
-        event["event_params"]["image_preparations"],
-        json!([{
-            "message_role": "user",
-            "item_id": null,
-            "effective_detail": "high",
-            "source_width": 1,
-            "source_height": 1,
-            "prepared_width": 1,
-            "prepared_height": 1,
-        }])
-    );
-    assert_eq!(event["event_params"]["status"], "completed");
-    assert!(event["event_params"]["started_at"].as_u64().is_some());
-    assert!(event["event_params"]["completed_at"].as_u64().is_some());
-    assert!(event["event_params"]["duration_ms"].as_u64().is_some());
-    assert_eq!(event["event_params"]["input_tokens"], 0);
-    assert_eq!(event["event_params"]["cached_input_tokens"], 0);
-    assert_eq!(event["event_params"]["output_tokens"], 0);
-    assert_eq!(event["event_params"]["reasoning_output_tokens"], 0);
-    assert_eq!(event["event_params"]["total_tokens"], 0);
-    let params = &event["event_params"];
-    let timings_are_numbers = [
-        "before_first_sampling_ms",
-        "sampling_ms",
-        "between_sampling_overhead_ms",
-        "tool_blocking_ms",
-        "after_last_sampling_ms",
-    ]
-    .into_iter()
-    .all(|field| params[field].as_u64().is_some());
-    assert_eq!(
-        json!({
-            "timingsAreNumbers": timings_are_numbers,
-            "toolBlockingMs": params["tool_blocking_ms"],
-            "samplingRequestCount": params["sampling_request_count"],
-            "samplingRetryCount": params["sampling_retry_count"],
-            "responseRequestCount": response_mock.requests().len(),
-        }),
-        json!({
-            "timingsAreNumbers": true,
-            "toolBlockingMs": 0,
-            "samplingRequestCount": 2,
-            "samplingRetryCount": 1,
-            "responseRequestCount": 2,
-        })
-    );
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    Ok(())
+        let event =
+            wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
+        assert_eq!(event["event_params"]["thread_id"], thread.id);
+        assert_eq!(event["event_params"]["session_id"], thread.session_id);
+        assert_eq!(event["event_params"]["turn_id"], turn.id);
+        assert_eq!(event["event_params"]["root_turn_id"], turn.id);
+        let request = response_mock.requests()[0].body_json();
+        let request_metadata: Value = serde_json::from_str(
+            request["client_metadata"]["x-codex-turn-metadata"]
+                .as_str()
+                .context("expected turn metadata")?,
+        )?;
+        assert_eq!(
+            json!({
+                "eventTrigger": event["event_params"]["turn_trigger"],
+                "eventSource": event["event_params"]["codex_turn_source"],
+                "requestTrigger": request_metadata["turn_trigger"],
+                "requestSource": request_metadata["source"],
+            }),
+            json!({
+                "eventTrigger": "user",
+                "eventSource": "composer",
+                "requestTrigger": "user",
+                "requestSource": "composer",
+            })
+        );
+        assert_eq!(
+            event["event_params"]["app_server_client"]["product_client_id"],
+            "codex_work_desktop"
+        );
+        assert_eq!(event["event_params"]["model"], "mock-model");
+        assert_eq!(event["event_params"]["model_provider"], "mock_provider");
+        assert_eq!(event["event_params"]["sandbox_policy"], "read_only");
+        assert_eq!(event["event_params"]["workspace_kind"], "projectless");
+        assert_eq!(event["event_params"]["ephemeral"], false);
+        assert_eq!(event["event_params"]["thread_source"], "user");
+        assert_eq!(event["event_params"]["initialization_mode"], "new");
+        assert_eq!(
+            event["event_params"]["subagent_source"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            event["event_params"]["parent_thread_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(event["event_params"]["num_input_images"], 1);
+        assert_eq!(
+            event["event_params"]["image_preparations"],
+            json!([{
+                "message_role": "user",
+                "item_id": null,
+                "effective_detail": "high",
+                "source_width": 1,
+                "source_height": 1,
+                "prepared_width": 1,
+                "prepared_height": 1,
+            }])
+        );
+        assert_eq!(event["event_params"]["status"], "completed");
+        assert!(event["event_params"]["started_at"].as_u64().is_some());
+        assert!(event["event_params"]["completed_at"].as_u64().is_some());
+        assert!(event["event_params"]["duration_ms"].as_u64().is_some());
+        assert_eq!(event["event_params"]["input_tokens"], 0);
+        assert_eq!(event["event_params"]["cached_input_tokens"], 0);
+        assert_eq!(event["event_params"]["output_tokens"], 0);
+        assert_eq!(event["event_params"]["reasoning_output_tokens"], 0);
+        assert_eq!(event["event_params"]["total_tokens"], 0);
+        let params = &event["event_params"];
+        let timings_are_numbers = [
+            "before_first_sampling_ms",
+            "sampling_ms",
+            "between_sampling_overhead_ms",
+            "tool_blocking_ms",
+            "after_last_sampling_ms",
+        ]
+        .into_iter()
+        .all(|field| params[field].as_u64().is_some());
+        assert_eq!(
+            json!({
+                "timingsAreNumbers": timings_are_numbers,
+                "toolBlockingMs": params["tool_blocking_ms"],
+                "samplingRequestCount": params["sampling_request_count"],
+                "samplingRetryCount": params["sampling_retry_count"],
+                "responseRequestCount": response_mock.requests().len(),
+            }),
+            json!({
+                "timingsAreNumbers": true,
+                "toolBlockingMs": 0,
+                "samplingRequestCount": 2,
+                "samplingRetryCount": 1,
+                "responseRequestCount": 2,
+            })
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_exec_emits_correlated_production_analytics() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let _responses = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_custom_tool_call("exec-1", "exec", "text('analytics');"),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![responses::ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::CodeModeOnly)
-        .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
-        .write(codex_home.path())?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
+    mock_server::run(&[&server], async {
+        let _responses = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_custom_tool_call("exec-1", "exec", "text('analytics');"),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![responses::ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .enable_feature(Feature::CodeModeOnly)
+            .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
+            .write(codex_home.path())?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
 
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .build_initialized()
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .build_initialized()
+            .await?;
+        let params = ThreadStartParams::default();
+        let thread = app_server.start_thread(params).await?;
+        let turn = app_server
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.thread.id,
+                input: vec![V2UserInput::Text {
+                    text: "run exec".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+
+        let event = wait_for_analytics_event(
+            &server,
+            DEFAULT_READ_TIMEOUT,
+            "codex_dynamic_tool_call_event",
+        )
         .await?;
-    let params = ThreadStartParams::default();
-    let thread = app_server.start_thread(params).await?;
-    let turn = app_server
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.thread.id,
-            input: vec![V2UserInput::Text {
-                text: "run exec".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
+        assert_eq!(
+            json!({
+                "turnId": event["event_params"]["turn_id"],
+                "rootTurnId": event["event_params"]["root_turn_id"],
+                "tool": event["event_params"]["tool_name"],
+                "origin": event["event_params"]["originating_response_id"],
+                "subsequent": event["event_params"]["subsequent_response_id"],
+                "hasCell": event["event_params"]["cell_id"].as_str().is_some(),
+            }),
+            json!({
+                "turnId": turn.turn.id,
+                "rootTurnId": turn.turn.id,
+                "tool": "exec",
+                "origin": "resp-1",
+                "subsequent": "resp-2",
+                "hasCell": true,
+            })
+        );
 
-    let event = wait_for_analytics_event(
-        &server,
-        DEFAULT_READ_TIMEOUT,
-        "codex_dynamic_tool_call_event",
-    )
-    .await?;
-    assert_eq!(
-        json!({
-            "turnId": event["event_params"]["turn_id"],
-            "rootTurnId": event["event_params"]["root_turn_id"],
-            "tool": event["event_params"]["tool_name"],
-            "origin": event["event_params"]["originating_response_id"],
-            "subsequent": event["event_params"]["subsequent_response_id"],
-            "hasCell": event["event_params"]["cell_id"].as_str().is_some(),
-        }),
-        json!({
-            "turnId": turn.turn.id,
-            "rootTurnId": turn.turn.id,
-            "tool": "exec",
-            "origin": "resp-1",
-            "subsequent": "resp-2",
-            "hasCell": true,
-        })
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1665,42 +1676,115 @@ async fn turn_profile_tracks_blocking_tool_and_follow_up_sampling() -> Result<()
     }));
     responses.push(create_final_assistant_message_sse_response("Done")?);
     let server = create_mock_responses_server_sequence(responses).await;
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .enable_feature(Feature::Goals)
+            .with_root_config(&format!(
+                "chatgpt_base_url = \"{}\"\ntools.update_plan.enabled = true",
+                server.uri()
+            ))
+            .write(codex_home.path())?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
 
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::Goals)
-        .with_root_config(&format!(
-            "chatgpt_base_url = \"{}\"\ntools.update_plan.enabled = true",
-            server.uri()
-        ))
-        .write(codex_home.path())?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .build_initialized()
+            .await?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .build_initialized()
-        .await?;
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
+        let TurnStartResponse { turn: first_turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "ask something".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Plan,
+                        settings: Settings {
+                            model: "mock-model".to_string(),
+                            reasoning_effort: Some(ReasoningEffort::Medium),
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    let TurnStartResponse { turn: first_turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::ToolRequestUserInput { request_id, .. } = server_req else {
+            panic!("expected ToolRequestUserInput request, got: {server_req:?}");
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        mcp.send_response(
             request_id,
-            params: TurnStartParams {
+            json!({
+                "answers": {
+                    "confirm_path": { "answers": ["yes"] }
+                }
+            }),
+        )
+        .await?;
+
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let event =
+            wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
+        let params = &event["event_params"];
+        assert_eq!(
+            json!({
+                "turnId": params["turn_id"],
+                "rootTurnId": params["root_turn_id"],
+                "toolBlockingIsPositive": params["tool_blocking_ms"]
+                    .as_u64()
+                    .is_some_and(|duration| duration > 0),
+                "samplingRequestCount": params["sampling_request_count"],
+                "samplingRetryCount": params["sampling_retry_count"],
+                "totalToolCalls": params["total_tool_call_count"],
+                "dynamicToolCalls": params["dynamic_tool_call_count"],
+                "status": params["status"],
+            }),
+            json!({
+                "turnId": first_turn.id,
+                "rootTurnId": first_turn.id,
+                "toolBlockingIsPositive": true,
+                "samplingRequestCount": 2,
+                "samplingRetryCount": 0,
+                "totalToolCalls": 1,
+                "dynamicToolCalls": 0,
+                "status": "completed",
+            })
+        );
+
+        let second_turn = mcp
+            .start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id: thread.id.clone(),
-                client_user_message_id: None,
                 input: vec![V2UserInput::Text {
-                    text: "ask something".to_string(),
+                    text: "run the other control tools".to_string(),
                     text_elements: Vec::new(),
                 }],
                 collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Plan,
+                    mode: ModeKind::Default,
                     settings: Settings {
                         model: "mock-model".to_string(),
                         reasoning_effort: Some(ReasoningEffort::Medium),
@@ -1708,143 +1792,73 @@ async fn turn_profile_tracks_blocking_tool_and_follow_up_sampling() -> Result<()
                     },
                 }),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::ToolRequestUserInput { request_id, .. } = server_req else {
-        panic!("expected ToolRequestUserInput request, got: {server_req:?}");
-    };
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    mcp.send_response(
-        request_id,
-        json!({
-            "answers": {
-                "confirm_path": { "answers": ["yes"] }
-            }
-        }),
-    )
-    .await?;
+        for (call_id, tool_name, _) in control_tools {
+            let event = wait_for_matching_analytics_event(&server, DEFAULT_READ_TIMEOUT, |event| {
+                event["event_type"] == "codex_control_tool_call_event"
+                    && event["event_params"]["item_id"] == call_id
+            })
+            .await?;
+            let success = tool_name != "view_image";
+            let turn_id = if call_id == "call1" {
+                &first_turn.id
+            } else {
+                &second_turn.turn.id
+            };
+            assert_eq!(
+                json!({
+                    "turnId": event["event_params"]["turn_id"],
+                    "rootTurnId": event["event_params"]["root_turn_id"],
+                    "tool": event["event_params"]["tool_name"],
+                    "success": event["event_params"]["success"],
+                    "status": event["event_params"]["terminal_status"],
+                    "hasOrigin": event["event_params"]["originating_response_id"]
+                        .as_str()
+                        .is_some(),
+                }),
+                json!({
+                    "turnId": turn_id,
+                    "rootTurnId": turn_id,
+                    "tool": tool_name,
+                    "success": success,
+                    "status": if success { "completed" } else { "failed" },
+                    "hasOrigin": true,
+                })
+            );
+            let serialized = event.to_string();
+            assert!(
+                ![
+                    "PRIVATE_PLAN",
+                    "PRIVATE_IMAGE_PATH",
+                    "PRIVATE_GOAL",
+                    "Proceed with the plan?"
+                ]
+                .iter()
+                .any(|private_input| serialized.contains(private_input)),
+                "tool-call analytics must not contain private tool arguments: {serialized}"
+            );
+        }
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let event = wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
-    let params = &event["event_params"];
-    assert_eq!(
-        json!({
-            "turnId": params["turn_id"],
-            "rootTurnId": params["root_turn_id"],
-            "toolBlockingIsPositive": params["tool_blocking_ms"]
-                .as_u64()
-                .is_some_and(|duration| duration > 0),
-            "samplingRequestCount": params["sampling_request_count"],
-            "samplingRetryCount": params["sampling_retry_count"],
-            "totalToolCalls": params["total_tool_call_count"],
-            "dynamicToolCalls": params["dynamic_tool_call_count"],
-            "status": params["status"],
-        }),
-        json!({
-            "turnId": first_turn.id,
-            "rootTurnId": first_turn.id,
-            "toolBlockingIsPositive": true,
-            "samplingRequestCount": 2,
-            "samplingRetryCount": 0,
-            "totalToolCalls": 1,
-            "dynamicToolCalls": 0,
-            "status": "completed",
-        })
-    );
-
-    let second_turn = mcp
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![V2UserInput::Text {
-                text: "run the other control tools".to_string(),
-                text_elements: Vec::new(),
-            }],
-            collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Default,
-                settings: Settings {
-                    model: "mock-model".to_string(),
-                    reasoning_effort: Some(ReasoningEffort::Medium),
-                    developer_instructions: None,
-                },
-            }),
-            ..Default::default()
-        })
-        .await?;
-
-    for (call_id, tool_name, _) in control_tools {
-        let event = wait_for_matching_analytics_event(&server, DEFAULT_READ_TIMEOUT, |event| {
-            event["event_type"] == "codex_control_tool_call_event"
-                && event["event_params"]["item_id"] == call_id
-        })
-        .await?;
-        let success = tool_name != "view_image";
-        let turn_id = if call_id == "call1" {
-            &first_turn.id
-        } else {
-            &second_turn.turn.id
-        };
+        let second_turn_event =
+            wait_for_matching_analytics_event(&server, DEFAULT_READ_TIMEOUT, |event| {
+                event["event_type"] == "codex_turn_event"
+                    && event["event_params"]["turn_id"] == second_turn.turn.id
+            })
+            .await?;
         assert_eq!(
             json!({
-                "turnId": event["event_params"]["turn_id"],
-                "rootTurnId": event["event_params"]["root_turn_id"],
-                "tool": event["event_params"]["tool_name"],
-                "success": event["event_params"]["success"],
-                "status": event["event_params"]["terminal_status"],
-                "hasOrigin": event["event_params"]["originating_response_id"]
-                    .as_str()
-                    .is_some(),
+                "rootTurnId": second_turn_event["event_params"]["root_turn_id"],
+                "total": second_turn_event["event_params"]["total_tool_call_count"],
+                "dynamic": second_turn_event["event_params"]["dynamic_tool_call_count"],
             }),
-            json!({
-                "turnId": turn_id,
-                "rootTurnId": turn_id,
-                "tool": tool_name,
-                "success": success,
-                "status": if success { "completed" } else { "failed" },
-                "hasOrigin": true,
-            })
+            json!({"rootTurnId": second_turn.turn.id, "total": 5, "dynamic": 0})
         );
-        let serialized = event.to_string();
-        assert!(
-            ![
-                "PRIVATE_PLAN",
-                "PRIVATE_IMAGE_PATH",
-                "PRIVATE_GOAL",
-                "Proceed with the plan?"
-            ]
-            .iter()
-            .any(|private_input| serialized.contains(private_input)),
-            "tool-call analytics must not contain private tool arguments: {serialized}"
-        );
-    }
 
-    let second_turn_event =
-        wait_for_matching_analytics_event(&server, DEFAULT_READ_TIMEOUT, |event| {
-            event["event_type"] == "codex_turn_event"
-                && event["event_params"]["turn_id"] == second_turn.turn.id
-        })
-        .await?;
-    assert_eq!(
-        json!({
-            "rootTurnId": second_turn_event["event_params"]["root_turn_id"],
-            "total": second_turn_event["event_params"]["total_tool_call_count"],
-            "dynamic": second_turn_event["event_params"]["dynamic_tool_call_count"],
-        }),
-        json!({"rootTurnId": second_turn.turn.id, "total": 5, "dynamic": 0})
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -2574,98 +2588,101 @@ async fn turn_start_reports_personality_overrides_v2(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let sse1 = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "Done"),
-        responses::ev_completed("resp-1"),
-    ]);
-    let sse2 = responses::sse(vec![
-        responses::ev_response_created("resp-2"),
-        responses::ev_assistant_message("msg-2", "Done"),
-        responses::ev_completed("resp-2"),
-    ]);
-    let response_mock = responses::mount_sse_sequence(&server, vec![sse1, sse2]).await;
+    mock_server::run(&[&server], async {
+        let sse1 = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "Done"),
+            responses::ev_completed("resp-1"),
+        ]);
+        let sse2 = responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-2", "Done"),
+            responses::ev_completed("resp-2"),
+        ]);
+        let response_mock = responses::mount_sse_sequence(&server, vec![sse1, sse2]).await;
 
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("exp-codex-personality".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    let _turn: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "Hello".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                personality: Some(first_personality),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("exp-codex-personality".to_string()),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    mcp.clear_message_buffer();
+        let _turn: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "Hello".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    personality: Some(first_personality),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    let _turn2: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "Hello again".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                personality: Some(next_personality),
-                ..Default::default()
-            },
-        })
-        .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        mcp.clear_message_buffer();
 
-    let settings_updated: ThreadSettingsUpdatedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("thread/settings/updated"),
-    )
-    .await??;
-    assert_eq!(
-        settings_updated.thread_settings.personality,
-        Some(next_personality)
-    );
+        let _turn2: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "Hello again".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    personality: Some(next_personality),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let settings_updated: ThreadSettingsUpdatedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("thread/settings/updated"),
+        )
+        .await??;
+        assert_eq!(
+            settings_updated.thread_settings.personality,
+            Some(next_personality)
+        );
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2, "expected two requests");
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    assert_eq!(
-        requests[1].instructions_text(),
-        requests[0].instructions_text(),
-        "turn updates preserve the original base instructions"
-    );
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2, "expected two requests");
 
-    Ok(())
+        assert_eq!(
+            requests[1].instructions_text(),
+            requests[0].instructions_text(),
+            "turn updates preserve the original base instructions"
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -2741,173 +2758,182 @@ async fn turn_start_exec_approval_toggle_v2() -> Result<()> {
         create_final_assistant_message_sse_response("done 2")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    // The first tool call explicitly requests escalation to force elicitation.
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .write(codex_home.as_path())?;
+    mock_server::run(&[&server], async {
+        // The first tool call explicitly requests escalation to force elicitation.
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .write(codex_home.as_path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.as_path())
-        .build_initialized()
-        .await?;
-    let expected_environment_id = mcp.auto_env_params()?.environment_id;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.as_path())
+            .build_initialized()
+            .await?;
+        let expected_environment_id = mcp.auto_env_params()?.environment_id;
 
-    // thread/start
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
+        // thread/start
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
 
-    // turn/start — expect CommandExecutionRequestApproval request from server
-    let first_turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "run python".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    // Acknowledge RPC
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(first_turn_id)),
-    )
-    .await??;
-
-    // Receive elicitation
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req else {
-        panic!("expected CommandExecutionRequestApproval request");
-    };
-    assert_eq!(params.item_id, "call1");
-    assert_eq!(
-        params.environment_id.as_deref(),
-        Some(expected_environment_id.as_str())
-    );
-    assert_eq!(
-        params.command.as_deref(),
-        Some(expected_approval_command.as_str())
-    );
-    let resolved_request_id = request_id.clone();
-
-    // Approve and wait for task completion
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(CommandExecutionRequestApprovalResponse {
-            decision: CommandExecutionApprovalDecision::Accept,
-        })?,
-    )
-    .await?;
-    let mut saw_resolved = false;
-    let mut saw_completed_command = false;
-    loop {
-        let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
-        let JSONRPCMessage::Notification(notification) = message else {
-            continue;
-        };
-        match notification.method.as_str() {
-            "item/completed" => {
-                let completed: ItemCompletedNotification =
-                    serde_json::from_value(notification.params.expect("item/completed params"))?;
-                match completed.item {
-                    ThreadItem::CommandExecution {
-                        id,
-                        command,
-                        exit_code,
-                        aggregated_output,
-                        ..
-                    } if id == "call1" => {
-                        assert_eq!(command, expected_display_command);
-                        assert_eq!(exit_code, Some(0));
-                        assert!(aggregated_output.is_some_and(|output| output.contains("True")));
-                        saw_completed_command = true;
-                    }
-                    _ => {}
-                }
-            }
-            "serverRequest/resolved" => {
-                let resolved: ServerRequestResolvedNotification = serde_json::from_value(
-                    notification
-                        .params
-                        .clone()
-                        .expect("serverRequest/resolved params"),
-                )?;
-                assert_eq!(resolved.thread_id, thread.id);
-                assert_eq!(resolved.request_id, resolved_request_id);
-                saw_resolved = true;
-            }
-            "turn/completed" => {
-                assert!(saw_resolved, "serverRequest/resolved should arrive first");
-                assert!(saw_completed_command, "expected completed command item");
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    let requests = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?;
-    assert!(
-        requests.iter().any(|request| {
-            request.url.path().ends_with("/responses")
-                && serde_json::from_slice::<Value>(&request.body)
-                    .ok()
-                    .and_then(|body| {
-                        body["input"].as_array().map(|items| {
-                            items.iter().any(|item| {
-                                item["type"] == "function_call_output"
-                                    && item["call_id"] == "call1"
-                                    && item["output"]
-                                        .as_str()
-                                        .is_some_and(|output| output.contains("True"))
-                            })
-                        })
-                    })
-                    .unwrap_or(false)
-        }),
-        "model request should include the command output confirming the original bearer token"
-    );
-
-    // Second turn with approval_policy=never should not elicit approval
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
+        // turn/start — expect CommandExecutionRequestApproval request from server
+        let first_turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
                 thread_id: thread.id.clone(),
                 client_user_message_id: None,
                 input: vec![V2UserInput::Text {
-                    text: "run python again".to_string(),
+                    text: "run python".to_string(),
                     text_elements: Vec::new(),
                 }],
-                approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
-                sandbox_policy: Some(codex_app_server_protocol::SandboxPolicy::DangerFullAccess),
-                model: Some("mock-model".to_string()),
-                effort: Some(ReasoningEffort::Medium),
-                summary: Some(ReasoningSummary::Auto),
                 ..Default::default()
-            },
-        })
+            })
+            .await?;
+        // Acknowledge RPC
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(first_turn_id)),
+        )
+        .await??;
+
+        // Receive elicitation
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req
+        else {
+            panic!("expected CommandExecutionRequestApproval request");
+        };
+        assert_eq!(params.item_id, "call1");
+        assert_eq!(
+            params.environment_id.as_deref(),
+            Some(expected_environment_id.as_str())
+        );
+        assert_eq!(
+            params.command.as_deref(),
+            Some(expected_approval_command.as_str())
+        );
+        let resolved_request_id = request_id.clone();
+
+        // Approve and wait for task completion
+        mcp.send_response(
+            request_id,
+            serde_json::to_value(CommandExecutionRequestApprovalResponse {
+                decision: CommandExecutionApprovalDecision::Accept,
+            })?,
+        )
         .await?;
+        let mut saw_resolved = false;
+        let mut saw_completed_command = false;
+        loop {
+            let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
+            let JSONRPCMessage::Notification(notification) = message else {
+                continue;
+            };
+            match notification.method.as_str() {
+                "item/completed" => {
+                    let completed: ItemCompletedNotification = serde_json::from_value(
+                        notification.params.expect("item/completed params"),
+                    )?;
+                    match completed.item {
+                        ThreadItem::CommandExecution {
+                            id,
+                            command,
+                            exit_code,
+                            aggregated_output,
+                            ..
+                        } if id == "call1" => {
+                            assert_eq!(command, expected_display_command);
+                            assert_eq!(exit_code, Some(0));
+                            assert!(
+                                aggregated_output.is_some_and(|output| output.contains("True"))
+                            );
+                            saw_completed_command = true;
+                        }
+                        _ => {}
+                    }
+                }
+                "serverRequest/resolved" => {
+                    let resolved: ServerRequestResolvedNotification = serde_json::from_value(
+                        notification
+                            .params
+                            .clone()
+                            .expect("serverRequest/resolved params"),
+                    )?;
+                    assert_eq!(resolved.thread_id, thread.id);
+                    assert_eq!(resolved.request_id, resolved_request_id);
+                    saw_resolved = true;
+                }
+                "turn/completed" => {
+                    assert!(saw_resolved, "serverRequest/resolved should arrive first");
+                    assert!(saw_completed_command, "expected completed command item");
+                    break;
+                }
+                _ => {}
+            }
+        }
 
-    // Ensure we do NOT receive a CommandExecutionRequestApproval request before task completes
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let requests = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?;
+        assert!(
+            requests.iter().any(|request| {
+                request.url.path().ends_with("/responses")
+                    && serde_json::from_slice::<Value>(&request.body)
+                        .ok()
+                        .and_then(|body| {
+                            body["input"].as_array().map(|items| {
+                                items.iter().any(|item| {
+                                    item["type"] == "function_call_output"
+                                        && item["call_id"] == "call1"
+                                        && item["output"]
+                                            .as_str()
+                                            .is_some_and(|output| output.contains("True"))
+                                })
+                            })
+                        })
+                        .unwrap_or(false)
+            }),
+            "model request should include the command output confirming the original bearer token"
+        );
 
-    Ok(())
+        // Second turn with approval_policy=never should not elicit approval
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "run python again".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
+                    sandbox_policy: Some(
+                        codex_app_server_protocol::SandboxPolicy::DangerFullAccess,
+                    ),
+                    model: Some("mock-model".to_string()),
+                    effort: Some(ReasoningEffort::Medium),
+                    summary: Some(ReasoningSummary::Auto),
+                    ..Default::default()
+                },
+            })
+            .await?;
+
+        // Ensure we do NOT receive a CommandExecutionRequestApproval request before task completes
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -2969,132 +2995,138 @@ async fn run_turn_start_exec_approval_rejection_v2(
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .write(codex_home.as_path())?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .write(codex_home.as_path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.as_path())
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.as_path())
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "run python".to_string(),
-                    text_elements: Vec::new(),
-                }],
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
                 ..Default::default()
-            },
+            })
+            .await?;
+
+        let TurnStartResponse { turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "run python".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            })
+            .await?;
+
+        let started_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let started: ItemStartedNotification =
+                    mcp.read_notification("item/started").await?;
+                if let ThreadItem::CommandExecution { .. } = started.item {
+                    return Ok::<ThreadItem, anyhow::Error>(started.item);
+                }
+            }
         })
-        .await?;
+        .await??;
+        let ThreadItem::CommandExecution {
+            id,
+            status,
+            command,
+            command_actions,
+            ..
+        } = started_command_execution
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(id, "call-decline");
+        assert_eq!(status, CommandExecutionStatus::InProgress);
+        assert_eq!(command, expected_display_command);
+        let displayed_actions = serde_json::to_string(&command_actions)?;
+        assert!(displayed_actions.contains("[REDACTED_SECRET]"));
+        assert!(!displayed_actions.contains(bearer_token));
 
-    let started_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let started: ItemStartedNotification = mcp.read_notification("item/started").await?;
-            if let ThreadItem::CommandExecution { .. } = started.item {
-                return Ok::<ThreadItem, anyhow::Error>(started.item);
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req
+        else {
+            panic!("expected CommandExecutionRequestApproval request")
+        };
+        assert_eq!(params.item_id, "call-decline");
+        assert_eq!(params.thread_id, thread.id);
+        assert_eq!(params.turn_id, turn.id);
+        assert_eq!(
+            params.command.as_deref(),
+            Some(expected_approval_command.as_str())
+        );
+        let approval_actions = serde_json::to_string(&params.command_actions)?;
+        assert!(approval_actions.contains(bearer_token));
+
+        mcp.send_response(request_id, approval_response).await?;
+
+        let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let completed: ItemCompletedNotification =
+                    mcp.read_notification("item/completed").await?;
+                if let ThreadItem::CommandExecution { .. } = completed.item {
+                    return Ok::<ThreadItem, anyhow::Error>(completed.item);
+                }
             }
-        }
+        })
+        .await??;
+        let ThreadItem::CommandExecution {
+            id,
+            status,
+            command,
+            command_actions,
+            exit_code,
+            aggregated_output,
+            ..
+        } = completed_command_execution
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(id, "call-decline");
+        assert_eq!(status, expected_status);
+        assert_eq!(command, expected_display_command);
+        let displayed_actions = serde_json::to_string(&command_actions)?;
+        assert!(displayed_actions.contains("[REDACTED_SECRET]"));
+        assert!(!displayed_actions.contains(bearer_token));
+        assert!(exit_code.is_none());
+        assert!(aggregated_output.is_none());
+
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let requests = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?;
+        assert!(
+            requests.iter().any(|request| {
+                request.url.path().ends_with("/responses")
+                    && body_contains(request, expected_rejection)
+            }),
+            "model request should include approval rejection: {expected_rejection}"
+        );
+
+        Ok(())
     })
-    .await??;
-    let ThreadItem::CommandExecution {
-        id,
-        status,
-        command,
-        command_actions,
-        ..
-    } = started_command_execution
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(id, "call-decline");
-    assert_eq!(status, CommandExecutionStatus::InProgress);
-    assert_eq!(command, expected_display_command);
-    let displayed_actions = serde_json::to_string(&command_actions)?;
-    assert!(displayed_actions.contains("[REDACTED_SECRET]"));
-    assert!(!displayed_actions.contains(bearer_token));
-
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req else {
-        panic!("expected CommandExecutionRequestApproval request")
-    };
-    assert_eq!(params.item_id, "call-decline");
-    assert_eq!(params.thread_id, thread.id);
-    assert_eq!(params.turn_id, turn.id);
-    assert_eq!(
-        params.command.as_deref(),
-        Some(expected_approval_command.as_str())
-    );
-    let approval_actions = serde_json::to_string(&params.command_actions)?;
-    assert!(approval_actions.contains(bearer_token));
-
-    mcp.send_response(request_id, approval_response).await?;
-
-    let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let completed: ItemCompletedNotification =
-                mcp.read_notification("item/completed").await?;
-            if let ThreadItem::CommandExecution { .. } = completed.item {
-                return Ok::<ThreadItem, anyhow::Error>(completed.item);
-            }
-        }
-    })
-    .await??;
-    let ThreadItem::CommandExecution {
-        id,
-        status,
-        command,
-        command_actions,
-        exit_code,
-        aggregated_output,
-        ..
-    } = completed_command_execution
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(id, "call-decline");
-    assert_eq!(status, expected_status);
-    assert_eq!(command, expected_display_command);
-    let displayed_actions = serde_json::to_string(&command_actions)?;
-    assert!(displayed_actions.contains("[REDACTED_SECRET]"));
-    assert!(!displayed_actions.contains(bearer_token));
-    assert!(exit_code.is_none());
-    assert!(aggregated_output.is_none());
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let requests = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?;
-    assert!(
-        requests.iter().any(|request| {
-            request.url.path().ends_with("/responses") && body_contains(request, expected_rejection)
-        }),
-        "model request should include approval rejection: {expected_rejection}"
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test]
@@ -3136,156 +3168,161 @@ async fn turn_start_explicit_local_environment_updates_legacy_cwd_between_turns(
         create_final_assistant_message_sse_response("done second")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .write(&codex_home)?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .write(&codex_home)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .build_initialized()
+            .await?;
 
-    // thread/start
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    // first turn with workspace-write sandbox and first_cwd
-    let first_writable_root =
-        codex_utils_absolute_path::AbsolutePathBuf::try_from(first_cwd.clone())?;
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                disabled_plugin_ids: None,
-                environments: None,
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "first turn".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                turn_trigger: None,
-                parent_turn_id: None,
-                root_turn_id: None,
-                tool_output: None,
-                responsesapi_client_metadata: None,
-                additional_context: None,
-                cwd: Some(first_cwd.clone()),
-                runtime_workspace_roots: None,
-                approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
-                approvals_reviewer: None,
-                sandbox_policy: Some(codex_app_server_protocol::SandboxPolicy::WorkspaceWrite {
-                    writable_roots: vec![first_writable_root],
-                    network_access: false,
-                    exclude_tmpdir_env_var: true,
-                    exclude_slash_tmp: true,
-                }),
-                permissions: None,
+        // thread/start
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
                 model: Some("mock-model".to_string()),
-                effort: Some(ReasoningEffort::Medium),
-                summary: Some(ReasoningSummary::Auto),
-                service_tier: None,
-                service_tier_for_turn: None,
-                personality: None,
-                output_schema: None,
-                collaboration_mode: None,
-                multi_agent_mode: None,
-                cyber_access_program: None,
-            },
-        })
-        .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    mcp.clear_message_buffer();
+                ..Default::default()
+            })
+            .await?;
 
-    // Select a new local cwd without the top-level compatibility parameter. The inherited
-    // workspace-write sandbox must follow the local environment cwd.
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                disabled_plugin_ids: None,
-                environments: Some(vec![TurnEnvironmentParams {
-                    environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
-                    cwd: second_cwd.abs().into(),
+        // first turn with workspace-write sandbox and first_cwd
+        let first_writable_root =
+            codex_utils_absolute_path::AbsolutePathBuf::try_from(first_cwd.clone())?;
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    disabled_plugin_ids: None,
+                    environments: None,
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "first turn".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    turn_trigger: None,
+                    parent_turn_id: None,
+                    root_turn_id: None,
+                    tool_output: None,
+                    responsesapi_client_metadata: None,
+                    additional_context: None,
+                    cwd: Some(first_cwd.clone()),
                     runtime_workspace_roots: None,
-                }]),
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "second turn".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                turn_trigger: None,
-                parent_turn_id: None,
-                root_turn_id: None,
-                tool_output: None,
-                responsesapi_client_metadata: None,
-                additional_context: None,
-                cwd: None,
-                runtime_workspace_roots: None,
-                approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
-                approvals_reviewer: None,
-                sandbox_policy: None,
-                permissions: None,
-                model: Some("mock-model".to_string()),
-                effort: Some(ReasoningEffort::Medium),
-                summary: Some(ReasoningSummary::Auto),
-                service_tier: None,
-                service_tier_for_turn: None,
-                personality: None,
-                output_schema: None,
-                collaboration_mode: None,
-                multi_agent_mode: None,
-                cyber_access_program: None,
-            },
-        })
-        .await?;
-    let settings_updated: ThreadSettingsUpdatedNotification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_notification("thread/settings/updated"),
-    )
-    .await??;
-    assert_eq!(settings_updated.thread_settings.cwd, second_cwd.abs());
+                    approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
+                    approvals_reviewer: None,
+                    sandbox_policy: Some(
+                        codex_app_server_protocol::SandboxPolicy::WorkspaceWrite {
+                            writable_roots: vec![first_writable_root],
+                            network_access: false,
+                            exclude_tmpdir_env_var: true,
+                            exclude_slash_tmp: true,
+                        },
+                    ),
+                    permissions: None,
+                    model: Some("mock-model".to_string()),
+                    effort: Some(ReasoningEffort::Medium),
+                    summary: Some(ReasoningSummary::Auto),
+                    service_tier: None,
+                    service_tier_for_turn: None,
+                    personality: None,
+                    output_schema: None,
+                    collaboration_mode: None,
+                    multi_agent_mode: None,
+                    cyber_access_program: None,
+                },
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        mcp.clear_message_buffer();
 
-    let command_exec_item = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let item_started: ItemStartedNotification =
-                mcp.read_notification("item/started").await?;
-            if matches!(item_started.item, ThreadItem::CommandExecution { .. }) {
-                return Ok::<ThreadItem, anyhow::Error>(item_started.item);
+        // Select a new local cwd without the top-level compatibility parameter. The inherited
+        // workspace-write sandbox must follow the local environment cwd.
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    disabled_plugin_ids: None,
+                    environments: Some(vec![TurnEnvironmentParams {
+                        environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
+                        cwd: second_cwd.abs().into(),
+                        runtime_workspace_roots: None,
+                    }]),
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "second turn".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    turn_trigger: None,
+                    parent_turn_id: None,
+                    root_turn_id: None,
+                    tool_output: None,
+                    responsesapi_client_metadata: None,
+                    additional_context: None,
+                    cwd: None,
+                    runtime_workspace_roots: None,
+                    approval_policy: Some(codex_app_server_protocol::AskForApproval::Never),
+                    approvals_reviewer: None,
+                    sandbox_policy: None,
+                    permissions: None,
+                    model: Some("mock-model".to_string()),
+                    effort: Some(ReasoningEffort::Medium),
+                    summary: Some(ReasoningSummary::Auto),
+                    service_tier: None,
+                    service_tier_for_turn: None,
+                    personality: None,
+                    output_schema: None,
+                    collaboration_mode: None,
+                    multi_agent_mode: None,
+                    cyber_access_program: None,
+                },
+            })
+            .await?;
+        let settings_updated: ThreadSettingsUpdatedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("thread/settings/updated"),
+        )
+        .await??;
+        assert_eq!(settings_updated.thread_settings.cwd, second_cwd.abs());
+
+        let command_exec_item = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let item_started: ItemStartedNotification =
+                    mcp.read_notification("item/started").await?;
+                if matches!(item_started.item, ThreadItem::CommandExecution { .. }) {
+                    return Ok::<ThreadItem, anyhow::Error>(item_started.item);
+                }
             }
-        }
+        })
+        .await??;
+        let ThreadItem::CommandExecution {
+            cwd,
+            command,
+            status,
+            ..
+        } = command_exec_item
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(cwd.as_str(), second_cwd.to_string_lossy().as_ref());
+        let expected_command = format_with_current_shell_display("echo second turn");
+        assert_eq!(command, expected_command);
+        assert_eq!(status, CommandExecutionStatus::InProgress);
+
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        Ok(())
     })
-    .await??;
-    let ThreadItem::CommandExecution {
-        cwd,
-        command,
-        status,
-        ..
-    } = command_exec_item
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(cwd.as_str(), second_cwd.to_string_lossy().as_ref());
-    let expected_command = format_with_current_shell_display("echo second turn");
-    assert_eq!(command, expected_command);
-    assert_eq!(status, CommandExecutionStatus::InProgress);
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test]
@@ -4893,6 +4930,7 @@ async fn turn_start_file_change_approval_accept_for_session_persists_v2() -> Res
         create_final_assistant_message_sse_response("patch 2 applied")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
+    mock_server::run(&[&server], async {
     MockResponsesConfig::new(&server.uri())
         .with_approval_policy("on-request")
         .with_sandbox_mode("read-only")
@@ -5073,6 +5111,8 @@ async fn turn_start_file_change_approval_accept_for_session_persists_v2() -> Res
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -5122,124 +5162,129 @@ async fn run_turn_start_file_change_approval_rejection_v2(
         create_final_assistant_message_sse_response("patch declined")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .with_sandbox_mode("read-only")
-        .write(&codex_home)?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .with_sandbox_mode("read-only")
+            .write(&codex_home)?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "apply patch".into(),
-                    text_elements: Vec::new(),
-                }],
-                cwd: Some(workspace.clone()),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
                 ..Default::default()
-            },
+            })
+            .await?;
+
+        let TurnStartResponse { turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "apply patch".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    cwd: Some(workspace.clone()),
+                    ..Default::default()
+                },
+            })
+            .await?;
+
+        let started_file_change = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let started: ItemStartedNotification =
+                    mcp.read_notification("item/started").await?;
+                if let ThreadItem::FileChange { .. } = started.item {
+                    return Ok::<ThreadItem, anyhow::Error>(started.item);
+                }
+            }
         })
-        .await?;
+        .await??;
+        let ThreadItem::FileChange {
+            ref id,
+            status,
+            ref changes,
+        } = started_file_change
+        else {
+            unreachable!("loop ensures we break on file change items");
+        };
+        assert_eq!(id, "patch-call");
+        assert_eq!(status, PatchApplyStatus::InProgress);
+        let started_changes = changes.clone();
 
-    let started_file_change = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let started: ItemStartedNotification = mcp.read_notification("item/started").await?;
-            if let ThreadItem::FileChange { .. } = started.item {
-                return Ok::<ThreadItem, anyhow::Error>(started.item);
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::FileChangeRequestApproval { request_id, params } = server_req else {
+            panic!("expected FileChangeRequestApproval request")
+        };
+        assert_eq!(params.item_id, "patch-call");
+        assert_eq!(params.thread_id, thread.id);
+        assert_eq!(params.turn_id, turn.id);
+        let expected_readme_path = workspace.join("README.md");
+        let expected_readme_path_str = expected_readme_path.to_string_lossy().into_owned();
+        pretty_assertions::assert_eq!(
+            started_changes,
+            vec![codex_app_server_protocol::FileUpdateChange {
+                path: expected_readme_path_str.clone(),
+                kind: PatchChangeKind::Add,
+                diff: "new line\n".to_string(),
+            }]
+        );
+
+        mcp.send_response(request_id, approval_response).await?;
+
+        let completed_file_change = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let completed: ItemCompletedNotification =
+                    mcp.read_notification("item/completed").await?;
+                if let ThreadItem::FileChange { .. } = completed.item {
+                    return Ok::<ThreadItem, anyhow::Error>(completed.item);
+                }
             }
-        }
+        })
+        .await??;
+        let ThreadItem::FileChange { ref id, status, .. } = completed_file_change else {
+            unreachable!("loop ensures we break on file change items");
+        };
+        assert_eq!(id, "patch-call");
+        assert_eq!(status, PatchApplyStatus::Declined);
+
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let requests = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?;
+        assert!(
+            requests.iter().any(|request| {
+                request.url.path().ends_with("/responses")
+                    && body_contains(request, expected_rejection)
+            }),
+            "model request should include approval rejection: {expected_rejection}"
+        );
+
+        assert!(
+            !expected_readme_path.exists(),
+            "declined patch should not be applied"
+        );
+
+        Ok(())
     })
-    .await??;
-    let ThreadItem::FileChange {
-        ref id,
-        status,
-        ref changes,
-    } = started_file_change
-    else {
-        unreachable!("loop ensures we break on file change items");
-    };
-    assert_eq!(id, "patch-call");
-    assert_eq!(status, PatchApplyStatus::InProgress);
-    let started_changes = changes.clone();
-
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::FileChangeRequestApproval { request_id, params } = server_req else {
-        panic!("expected FileChangeRequestApproval request")
-    };
-    assert_eq!(params.item_id, "patch-call");
-    assert_eq!(params.thread_id, thread.id);
-    assert_eq!(params.turn_id, turn.id);
-    let expected_readme_path = workspace.join("README.md");
-    let expected_readme_path_str = expected_readme_path.to_string_lossy().into_owned();
-    pretty_assertions::assert_eq!(
-        started_changes,
-        vec![codex_app_server_protocol::FileUpdateChange {
-            path: expected_readme_path_str.clone(),
-            kind: PatchChangeKind::Add,
-            diff: "new line\n".to_string(),
-        }]
-    );
-
-    mcp.send_response(request_id, approval_response).await?;
-
-    let completed_file_change = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let completed: ItemCompletedNotification =
-                mcp.read_notification("item/completed").await?;
-            if let ThreadItem::FileChange { .. } = completed.item {
-                return Ok::<ThreadItem, anyhow::Error>(completed.item);
-            }
-        }
-    })
-    .await??;
-    let ThreadItem::FileChange { ref id, status, .. } = completed_file_change else {
-        unreachable!("loop ensures we break on file change items");
-    };
-    assert_eq!(id, "patch-call");
-    assert_eq!(status, PatchApplyStatus::Declined);
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let requests = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?;
-    assert!(
-        requests.iter().any(|request| {
-            request.url.path().ends_with("/responses") && body_contains(request, expected_rejection)
-        }),
-        "model request should include approval rejection: {expected_rejection}"
-    );
-
-    assert!(
-        !expected_readme_path.exists(),
-        "declined patch should not be applied"
-    );
-
-    Ok(())
+    .await
 }
 
 #[cfg_attr(not(windows), test_case(None; "started"))]
@@ -5271,126 +5316,132 @@ async fn command_execution_notifications_include_process_id(
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_sandbox_mode("danger-full-access")
-        .enable_feature(Feature::UnifiedExec)
-        .disable_feature(Feature::ShellZshFork)
-        .disable_feature(Feature::ShellSnapshot)
-        .write(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .with_sandbox_mode("danger-full-access")
+            .enable_feature(Feature::UnifiedExec)
+            .disable_feature(Feature::ShellZshFork)
+            .disable_feature(Feature::ShellSnapshot)
+            .write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-
-    let TurnStartResponse { turn: _turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                client_user_message_id: None,
-                input: vec![V2UserInput::Text {
-                    text: "run a command".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                sandbox_policy: Some(codex_app_server_protocol::SandboxPolicy::DangerFullAccess),
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
                 ..Default::default()
-            },
+            })
+            .await?;
+
+        let TurnStartResponse { turn: _turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    client_user_message_id: None,
+                    input: vec![V2UserInput::Text {
+                        text: "run a command".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    sandbox_policy: Some(
+                        codex_app_server_protocol::SandboxPolicy::DangerFullAccess,
+                    ),
+                    ..Default::default()
+                },
+            })
+            .await?;
+
+        let started_command = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let started: ItemStartedNotification =
+                    mcp.read_notification("item/started").await?;
+                if let ThreadItem::CommandExecution { .. } = started.item {
+                    return Ok::<ThreadItem, anyhow::Error>(started.item);
+                }
+            }
         })
-        .await?;
+        .await??;
+        let ThreadItem::CommandExecution {
+            id,
+            process_id: started_process_id,
+            status,
+            ..
+        } = started_command
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(id, "uexec-1");
+        assert_eq!(status, CommandExecutionStatus::InProgress);
+        assert_eq!(started_process_id.is_none(), launch_failed);
 
-    let started_command = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let started: ItemStartedNotification = mcp.read_notification("item/started").await?;
-            if let ThreadItem::CommandExecution { .. } = started.item {
-                return Ok::<ThreadItem, anyhow::Error>(started.item);
+        let completed_command = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let completed: ItemCompletedNotification =
+                    mcp.read_notification("item/completed").await?;
+                if let ThreadItem::CommandExecution { .. } = completed.item {
+                    return Ok::<ThreadItem, anyhow::Error>(completed.item);
+                }
             }
-        }
-    })
-    .await??;
-    let ThreadItem::CommandExecution {
-        id,
-        process_id: started_process_id,
-        status,
-        ..
-    } = started_command
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(id, "uexec-1");
-    assert_eq!(status, CommandExecutionStatus::InProgress);
-    assert_eq!(started_process_id.is_none(), launch_failed);
-
-    let completed_command = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let completed: ItemCompletedNotification =
-                mcp.read_notification("item/completed").await?;
-            if let ThreadItem::CommandExecution { .. } = completed.item {
-                return Ok::<ThreadItem, anyhow::Error>(completed.item);
-            }
-        }
-    })
-    .await??;
-    let ThreadItem::CommandExecution {
-        id: completed_id,
-        process_id: completed_process_id,
-        status: completed_status,
-        exit_code,
-        duration_ms,
-        aggregated_output,
-        ..
-    } = completed_command
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(completed_id, "uexec-1");
-    assert!(
-        matches!(
-            completed_status,
-            CommandExecutionStatus::Completed | CommandExecutionStatus::Failed
-        ),
-        "unexpected command execution status: {completed_status:?}"
-    );
-    if launch_failed {
-        assert_eq!(
-            (completed_status, exit_code, duration_ms),
-            (CommandExecutionStatus::Failed, Some(-1), Some(0))
-        );
+        })
+        .await??;
+        let ThreadItem::CommandExecution {
+            id: completed_id,
+            process_id: completed_process_id,
+            status: completed_status,
+            exit_code,
+            duration_ms,
+            aggregated_output,
+            ..
+        } = completed_command
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(completed_id, "uexec-1");
         assert!(
-            aggregated_output
-                .context("launch diagnostic")?
-                .starts_with("Failed to create unified exec process:")
+            matches!(
+                completed_status,
+                CommandExecutionStatus::Completed | CommandExecutionStatus::Failed
+            ),
+            "unexpected command execution status: {completed_status:?}"
         );
-    } else if completed_status == CommandExecutionStatus::Completed {
-        assert_eq!(exit_code, Some(0));
-    } else {
-        assert!(exit_code.is_some(), "expected exit_code for failed command");
-    }
-    assert_eq!(completed_process_id, started_process_id);
+        if launch_failed {
+            assert_eq!(
+                (completed_status, exit_code, duration_ms),
+                (CommandExecutionStatus::Failed, Some(-1), Some(0))
+            );
+            assert!(
+                aggregated_output
+                    .context("launch diagnostic")?
+                    .starts_with("Failed to create unified exec process:")
+            );
+        } else if completed_status == CommandExecutionStatus::Completed {
+            assert_eq!(exit_code, Some(0));
+        } else {
+            assert!(exit_code.is_some(), "expected exit_code for failed command");
+        }
+        assert_eq!(completed_process_id, started_process_id);
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    for method in mcp.pending_notification_methods() {
-        let notification = mcp.read_stream_until_notification_message(&method).await?;
-        assert_ne!(
-            notification.params.context("notification params")?["item"]["id"],
-            "uexec-1"
-        );
-    }
+        for method in mcp.pending_notification_methods() {
+            let notification = mcp.read_stream_until_notification_message(&method).await?;
+            assert_ne!(
+                notification.params.context("notification params")?["item"]["id"],
+                "uexec-1"
+            );
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "plugin attribution fixture is Unix-only")]
@@ -5454,85 +5505,90 @@ async fn command_execution_notifications_include_trusted_plugin_id(
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .with_sandbox_mode("danger-full-access")
-        .enable_feature(Feature::Plugins)
-        .enable_feature(Feature::UnifiedExec)
-        .disable_feature(Feature::RemotePlugin)
-        .disable_feature(Feature::ShellZshFork)
-        .disable_feature(Feature::ShellSnapshot)
-        .with_extra_config("[plugins.\"google-calendar@openai-api-curated\"]\nenabled = true")
-        .write(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .with_sandbox_mode("danger-full-access")
+            .enable_feature(Feature::Plugins)
+            .enable_feature(Feature::UnifiedExec)
+            .disable_feature(Feature::RemotePlugin)
+            .disable_feature(Feature::ShellZshFork)
+            .disable_feature(Feature::ShellSnapshot)
+            .with_extra_config("[plugins.\"google-calendar@openai-api-curated\"]\nenabled = true")
+            .write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id,
-                input: vec![V2UserInput::Text {
-                    text: "run a plugin command".to_string(),
-                    text_elements: Vec::new(),
-                }],
-                sandbox_policy: Some(codex_app_server_protocol::SandboxPolicy::DangerFullAccess),
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
                 ..Default::default()
-            },
-        })
-        .await?;
+            })
+            .await?;
+        let _: TurnStartResponse = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id,
+                    input: vec![V2UserInput::Text {
+                        text: "run a plugin command".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    sandbox_policy: Some(
+                        codex_app_server_protocol::SandboxPolicy::DangerFullAccess,
+                    ),
+                    ..Default::default()
+                },
+            })
+            .await?;
 
-    for method in ["item/started", "item/completed"] {
-        let status = timeout(DEFAULT_READ_TIMEOUT, async {
-            loop {
-                let notification = mcp.read_stream_until_notification_message(method).await?;
-                let params = notification.params.expect("item notification params");
-                let item_json = params.get("item").expect("item notification item").clone();
-                let item = serde_json::from_value::<ThreadItem>(item_json.clone())?;
-                if let ThreadItem::CommandExecution { status, .. } = item {
-                    let emitted_script_path = item_json
-                        .get("scriptPath")
-                        .and_then(serde_json::Value::as_str)
-                        .expect("command execution item should include scriptPath");
-                    assert_eq!(
-                        (item_json["pluginId"].as_str(), emitted_script_path),
-                        (Some("google-calendar@openai-api-curated"), "scripts/run.sh")
-                    );
-                    assert!(
-                        !emitted_script_path.contains(script_path.to_string_lossy().as_ref()),
-                        "scriptPath must not serialize the absolute fixture path"
-                    );
-                    assert!(
-                        !emitted_script_path.contains("plugins/cache"),
-                        "scriptPath must not serialize a plugin cache path"
-                    );
-                    return Ok::<CommandExecutionStatus, anyhow::Error>(status);
+        for method in ["item/started", "item/completed"] {
+            let status = timeout(DEFAULT_READ_TIMEOUT, async {
+                loop {
+                    let notification = mcp.read_stream_until_notification_message(method).await?;
+                    let params = notification.params.expect("item notification params");
+                    let item_json = params.get("item").expect("item notification item").clone();
+                    let item = serde_json::from_value::<ThreadItem>(item_json.clone())?;
+                    if let ThreadItem::CommandExecution { status, .. } = item {
+                        let emitted_script_path = item_json
+                            .get("scriptPath")
+                            .and_then(serde_json::Value::as_str)
+                            .expect("command execution item should include scriptPath");
+                        assert_eq!(
+                            (item_json["pluginId"].as_str(), emitted_script_path),
+                            (Some("google-calendar@openai-api-curated"), "scripts/run.sh")
+                        );
+                        assert!(
+                            !emitted_script_path.contains(script_path.to_string_lossy().as_ref()),
+                            "scriptPath must not serialize the absolute fixture path"
+                        );
+                        assert!(
+                            !emitted_script_path.contains("plugins/cache"),
+                            "scriptPath must not serialize a plugin cache path"
+                        );
+                        return Ok::<CommandExecutionStatus, anyhow::Error>(status);
+                    }
                 }
+            })
+            .await??;
+            if method == "item/started" {
+                assert_eq!(status, CommandExecutionStatus::InProgress);
+            } else {
+                assert_eq!(status, expected_status);
             }
-        })
-        .await??;
-        if method == "item/started" {
-            assert_eq!(status, CommandExecutionStatus::InProgress);
-        } else {
-            assert_eq!(status, expected_status);
         }
-    }
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

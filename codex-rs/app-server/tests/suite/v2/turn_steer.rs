@@ -29,6 +29,7 @@ use codex_app_server_protocol::TurnSteerReplaceResponse;
 use codex_app_server_protocol::TurnSteerResponse;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
+use core_test_support::mock_server;
 use core_test_support::skip_if_remote;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -47,62 +48,66 @@ async fn turn_steer_requires_active_turn() -> Result<()> {
     std::fs::create_dir(&codex_home)?;
 
     let server = create_mock_responses_server_sequence(vec![]).await;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        &codex_home,
-        &server.uri(),
-        &server.uri(),
-    )?;
-    mount_analytics_capture(&server, &codex_home).await?;
+    mock_server::run(&[&server], async {
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            &codex_home,
+            &server.uri(),
+            &server.uri(),
+        )?;
+        mount_analytics_capture(&server, &codex_home).await?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(&codex_home)
-        .without_managed_config()
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(&codex_home)
+            .without_managed_config()
+            .build_initialized()
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
 
-    let steer_req = mcp
-        .send_turn_steer_request(TurnSteerParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: Some("client-steer-message-1".to_string()),
-            input: vec![V2UserInput::Text {
-                text: "steer".to_string(),
-                text_elements: Vec::new(),
-            }],
-            responsesapi_client_metadata: None,
-            additional_context: None,
-            expected_turn_id: "turn-does-not-exist".to_string(),
-        })
-        .await?;
-    let steer_err: JSONRPCError = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_error_message(RequestId::Integer(steer_req)),
-    )
-    .await??;
-    assert_eq!(steer_err.error.code, -32600);
+        let steer_req = mcp
+            .send_turn_steer_request(TurnSteerParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: Some("client-steer-message-1".to_string()),
+                input: vec![V2UserInput::Text {
+                    text: "steer".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                responsesapi_client_metadata: None,
+                additional_context: None,
+                expected_turn_id: "turn-does-not-exist".to_string(),
+            })
+            .await?;
+        let steer_err: JSONRPCError = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_error_message(RequestId::Integer(steer_req)),
+        )
+        .await??;
+        assert_eq!(steer_err.error.code, -32600);
 
-    let event =
-        wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_steer_event").await?;
-    assert_eq!(event["event_params"]["thread_id"], thread.id);
-    assert_eq!(event["event_params"]["result"], "rejected");
-    assert_eq!(event["event_params"]["num_input_images"], 0);
-    assert_eq!(
-        event["event_params"]["expected_turn_id"],
-        "turn-does-not-exist"
-    );
-    assert_eq!(
-        event["event_params"]["accepted_turn_id"],
-        serde_json::Value::Null
-    );
-    assert_eq!(event["event_params"]["rejection_reason"], "no_active_turn");
+        let event =
+            wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_steer_event")
+                .await?;
+        assert_eq!(event["event_params"]["thread_id"], thread.id);
+        assert_eq!(event["event_params"]["result"], "rejected");
+        assert_eq!(event["event_params"]["num_input_images"], 0);
+        assert_eq!(
+            event["event_params"]["expected_turn_id"],
+            "turn-does-not-exist"
+        );
+        assert_eq!(
+            event["event_params"]["accepted_turn_id"],
+            serde_json::Value::Null
+        );
+        assert_eq!(event["event_params"]["rejection_reason"], "no_active_turn");
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

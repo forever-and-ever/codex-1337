@@ -34,6 +34,7 @@ use codex_models_manager::bundled_models_response;
 use codex_plugin::PluginId;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
@@ -124,204 +125,207 @@ async fn guardian_review_turns_and_tools_reach_analytics() -> Result<()> {
     const PRIVATE: &str = "guardian-private-content";
     const READ_TIMEOUT: Duration = Duration::from_secs(60);
     let server = responses::start_mock_server().await;
-    let codex_home = TempDir::new()?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
-    MockResponsesConfig::new(&server.uri())
-        .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
-        .with_provider_config("supports_websockets = false")
-        .enable_feature(Feature::GuardianApproval)
-        .disable_feature(Feature::Apps)
-        .write(codex_home.path())?;
-    let parent_tool = |id: &str| {
-        responses::sse_response(responses::sse(vec![
-            responses::ev_response_created(id),
-            responses::ev_function_call(
-                id,
-                "exec_command",
-                &json!({
-                    "cmd": format!("echo {id} > {id}.txt"),
-                    "sandbox_permissions": "require_escalated",
-                    "justification": "Exercise Guardian analytics",
-                })
-                .to_string(),
-            ),
-            responses::ev_completed(id),
-        ]))
-    };
-    let requests = responses::mount_response_sequence(
-        &server,
-        vec![
-            parent_tool("parent-first"),
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
+        MockResponsesConfig::new(&server.uri())
+            .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
+            .with_provider_config("supports_websockets = false")
+            .enable_feature(Feature::GuardianApproval)
+            .disable_feature(Feature::Apps)
+            .write(codex_home.path())?;
+        let parent_tool = |id: &str| {
             responses::sse_response(responses::sse(vec![
-                responses::ev_response_created("guardian-first"),
-                responses::ev_web_search_call_added_partial("guardian-search", "in_progress"),
-                responses::ev_web_search_call_done("guardian-search", "completed", PRIVATE),
-                responses::ev_reasoning_item("guardian-reasoning", &[PRIVATE], &[PRIVATE]),
-                responses::ev_assistant_message(
-                    "guardian-answer",
-                    &json!({"outcome": "deny", "rationale": PRIVATE}).to_string(),
+                responses::ev_response_created(id),
+                responses::ev_function_call(
+                    id,
+                    "exec_command",
+                    &json!({
+                        "cmd": format!("echo {id} > {id}.txt"),
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Exercise Guardian analytics",
+                    })
+                    .to_string(),
                 ),
-                responses::ev_completed("guardian-first"),
-            ])),
-            parent_tool("parent-second"),
-            responses::sse_response(responses::sse_failed(
-                "guardian-failed",
-                "invalid_prompt",
-                PRIVATE,
-            )),
-            parent_tool("parent-third"),
-            responses::sse_response(responses::sse(vec![responses::ev_response_created(
-                "guardian-pending",
-            )]))
-            .set_delay(READ_TIMEOUT),
-        ],
-    )
-    .await;
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        // Basic Guardian command approvals require host-native paths.
-        .without_auto_env()
-        .build_initialized_with_timeout(READ_TIMEOUT)
-        .await?;
-    let ThreadStartResponse { thread, .. } = app_server
-        .request(|request_id| ClientRequest::ThreadStart {
-            request_id,
-            params: ThreadStartParams {
-                approval_policy: Some(AskForApproval::OnRequest),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                responses::ev_completed(id),
+            ]))
+        };
+        let requests = responses::mount_response_sequence(
+            &server,
+            vec![
+                parent_tool("parent-first"),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("guardian-first"),
+                    responses::ev_web_search_call_added_partial("guardian-search", "in_progress"),
+                    responses::ev_web_search_call_done("guardian-search", "completed", PRIVATE),
+                    responses::ev_reasoning_item("guardian-reasoning", &[PRIVATE], &[PRIVATE]),
+                    responses::ev_assistant_message(
+                        "guardian-answer",
+                        &json!({"outcome": "deny", "rationale": PRIVATE}).to_string(),
+                    ),
+                    responses::ev_completed("guardian-first"),
+                ])),
+                parent_tool("parent-second"),
+                responses::sse_response(responses::sse_failed(
+                    "guardian-failed",
+                    "invalid_prompt",
+                    PRIVATE,
+                )),
+                parent_tool("parent-third"),
+                responses::sse_response(responses::sse(vec![responses::ev_response_created(
+                    "guardian-pending",
+                )]))
+                .set_delay(READ_TIMEOUT),
+            ],
+        )
+        .await;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            // Basic Guardian command approvals require host-native paths.
+            .without_auto_env()
+            .build_initialized_with_timeout(READ_TIMEOUT)
+            .await?;
+        let ThreadStartResponse { thread, .. } = app_server
+            .request(|request_id| ClientRequest::ThreadStart {
+                request_id,
+                params: ThreadStartParams {
+                    approval_policy: Some(AskForApproval::OnRequest),
+                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let request_id = app_server
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "Review three commands".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                effort: Some(ReasoningEffort::High),
                 ..Default::default()
-            },
-        })
-        .await?;
-    let request_id = app_server
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![UserInput::Text {
-                text: "Review three commands".to_string(),
-                text_elements: Vec::new(),
-            }],
-            effort: Some(ReasoningEffort::High),
-            ..Default::default()
-        })
-        .await?;
-    let TurnStartResponse { turn } =
-        timeout(READ_TIMEOUT, app_server.read_response(request_id)).await??;
-    let reviews = timeout(READ_TIMEOUT, async {
-        loop {
-            let reviews = requests
-                .requests()
-                .into_iter()
-                .map(|request| request.body_json()["client_metadata"].clone())
-                .filter(|metadata| metadata["x-openai-subagent"] == "guardian")
-                .collect::<Vec<_>>();
-            if reviews.len() == 3 {
-                break reviews;
+            })
+            .await?;
+        let TurnStartResponse { turn } =
+            timeout(READ_TIMEOUT, app_server.read_response(request_id)).await??;
+        let reviews = timeout(READ_TIMEOUT, async {
+            loop {
+                let reviews = requests
+                    .requests()
+                    .into_iter()
+                    .map(|request| request.body_json()["client_metadata"].clone())
+                    .filter(|metadata| metadata["x-openai-subagent"] == "guardian")
+                    .collect::<Vec<_>>();
+                if reviews.len() == 3 {
+                    break reviews;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await?;
-    app_server
-        .interrupt_turn_and_wait_for_aborted(thread.id.clone(), turn.id, READ_TIMEOUT)
-        .await?;
-    wait_for_matching_analytics_event(&server, READ_TIMEOUT, |event| {
-        event["event_type"] == "codex_turn_event"
-            && event["event_params"]["turn_id"] == reviews[2]["turn_id"]
-    })
-    .await?;
-    timeout(READ_TIMEOUT, app_server.shutdown_gracefully()).await??;
-    let events = captured_analytics_events(&server).await;
-    assert!(!serde_json::to_string(&events)?.contains(PRIVATE));
-    let parent_command = events
-        .iter()
-        .find(|event| {
-            event["event_type"] == "codex_command_execution_event"
-                && event["event_params"]["thread_id"] == thread.id
-                && event["event_params"]["item_id"] == "parent-first"
         })
-        .expect("denied parent command analytics");
-    let params = &parent_command["event_params"];
-    assert_eq!(
-        json!([params["model_slug"], params["reasoning_effort"]]),
-        json!(["mock-model", "high"])
-    );
-    let children = events
-        .iter()
-        .filter(|event| event["event_params"]["subagent_source"] == "guardian")
-        .collect::<Vec<_>>();
-    for event in &children {
-        let params = &event["event_params"];
+        .await?;
+        app_server
+            .interrupt_turn_and_wait_for_aborted(thread.id.clone(), turn.id, READ_TIMEOUT)
+            .await?;
+        wait_for_matching_analytics_event(&server, READ_TIMEOUT, |event| {
+            event["event_type"] == "codex_turn_event"
+                && event["event_params"]["turn_id"] == reviews[2]["turn_id"]
+        })
+        .await?;
+        timeout(READ_TIMEOUT, app_server.shutdown_gracefully()).await??;
+        let events = captured_analytics_events(&server).await;
+        assert!(!serde_json::to_string(&events)?.contains(PRIVATE));
+        let parent_command = events
+            .iter()
+            .find(|event| {
+                event["event_type"] == "codex_command_execution_event"
+                    && event["event_params"]["thread_id"] == thread.id
+                    && event["event_params"]["item_id"] == "parent-first"
+            })
+            .expect("denied parent command analytics");
+        let params = &parent_command["event_params"];
+        assert_eq!(
+            json!([params["model_slug"], params["reasoning_effort"]]),
+            json!(["mock-model", "high"])
+        );
+        let children = events
+            .iter()
+            .filter(|event| event["event_params"]["subagent_source"] == "guardian")
+            .collect::<Vec<_>>();
+        for event in &children {
+            let params = &event["event_params"];
+            assert_eq!(
+                json!([
+                    params["thread_id"],
+                    params["session_id"],
+                    params["parent_thread_id"],
+                    params["thread_source"]
+                ]),
+                json!([
+                    reviews[0]["thread_id"],
+                    thread.session_id,
+                    thread.id,
+                    "guardian_review"
+                ])
+            );
+        }
+        let turns = children
+            .iter()
+            .filter(|event| event["event_type"] == "codex_turn_event")
+            .map(|event| {
+                let params = &event["event_params"];
+                let started_at = params["started_at"].as_u64().expect("turn start time");
+                let completed_at = params["completed_at"]
+                    .as_u64()
+                    .expect("turn completion time");
+                assert!(started_at > 0 && completed_at >= started_at);
+                assert!(params["duration_ms"].is_u64());
+                assert_eq!(params["guardian_v2_enabled"], false);
+                json!([
+                    params["turn_id"],
+                    params["status"],
+                    params["turn_error"],
+                    params["total_tool_call_count"],
+                    params["web_search_count"]
+                ])
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            turns,
+            vec![
+                json!([reviews[0]["turn_id"], "completed", null, 1, 1]),
+                json!([reviews[1]["turn_id"], "failed", "other", 0, 0]),
+                json!([reviews[2]["turn_id"], "interrupted", null, 0, 0]),
+            ]
+        );
+        let tools = children
+            .iter()
+            .filter(|event| event["event_type"] == "codex_web_search_event")
+            .collect::<Vec<_>>();
+        let [tool] = tools.as_slice() else {
+            anyhow::bail!(
+                "expected one Guardian web search event, got {}",
+                tools.len()
+            );
+        };
+        let params = &tool["event_params"];
+        let started_at = params["started_at_ms"].as_u64().expect("tool start time");
+        let completed_at = params["completed_at_ms"]
+            .as_u64()
+            .expect("tool completion time");
+        assert!(started_at > 0 && completed_at >= started_at);
+        assert_eq!(params["duration_ms"], completed_at - started_at);
         assert_eq!(
             json!([
-                params["thread_id"],
-                params["session_id"],
-                params["parent_thread_id"],
-                params["thread_source"]
-            ]),
-            json!([
-                reviews[0]["thread_id"],
-                thread.session_id,
-                thread.id,
-                "guardian_review"
-            ])
-        );
-    }
-    let turns = children
-        .iter()
-        .filter(|event| event["event_type"] == "codex_turn_event")
-        .map(|event| {
-            let params = &event["event_params"];
-            let started_at = params["started_at"].as_u64().expect("turn start time");
-            let completed_at = params["completed_at"]
-                .as_u64()
-                .expect("turn completion time");
-            assert!(started_at > 0 && completed_at >= started_at);
-            assert!(params["duration_ms"].is_u64());
-            assert_eq!(params["guardian_v2_enabled"], false);
-            json!([
                 params["turn_id"],
-                params["status"],
-                params["turn_error"],
-                params["total_tool_call_count"],
-                params["web_search_count"]
-            ])
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        turns,
-        vec![
-            json!([reviews[0]["turn_id"], "completed", null, 1, 1]),
-            json!([reviews[1]["turn_id"], "failed", "other", 0, 0]),
-            json!([reviews[2]["turn_id"], "interrupted", null, 0, 0]),
-        ]
-    );
-    let tools = children
-        .iter()
-        .filter(|event| event["event_type"] == "codex_web_search_event")
-        .collect::<Vec<_>>();
-    let [tool] = tools.as_slice() else {
-        anyhow::bail!(
-            "expected one Guardian web search event, got {}",
-            tools.len()
+                params["item_id"],
+                params["terminal_status"]
+            ]),
+            json!([reviews[0]["turn_id"], "guardian-search", "completed"])
         );
-    };
-    let params = &tool["event_params"];
-    let started_at = params["started_at_ms"].as_u64().expect("tool start time");
-    let completed_at = params["completed_at_ms"]
-        .as_u64()
-        .expect("tool completion time");
-    assert!(started_at > 0 && completed_at >= started_at);
-    assert_eq!(params["duration_ms"], completed_at - started_at);
-    assert_eq!(
-        json!([
-            params["turn_id"],
-            params["item_id"],
-            params["terminal_status"]
-        ]),
-        json!([reviews[0]["turn_id"], "guardian-search", "completed"])
-    );
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -797,45 +801,45 @@ async fn assert_plugin_measurement_analytics(remote: bool, background: bool) -> 
     }
     response_sequence.push(final_response);
     let server = create_mock_responses_server_sequence(response_sequence).await;
-
-    let analytics_server = responses::start_mock_server().await;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        codex_home.path(),
-        &server.uri(),
-        &analytics_server.uri(),
-    )?;
-    let config_path = codex_home.path().join("config.toml");
-    let config = std::fs::read_to_string(&config_path)?;
-    let model = bundled_models_response()?
-        .models
+    mock_server::run(&[&server], async {
+        let analytics_server = responses::start_mock_server().await;
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            codex_home.path(),
+            &server.uri(),
+            &analytics_server.uri(),
+        )?;
+        let config_path = codex_home.path().join("config.toml");
+        let config = std::fs::read_to_string(&config_path)?;
+        let model = bundled_models_response()?
+            .models
+            .into_iter()
+            .find(|model| model.slug == "gpt-5.5")
+            .expect("bundled gpt-5.5 model");
+        let models = [
+            ("initial-model", ReasoningEffort::Low),
+            ("invoking-model", ReasoningEffort::High),
+        ]
         .into_iter()
-        .find(|model| model.slug == "gpt-5.5")
-        .expect("bundled gpt-5.5 model");
-    let models = [
-        ("initial-model", ReasoningEffort::Low),
-        ("invoking-model", ReasoningEffort::High),
-    ]
-    .into_iter()
-    .map(|(slug, effort)| {
-        let mut model = model.clone();
-        model.slug = slug.to_string();
-        model.default_reasoning_level = Some(effort);
-        model
-    })
-    .collect();
-    let catalog_path = codex_home.path().join("measurement-models.json");
-    std::fs::write(
-        &catalog_path,
-        serde_json::to_vec(&ModelsResponse { models })?,
-    )?;
-    let catalog_config = format!(
-        "model_catalog_json = {}",
-        serde_json::to_string(&catalog_path)?
-    );
-    std::fs::write(
-        config_path,
-        format!(
-            r#"{catalog_config}
+        .map(|(slug, effort)| {
+            let mut model = model.clone();
+            model.slug = slug.to_string();
+            model.default_reasoning_level = Some(effort);
+            model
+        })
+        .collect();
+        let catalog_path = codex_home.path().join("measurement-models.json");
+        std::fs::write(
+            &catalog_path,
+            serde_json::to_vec(&ModelsResponse { models })?,
+        )?;
+        let catalog_config = format!(
+            "model_catalog_json = {}",
+            serde_json::to_string(&catalog_path)?
+        );
+        std::fs::write(
+            config_path,
+            format!(
+                r#"{catalog_config}
 {config}
 [features]
 step_model_switching = true
@@ -849,237 +853,246 @@ unified_exec_zsh_fork = false
 [plugins."{METRICS_PLUGIN_ID}"]
 enabled = true
 "#,
-        ),
-    )?;
-    mount_analytics_capture(&analytics_server, codex_home.path()).await?;
+            ),
+        )?;
+        mount_analytics_capture(&analytics_server, codex_home.path()).await?;
 
-    let mut builder = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config();
-    if remote {
-        builder = builder.with_exec_server_delay(Duration::ZERO);
-    }
-    let mut mcp = builder.build().await?;
-    if remote {
-        assert_eq!(
-            mcp.auto_env_params()?.environment_id,
-            codex_exec_server::REMOTE_ENVIRONMENT_ID
-        );
-    }
-    timeout(Duration::from_secs(10), mcp.initialize()).await??;
-    let thread_request = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("initial-model".to_string()),
-            service_name: Some("codex_work_desktop".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let thread_response: JSONRPCResponse = timeout(
-        Duration::from_secs(10),
-        mcp.read_stream_until_response_message(RequestId::Integer(thread_request)),
-    )
-    .await??;
-    let ThreadStartResponse { thread, .. } = to_response(thread_response)?;
-    let thread_id = thread.id.clone();
-
-    let turn_request = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id,
-            input: vec![UserInput::Text {
-                text: "run the curated plugin metrics script".to_string(),
-                text_elements: Vec::new(),
-            }],
-            sandbox_policy: Some(SandboxPolicy::ReadOnly {
-                network_access: false,
-            }),
-            ..Default::default()
-        })
-        .await?;
-    let turn_response = timeout(
-        Duration::from_secs(10),
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_request)),
-    )
-    .await??;
-    let turn_response: TurnStartResponse = to_response(turn_response)?;
-    for model in if background {
-        vec!["invoking-model", "initial-model"]
-    } else {
-        vec!["invoking-model"]
-    } {
-        let request = timeout(
-            Duration::from_secs(10),
-            mcp.read_stream_until_request_message(),
-        )
-        .await??;
-        let ServerRequest::ToolRequestUserInput { request_id, .. } = request else {
-            anyhow::bail!("expected request_user_input, received {request:?}");
-        };
-        let response: TurnSettingsUpdateResponse = mcp
-            .request(|request_id| ClientRequest::TurnSettingsUpdate {
-                request_id,
-                params: TurnSettingsUpdateParams {
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_response.turn.id.clone(),
-                    model: Some(model.to_string()),
-                    ..Default::default()
-                },
+        let mut builder = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config();
+        if remote {
+            builder = builder.with_exec_server_delay(Duration::ZERO);
+        }
+        let mut mcp = builder.build().await?;
+        if remote {
+            assert_eq!(
+                mcp.auto_env_params()?.environment_id,
+                codex_exec_server::REMOTE_ENVIRONMENT_ID
+            );
+        }
+        timeout(Duration::from_secs(10), mcp.initialize()).await??;
+        let thread_request = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("initial-model".to_string()),
+                service_name: Some("codex_work_desktop".to_string()),
+                ..Default::default()
             })
             .await?;
-        assert_eq!(response.status, TurnSettingsUpdateStatus::Applied);
-        mcp.send_response(
-            request_id,
-            json!({"answers": {"continue": {"answers": ["Yes"]}}}),
+        let thread_response: JSONRPCResponse = timeout(
+            Duration::from_secs(10),
+            mcp.read_stream_until_response_message(RequestId::Integer(thread_request)),
         )
-        .await?;
-    }
-    let completed_turn = timeout(
-        Duration::from_secs(10),
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    let turn_id = completed_turn
-        .params
-        .as_ref()
-        .and_then(|params| params["turn"]["id"].as_str())
-        .expect("completed turn id");
+        .await??;
+        let ThreadStartResponse { thread, .. } = to_response(thread_response)?;
+        let thread_id = thread.id.clone();
 
-    if background {
-        std::fs::write(release_path, "release")?;
-    }
-
-    for measurement_name in ["findings", "files_scanned"] {
-        wait_for_matching_analytics_event(&analytics_server, Duration::from_secs(10), |event| {
-            event["event_type"] == "codex_plugin_measurement_event"
-                && event["event_params"]["item_id"] == call_id
-                && event["event_params"]["measurement_name"] == measurement_name
-        })
-        .await?;
-    }
-    let command_event =
-        wait_for_matching_analytics_event(&analytics_server, Duration::from_secs(10), |event| {
-            event["event_type"] == "codex_command_execution_event"
-                && event["event_params"]["item_id"] == call_id
-        })
-        .await?;
-    assert_eq!(
-        json!({
-            "model_slug": command_event["event_params"]["model_slug"],
-            "sandbox_backend": command_event["event_params"]["sandbox_backend"],
-            "reasoning_effort": command_event["event_params"]["reasoning_effort"],
-            "plugin_id": command_event["event_params"]["plugin_id"],
-            "script_path": command_event["event_params"]["script_path"],
-            "item_id": command_event["event_params"]["item_id"],
-            "exit_code": command_event["event_params"]["exit_code"],
-        }),
-        json!({
-            "model_slug": "invoking-model",
-            "sandbox_backend": if cfg!(target_os = "macos") { "seatbelt" } else { "seccomp" },
-            "reasoning_effort": "high",
-            "plugin_id": METRICS_PLUGIN_ID,
-            "script_path": "scripts/run.sh",
-            "item_id": call_id,
-            "exit_code": 0,
-        })
-    );
-    let mut measurement_events = Vec::new();
-    for request in analytics_server
-        .received_requests()
-        .await
-        .unwrap_or_default()
-    {
-        if request.method != "POST" || request.url.path() != "/codex/analytics-events/events" {
-            continue;
+        let turn_request = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id,
+                input: vec![UserInput::Text {
+                    text: "run the curated plugin metrics script".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                    network_access: false,
+                }),
+                ..Default::default()
+            })
+            .await?;
+        let turn_response = timeout(
+            Duration::from_secs(10),
+            mcp.read_stream_until_response_message(RequestId::Integer(turn_request)),
+        )
+        .await??;
+        let turn_response: TurnStartResponse = to_response(turn_response)?;
+        for model in if background {
+            vec!["invoking-model", "initial-model"]
+        } else {
+            vec!["invoking-model"]
+        } {
+            let request = timeout(
+                Duration::from_secs(10),
+                mcp.read_stream_until_request_message(),
+            )
+            .await??;
+            let ServerRequest::ToolRequestUserInput { request_id, .. } = request else {
+                anyhow::bail!("expected request_user_input, received {request:?}");
+            };
+            let response: TurnSettingsUpdateResponse = mcp
+                .request(|request_id| ClientRequest::TurnSettingsUpdate {
+                    request_id,
+                    params: TurnSettingsUpdateParams {
+                        thread_id: thread_id.clone(),
+                        turn_id: turn_response.turn.id.clone(),
+                        model: Some(model.to_string()),
+                        ..Default::default()
+                    },
+                })
+                .await?;
+            assert_eq!(response.status, TurnSettingsUpdateStatus::Applied);
+            mcp.send_response(
+                request_id,
+                json!({"answers": {"continue": {"answers": ["Yes"]}}}),
+            )
+            .await?;
         }
-        let payload: Value = serde_json::from_slice(&request.body)?;
-        let Some(events) = payload["events"].as_array() else {
-            continue;
-        };
-        measurement_events.extend(
-            events
-                .iter()
-                .filter(|event| {
+        let completed_turn = timeout(
+            Duration::from_secs(10),
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        let turn_id = completed_turn
+            .params
+            .as_ref()
+            .and_then(|params| params["turn"]["id"].as_str())
+            .expect("completed turn id");
+
+        if background {
+            std::fs::write(release_path, "release")?;
+        }
+
+        for measurement_name in ["findings", "files_scanned"] {
+            wait_for_matching_analytics_event(
+                &analytics_server,
+                Duration::from_secs(10),
+                |event| {
                     event["event_type"] == "codex_plugin_measurement_event"
                         && event["event_params"]["item_id"] == call_id
-                })
-                .cloned(),
-        );
-    }
-    measurement_events.sort_by(|left, right| {
-        left["event_params"]["measurement_name"]
-            .as_str()
-            .cmp(&right["event_params"]["measurement_name"].as_str())
-    });
-    assert_eq!(measurement_events.len(), 2);
-    let execution_id = measurement_events[0]["event_params"]["execution_id"]
-        .as_str()
-        .expect("measurement execution id");
-    assert!(!execution_id.is_empty());
-    assert_eq!(
-        measurement_events[1]["event_params"]["execution_id"].as_str(),
-        Some(execution_id)
-    );
-    assert_eq!(
-        measurement_events
-            .iter()
-            .map(|event| json!({
-                "plugin_id": event["event_params"]["plugin_id"],
-                "operation": event["event_params"]["operation"],
-                "measurement_name": event["event_params"]["measurement_name"],
-                "number_value": event["event_params"]["number_value"],
-                "dimensions": event["event_params"]["dimensions"],
-                "item_id": event["event_params"]["item_id"],
-            }))
-            .collect::<Vec<_>>(),
-        vec![
-            json!({
-                "plugin_id": METRICS_PLUGIN_ID,
-                "operation": "scan",
-                "measurement_name": "files_scanned",
-                "number_value": 17.0,
-                "dimensions": null,
-                "item_id": call_id,
-            }),
-            json!({
-                "plugin_id": METRICS_PLUGIN_ID,
-                "operation": "scan",
-                "measurement_name": "findings",
-                "number_value": 3.0,
-                "dimensions": {"severity": "high"},
-                "item_id": call_id,
-            }),
-        ]
-    );
-    for event in &measurement_events {
-        let event_params = event["event_params"]
-            .as_object()
-            .expect("measurement event params");
-        let mut field_names = event_params.keys().map(String::as_str).collect::<Vec<_>>();
-        field_names.sort_unstable();
+                        && event["event_params"]["measurement_name"] == measurement_name
+                },
+            )
+            .await?;
+        }
+        let command_event = wait_for_matching_analytics_event(
+            &analytics_server,
+            Duration::from_secs(10),
+            |event| {
+                event["event_type"] == "codex_command_execution_event"
+                    && event["event_params"]["item_id"] == call_id
+            },
+        )
+        .await?;
         assert_eq!(
-            field_names,
+            json!({
+                "model_slug": command_event["event_params"]["model_slug"],
+                "sandbox_backend": command_event["event_params"]["sandbox_backend"],
+                "reasoning_effort": command_event["event_params"]["reasoning_effort"],
+                "plugin_id": command_event["event_params"]["plugin_id"],
+                "script_path": command_event["event_params"]["script_path"],
+                "item_id": command_event["event_params"]["item_id"],
+                "exit_code": command_event["event_params"]["exit_code"],
+            }),
+            json!({
+                "model_slug": "invoking-model",
+                "sandbox_backend": if cfg!(target_os = "macos") { "seatbelt" } else { "seccomp" },
+                "reasoning_effort": "high",
+                "plugin_id": METRICS_PLUGIN_ID,
+                "script_path": "scripts/run.sh",
+                "item_id": call_id,
+                "exit_code": 0,
+            })
+        );
+        let mut measurement_events = Vec::new();
+        for request in analytics_server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+        {
+            if request.method != "POST" || request.url.path() != "/codex/analytics-events/events" {
+                continue;
+            }
+            let payload: Value = serde_json::from_slice(&request.body)?;
+            let Some(events) = payload["events"].as_array() else {
+                continue;
+            };
+            measurement_events.extend(
+                events
+                    .iter()
+                    .filter(|event| {
+                        event["event_type"] == "codex_plugin_measurement_event"
+                            && event["event_params"]["item_id"] == call_id
+                    })
+                    .cloned(),
+            );
+        }
+        measurement_events.sort_by(|left, right| {
+            left["event_params"]["measurement_name"]
+                .as_str()
+                .cmp(&right["event_params"]["measurement_name"].as_str())
+        });
+        assert_eq!(measurement_events.len(), 2);
+        let execution_id = measurement_events[0]["event_params"]["execution_id"]
+            .as_str()
+            .expect("measurement execution id");
+        assert!(!execution_id.is_empty());
+        assert_eq!(
+            measurement_events[1]["event_params"]["execution_id"].as_str(),
+            Some(execution_id)
+        );
+        assert_eq!(
+            measurement_events
+                .iter()
+                .map(|event| json!({
+                    "plugin_id": event["event_params"]["plugin_id"],
+                    "operation": event["event_params"]["operation"],
+                    "measurement_name": event["event_params"]["measurement_name"],
+                    "number_value": event["event_params"]["number_value"],
+                    "dimensions": event["event_params"]["dimensions"],
+                    "item_id": event["event_params"]["item_id"],
+                }))
+                .collect::<Vec<_>>(),
             vec![
-                "dimensions",
-                "execution_id",
-                "item_id",
-                "measurement_name",
-                "model_slug",
-                "number_value",
-                "operation",
-                "originator",
-                "plugin_id",
-                "reasoning_effort",
-                "thread_id",
-                "turn_id",
+                json!({
+                    "plugin_id": METRICS_PLUGIN_ID,
+                    "operation": "scan",
+                    "measurement_name": "files_scanned",
+                    "number_value": 17.0,
+                    "dimensions": null,
+                    "item_id": call_id,
+                }),
+                json!({
+                    "plugin_id": METRICS_PLUGIN_ID,
+                    "operation": "scan",
+                    "measurement_name": "findings",
+                    "number_value": 3.0,
+                    "dimensions": {"severity": "high"},
+                    "item_id": call_id,
+                }),
             ]
         );
-        assert_eq!(event_params["thread_id"], thread_id);
-        assert_eq!(event_params["turn_id"], turn_id);
-        assert_eq!(event_params["originator"], "codex_work_desktop");
-        assert_eq!(event_params["model_slug"], "invoking-model");
-        assert_eq!(event_params["reasoning_effort"], "high");
-    }
+        for event in &measurement_events {
+            let event_params = event["event_params"]
+                .as_object()
+                .expect("measurement event params");
+            let mut field_names = event_params.keys().map(String::as_str).collect::<Vec<_>>();
+            field_names.sort_unstable();
+            assert_eq!(
+                field_names,
+                vec![
+                    "dimensions",
+                    "execution_id",
+                    "item_id",
+                    "measurement_name",
+                    "model_slug",
+                    "number_value",
+                    "operation",
+                    "originator",
+                    "plugin_id",
+                    "reasoning_effort",
+                    "thread_id",
+                    "turn_id",
+                ]
+            );
+            assert_eq!(event_params["thread_id"], thread_id);
+            assert_eq!(event_params["turn_id"], turn_id);
+            assert_eq!(event_params["originator"], "codex_work_desktop");
+            assert_eq!(event_params["model_slug"], "invoking-model");
+            assert_eq!(event_params["reasoning_effort"], "high");
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(windows, ignore = "plugin metrics fixture is Unix-only")]

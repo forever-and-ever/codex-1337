@@ -8,6 +8,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::turn_input::TurnInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
@@ -29,6 +30,7 @@ async fn guardian_receives_sender_user_messages_by_default(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_pre_build_hook(move |home| {
             if let Some(enabled) = thread_context {
@@ -201,4 +203,6 @@ async fn guardian_receives_sender_user_messages_by_default(
     }
     assert_eq!(requests.len(), 10);
     Ok(())
+    })
+    .await
 }

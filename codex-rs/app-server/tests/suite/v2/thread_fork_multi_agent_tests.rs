@@ -33,6 +33,7 @@ use codex_features::Feature;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_rollout::read_session_meta_line;
 use core_test_support::load_default_config_for_test;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -61,161 +62,164 @@ async fn running_thread_fork_keeps_parent_approval(history_mode: ThreadHistoryMo
         create_final_assistant_message_sse_response("Parent done")?,
     ])
     .await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::MultiAgentV2)
-        .with_root_config(r#"approvals_reviewer = "user""#)
-        .write(codex_home.path())?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let parent = mcp
-        .start_thread(ThreadStartParams {
-            history_mode: Some(history_mode),
-            ..Default::default()
-        })
-        .await?
-        .thread;
-    let TurnStartResponse { turn: parent_turn } = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: parent.id.clone(),
-                approval_policy: Some(AskForApproval::UnlessTrusted),
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .enable_feature(Feature::MultiAgentV2)
+            .with_root_config(r#"approvals_reviewer = "user""#)
+            .write(codex_home.path())?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let parent = mcp
+            .start_thread(ThreadStartParams {
+                history_mode: Some(history_mode),
+                ..Default::default()
+            })
+            .await?
+            .thread;
+        let TurnStartResponse { turn: parent_turn } = mcp
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: parent.id.clone(),
+                    approval_policy: Some(AskForApproval::UnlessTrusted),
+                    input: vec![UserInput::Text {
+                        text: "Run the command".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let approval = timeout(READ_TIMEOUT, mcp.read_stream_until_request_message()).await??;
+        let ServerRequest::CommandExecutionRequestApproval {
+            request_id: approval_id,
+            params,
+        } = approval
+        else {
+            panic!("expected command approval");
+        };
+        assert_eq!(
+            (&params.thread_id, &params.turn_id, params.item_id.as_str()),
+            (&parent.id, &parent_turn.id, "parent-call")
+        );
+        let ThreadForkResponse { thread: fork, .. } = mcp
+            .request(|request_id| ClientRequest::ThreadFork {
+                request_id,
+                params: ThreadForkParams {
+                    thread_id: parent.id.clone(),
+                    defer_goal_continuation: true,
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert_eq!(fork.status, ThreadStatus::Idle);
+        assert_eq!(
+            fork.turns.last().expect("partial inherited turn").status,
+            TurnStatus::Interrupted
+        );
+        let _: ThreadUnsubscribeResponse = mcp
+            .request(|request_id| ClientRequest::ThreadUnsubscribe {
+                request_id,
+                params: ThreadUnsubscribeParams {
+                    thread_id: parent.id.clone(),
+                },
+            })
+            .await?;
+
+        let completed = mcp
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: fork.id.clone(),
                 input: vec![UserInput::Text {
-                    text: "Run the command".into(),
+                    text: "Continue in the fork".into(),
                     text_elements: Vec::new(),
                 }],
                 ..Default::default()
-            },
-        })
-        .await?;
-    let approval = timeout(READ_TIMEOUT, mcp.read_stream_until_request_message()).await??;
-    let ServerRequest::CommandExecutionRequestApproval {
-        request_id: approval_id,
-        params,
-    } = approval
-    else {
-        panic!("expected command approval");
-    };
-    assert_eq!(
-        (&params.thread_id, &params.turn_id, params.item_id.as_str()),
-        (&parent.id, &parent_turn.id, "parent-call")
-    );
-    let ThreadForkResponse { thread: fork, .. } = mcp
-        .request(|request_id| ClientRequest::ThreadFork {
-            request_id,
-            params: ThreadForkParams {
-                thread_id: parent.id.clone(),
-                defer_goal_continuation: true,
-                ..Default::default()
-            },
-        })
-        .await?;
-    assert_eq!(fork.status, ThreadStatus::Idle);
-    assert_eq!(
-        fork.turns.last().expect("partial inherited turn").status,
-        TurnStatus::Interrupted
-    );
-    let _: ThreadUnsubscribeResponse = mcp
-        .request(|request_id| ClientRequest::ThreadUnsubscribe {
-            request_id,
-            params: ThreadUnsubscribeParams {
-                thread_id: parent.id.clone(),
-            },
-        })
-        .await?;
-
-    let completed = mcp
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: fork.id.clone(),
-            input: vec![UserInput::Text {
-                text: "Continue in the fork".into(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(completed.turn.status, TurnStatus::Completed);
-    let requests = server.received_requests().await.expect("model requests");
-    let input = requests
-        .last()
-        .expect("fork model request")
-        .body_json::<Value>()?["input"]
-        .clone();
-    assert!(serde_json::to_string(&input)?.contains("<turn_aborted>"));
-    assert!(
-        input
-            .as_array()
-            .expect("model input")
-            .iter()
-            .any(|item| item["type"] == "function_call_output"
-                && item["call_id"] == "parent-call"
-                && item["output"] == "aborted")
-    );
-
-    // Navigation unsubscribes the parent, but does not cancel its turn or resolve approval.
-    let resumed: ThreadResumeResponse = mcp
-        .request(|request_id| ClientRequest::ThreadResume {
-            request_id,
-            params: ThreadResumeParams {
-                thread_id: parent.id.clone(),
-                ..Default::default()
-            },
-        })
-        .await?;
-    assert!(matches!(resumed.thread.status, ThreadStatus::Active { .. }));
-    assert_eq!(
-        resumed
-            .thread
-            .turns
+            })
+            .await?;
+        assert_eq!(completed.turn.status, TurnStatus::Completed);
+        let requests = server.received_requests().await.expect("model requests");
+        let input = requests
             .last()
-            .expect("running parent turn")
-            .status,
-        TurnStatus::InProgress
-    );
-    let replayed = timeout(READ_TIMEOUT, mcp.read_stream_until_request_message()).await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = replayed else {
-        panic!("expected replayed command approval");
-    };
-    assert_eq!(request_id, approval_id);
-    assert_eq!(
-        (&params.thread_id, &params.turn_id),
-        (&parent.id, &parent_turn.id)
-    );
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(CommandExecutionRequestApprovalResponse {
-            decision: CommandExecutionApprovalDecision::Accept,
-        })?,
-    )
-    .await?;
-    let completed: TurnCompletedNotification =
-        timeout(READ_TIMEOUT, mcp.read_notification("turn/completed")).await??;
-    assert_eq!(
-        (
-            completed.thread_id,
-            completed.turn.id,
-            completed.turn.status
-        ),
-        (parent.id, parent_turn.id, TurnStatus::Completed)
-    );
-    let requests = server.received_requests().await.expect("model requests");
-    let input = requests
-        .last()
-        .expect("parent model request")
-        .body_json::<Value>()?["input"]
-        .clone();
-    assert!(!serde_json::to_string(&input)?.contains("<turn_aborted>"));
-    assert!(input.as_array().expect("model input").iter().any(|item| {
-        item["type"] == "function_call_output"
-            && item["call_id"] == "parent-call"
-            && item["output"]
-                .as_str()
-                .is_some_and(|output| output.contains("parent-finished"))
-    }));
-    Ok(())
+            .expect("fork model request")
+            .body_json::<Value>()?["input"]
+            .clone();
+        assert!(serde_json::to_string(&input)?.contains("<turn_aborted>"));
+        assert!(
+            input
+                .as_array()
+                .expect("model input")
+                .iter()
+                .any(|item| item["type"] == "function_call_output"
+                    && item["call_id"] == "parent-call"
+                    && item["output"] == "aborted")
+        );
+
+        // Navigation unsubscribes the parent, but does not cancel its turn or resolve approval.
+        let resumed: ThreadResumeResponse = mcp
+            .request(|request_id| ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id: parent.id.clone(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert!(matches!(resumed.thread.status, ThreadStatus::Active { .. }));
+        assert_eq!(
+            resumed
+                .thread
+                .turns
+                .last()
+                .expect("running parent turn")
+                .status,
+            TurnStatus::InProgress
+        );
+        let replayed = timeout(READ_TIMEOUT, mcp.read_stream_until_request_message()).await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = replayed else {
+            panic!("expected replayed command approval");
+        };
+        assert_eq!(request_id, approval_id);
+        assert_eq!(
+            (&params.thread_id, &params.turn_id),
+            (&parent.id, &parent_turn.id)
+        );
+        mcp.send_response(
+            request_id,
+            serde_json::to_value(CommandExecutionRequestApprovalResponse {
+                decision: CommandExecutionApprovalDecision::Accept,
+            })?,
+        )
+        .await?;
+        let completed: TurnCompletedNotification =
+            timeout(READ_TIMEOUT, mcp.read_notification("turn/completed")).await??;
+        assert_eq!(
+            (
+                completed.thread_id,
+                completed.turn.id,
+                completed.turn.status
+            ),
+            (parent.id, parent_turn.id, TurnStatus::Completed)
+        );
+        let requests = server.received_requests().await.expect("model requests");
+        let input = requests
+            .last()
+            .expect("parent model request")
+            .body_json::<Value>()?["input"]
+            .clone();
+        assert!(!serde_json::to_string(&input)?.contains("<turn_aborted>"));
+        assert!(input.as_array().expect("model input").iter().any(|item| {
+            item["type"] == "function_call_output"
+                && item["call_id"] == "parent-call"
+                && item["output"]
+                    .as_str()
+                    .is_some_and(|output| output.contains("parent-finished"))
+        }));
+        Ok(())
+    })
+    .await
 }
 
 enum SourceState {

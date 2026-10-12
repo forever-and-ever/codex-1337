@@ -43,6 +43,7 @@ use codex_utils_string::approx_bytes_for_tokens;
 use core_test_support::PathBufExt;
 use core_test_support::create_directory_symlink;
 use core_test_support::load_default_config_for_test;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -716,81 +717,84 @@ async fn untrusted_project_excludes_project_instructions() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn runtime_trust_reload_refreshes_project_instructions() -> Result<()> {
     let server = start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
-            sse(vec![ev_response_created("resp2"), ev_completed("resp2")]),
-            sse(vec![ev_response_created("resp3"), ev_completed("resp3")]),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let global_agents =
-        write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
-    let mut builder = test_codex()
-        .with_home(home)
-        .with_config(|config| {
-            config.active_project.trust_level = Some(TrustLevel::Trusted);
-        })
-        .with_workspace_setup(|cwd, fs| async move {
-            fs.write_file(
-                &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
-                PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
-                Default::default(),
-                /*sandbox*/ None,
-            )
-            .await?;
-            Ok::<(), anyhow::Error>(())
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    let project_agents = test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?;
-    let global_agents = PathUri::from_abs_path(&global_agents);
-
-    test.submit_turn("trusted project").await?;
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![global_agents.clone(), project_agents.clone()]
-    );
-
-    let current_config = test.codex.config().await;
-    let mut untrusted_config = current_config.as_ref().clone();
-    untrusted_config.active_project.trust_level = Some(TrustLevel::Untrusted);
-    let _ = test
-        .codex
-        .refresh_runtime_config(current_config, untrusted_config)
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
+                sse(vec![ev_response_created("resp2"), ev_completed("resp2")]),
+                sse(vec![ev_response_created("resp3"), ev_completed("resp3")]),
+            ],
+        )
         .await;
-    test.submit_turn("untrusted project").await?;
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![global_agents.clone()]
-    );
+        let home = Arc::new(TempDir::new()?);
+        let global_agents =
+            write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
+        let mut builder = test_codex()
+            .with_home(home)
+            .with_config(|config| {
+                config.active_project.trust_level = Some(TrustLevel::Trusted);
+            })
+            .with_workspace_setup(|cwd, fs| async move {
+                fs.write_file(
+                    &executor_path_uri(cwd.join(GLOBAL_AGENTS_FILENAME))?,
+                    PROJECT_INSTRUCTIONS.as_bytes().to_vec(),
+                    Default::default(),
+                    /*sandbox*/ None,
+                )
+                .await?;
+                Ok::<(), anyhow::Error>(())
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        let project_agents = test.workspace_path_uri(GLOBAL_AGENTS_FILENAME)?;
+        let global_agents = PathUri::from_abs_path(&global_agents);
 
-    let current_config = test.codex.config().await;
-    let mut trusted_config = current_config.as_ref().clone();
-    trusted_config.active_project.trust_level = Some(TrustLevel::Trusted);
-    let _ = test
-        .codex
-        .refresh_runtime_config(current_config, trusted_config)
-        .await;
-    test.submit_turn("trusted again").await?;
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![global_agents, project_agents]
-    );
+        test.submit_turn("trusted project").await?;
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![global_agents.clone(), project_agents.clone()]
+        );
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    let latest_instruction_fragments = requests
-        .iter()
-        .map(instruction_fragments)
-        .map(|fragments| fragments.last().cloned().expect("instructions message"))
-        .collect::<Vec<_>>();
-    assert!(latest_instruction_fragments[0].contains(PROJECT_INSTRUCTIONS));
-    assert!(latest_instruction_fragments[1].contains(&format!("-{PROJECT_INSTRUCTIONS}")));
-    assert!(latest_instruction_fragments[2].contains(&format!("+{PROJECT_INSTRUCTIONS}")));
+        let current_config = test.codex.config().await;
+        let mut untrusted_config = current_config.as_ref().clone();
+        untrusted_config.active_project.trust_level = Some(TrustLevel::Untrusted);
+        let _ = test
+            .codex
+            .refresh_runtime_config(current_config, untrusted_config)
+            .await;
+        test.submit_turn("untrusted project").await?;
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![global_agents.clone()]
+        );
 
-    Ok(())
+        let current_config = test.codex.config().await;
+        let mut trusted_config = current_config.as_ref().clone();
+        trusted_config.active_project.trust_level = Some(TrustLevel::Trusted);
+        let _ = test
+            .codex
+            .refresh_runtime_config(current_config, trusted_config)
+            .await;
+        test.submit_turn("trusted again").await?;
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![global_agents, project_agents]
+        );
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        let latest_instruction_fragments = requests
+            .iter()
+            .map(instruction_fragments)
+            .map(|fragments| fragments.last().cloned().expect("instructions message"))
+            .collect::<Vec<_>>();
+        assert!(latest_instruction_fragments[0].contains(PROJECT_INSTRUCTIONS));
+        assert!(latest_instruction_fragments[1].contains(&format!("-{PROJECT_INSTRUCTIONS}")));
+        assert!(latest_instruction_fragments[2].contains(&format!("+{PROJECT_INSTRUCTIONS}")));
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1183,6 +1187,7 @@ impl ThreadInstructionsFixture {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thread_provider_composes_and_clears_only_its_instructions() -> Result<()> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = responses::mount_sse_sequence(
         &server,
         ["initial", "unchanged", "cleared", "unchanged-empty"]
@@ -1243,11 +1248,14 @@ async fn thread_provider_composes_and_clears_only_its_instructions() -> Result<(
         ],
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thread_provider_refreshes_at_the_next_step_of_an_active_turn() -> Result<()> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -1345,181 +1353,191 @@ async fn thread_provider_refreshes_at_the_next_step_of_an_active_turn() -> Resul
         vec![vec![initial.clone()], vec![initial, updated]],
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn isolated_guardian_keeps_applied_thread_instructions() -> Result<()> {
     let server = start_mock_server().await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.permissions.approval_policy = codex_core::config::Constrained::allow_any(
-                codex_protocol::protocol::AskForApproval::OnRequest,
-            );
-            config.approvals_reviewer = codex_protocol::config_types::ApprovalsReviewer::AutoReview;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let provider =
-        Arc::new(RecordingThreadInstructionsProvider::with_text(TASK_USER_INSTRUCTIONS).shared());
-    let parent = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            thread_instructions_provider: Some(provider.clone()),
-            ..test.start_thread_options().await
-        })
-        .await?;
-    // Publish an update after the parent captured its instructions, before it starts Guardian.
-    let parent_request = responses::mount_sse_once_match(
-        &server,
-        move |_: &wiremock::Request| {
-            provider.set_instructions(Some(Instructions {
-                text: UPDATED_TASK_USER_INSTRUCTIONS.to_owned(),
-                source: None,
-            }));
-            true
-        },
-        sse(vec![
-            responses::ev_exec_command_call_with_args(
-                "action",
-                &serde_json::json!({
-                    "cmd": "echo reviewed",
-                    "sandbox_permissions": "require_escalated",
-                    "justification": "Check the requested action.",
-                }),
-            ),
-            ev_completed("parent-action"),
-        ]),
-    )
-    .await;
-    let remaining = responses::mount_sse_sequence(
-        &server,
-        vec![
+    mock_server::run(&[&server], async {
+        let test = test_codex()
+            .with_config(|config| {
+                config.permissions.approval_policy = codex_core::config::Constrained::allow_any(
+                    codex_protocol::protocol::AskForApproval::OnRequest,
+                );
+                config.approvals_reviewer =
+                    codex_protocol::config_types::ApprovalsReviewer::AutoReview;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let provider = Arc::new(
+            RecordingThreadInstructionsProvider::with_text(TASK_USER_INSTRUCTIONS).shared(),
+        );
+        let parent = test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                thread_instructions_provider: Some(provider.clone()),
+                ..test.start_thread_options().await
+            })
+            .await?;
+        // Publish an update after the parent captured its instructions, before it starts Guardian.
+        let parent_request = responses::mount_sse_once_match(
+            &server,
+            move |_: &wiremock::Request| {
+                provider.set_instructions(Some(Instructions {
+                    text: UPDATED_TASK_USER_INSTRUCTIONS.to_owned(),
+                    source: None,
+                }));
+                true
+            },
             sse(vec![
-                responses::ev_assistant_message("decision", r#"{"outcome":"deny"}"#),
-                ev_completed("guardian-review"),
+                responses::ev_exec_command_call_with_args(
+                    "action",
+                    &serde_json::json!({
+                        "cmd": "echo reviewed",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Check the requested action.",
+                    }),
+                ),
+                ev_completed("parent-action"),
             ]),
-            responses::sse_completed("parent-done"),
-        ],
-    )
-    .await;
-    submit_thread_turn(&parent.thread, "Check the action before executing it.").await?;
-    let requests = remaining.requests();
-    let initial = expected_provider_only_instruction_fragment(TASK_USER_INSTRUCTIONS);
-    assert_single_instruction_fragment(&parent_request.single_request(), &initial);
-    assert_eq!(
-        requests[0].body_json()["client_metadata"]["x-openai-subagent"],
-        "guardian"
-    );
-    assert_single_instruction_fragment(&requests[0], &initial);
-    assert!(requests[1].body_contains_text(UPDATED_TASK_USER_INSTRUCTIONS));
-    Ok(())
+        )
+        .await;
+        let remaining = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    responses::ev_assistant_message("decision", r#"{"outcome":"deny"}"#),
+                    ev_completed("guardian-review"),
+                ]),
+                responses::sse_completed("parent-done"),
+            ],
+        )
+        .await;
+        submit_thread_turn(&parent.thread, "Check the action before executing it.").await?;
+        let requests = remaining.requests();
+        let initial = expected_provider_only_instruction_fragment(TASK_USER_INSTRUCTIONS);
+        assert_single_instruction_fragment(&parent_request.single_request(), &initial);
+        assert_eq!(
+            requests[0].body_json()["client_metadata"]["x-openai-subagent"],
+            "guardian"
+        );
+        assert_single_instruction_fragment(&requests[0], &initial);
+        assert!(requests[1].body_contains_text(UPDATED_TASK_USER_INSTRUCTIONS));
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thread_provider_enforces_its_own_limit_before_startup_and_sampling() -> Result<()> {
     let server = start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        ["initial", "full-thread-budget"]
-            .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
-            .to_vec(),
-    )
-    .await;
-    let fixture = ThreadInstructionsFixture::new(&server).await?;
-    let oversized = Instructions {
-        text: "x".repeat(approx_bytes_for_tokens(/*tokens*/ 10_001)),
-        source: None,
-    };
-    let error = fixture
-        .test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            environments: Some(vec![fixture.test.executor_environment().request()]),
-            thread_instructions_provider: Some(Arc::new(RecordingThreadInstructionsProvider::new(
-                Some(oversized.clone()),
-            ))),
-            ..StartThreadOptions::new(fixture.test.config.clone())
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            ["initial", "full-thread-budget"]
+                .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
+                .to_vec(),
+        )
+        .await;
+        let fixture = ThreadInstructionsFixture::new(&server).await?;
+        let oversized = Instructions {
+            text: "x".repeat(approx_bytes_for_tokens(/*tokens*/ 10_001)),
+            source: None,
+        };
+        let error = fixture
+            .test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                environments: Some(vec![fixture.test.executor_environment().request()]),
+                thread_instructions_provider: Some(Arc::new(
+                    RecordingThreadInstructionsProvider::new(Some(oversized.clone())),
+                )),
+                ..StartThreadOptions::new(fixture.test.config.clone())
+            })
+            .await
+            .err()
+            .ok_or_else(|| anyhow!("oversized instructions must fail before thread creation"))?;
+        assert!(matches!(
+            error.details(),
+            CodexErrorDetails::InvalidRequest(_)
+        ));
+        assert!(error.to_string().contains("10000 estimated tokens"));
+
+        submit_thread_turn(&fixture.thread, "inspect valid instructions").await?;
+        fixture.provider.set_instructions(Some(oversized));
+        fixture
+            .provider
+            .set_warnings(vec!["provider refresh warning".to_string()]);
+        let request_count = response_mock.requests().len();
+        fixture
+            .thread
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "reject oversized instructions before sampling".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let EventMsg::Warning(warning) = wait_for_event(&fixture.thread, |event| {
+            matches!(event, EventMsg::Warning(_) | EventMsg::Error(_))
         })
         .await
-        .err()
-        .ok_or_else(|| anyhow!("oversized instructions must fail before thread creation"))?;
-    assert!(matches!(
-        error.details(),
-        CodexErrorDetails::InvalidRequest(_)
-    ));
-    assert!(error.to_string().contains("10000 estimated tokens"));
+        else {
+            panic!("provider warnings must be emitted before validation errors");
+        };
+        assert_eq!(warning.message, "provider refresh warning");
+        let EventMsg::Error(error) =
+            wait_for_event(&fixture.thread, |event| matches!(event, EventMsg::Error(_))).await
+        else {
+            unreachable!();
+        };
+        assert!(error.message.contains("10000 estimated tokens"));
+        wait_for_event(&fixture.thread, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(response_mock.requests().len(), request_count);
+        fixture.provider.set_warnings(Vec::new());
 
-    submit_thread_turn(&fixture.thread, "inspect valid instructions").await?;
-    fixture.provider.set_instructions(Some(oversized));
-    fixture
-        .provider
-        .set_warnings(vec!["provider refresh warning".to_string()]);
-    let request_count = response_mock.requests().len();
-    fixture
-        .thread
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "reject oversized instructions before sampling".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let EventMsg::Warning(warning) = wait_for_event(&fixture.thread, |event| {
-        matches!(event, EventMsg::Warning(_) | EventMsg::Error(_))
+        // The full thread budget is independent of global instructions and wrapping.
+        // Changing environments must also remove the previously selected repository docs.
+        let host_text = "x".repeat(approx_bytes_for_tokens(/*tokens*/ 10_000));
+        let expected = expected_instruction_amendment(
+            &instruction_fragments(&response_mock.requests()[0])[0],
+            &expected_provider_only_instruction_fragment(&format!(
+                "{GLOBAL_INSTRUCTIONS}\n\n{host_text}"
+            )),
+        );
+        fixture.provider.set_instructions(Some(Instructions {
+            text: host_text,
+            source: None,
+        }));
+        fixture
+            .thread
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "inspect instructions without the previous environment".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(TurnEnvironmentRequests::new(
+                        fixture.test.config.cwd.clone(),
+                        Vec::new(),
+                    )),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&fixture.thread, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(instruction_fragments(&requests[1]).last(), Some(&expected));
+        Ok(())
     })
     .await
-    else {
-        panic!("provider warnings must be emitted before validation errors");
-    };
-    assert_eq!(warning.message, "provider refresh warning");
-    let EventMsg::Error(error) =
-        wait_for_event(&fixture.thread, |event| matches!(event, EventMsg::Error(_))).await
-    else {
-        unreachable!();
-    };
-    assert!(error.message.contains("10000 estimated tokens"));
-    wait_for_event(&fixture.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    assert_eq!(response_mock.requests().len(), request_count);
-    fixture.provider.set_warnings(Vec::new());
-
-    // The full thread budget is independent of global instructions and wrapping.
-    // Changing environments must also remove the previously selected repository docs.
-    let host_text = "x".repeat(approx_bytes_for_tokens(/*tokens*/ 10_000));
-    let expected = expected_instruction_amendment(
-        &instruction_fragments(&response_mock.requests()[0])[0],
-        &expected_provider_only_instruction_fragment(&format!(
-            "{GLOBAL_INSTRUCTIONS}\n\n{host_text}"
-        )),
-    );
-    fixture.provider.set_instructions(Some(Instructions {
-        text: host_text,
-        source: None,
-    }));
-    fixture
-        .thread
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "inspect instructions without the previous environment".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(TurnEnvironmentRequests::new(
-                    fixture.test.config.cwd.clone(),
-                    Vec::new(),
-                )),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_event(&fixture.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(instruction_fragments(&requests[1]).last(), Some(&expected));
-    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -1539,233 +1557,241 @@ async fn fork_preserves_thread_instructions(
     shared: bool,
 ) -> Result<()> {
     let server = start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        ["parent", "fork", "updated-fork"]
-            .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
-            .to_vec(),
-    )
-    .await;
-    let history_mode = match source {
-        InstructionForkSource::LiveRollout | InstructionForkSource::OfflineHistory => {
-            ThreadHistoryMode::Legacy
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            ["parent", "fork", "updated-fork"]
+                .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
+                .to_vec(),
+        )
+        .await;
+        let history_mode = match source {
+            InstructionForkSource::LiveRollout | InstructionForkSource::OfflineHistory => {
+                ThreadHistoryMode::Legacy
+            }
+            InstructionForkSource::OfflinePrepared => ThreadHistoryMode::Paginated,
+        };
+        let mut builder = test_codex()
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::Sqlite)
+                    .expect("enable local persistence");
+            })
+            .with_history_mode(history_mode);
+        let test = builder.build_with_auto_env(&server).await?;
+        let parent_provider =
+            RecordingThreadInstructionsProvider::with_text(TASK_USER_INSTRUCTIONS);
+        let parent_provider = Arc::new(if shared {
+            parent_provider.shared()
+        } else {
+            parent_provider
+        });
+        let parent = test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                environments: Some(Vec::new()),
+                thread_instructions_provider: Some(parent_provider.clone()),
+                history_mode: Some(history_mode),
+                ..StartThreadOptions::new(test.config.clone())
+            })
+            .await?;
+        submit_thread_turn(&parent.thread, "persist parent instructions").await?;
+        parent.thread.ensure_rollout_materialized().await;
+        parent.thread.flush_rollout().await?;
+        let parent_id = parent.thread_id;
+        let rollout_path = parent
+            .thread
+            .rollout_path()
+            .expect("persisted parent rollout");
+        let parent_loads = parent_provider.load_count();
+        let offline = !matches!(source, InstructionForkSource::LiveRollout);
+        if offline {
+            parent.thread.shutdown_and_wait().await?;
+            test.thread_manager
+                .remove_thread_if_matches(&parent_id, &parent.thread)
+                .await;
         }
-        InstructionForkSource::OfflinePrepared => ThreadHistoryMode::Paginated,
-    };
-    let mut builder = test_codex()
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::Sqlite)
-                .expect("enable local persistence");
-        })
-        .with_history_mode(history_mode);
-    let test = builder.build_with_auto_env(&server).await?;
-    let parent_provider = RecordingThreadInstructionsProvider::with_text(TASK_USER_INSTRUCTIONS);
-    let parent_provider = Arc::new(if shared {
-        parent_provider.shared()
-    } else {
-        parent_provider
-    });
-    let parent = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
+        let fork_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
+            TASK_USER_INSTRUCTIONS,
+        ));
+        let options = StartThreadOptions {
             environments: Some(Vec::new()),
-            thread_instructions_provider: Some(parent_provider.clone()),
-            history_mode: Some(history_mode),
+            thread_instructions_provider: offline
+                .then(|| fork_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
             ..StartThreadOptions::new(test.config.clone())
-        })
-        .await?;
-    submit_thread_turn(&parent.thread, "persist parent instructions").await?;
-    parent.thread.ensure_rollout_materialized().await;
-    parent.thread.flush_rollout().await?;
-    let parent_id = parent.thread_id;
-    let rollout_path = parent
-        .thread
-        .rollout_path()
-        .expect("persisted parent rollout");
-    let parent_loads = parent_provider.load_count();
-    let offline = !matches!(source, InstructionForkSource::LiveRollout);
-    if offline {
-        parent.thread.shutdown_and_wait().await?;
-        test.thread_manager
-            .remove_thread_if_matches(&parent_id, &parent.thread)
-            .await;
-    }
-    let fork_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
-        TASK_USER_INSTRUCTIONS,
-    ));
-    let options = StartThreadOptions {
-        environments: Some(Vec::new()),
-        thread_instructions_provider: offline
-            .then(|| fork_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
-        ..StartThreadOptions::new(test.config.clone())
-    };
-    let fork = match source {
-        InstructionForkSource::LiveRollout => {
-            test.thread_manager
-                .fork_legacy_thread(ForkSnapshot::Interrupted, options, rollout_path)
-                .await?
+        };
+        let fork = match source {
+            InstructionForkSource::LiveRollout => {
+                test.thread_manager
+                    .fork_legacy_thread(ForkSnapshot::Interrupted, options, rollout_path)
+                    .await?
+            }
+            InstructionForkSource::OfflineHistory => {
+                let stored = test
+                    .thread_store
+                    .load_latest_model_context(LoadThreadHistoryParams {
+                        thread_id: parent_id,
+                        include_archived: true,
+                    })
+                    .await?;
+                let history = InitialHistory::Resumed(ResumedHistory {
+                    history_revision: None,
+                    conversation_id: parent_id,
+                    history: Arc::new(stored.items),
+                    rollout_path: None,
+                });
+                test.thread_manager
+                    .fork_thread_from_history(ForkSnapshot::Interrupted, options, history)
+                    .await?
+            }
+            InstructionForkSource::OfflinePrepared => {
+                let prepared = test
+                    .thread_store
+                    .prepare_fork(PrepareForkParams {
+                        thread_id: parent_id,
+                        boundary: ForkBoundary::Latest,
+                    })
+                    .await?;
+                test.thread_manager
+                    .fork_prepared_thread(options, prepared)
+                    .await?
+            }
+        };
+        submit_thread_turn(&fork.thread, "continue with inherited instructions").await?;
+        // Live forks inherit only a snapshot; offline forks retain their own provider.
+        // Neither path may call the original task's provider.
+        for provider in [&parent_provider, &fork_provider] {
+            provider.set_instructions(Some(Instructions {
+                text: UPDATED_TASK_USER_INSTRUCTIONS.to_string(),
+                source: None,
+            }));
         }
-        InstructionForkSource::OfflineHistory => {
-            let stored = test
-                .thread_store
-                .load_latest_model_context(LoadThreadHistoryParams {
-                    thread_id: parent_id,
-                    include_archived: true,
-                })
-                .await?;
-            let history = InitialHistory::Resumed(ResumedHistory {
-                history_revision: None,
-                conversation_id: parent_id,
-                history: Arc::new(stored.items),
-                rollout_path: None,
-            });
-            test.thread_manager
-                .fork_thread_from_history(ForkSnapshot::Interrupted, options, history)
-                .await?
-        }
-        InstructionForkSource::OfflinePrepared => {
-            let prepared = test
-                .thread_store
-                .prepare_fork(PrepareForkParams {
-                    thread_id: parent_id,
-                    boundary: ForkBoundary::Latest,
-                })
-                .await?;
-            test.thread_manager
-                .fork_prepared_thread(options, prepared)
-                .await?
-        }
-    };
-    submit_thread_turn(&fork.thread, "continue with inherited instructions").await?;
-    // Live forks inherit only a snapshot; offline forks retain their own provider.
-    // Neither path may call the original task's provider.
-    for provider in [&parent_provider, &fork_provider] {
-        provider.set_instructions(Some(Instructions {
-            text: UPDATED_TASK_USER_INSTRUCTIONS.to_string(),
-            source: None,
-        }));
-    }
-    submit_thread_turn(&fork.thread, "continue after source update").await?;
-    assert_eq!(parent_provider.load_count(), parent_loads);
-    let initial = expected_provider_only_instruction_fragment(TASK_USER_INSTRUCTIONS);
-    let final_fragments = if offline {
-        vec![
-            initial.clone(),
-            expected_instruction_amendment(
-                &initial,
-                &expected_provider_only_instruction_fragment(UPDATED_TASK_USER_INSTRUCTIONS),
-            ),
-        ]
-    } else {
-        vec![initial.clone()]
-    };
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(instruction_fragments)
-            .collect::<Vec<_>>(),
-        vec![vec![initial.clone()], vec![initial], final_fragments]
-    );
-    Ok(())
+        submit_thread_turn(&fork.thread, "continue after source update").await?;
+        assert_eq!(parent_provider.load_count(), parent_loads);
+        let initial = expected_provider_only_instruction_fragment(TASK_USER_INSTRUCTIONS);
+        let final_fragments = if offline {
+            vec![
+                initial.clone(),
+                expected_instruction_amendment(
+                    &initial,
+                    &expected_provider_only_instruction_fragment(UPDATED_TASK_USER_INSTRUCTIONS),
+                ),
+            ]
+        } else {
+            vec![initial.clone()]
+        };
+        assert_eq!(
+            response_mock
+                .requests()
+                .iter()
+                .map(instruction_fragments)
+                .collect::<Vec<_>>(),
+            vec![vec![initial.clone()], vec![initial], final_fragments]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn thread_provider_lives_with_its_session_across_resume() -> Result<()> {
     let server = start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        ["updated-live-session", "cold-session"]
-            .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
-            .to_vec(),
-    )
-    .await;
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
-    let provider = Arc::new(RecordingThreadInstructionsProvider::new(
-        /*instructions*/ None,
-    ));
-    let started = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            environments: Some(Vec::new()),
-            thread_instructions_provider: Some(provider.clone()),
-            ..StartThreadOptions::new(test.config.clone())
-        })
-        .await?;
-    assert_eq!(provider.load_count(), 1);
-    let (_, history) =
-        persisted_resume_history(&started.thread, test.thread_store.as_ref()).await?;
-    let cold_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
-        "cold session instructions",
-    ));
-    provider.set_instructions(Some(Instructions {
-        text: UPDATED_TASK_USER_INSTRUCTIONS.to_string(),
-        source: None,
-    }));
-    let same_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
-        UPDATED_TASK_USER_INSTRUCTIONS,
-    ));
-    for supplied in [
-        None,
-        Some(same_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
-        Some(cold_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
-    ] {
-        let resumed = test
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            ["updated-live-session", "cold-session"]
+                .map(|id| sse(vec![ev_response_created(id), ev_completed(id)]))
+                .to_vec(),
+        )
+        .await;
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
+        let provider = Arc::new(RecordingThreadInstructionsProvider::new(
+            /*instructions*/ None,
+        ));
+        let started = test
             .thread_manager
             .start_thread(StartThreadOptions {
-                initial_history: history.clone(),
-                thread_instructions_provider: supplied,
+                environments: Some(Vec::new()),
+                thread_instructions_provider: Some(provider.clone()),
                 ..StartThreadOptions::new(test.config.clone())
             })
             .await?;
-        assert!(Arc::ptr_eq(&resumed.thread, &started.thread));
         assert_eq!(provider.load_count(), 1);
-        assert_eq!(same_provider.load_count(), 0);
-        assert_eq!(cold_provider.load_count(), 0);
-    }
+        let (_, history) =
+            persisted_resume_history(&started.thread, test.thread_store.as_ref()).await?;
+        let cold_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
+            "cold session instructions",
+        ));
+        provider.set_instructions(Some(Instructions {
+            text: UPDATED_TASK_USER_INSTRUCTIONS.to_string(),
+            source: None,
+        }));
+        let same_provider = Arc::new(RecordingThreadInstructionsProvider::with_text(
+            UPDATED_TASK_USER_INSTRUCTIONS,
+        ));
+        for supplied in [
+            None,
+            Some(same_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
+            Some(cold_provider.clone() as Arc<dyn ThreadInstructionsProvider>),
+        ] {
+            let resumed = test
+                .thread_manager
+                .start_thread(StartThreadOptions {
+                    initial_history: history.clone(),
+                    thread_instructions_provider: supplied,
+                    ..StartThreadOptions::new(test.config.clone())
+                })
+                .await?;
+            assert!(Arc::ptr_eq(&resumed.thread, &started.thread));
+            assert_eq!(provider.load_count(), 1);
+            assert_eq!(same_provider.load_count(), 0);
+            assert_eq!(cold_provider.load_count(), 0);
+        }
 
-    // Reattachment does no loading; the existing Session pulls at the next model step.
-    submit_thread_turn(&started.thread, "load instructions added after creation").await?;
-    assert_eq!(provider.load_count(), 2);
-    assert_eq!(same_provider.load_count(), 0);
-    let (_, history) =
-        persisted_resume_history(&started.thread, test.thread_store.as_ref()).await?;
-    started.thread.shutdown_and_wait().await?;
-    let resumed = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            initial_history: history,
-            environments: Some(Vec::new()),
-            thread_instructions_provider: Some(cold_provider.clone()),
-            ..StartThreadOptions::new(test.config.clone())
-        })
-        .await?;
-    assert!(!Arc::ptr_eq(&resumed.thread, &started.thread));
-    assert_eq!(cold_provider.load_count(), 1);
-    submit_thread_turn(&resumed.thread, "load cold session instructions").await?;
-    assert_eq!(provider.load_count(), 2);
-    let requests = response_mock.requests();
-    assert_single_instruction_fragment(
-        &requests[0],
-        &expected_provider_only_instruction_fragment(UPDATED_TASK_USER_INSTRUCTIONS),
-    );
-    assert_eq!(
-        instruction_fragments(&requests[1]).last(),
-        Some(&expected_instruction_amendment(
+        // Reattachment does no loading; the existing Session pulls at the next model step.
+        submit_thread_turn(&started.thread, "load instructions added after creation").await?;
+        assert_eq!(provider.load_count(), 2);
+        assert_eq!(same_provider.load_count(), 0);
+        let (_, history) =
+            persisted_resume_history(&started.thread, test.thread_store.as_ref()).await?;
+        started.thread.shutdown_and_wait().await?;
+        let resumed = test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                initial_history: history,
+                environments: Some(Vec::new()),
+                thread_instructions_provider: Some(cold_provider.clone()),
+                ..StartThreadOptions::new(test.config.clone())
+            })
+            .await?;
+        assert!(!Arc::ptr_eq(&resumed.thread, &started.thread));
+        assert_eq!(cold_provider.load_count(), 1);
+        submit_thread_turn(&resumed.thread, "load cold session instructions").await?;
+        assert_eq!(provider.load_count(), 2);
+        let requests = response_mock.requests();
+        assert_single_instruction_fragment(
+            &requests[0],
             &expected_provider_only_instruction_fragment(UPDATED_TASK_USER_INSTRUCTIONS),
-            &expected_provider_only_instruction_fragment("cold session instructions"),
-        )),
-    );
-    Ok(())
+        );
+        assert_eq!(
+            instruction_fragments(&requests[1]).last(),
+            Some(&expected_instruction_amendment(
+                &expected_provider_only_instruction_fragment(UPDATED_TASK_USER_INSTRUCTIONS),
+                &expected_provider_only_instruction_fragment("cold session instructions"),
+            )),
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Result<()> {
     // Set up one global source, one project source, and two ordinary model turns.
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -1887,6 +1913,8 @@ async fn fresh_thread_composes_global_before_project_and_reports_sources() -> Re
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1962,6 +1990,7 @@ async fn multi_environment_thread_refreshes_global_and_keeps_repository_snapshot
     skip_if_no_remote_env!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -2087,87 +2116,93 @@ async fn multi_environment_thread_refreshes_global_and_keeps_repository_snapshot
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn global_instruction_warnings_reappear_only_after_recovery() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        (0..4)
-            .map(|index| {
-                responses::sse(vec![
-                    responses::ev_response_created(&format!("response-{index}")),
-                    responses::ev_completed(&format!("response-{index}")),
-                ])
-            })
-            .collect(),
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
-    let override_path = home.path().join(GLOBAL_AGENTS_OVERRIDE_FILENAME);
-    let create_unreadable_override = || {
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(GLOBAL_AGENTS_OVERRIDE_FILENAME, &override_path)
-        }
-        #[cfg(windows)]
-        {
-            std::os::windows::fs::symlink_file(GLOBAL_AGENTS_OVERRIDE_FILENAME, &override_path)
-        }
-    };
-    create_unreadable_override()?;
-    let read_error = std::fs::read(&override_path).expect_err("symlink loop must be unreadable");
-    let expected_warning = format!(
-        "Failed to read global AGENTS.md instructions from `{}`: {read_error}",
-        override_path.display()
-    );
-    let mut builder = test_codex().with_home(Arc::clone(&home));
-    let test = builder.build_with_auto_env(&server).await?;
-    wait_for_event(
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            (0..4)
+                .map(|index| {
+                    responses::sse(vec![
+                        responses::ev_response_created(&format!("response-{index}")),
+                        responses::ev_completed(&format!("response-{index}")),
+                    ])
+                })
+                .collect(),
+        )
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        write_global_file(home.as_ref(), GLOBAL_AGENTS_FILENAME, GLOBAL_INSTRUCTIONS)?;
+        let override_path = home.path().join(GLOBAL_AGENTS_OVERRIDE_FILENAME);
+        let create_unreadable_override = || {
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(GLOBAL_AGENTS_OVERRIDE_FILENAME, &override_path)
+            }
+            #[cfg(windows)]
+            {
+                std::os::windows::fs::symlink_file(GLOBAL_AGENTS_OVERRIDE_FILENAME, &override_path)
+            }
+        };
+        create_unreadable_override()?;
+        let read_error =
+            std::fs::read(&override_path).expect_err("symlink loop must be unreadable");
+        let expected_warning = format!(
+            "Failed to read global AGENTS.md instructions from `{}`: {read_error}",
+            override_path.display()
+        );
+        let mut builder = test_codex().with_home(Arc::clone(&home));
+        let test = builder.build_with_auto_env(&server).await?;
+        wait_for_event(
         &test.codex,
         |event| matches!(event, EventMsg::Warning(warning) if warning.message == expected_warning),
     )
     .await;
 
-    for (warning_active, expected_warnings) in [
-        (true, Vec::new()),
-        (false, Vec::new()),
-        (true, vec![expected_warning]),
-        (true, Vec::new()),
-    ] {
-        std::fs::remove_file(&override_path)?;
-        if warning_active {
-            create_unreadable_override()?;
-        } else {
-            std::fs::write(&override_path, "")?;
-        }
-        test.codex
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "check the instructions".to_string(),
-                text_elements: Vec::new(),
-            }]))
-            .await?;
-        let mut warnings = Vec::new();
-        wait_for_event(&test.codex, |event| {
-            if let EventMsg::Warning(warning) = event {
-                warnings.push(warning.message.clone());
+        for (warning_active, expected_warnings) in [
+            (true, Vec::new()),
+            (false, Vec::new()),
+            (true, vec![expected_warning]),
+            (true, Vec::new()),
+        ] {
+            std::fs::remove_file(&override_path)?;
+            if warning_active {
+                create_unreadable_override()?;
+            } else {
+                std::fs::write(&override_path, "")?;
             }
-            matches!(event, EventMsg::TurnComplete(_))
-        })
-        .await;
-        assert_eq!(warnings, expected_warnings);
-    }
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
-    for request in &requests {
-        assert_single_instruction_fragment(
-            request,
-            &expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS),
-        );
-    }
-    Ok(())
+            test.codex
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "check the instructions".to_string(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+            let mut warnings = Vec::new();
+            wait_for_event(&test.codex, |event| {
+                if let EventMsg::Warning(warning) = event {
+                    warnings.push(warning.message.clone());
+                }
+                matches!(event, EventMsg::TurnComplete(_))
+            })
+            .await;
+            assert_eq!(warnings, expected_warnings);
+        }
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 4);
+        for request in &requests {
+            assert_single_instruction_fragment(
+                request,
+                &expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS),
+            );
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2208,229 +2243,235 @@ async fn invalid_utf8_global_instructions_are_lossy() -> Result<()> {
 async fn cold_resume_invalidates_deleted_legacy_agents_md_once() -> Result<()> {
     // Set up an initial turn and a later cold-resumed turn against the same rollout.
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("initial-response"),
-                responses::ev_completed("initial-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("resumed-response"),
-                responses::ev_completed("resumed-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("second-resumed-response"),
-                responses::ev_completed("second-resumed-response"),
-            ]),
-            responses::sse_completed("refreshed-resumed-response"),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let old_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        OLD_GLOBAL_INSTRUCTIONS,
-    )?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("initial-response"),
+                    responses::ev_completed("initial-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("resumed-response"),
+                    responses::ev_completed("resumed-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("second-resumed-response"),
+                    responses::ev_completed("second-resumed-response"),
+                ]),
+                responses::sse_completed("refreshed-resumed-response"),
+            ],
+        )
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        let old_source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            OLD_GLOBAL_INSTRUCTIONS,
+        )?;
 
-    // Create the initial thread and persist its creation-time instruction snapshot.
-    let mut initial_builder = test_codex().with_home(Arc::clone(&home));
-    let initial = initial_builder.build(&server).await?;
+        // Create the initial thread and persist its creation-time instruction snapshot.
+        let mut initial_builder = test_codex().with_home(Arc::clone(&home));
+        let initial = initial_builder.build(&server).await?;
 
-    // Assert the pre-resume thread reports the source used to create its snapshot.
-    assert_eq!(
-        initial.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&old_source)],
-        "initial thread reports the creation-time global source"
-    );
-    initial.submit_turn("persist instructions").await?;
-    let rollout_path = initial
-        .session_configured
-        .rollout_path
-        .clone()
-        .expect("rollout path");
-    initial.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&initial.codex, |event| {
-        matches!(event, EventMsg::ShutdownComplete)
+        // Assert the pre-resume thread reports the source used to create its snapshot.
+        assert_eq!(
+            initial.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&old_source)],
+            "initial thread reports the creation-time global source"
+        );
+        initial.submit_turn("persist instructions").await?;
+        let rollout_path = initial
+            .session_configured
+            .rollout_path
+            .clone()
+            .expect("rollout path");
+        initial.codex.submit(Op::Shutdown).await?;
+        wait_for_event(&initial.codex, |event| {
+            matches!(event, EventMsg::ShutdownComplete)
+        })
+        .await;
+
+        // Simulate a rollout written before AGENTS.md had a persisted WorldState section.
+        remove_agents_md_world_state_section(&rollout_path)?;
+
+        std::fs::remove_file(old_source.as_path())?;
+        let mut resume_builder = test_codex().with_home(Arc::clone(&home));
+        let resumed = resume_builder
+            .resume(&server, Arc::clone(&home), rollout_path)
+            .await?;
+
+        // Model history still contains the old fragment, but the source no longer exists.
+        assert_eq!(
+            resumed.codex.instruction_sources().await,
+            Vec::<PathUri>::new(),
+            "resume reports no deleted instruction source"
+        );
+
+        resumed.submit_turn("continue resumed thread").await?;
+        resumed.submit_turn("continue again").await?;
+        write_global_file(&home, GLOBAL_AGENTS_FILENAME, NEW_GLOBAL_INSTRUCTIONS)?;
+        resumed.submit_turn("refresh after resume").await?;
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 4);
+        let initial_input = requests[0].input();
+        let resumed_input = requests[1].input();
+        assert_eq!(
+            resumed_input.get(..initial_input.len()),
+            Some(initial_input.as_slice()),
+            "cold resume should replay the original structured input prefix"
+        );
+        let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
+        let removal = expected_provider_only_instruction_fragment(
+            "The previously provided AGENTS.md instructions no longer apply.",
+        );
+        assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
+        assert_eq!(
+            instruction_fragments(&requests[1]),
+            vec![initial.clone(), removal.clone()]
+        );
+        assert_eq!(
+            instruction_fragments(&requests[2]),
+            vec![initial.clone(), removal.clone()]
+        );
+        let replacement = expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
+        assert_eq!(
+            instruction_fragments(&requests[3]),
+            vec![initial, removal, replacement]
+        );
+
+        Ok(())
     })
-    .await;
-
-    // Simulate a rollout written before AGENTS.md had a persisted WorldState section.
-    remove_agents_md_world_state_section(&rollout_path)?;
-
-    std::fs::remove_file(old_source.as_path())?;
-    let mut resume_builder = test_codex().with_home(Arc::clone(&home));
-    let resumed = resume_builder
-        .resume(&server, Arc::clone(&home), rollout_path)
-        .await?;
-
-    // Model history still contains the old fragment, but the source no longer exists.
-    assert_eq!(
-        resumed.codex.instruction_sources().await,
-        Vec::<PathUri>::new(),
-        "resume reports no deleted instruction source"
-    );
-
-    resumed.submit_turn("continue resumed thread").await?;
-    resumed.submit_turn("continue again").await?;
-    write_global_file(&home, GLOBAL_AGENTS_FILENAME, NEW_GLOBAL_INSTRUCTIONS)?;
-    resumed.submit_turn("refresh after resume").await?;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
-    let initial_input = requests[0].input();
-    let resumed_input = requests[1].input();
-    assert_eq!(
-        resumed_input.get(..initial_input.len()),
-        Some(initial_input.as_slice()),
-        "cold resume should replay the original structured input prefix"
-    );
-    let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    let removal = expected_provider_only_instruction_fragment(
-        "The previously provided AGENTS.md instructions no longer apply.",
-    );
-    assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
-    assert_eq!(
-        instruction_fragments(&requests[1]),
-        vec![initial.clone(), removal.clone()]
-    );
-    assert_eq!(
-        instruction_fragments(&requests[2]),
-        vec![initial.clone(), removal.clone()]
-    );
-    let replacement = expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
-    assert_eq!(
-        instruction_fragments(&requests[3]),
-        vec![initial, removal, replacement]
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn fork_injects_changed_agents_md_once() -> Result<()> {
     // Set up a parent turn and a later fork turn against the parent's rollout.
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("parent-response"),
-                responses::ev_completed("parent-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("fork-response"),
-                responses::ev_completed("fork-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("second-fork-response"),
-                responses::ev_completed("second-fork-response"),
-            ]),
-            responses::sse_completed("refreshed-fork-response"),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        OLD_GLOBAL_INSTRUCTIONS,
-    )?;
-
-    // Create the parent and persist its creation-time instruction snapshot.
-    let mut builder = test_codex().with_home(Arc::clone(&home));
-    let parent = builder.build(&server).await?;
-
-    // Assert the parent reports the source used to create its snapshot.
-    assert_eq!(
-        parent.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "parent reports the creation-time global source"
-    );
-    parent.submit_turn("persist instructions").await?;
-    parent.codex.ensure_rollout_materialized().await;
-    parent.codex.flush_rollout().await?;
-    let rollout_path = parent.codex.rollout_path().expect("rollout path");
-
-    // Add a preferred override source, then fork with freshly loaded configuration.
-    let new_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_OVERRIDE_FILENAME,
-        NEW_GLOBAL_INSTRUCTIONS,
-    )?;
-    assert_ne!(source, new_source);
-    let mut fork_config = load_default_config_for_test(home.as_ref()).await;
-    fork_config.cwd = parent.config.cwd.clone();
-    fork_config.model = parent.config.model.clone();
-    fork_config.model_provider = parent.config.model_provider.clone();
-    fork_config.model_catalog = parent.config.model_catalog.clone();
-    fork_config.codex_self_exe = parent.config.codex_self_exe.clone();
-    fork_config
-        .features
-        .enable(Feature::ContentItemKinds)
-        .expect("test config should allow ContentItemKinds override");
-    let forked = parent
-        .thread_manager
-        .fork_legacy_thread(
-            ForkSnapshot::Interrupted,
-            codex_core::StartThreadOptions::new(fork_config),
-            rollout_path,
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("parent-response"),
+                    responses::ev_completed("parent-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("fork-response"),
+                    responses::ev_completed("fork-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("second-fork-response"),
+                    responses::ev_completed("second-fork-response"),
+                ]),
+                responses::sse_completed("refreshed-fork-response"),
+            ],
         )
-        .await?;
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        let source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            OLD_GLOBAL_INSTRUCTIONS,
+        )?;
 
-    // Assert the fork reports the new source before issuing its first turn.
-    assert_eq!(
-        forked.thread.instruction_sources().await,
-        vec![PathUri::from_abs_path(&new_source)],
-        "fork config should reflect the newly loaded global source"
-    );
+        // Create the parent and persist its creation-time instruction snapshot.
+        let mut builder = test_codex().with_home(Arc::clone(&home));
+        let parent = builder.build(&server).await?;
 
-    submit_thread_turn(&forked.thread, "continue fork").await?;
-    submit_thread_turn(&forked.thread, "continue fork again").await?;
-    write_global_file(
-        &home,
-        GLOBAL_AGENTS_OVERRIDE_FILENAME,
-        "instructions changed after fork",
-    )?;
-    submit_thread_turn(&forked.thread, "refresh after fork").await?;
+        // Assert the parent reports the source used to create its snapshot.
+        assert_eq!(
+            parent.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "parent reports the creation-time global source"
+        );
+        parent.submit_turn("persist instructions").await?;
+        parent.codex.ensure_rollout_materialized().await;
+        parent.codex.flush_rollout().await?;
+        let rollout_path = parent.codex.rollout_path().expect("rollout path");
 
-    // Assert the forked model request replays the parent's exact structured history.
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
-    let parent_input = requests[0].input();
-    let mut fork_input = requests[1].input();
-    // The request prefix has a thread-scoped ID; retained history IDs stay unchanged.
-    fork_input[0]["id"] = parent_input[0]["id"].clone();
-    assert_eq!(
-        fork_input.get(..parent_input.len()),
-        Some(parent_input.as_slice()),
-        "fork should replay the parent's original structured input prefix"
-    );
-    let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    let replacement = expected_instruction_amendment(
-        &initial,
-        &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
-    );
-    assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
-    assert_eq!(
-        instruction_fragments(&requests[1]),
-        vec![initial.clone(), replacement.clone()]
-    );
-    assert_eq!(
-        instruction_fragments(&requests[2]),
-        vec![initial.clone(), replacement.clone()]
-    );
-    let refreshed = expected_instruction_amendment(
-        &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
-        &expected_provider_only_instruction_fragment("instructions changed after fork"),
-    );
-    assert_eq!(
-        instruction_fragments(&requests[3]),
-        vec![initial, replacement, refreshed]
-    );
+        // Add a preferred override source, then fork with freshly loaded configuration.
+        let new_source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_OVERRIDE_FILENAME,
+            NEW_GLOBAL_INSTRUCTIONS,
+        )?;
+        assert_ne!(source, new_source);
+        let mut fork_config = load_default_config_for_test(home.as_ref()).await;
+        fork_config.cwd = parent.config.cwd.clone();
+        fork_config.model = parent.config.model.clone();
+        fork_config.model_provider = parent.config.model_provider.clone();
+        fork_config.model_catalog = parent.config.model_catalog.clone();
+        fork_config.codex_self_exe = parent.config.codex_self_exe.clone();
+        fork_config
+            .features
+            .enable(Feature::ContentItemKinds)
+            .expect("test config should allow ContentItemKinds override");
+        let forked = parent
+            .thread_manager
+            .fork_legacy_thread(
+                ForkSnapshot::Interrupted,
+                codex_core::StartThreadOptions::new(fork_config),
+                rollout_path,
+            )
+            .await?;
 
-    Ok(())
+        // Assert the fork reports the new source before issuing its first turn.
+        assert_eq!(
+            forked.thread.instruction_sources().await,
+            vec![PathUri::from_abs_path(&new_source)],
+            "fork config should reflect the newly loaded global source"
+        );
+
+        submit_thread_turn(&forked.thread, "continue fork").await?;
+        submit_thread_turn(&forked.thread, "continue fork again").await?;
+        write_global_file(
+            &home,
+            GLOBAL_AGENTS_OVERRIDE_FILENAME,
+            "instructions changed after fork",
+        )?;
+        submit_thread_turn(&forked.thread, "refresh after fork").await?;
+
+        // Assert the forked model request replays the parent's exact structured history.
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 4);
+        let parent_input = requests[0].input();
+        let mut fork_input = requests[1].input();
+        // The request prefix has a thread-scoped ID; retained history IDs stay unchanged.
+        fork_input[0]["id"] = parent_input[0]["id"].clone();
+        assert_eq!(
+            fork_input.get(..parent_input.len()),
+            Some(parent_input.as_slice()),
+            "fork should replay the parent's original structured input prefix"
+        );
+        let initial = expected_provider_only_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
+        let replacement = expected_instruction_amendment(
+            &initial,
+            &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
+        );
+        assert_eq!(instruction_fragments(&requests[0]), vec![initial.clone()]);
+        assert_eq!(
+            instruction_fragments(&requests[1]),
+            vec![initial.clone(), replacement.clone()]
+        );
+        assert_eq!(
+            instruction_fragments(&requests[2]),
+            vec![initial.clone(), replacement.clone()]
+        );
+        let refreshed = expected_instruction_amendment(
+            &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
+            &expected_provider_only_instruction_fragment("instructions changed after fork"),
+        );
+        assert_eq!(
+            instruction_fragments(&requests[3]),
+            vec![initial, replacement, refreshed]
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

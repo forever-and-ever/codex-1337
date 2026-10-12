@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -350,106 +351,110 @@ async fn run_mcp_permission_request_hook_test(outcome: PermissionRequestHookOutc
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = match outcome {
-        PermissionRequestHookOutcome::Allow => "permissionrequest-rmcp-allow",
-        PermissionRequestHookOutcome::Deny(_) => "permissionrequest-rmcp-deny",
-    };
-    let arguments = json!({ "message": RMCP_ECHO_MESSAGE }).to_string();
-    let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
-    let mut builder = test_codex()
-        .with_pre_build_hook(move |home| {
-            write_permission_request_hook(home, outcome)
-                .expect("failed to write MCP permission request hook fixture");
-        })
-        .with_config(move |config| {
-            trust_discovered_hooks(config);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            insert_rmcp_test_server(
-                config,
-                rmcp_test_server_bin,
-                AppToolApproval::Prompt,
-                remote_aware_environment_id(),
-            );
-        });
-    let test = builder.build_with_remote_and_local_env(&server).await?;
-    wait_for_mcp_server(&test.codex, RMCP_SERVER).await?;
+    mock_server::run(&[&server], async {
+        let call_id = match outcome {
+            PermissionRequestHookOutcome::Allow => "permissionrequest-rmcp-allow",
+            PermissionRequestHookOutcome::Deny(_) => "permissionrequest-rmcp-deny",
+        };
+        let arguments = json!({ "message": RMCP_ECHO_MESSAGE }).to_string();
+        let rmcp_test_server_bin = remote_aware_stdio_server_bin()?;
+        let mut builder = test_codex()
+            .with_pre_build_hook(move |home| {
+                write_permission_request_hook(home, outcome)
+                    .expect("failed to write MCP permission request hook fixture");
+            })
+            .with_config(move |config| {
+                trust_discovered_hooks(config);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                insert_rmcp_test_server(
+                    config,
+                    rmcp_test_server_bin,
+                    AppToolApproval::Prompt,
+                    remote_aware_environment_id(),
+                );
+            });
+        let test = builder.build_with_remote_and_local_env(&server).await?;
+        wait_for_mcp_server(&test.codex, RMCP_SERVER).await?;
 
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-mcp-permission-hook-1"),
-                ev_function_call_with_namespace(
-                    call_id,
-                    RMCP_PREFIXED_NAMESPACE,
-                    "echo",
-                    &arguments,
-                ),
-                ev_completed("resp-mcp-permission-hook-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-mcp-permission-hook-2"),
-                ev_assistant_message("msg-mcp-permission-hook", "done"),
-                ev_completed("resp-mcp-permission-hook-2"),
-            ]),
-        ],
-    )
-    .await;
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-mcp-permission-hook-1"),
+                    ev_function_call_with_namespace(
+                        call_id,
+                        RMCP_PREFIXED_NAMESPACE,
+                        "echo",
+                        &arguments,
+                    ),
+                    ev_completed("resp-mcp-permission-hook-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-mcp-permission-hook-2"),
+                    ev_assistant_message("msg-mcp-permission-hook", "done"),
+                    ev_completed("resp-mcp-permission-hook-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    test.submit_turn_with_approval_and_permission_profile(
-        "call the rmcp echo tool with the MCP permission request hook",
-        AskForApproval::OnRequest,
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        test.submit_turn_with_approval_and_permission_profile(
+            "call the rmcp echo tool with the MCP permission request hook",
+            AskForApproval::OnRequest,
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        requests.iter().all(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() != Some("guardian")
-        }),
-        "a permission request hook should resolve MCP approval before Guardian review",
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests.iter().all(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    != Some("guardian")
+            }),
+            "a permission request hook should resolve MCP approval before Guardian review",
+        );
 
-    let output_item = requests[1].function_call_output(call_id);
-    let output = match outcome {
-        PermissionRequestHookOutcome::Allow => output_item["output"].as_str(),
-        PermissionRequestHookOutcome::Deny(_) => output_item["output"][0]["text"].as_str(),
-    }
-    .expect("MCP tool output should contain text");
-    match outcome {
-        PermissionRequestHookOutcome::Allow => assert!(
-            output.contains(&format!("ECHOING: {RMCP_ECHO_MESSAGE}")),
-            "an allowed MCP tool should execute",
-        ),
-        PermissionRequestHookOutcome::Deny(message) => assert!(
-            output.contains(message),
-            "a denied MCP tool should surface the hook's rejection message",
-        ),
-    }
+        let output_item = requests[1].function_call_output(call_id);
+        let output = match outcome {
+            PermissionRequestHookOutcome::Allow => output_item["output"].as_str(),
+            PermissionRequestHookOutcome::Deny(_) => output_item["output"][0]["text"].as_str(),
+        }
+        .expect("MCP tool output should contain text");
+        match outcome {
+            PermissionRequestHookOutcome::Allow => assert!(
+                output.contains(&format!("ECHOING: {RMCP_ECHO_MESSAGE}")),
+                "an allowed MCP tool should execute",
+            ),
+            PermissionRequestHookOutcome::Deny(message) => assert!(
+                output.contains(message),
+                "a denied MCP tool should surface the hook's rejection message",
+            ),
+        }
 
-    let hook_inputs =
-        read_hook_inputs(test.codex_home_path(), "permission_request_hook_log.jsonl")?;
-    assert_eq!(hook_inputs.len(), 1);
-    assert_eq!(
-        json!({
-            "hook_event_name": hook_inputs[0]["hook_event_name"],
-            "tool_name": hook_inputs[0]["tool_name"],
-            "tool_input": hook_inputs[0]["tool_input"],
-        }),
-        json!({
-            "hook_event_name": "PermissionRequest",
-            "tool_name": RMCP_ECHO_TOOL_NAME,
-            "tool_input": { "message": RMCP_ECHO_MESSAGE },
-        }),
-    );
-    assert!(
-        hook_inputs[0].get("tool_use_id").is_none(),
-        "PermissionRequest input should not include a tool_use_id",
-    );
+        let hook_inputs =
+            read_hook_inputs(test.codex_home_path(), "permission_request_hook_log.jsonl")?;
+        assert_eq!(hook_inputs.len(), 1);
+        assert_eq!(
+            json!({
+                "hook_event_name": hook_inputs[0]["hook_event_name"],
+                "tool_name": hook_inputs[0]["tool_name"],
+                "tool_input": hook_inputs[0]["tool_input"],
+            }),
+            json!({
+                "hook_event_name": "PermissionRequest",
+                "tool_name": RMCP_ECHO_TOOL_NAME,
+                "tool_input": { "message": RMCP_ECHO_MESSAGE },
+            }),
+        );
+        assert!(
+            hook_inputs[0].get("tool_use_id").is_none(),
+            "PermissionRequest input should not include a tool_use_id",
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -634,6 +639,7 @@ async fn mcp_tool_hook_blocks_model_tool_without_recursive_hooks_or_approval() -
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let call_id = "mcp-hook-denied-echo";
     let arguments = json!({ "message": RMCP_ECHO_MESSAGE }).to_string();
     let responses = mount_sse_sequence(
@@ -697,6 +703,8 @@ async fn mcp_tool_hook_blocks_model_tool_without_recursive_hooks_or_approval() -
     assert!(output.contains("MCP blocked hook e2e ping"));
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -768,95 +776,98 @@ async fn pre_tool_use_blocks_mcp_tool_before_execution(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let call_id = "pretooluse-rmcp-echo";
-    let arguments = json!({ "message": RMCP_ECHO_MESSAGE }).to_string();
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call_with_namespace(call_id, mcp_namespace, "echo", &arguments),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "mcp hook blocked it"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let call_id = "pretooluse-rmcp-echo";
+        let arguments = json!({ "message": RMCP_ECHO_MESSAGE }).to_string();
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call_with_namespace(call_id, mcp_namespace, "echo", &arguments),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "mcp hook blocked it"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let block_reason = "blocked mcp pre hook";
-    let rmcp_test_server_bin = stdio_server_bin()?;
-    let test = test_codex()
-        .with_pre_build_hook(move |home| {
-            write_pre_tool_use_hook(home, block_reason)
-                .expect("failed to write MCP pre tool use hook fixture");
-        })
-        .with_config(move |config| {
-            let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
-            enable_hooks_and_rmcp_server(
-                config,
-                rmcp_test_server_bin,
-                AppToolApproval::Approve,
-                prefix_mcp_tool_names,
-            );
-        })
-        .build(&server)
-        .await?;
-    wait_for_mcp_server(&test.codex, RMCP_SERVER).await?;
+        let block_reason = "blocked mcp pre hook";
+        let rmcp_test_server_bin = stdio_server_bin()?;
+        let test = test_codex()
+            .with_pre_build_hook(move |home| {
+                write_pre_tool_use_hook(home, block_reason)
+                    .expect("failed to write MCP pre tool use hook fixture");
+            })
+            .with_config(move |config| {
+                let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
+                enable_hooks_and_rmcp_server(
+                    config,
+                    rmcp_test_server_bin,
+                    AppToolApproval::Approve,
+                    prefix_mcp_tool_names,
+                );
+            })
+            .build(&server)
+            .await?;
+        wait_for_mcp_server(&test.codex, RMCP_SERVER).await?;
 
-    test.submit_turn("call the rmcp echo tool with the MCP pre hook")
-        .await?;
+        test.submit_turn("call the rmcp echo tool with the MCP pre hook")
+            .await?;
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    let output_item = requests[1].function_call_output(call_id);
-    assert_eq!(
-        output_item["internal_chat_message_metadata_passthrough"]["executed_tool_calls"],
-        json!([{
-            "name": format!("{mcp_namespace}__echo"),
-            "arguments": { "message": RMCP_ECHO_MESSAGE },
-        }]),
-        "a blocked MCP request must still retain the original model-attempted call",
-    );
-    let output = output_item
-        .get("output")
-        .and_then(Value::as_str)
-        .expect("blocked MCP tool output should be a string");
-    assert!(
-        output.contains(&format!(
-            "Tool call blocked by PreToolUse hook: {block_reason}. Tool: {RMCP_ECHO_TOOL_NAME}"
-        )),
-        "blocked MCP tool output should surface the hook reason and tool name",
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        let output_item = requests[1].function_call_output(call_id);
+        assert_eq!(
+            output_item["internal_chat_message_metadata_passthrough"]["executed_tool_calls"],
+            json!([{
+                "name": format!("{mcp_namespace}__echo"),
+                "arguments": { "message": RMCP_ECHO_MESSAGE },
+            }]),
+            "a blocked MCP request must still retain the original model-attempted call",
+        );
+        let output = output_item
+            .get("output")
+            .and_then(Value::as_str)
+            .expect("blocked MCP tool output should be a string");
+        assert!(
+            output.contains(&format!(
+                "Tool call blocked by PreToolUse hook: {block_reason}. Tool: {RMCP_ECHO_TOOL_NAME}"
+            )),
+            "blocked MCP tool output should surface the hook reason and tool name",
+        );
 
-    let hook_inputs = read_hook_inputs(test.codex_home_path(), "pre_tool_use_hook_log.jsonl")?;
-    assert_eq!(hook_inputs.len(), 1);
-    assert_eq!(
-        json!({
-            "hook_event_name": hook_inputs[0]["hook_event_name"],
-            "tool_name": hook_inputs[0]["tool_name"],
-            "tool_use_id": hook_inputs[0]["tool_use_id"],
-            "tool_input": hook_inputs[0]["tool_input"],
-        }),
-        json!({
-            "hook_event_name": "PreToolUse",
-            "tool_name": RMCP_ECHO_TOOL_NAME,
-            "tool_use_id": call_id,
-            "tool_input": { "message": RMCP_ECHO_MESSAGE },
-        })
-    );
-    let transcript_path = hook_inputs[0]["transcript_path"]
-        .as_str()
-        .expect("pre tool use hook transcript_path should be a string");
-    assert!(
-        Path::new(transcript_path).exists(),
-        "pre tool use hook transcript_path should be materialized on disk",
-    );
+        let hook_inputs = read_hook_inputs(test.codex_home_path(), "pre_tool_use_hook_log.jsonl")?;
+        assert_eq!(hook_inputs.len(), 1);
+        assert_eq!(
+            json!({
+                "hook_event_name": hook_inputs[0]["hook_event_name"],
+                "tool_name": hook_inputs[0]["tool_name"],
+                "tool_use_id": hook_inputs[0]["tool_use_id"],
+                "tool_input": hook_inputs[0]["tool_input"],
+            }),
+            json!({
+                "hook_event_name": "PreToolUse",
+                "tool_name": RMCP_ECHO_TOOL_NAME,
+                "tool_use_id": call_id,
+                "tool_input": { "message": RMCP_ECHO_MESSAGE },
+            })
+        );
+        let transcript_path = hook_inputs[0]["transcript_path"]
+            .as_str()
+            .expect("pre tool use hook transcript_path should be a string");
+        assert!(
+            Path::new(transcript_path).exists(),
+            "pre tool use hook transcript_path should be materialized on disk",
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

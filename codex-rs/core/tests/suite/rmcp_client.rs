@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_protocol::protocol::TurnEnvironmentRequests;
+use core_test_support::mock_server;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -898,139 +899,146 @@ async fn future_environment_mcp_policy_applies_on_the_next_turn() -> anyhow::Res
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let response = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call(
-                    "pause",
-                    "request_user_input",
-                    &json!({
-                        "questions": [{
-                            "id": "continue",
-                            "header": "Continue",
-                            "question": "Continue?",
-                            "options": [
-                                {"label": "Yes (Recommended)", "description": "Continue."},
-                                {"label": "No", "description": "Stop."}
-                            ]
-                        }]
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("paused"),
-            ]),
-            responses::sse(vec![responses::ev_completed("active-done")]),
-            responses::sse(vec![responses::ev_completed("next-done")]),
-        ],
-    )
-    .await;
-    let command = remote_aware_stdio_server_bin()?;
-    let allowed_command = command.clone();
-    let fixture = test_codex()
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
-        .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::DefaultModeRequestUserInput)
-                .unwrap();
-            insert_mcp_server(
-                config,
-                "environment_policy",
-                stdio_transport(command, /*env*/ None, Vec::new()),
-                TestMcpServerOptions {
-                    environment_id: remote_aware_environment_id(),
-                    ..Default::default()
-                },
-            );
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    wait_for_mcp_server(&fixture.codex, "environment_policy").await?;
-    let selection = fixture.codex.environment_selections().await.remove(0);
-    let mut config = EnvironmentConfig {
-        allow_login_shell: fixture.config.permissions.allow_login_shell,
-        workspace_roots: selection.workspace_roots.clone(),
-        permission_profile: PermissionProfileSnapshot::legacy(
-            fixture.config.permissions.permission_profile().clone(),
-        ),
-        shell_environment_policy: Default::default(),
-        windows_sandbox_level: WindowsSandboxLevel::from_config(&fixture.config),
-        windows_sandbox_type: fixture.config.permissions.windows_sandbox_type,
-        use_legacy_landlock: fixture.config.features.use_legacy_landlock(),
-        exec_policy: None,
-        mcp_policy: Some(EnvironmentMcpPolicy {
-            servers: Some(BTreeMap::from([(
-                "environment_policy".to_string(),
-                McpServerRequirement::Identity {
-                    identity: McpServerIdentity::Command {
-                        command: allowed_command,
+    mock_server::run(&[&server], async {
+        let response = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        "pause",
+                        "request_user_input",
+                        &json!({
+                            "questions": [{
+                                "id": "continue",
+                                "header": "Continue",
+                                "question": "Continue?",
+                                "options": [
+                                    {"label": "Yes (Recommended)", "description": "Continue."},
+                                    {"label": "No", "description": "Stop."}
+                                ]
+                            }]
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("paused"),
+                ]),
+                responses::sse(vec![responses::ev_completed("active-done")]),
+                responses::sse(vec![responses::ev_completed("next-done")]),
+            ],
+        )
+        .await;
+        let command = remote_aware_stdio_server_bin()?;
+        let allowed_command = command.clone();
+        let fixture = test_codex()
+            .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+            .with_config(move |config| {
+                config
+                    .features
+                    .enable(Feature::DefaultModeRequestUserInput)
+                    .unwrap();
+                insert_mcp_server(
+                    config,
+                    "environment_policy",
+                    stdio_transport(command, /*env*/ None, Vec::new()),
+                    TestMcpServerOptions {
+                        environment_id: remote_aware_environment_id(),
+                        ..Default::default()
                     },
+                );
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        wait_for_mcp_server(&fixture.codex, "environment_policy").await?;
+        let selection = fixture.codex.environment_selections().await.remove(0);
+        let mut config = EnvironmentConfig {
+            allow_login_shell: fixture.config.permissions.allow_login_shell,
+            workspace_roots: selection.workspace_roots.clone(),
+            permission_profile: PermissionProfileSnapshot::legacy(
+                fixture.config.permissions.permission_profile().clone(),
+            ),
+            shell_environment_policy: Default::default(),
+            windows_sandbox_level: WindowsSandboxLevel::from_config(&fixture.config),
+            windows_sandbox_type: fixture.config.permissions.windows_sandbox_type,
+            use_legacy_landlock: fixture.config.features.use_legacy_landlock(),
+            exec_policy: None,
+            mcp_policy: Some(EnvironmentMcpPolicy {
+                servers: Some(BTreeMap::from([(
+                    "environment_policy".to_string(),
+                    McpServerRequirement::Identity {
+                        identity: McpServerIdentity::Command {
+                            command: allowed_command,
+                        },
+                    },
+                )])),
+                plugins: None,
+            }),
+            network_policy: None,
+            selected_capability_roots: Vec::new(),
+        };
+        let settings = |config| ThreadSettingsOverrides {
+            environments: Some(TurnEnvironmentRequests::new(
+                fixture.config.cwd.clone(),
+                vec![TurnEnvironmentRequest {
+                    config: EnvironmentConfigState::Ready(config),
+                    ..selection.clone().into_request()
+                }],
+            )),
+            ..Default::default()
+        };
+        submit_thread_settings(&fixture.codex, settings(config.clone())).await?;
+        fixture
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "pause before continuing".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let EventMsg::RequestUserInput(request) = wait_for_event(&fixture.codex, |event| {
+            matches!(event, EventMsg::RequestUserInput(_))
+        })
+        .await
+        else {
+            unreachable!("wait_for_event should return the request-user-input event")
+        };
+
+        config.mcp_policy.as_mut().unwrap().servers = Some(BTreeMap::new());
+        submit_thread_settings(&fixture.codex, settings(config)).await?;
+        fixture
+            .codex
+            .submit(Op::UserInputAnswer {
+                id: request.turn_id,
+                response: RequestUserInputResponse {
+                    answers: HashMap::from([(
+                        "continue".to_string(),
+                        RequestUserInputAnswer {
+                            answers: vec!["Yes (Recommended)".to_string()],
+                        },
+                    )]),
                 },
-            )])),
-            plugins: None,
-        }),
-        network_policy: None,
-        selected_capability_roots: Vec::new(),
-    };
-    let settings = |config| ThreadSettingsOverrides {
-        environments: Some(TurnEnvironmentRequests::new(
-            fixture.config.cwd.clone(),
-            vec![TurnEnvironmentRequest {
-                config: EnvironmentConfigState::Ready(config),
-                ..selection.clone().into_request()
-            }],
-        )),
-        ..Default::default()
-    };
-    submit_thread_settings(&fixture.codex, settings(config.clone())).await?;
-    fixture
-        .codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "pause before continuing".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let EventMsg::RequestUserInput(request) = wait_for_event(&fixture.codex, |event| {
-        matches!(event, EventMsg::RequestUserInput(_))
+            })
+            .await?;
+        wait_for_event(&fixture.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        fixture.submit_text_turn("start the next turn").await?;
+
+        let tool_is_visible = response
+            .requests()
+            .iter()
+            .map(|request| {
+                responses::namespace_child_tool(
+                    &request.body_json(),
+                    "mcp__environment_policy",
+                    "echo",
+                )
+                .is_some()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tool_is_visible, vec![true, true, false]);
+        Ok(())
     })
     .await
-    else {
-        unreachable!("wait_for_event should return the request-user-input event")
-    };
-
-    config.mcp_policy.as_mut().unwrap().servers = Some(BTreeMap::new());
-    submit_thread_settings(&fixture.codex, settings(config)).await?;
-    fixture
-        .codex
-        .submit(Op::UserInputAnswer {
-            id: request.turn_id,
-            response: RequestUserInputResponse {
-                answers: HashMap::from([(
-                    "continue".to_string(),
-                    RequestUserInputAnswer {
-                        answers: vec!["Yes (Recommended)".to_string()],
-                    },
-                )]),
-            },
-        })
-        .await?;
-    wait_for_event(&fixture.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    fixture.submit_text_turn("start the next turn").await?;
-
-    let tool_is_visible = response
-        .requests()
-        .iter()
-        .map(|request| {
-            responses::namespace_child_tool(&request.body_json(), "mcp__environment_policy", "echo")
-                .is_some()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(tool_is_visible, vec![true, true, false]);
-    Ok(())
 }
 
 #[test_case("rmcp", "mcp__rmcp"; "simple name")]

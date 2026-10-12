@@ -17,6 +17,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call_with_namespace;
@@ -204,6 +205,7 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
     const CALL_ID: &str = "freeform-message";
     const MESSAGE: &str = "I found a blocker that changes the plan.";
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -340,6 +342,8 @@ async fn freeform_async_message_emits_an_item_without_ending_the_turn(
                 && item.to_string().contains(MESSAGE))
     );
     Ok(())
+    })
+    .await
 }
 
 const CATALOG_ASYNC_PARAMETERS: &str = r#"{
@@ -396,6 +400,7 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
     ];
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -552,6 +557,8 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[test_case(json!({"questions": []}), "questions must not be empty"; "no_questions")]
@@ -565,6 +572,7 @@ async fn invalid_async_questions_do_not_emit_an_item(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -611,4 +619,6 @@ async fn invalid_async_questions_do_not_emit_an_item(
         Some(expected_error.to_string())
     );
     Ok(())
+    })
+    .await
 }

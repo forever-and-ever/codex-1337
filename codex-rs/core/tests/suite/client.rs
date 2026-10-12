@@ -60,6 +60,7 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::TestCodexResponsesRequestKind;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::load_default_config_for_test;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -568,57 +569,60 @@ async fn sends_local_audio_to_responses() -> anyhow::Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn response_item_ids_persist_across_resume_and_preserve_server_ids() -> anyhow::Result<()> {
     let server = MockServer::start().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg_server", "first reply"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let mut builder = test_codex();
-    let initial = builder.build(&server).await?;
-    let home = Arc::clone(&initial.home);
-    let rollout_path = initial
-        .session_configured
-        .rollout_path
-        .clone()
-        .expect("rollout path");
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg_server", "first reply"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let mut builder = test_codex();
+        let initial = builder.build(&server).await?;
+        let home = Arc::clone(&initial.home);
+        let rollout_path = initial
+            .session_configured
+            .rollout_path
+            .clone()
+            .expect("rollout path");
 
-    initial.submit_turn("before resume").await?;
-    initial.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&initial.codex, |event| {
-        matches!(event, EventMsg::ShutdownComplete)
+        initial.submit_turn("before resume").await?;
+        initial.codex.submit(Op::Shutdown).await?;
+        wait_for_event(&initial.codex, |event| {
+            matches!(event, EventMsg::ShutdownComplete)
+        })
+        .await;
+
+        let resumed = builder.resume(&server, home, rollout_path).await?;
+        resumed.submit_turn("after resume").await?;
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let user_id = response_message_item_id(&requests[0], "user", "before resume");
+        let user_uuid = user_id
+            .strip_prefix("msg_")
+            .expect("message ID should have the Responses API prefix");
+        assert_eq!(
+            Uuid::parse_str(user_uuid)?.get_version(),
+            Some(uuid::Version::SortRand)
+        );
+        assert_eq!(
+            response_message_item_id(&requests[1], "user", "before resume"),
+            user_id
+        );
+        assert_eq!(
+            response_message_item_id(&requests[1], "assistant", "first reply"),
+            "msg_server"
+        );
+
+        Ok(())
     })
-    .await;
-
-    let resumed = builder.resume(&server, home, rollout_path).await?;
-    resumed.submit_turn("after resume").await?;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let user_id = response_message_item_id(&requests[0], "user", "before resume");
-    let user_uuid = user_id
-        .strip_prefix("msg_")
-        .expect("message ID should have the Responses API prefix");
-    assert_eq!(
-        Uuid::parse_str(user_uuid)?.get_version(),
-        Some(uuid::Version::SortRand)
-    );
-    assert_eq!(
-        response_message_item_id(&requests[1], "user", "before resume"),
-        user_id
-    );
-    assert_eq!(
-        response_message_item_id(&requests[1], "assistant", "first reply"),
-        "msg_server"
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -666,111 +670,119 @@ async fn synthetic_call_output_id_is_stable_across_resumes() -> anyhow::Result<(
     }
 
     let server = MockServer::start().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let codex_home = Arc::new(TempDir::new()?);
-    let mut builder = test_codex();
-    let first = builder
-        .resume(&server, Arc::clone(&codex_home), session_path.clone())
-        .await?;
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let codex_home = Arc::new(TempDir::new()?);
+        let mut builder = test_codex();
+        let first = builder
+            .resume(&server, Arc::clone(&codex_home), session_path.clone())
+            .await?;
 
-    first.submit_turn("first resume").await?;
-    first.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&first.codex, |event| {
-        matches!(event, EventMsg::ShutdownComplete)
-    })
-    .await;
-    assert!(
-        !std::fs::read_to_string(&session_path)?.contains("\"type\":\"function_call_output\""),
-        "prompt-only repair should not be persisted to the rollout"
-    );
+        first.submit_turn("first resume").await?;
+        first.codex.submit(Op::Shutdown).await?;
+        wait_for_event(&first.codex, |event| {
+            matches!(event, EventMsg::ShutdownComplete)
+        })
+        .await;
+        assert!(
+            !std::fs::read_to_string(&session_path)?.contains("\"type\":\"function_call_output\""),
+            "prompt-only repair should not be persisted to the rollout"
+        );
 
-    let second = builder.resume(&server, codex_home, session_path).await?;
-    second.submit_turn("second resume").await?;
+        let second = builder.resume(&server, codex_home, session_path).await?;
+        second.submit_turn("second resume").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let first_output = requests[0].function_call_output(function_call_id);
-    let first_output_id = first_output
-        .get("id")
-        .and_then(serde_json::Value::as_str)
-        .expect("reconstructed output should have an item ID")
-        .to_string();
-    let first_output_uuid = first_output_id
-        .strip_prefix("fco_")
-        .expect("synthetic output should use the Responses API prefix");
-    assert_eq!(
-        Uuid::parse_str(first_output_uuid)?.get_version(),
-        Some(uuid::Version::Sha1)
-    );
-    assert_eq!(
-        requests[1]
-            .function_call_output(function_call_id)
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let first_output = requests[0].function_call_output(function_call_id);
+        let first_output_id = first_output
             .get("id")
-            .and_then(serde_json::Value::as_str),
-        Some(first_output_id.as_str())
-    );
+            .and_then(serde_json::Value::as_str)
+            .expect("reconstructed output should have an item ID")
+            .to_string();
+        let first_output_uuid = first_output_id
+            .strip_prefix("fco_")
+            .expect("synthetic output should use the Responses API prefix");
+        assert_eq!(
+            Uuid::parse_str(first_output_uuid)?.get_version(),
+            Some(uuid::Version::Sha1)
+        );
+        assert_eq!(
+            requests[1]
+                .function_call_output(function_call_id)
+                .get("id")
+                .and_then(serde_json::Value::as_str),
+            Some(first_output_id.as_str())
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn response_item_ids_are_sent_for_all_remote_v2_compaction_requests() -> anyhow::Result<()> {
     let server = MockServer::start().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            sse(vec![
-                json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "ENCRYPTED_CONTEXT_COMPACTION_SUMMARY",
-                    }
-                }),
-                ev_completed("resp-compact"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .build(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "ENCRYPTED_CONTEXT_COMPACTION_SUMMARY",
+                        }
+                    }),
+                    ev_completed("resp-compact"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .build(&server)
+            .await?;
 
-    test.submit_turn("before compaction").await?;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.submit_turn("after compaction").await?;
+        test.submit_turn("before compaction").await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_turn("after compaction").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    for (request_index, request) in requests.iter().enumerate() {
-        let input = request.input();
-        assert!(!input.is_empty(), "request {request_index} input is empty");
-        for item in input {
-            if item.get("type").and_then(serde_json::Value::as_str) == Some("compaction_trigger") {
-                continue;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        for (request_index, request) in requests.iter().enumerate() {
+            let input = request.input();
+            assert!(!input.is_empty(), "request {request_index} input is empty");
+            for item in input {
+                if item.get("type").and_then(serde_json::Value::as_str)
+                    == Some("compaction_trigger")
+                {
+                    continue;
+                }
+                assert!(
+                    item.get("id").and_then(serde_json::Value::as_str).is_some(),
+                    "request {request_index} item should have an ID: {item:#?}"
+                );
             }
-            assert!(
-                item.get("id").and_then(serde_json::Value::as_str).is_some(),
-                "request {request_index} item should have an ID: {item:#?}"
-            );
         }
-    }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 /// Writes an `auth.json` into the provided `codex_home` with the specified parameters.

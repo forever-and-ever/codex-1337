@@ -38,6 +38,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::Settings;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -427,45 +428,48 @@ async fn thread_settings_update_cwd_retargets_default_environment() -> Result<()
 #[tokio::test]
 async fn thread_settings_update_while_turn_is_active_emits_notification() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let first_response =
-        responses::sse_response(create_final_assistant_message_sse_response("first done")?)
-            .set_delay(Duration::from_secs(2));
-    let _requests = responses::mount_response_sequence(&server, vec![first_response]).await;
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri())?;
+    mock_server::run(&[&server], async {
+        let first_response =
+            responses::sse_response(create_final_assistant_message_sse_response("first done")?)
+                .set_delay(Duration::from_secs(2));
+        let _requests = responses::mount_response_sequence(&server, vec![first_response]).await;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let thread = start_thread(&mut mcp).await?.thread;
+        start_text_turn(&mut mcp, thread.id.clone()).await?;
+        timeout(
+            DEFAULT_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/started"),
+        )
+        .await??;
+
+        send_thread_settings_update(
+            &mut mcp,
+            ThreadSettingsUpdateParams {
+                thread_id: thread.id.clone(),
+                model: Some("mock-model-4".to_string()),
+                ..Default::default()
+            },
+        )
         .await?;
-    let thread = start_thread(&mut mcp).await?.thread;
-    start_text_turn(&mut mcp, thread.id.clone()).await?;
-    timeout(
-        DEFAULT_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/started"),
-    )
-    .await??;
 
-    send_thread_settings_update(
-        &mut mcp,
-        ThreadSettingsUpdateParams {
-            thread_id: thread.id.clone(),
-            model: Some("mock-model-4".to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
+        let updated = read_thread_settings_updated(&mut mcp).await?;
+        assert_eq!(updated.thread_id, thread.id);
+        assert_eq!(updated.thread_settings.model, "mock-model-4");
 
-    let updated = read_thread_settings_updated(&mut mcp).await?;
-    assert_eq!(updated.thread_id, thread.id);
-    assert_eq!(updated.thread_settings.model, "mock-model-4");
-
-    timeout(
-        DEFAULT_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    Ok(())
+        timeout(
+            DEFAULT_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

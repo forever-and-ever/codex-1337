@@ -37,6 +37,7 @@ use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathExt;
 use core_test_support::is_remote_test_environment;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -587,65 +588,68 @@ async fn view_image_routes_to_selected_local_environment() -> anyhow::Result<()>
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
-    let test = builder.build(&server).await?;
-    write_workspace_file(
-        &test,
-        "local.png",
-        png_bytes(/*width*/ 1, /*height*/ 1, [0, 255, 0, 255])?,
-    )
-    .await?;
-    let call_id = "call-view-image-local-env";
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    call_id,
-                    "view_image",
-                    &json!({
-                        "path": "local.png",
-                        "environment_id": LOCAL_ENVIRONMENT_ID,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build(&server).await?;
+        write_workspace_file(
+            &test,
+            "local.png",
+            png_bytes(/*width*/ 1, /*height*/ 1, [0, 255, 0, 255])?,
+        )
+        .await?;
+        let call_id = "call-view-image-local-env";
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        call_id,
+                        "view_image",
+                        &json!({
+                            "path": "local.png",
+                            "environment_id": LOCAL_ENVIRONMENT_ID,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    test.submit_turn_with_environments(
-        "route local view image",
-        Some(vec![local(test.config.cwd.clone())]),
-    )
-    .await?;
+        test.submit_turn_with_environments(
+            "route local view image",
+            Some(vec![local(test.config.cwd.clone())]),
+        )
+        .await?;
 
-    let output = response_mock
-        .last_request()
-        .context("missing request containing local view_image output")?
-        .function_call_output(call_id);
-    let output_items = output
-        .get("output")
-        .and_then(Value::as_array)
-        .context("view_image output should be content items")?;
-    assert_eq!(output_items.len(), 1);
-    let image_url = output_items[0]
-        .get("image_url")
-        .and_then(Value::as_str)
-        .context("view_image output should include image_url")?;
-    assert!(
-        image_url.starts_with("data:image/png;base64,"),
-        "unexpected image_url: {image_url}",
-    );
+        let output = response_mock
+            .last_request()
+            .context("missing request containing local view_image output")?
+            .function_call_output(call_id);
+        let output_items = output
+            .get("output")
+            .and_then(Value::as_array)
+            .context("view_image output should be content items")?;
+        assert_eq!(output_items.len(), 1);
+        let image_url = output_items[0]
+            .get("image_url")
+            .and_then(Value::as_str)
+            .context("view_image output should include image_url")?;
+        assert!(
+            image_url.starts_with("data:image/png;base64,"),
+            "unexpected image_url: {image_url}",
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -653,6 +657,7 @@ async fn view_image_tool_applies_local_sandbox_read_denies() -> anyhow::Result<(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex();
     let test = builder.build(&server).await?;
     let rel_path = "denied.png";
@@ -725,6 +730,8 @@ async fn view_image_tool_applies_local_sandbox_read_denies() -> anyhow::Result<(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -733,110 +740,113 @@ async fn view_image_routes_to_selected_remote_environment() -> anyhow::Result<()
     skip_if_no_remote_env!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
-    let test = builder.build_with_remote_and_local_env(&server).await?;
-    let local_cwd = TempDir::new()?;
-    fs::write(local_cwd.path().join("remote.png"), b"not a remote image")?;
-    let local_selection = local(local_cwd.path().abs());
-    let remote_cwd_uri = test.executor_environment().selection().cwd.clone();
-    let image_path_uri = remote_cwd_uri.join("remote.png")?;
-    let png = png_bytes(/*width*/ 1, /*height*/ 1, [0, 255, 0, 255])?;
-    test.fs()
-        .write_file(
-            &image_path_uri,
-            png,
-            Default::default(),
-            /*sandbox*/ None,
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_remote_and_local_env(&server).await?;
+        let local_cwd = TempDir::new()?;
+        fs::write(local_cwd.path().join("remote.png"), b"not a remote image")?;
+        let local_selection = local(local_cwd.path().abs());
+        let remote_cwd_uri = test.executor_environment().selection().cwd.clone();
+        let image_path_uri = remote_cwd_uri.join("remote.png")?;
+        let png = png_bytes(/*width*/ 1, /*height*/ 1, [0, 255, 0, 255])?;
+        test.fs()
+            .write_file(
+                &image_path_uri,
+                png,
+                Default::default(),
+                /*sandbox*/ None,
+            )
+            .await?;
+        let absolute_image_path = image_path_uri.inferred_native_path_string();
+        let remote_selection = TurnEnvironmentSelection {
+            selected_capability_roots: Default::default(),
+            environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
+            cwd: remote_cwd_uri.clone(),
+            workspace_roots: vec![remote_cwd_uri],
+            config: EnvironmentConfigState::FromThread,
+        };
+        let relative_call_id = "call-view-image-relative-multi-env";
+        let absolute_call_id = "call-view-image-absolute-multi-env";
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(
+                        relative_call_id,
+                        "view_image",
+                        &json!({
+                            "path": "remote.png",
+                            "environment_id": REMOTE_ENVIRONMENT_ID,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_function_call(
+                        absolute_call_id,
+                        "view_image",
+                        &json!({
+                            "path": absolute_image_path,
+                            "environment_id": REMOTE_ENVIRONMENT_ID,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-2"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-3"),
+                ]),
+            ],
         )
-        .await?;
-    let absolute_image_path = image_path_uri.inferred_native_path_string();
-    let remote_selection = TurnEnvironmentSelection {
-        selected_capability_roots: Default::default(),
-        environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
-        cwd: remote_cwd_uri.clone(),
-        workspace_roots: vec![remote_cwd_uri],
-        config: EnvironmentConfigState::FromThread,
-    };
-    let relative_call_id = "call-view-image-relative-multi-env";
-    let absolute_call_id = "call-view-image-absolute-multi-env";
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(
-                    relative_call_id,
-                    "view_image",
-                    &json!({
-                        "path": "remote.png",
-                        "environment_id": REMOTE_ENVIRONMENT_ID,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_function_call(
-                    absolute_call_id,
-                    "view_image",
-                    &json!({
-                        "path": absolute_image_path,
-                        "environment_id": REMOTE_ENVIRONMENT_ID,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-2"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-3"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-3"),
-            ]),
-        ],
-    )
-    .await;
+        .await;
 
-    test.submit_turn_with_environments(
-        "route view image",
-        Some(vec![local_selection, remote_selection]),
-    )
-    .await?;
-
-    let request = response_mock
-        .last_request()
-        .context("missing request containing view_image output")?
-        .clone();
-    for call_id in [relative_call_id, absolute_call_id] {
-        let output = request.function_call_output(call_id);
-        let output_items = output
-            .get("output")
-            .and_then(Value::as_array)
-            .context("view_image output should be content items")?;
-        assert_eq!(output_items.len(), 1);
-        let image_url = output_items[0]
-            .get("image_url")
-            .and_then(Value::as_str)
-            .context("view_image output should include image_url")?;
-        assert!(
-            image_url.starts_with("data:image/png;base64,"),
-            "unexpected image_url: {image_url}",
-        );
-    }
-
-    test.fs()
-        .remove(
-            &image_path_uri,
-            RemoveOptions {
-                recursive: false,
-                force: true,
-                follow_symlinks: true,
-            },
-            /*sandbox*/ None,
+        test.submit_turn_with_environments(
+            "route view image",
+            Some(vec![local_selection, remote_selection]),
         )
         .await?;
 
-    Ok(())
+        let request = response_mock
+            .last_request()
+            .context("missing request containing view_image output")?
+            .clone();
+        for call_id in [relative_call_id, absolute_call_id] {
+            let output = request.function_call_output(call_id);
+            let output_items = output
+                .get("output")
+                .and_then(Value::as_array)
+                .context("view_image output should be content items")?;
+            assert_eq!(output_items.len(), 1);
+            let image_url = output_items[0]
+                .get("image_url")
+                .and_then(Value::as_str)
+                .context("view_image output should include image_url")?;
+            assert!(
+                image_url.starts_with("data:image/png;base64,"),
+                "unexpected image_url: {image_url}",
+            );
+        }
+
+        test.fs()
+            .remove(
+                &image_path_uri,
+                RemoveOptions {
+                    recursive: false,
+                    force: true,
+                    follow_symlinks: true,
+                },
+                /*sandbox*/ None,
+            )
+            .await?;
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

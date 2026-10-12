@@ -20,6 +20,7 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::PathBufExt;
 use core_test_support::PathExt;
 use core_test_support::assert_regex_match;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -283,128 +284,132 @@ fn slow_user_shell_command() -> &'static str {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
-    let fixture = builder.build(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.4");
+        let fixture = builder.build(&server).await?;
 
-    let call_id = "active-turn-shell-call";
-    let args = if cfg!(windows) {
-        serde_json::json!({
-            "cmd": "Start-Sleep -Seconds 2; Write-Output model-shell",
-            "yield_time_ms": 10_000,
-        })
-    } else {
-        serde_json::json!({
-            "cmd": "sleep 2; echo model-shell",
-            "yield_time_ms": 10_000,
-        })
-    };
-    let first = sse(vec![
-        ev_response_created("resp-1"),
-        ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-        ev_completed("resp-1"),
-    ]);
-    let second = sse(vec![
-        ev_assistant_message("msg-1", "done"),
-        ev_completed("resp-2"),
-    ]);
-    let mock = responses::mount_sse_sequence(&server, vec![first, second]).await;
+        let call_id = "active-turn-shell-call";
+        let args = if cfg!(windows) {
+            serde_json::json!({
+                "cmd": "Start-Sleep -Seconds 2; Write-Output model-shell",
+                "yield_time_ms": 10_000,
+            })
+        } else {
+            serde_json::json!({
+                "cmd": "sleep 2; echo model-shell",
+                "yield_time_ms": 10_000,
+            })
+        };
+        let first = sse(vec![
+            ev_response_created("resp-1"),
+            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+            ev_completed("resp-1"),
+        ]);
+        let second = sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]);
+        let mock = responses::mount_sse_sequence(&server, vec![first, second]).await;
 
-    let cwd = fixture.config.cwd.clone();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd.as_path());
+        let cwd = fixture.config.cwd.clone();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, cwd.as_path());
 
-    fixture
-        .codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run model shell command".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: fixture.session_configured.model.clone(),
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        fixture
+            .codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run model shell command".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: fixture.session_configured.model.clone(),
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let _ = wait_for_event_match(&fixture.codex, |ev| match ev {
-        EventMsg::ExecCommandBegin(event)
-            if event.source == ExecCommandSource::UnifiedExecStartup =>
-        {
-            Some(event.clone())
-        }
-        _ => None,
-    })
-    .await;
-
-    #[cfg(windows)]
-    let user_shell_command = "Write-Output user-shell".to_string();
-    #[cfg(not(windows))]
-    let user_shell_command = "printf user-shell".to_string();
-    fixture
-        .codex
-        .submit(Op::RunUserShellCommand {
-            command: user_shell_command,
-            timeout_ms: None,
+        let _ = wait_for_event_match(&fixture.codex, |ev| match ev {
+            EventMsg::ExecCommandBegin(event)
+                if event.source == ExecCommandSource::UnifiedExecStartup =>
+            {
+                Some(event.clone())
+            }
+            _ => None,
         })
-        .await?;
+        .await;
 
-    let mut saw_replaced_abort = false;
-    let mut saw_user_shell_end = false;
-    let mut saw_turn_complete = false;
-    for _ in 0..200 {
-        let event = timeout(Duration::from_secs(20), fixture.codex.next_event())
-            .await
-            .context("timed out waiting for event")?
-            .context("event stream ended unexpectedly")?;
-        match event.msg {
-            EventMsg::TurnAborted(ev) if ev.reason == TurnAbortReason::Replaced => {
-                saw_replaced_abort = true;
+        #[cfg(windows)]
+        let user_shell_command = "Write-Output user-shell".to_string();
+        #[cfg(not(windows))]
+        let user_shell_command = "printf user-shell".to_string();
+        fixture
+            .codex
+            .submit(Op::RunUserShellCommand {
+                command: user_shell_command,
+                timeout_ms: None,
+            })
+            .await?;
+
+        let mut saw_replaced_abort = false;
+        let mut saw_user_shell_end = false;
+        let mut saw_turn_complete = false;
+        for _ in 0..200 {
+            let event = timeout(Duration::from_secs(20), fixture.codex.next_event())
+                .await
+                .context("timed out waiting for event")?
+                .context("event stream ended unexpectedly")?;
+            match event.msg {
+                EventMsg::TurnAborted(ev) if ev.reason == TurnAbortReason::Replaced => {
+                    saw_replaced_abort = true;
+                }
+                EventMsg::ExecCommandEnd(ev) if ev.source == ExecCommandSource::UserShell => {
+                    saw_user_shell_end = true;
+                }
+                EventMsg::TurnComplete(_) => {
+                    saw_turn_complete = true;
+                    break;
+                }
+                _ => {}
             }
-            EventMsg::ExecCommandEnd(ev) if ev.source == ExecCommandSource::UserShell => {
-                saw_user_shell_end = true;
-            }
-            EventMsg::TurnComplete(_) => {
-                saw_turn_complete = true;
-                break;
-            }
-            _ => {}
         }
-    }
 
-    assert!(saw_turn_complete, "expected turn to complete");
-    assert!(
-        saw_user_shell_end,
-        "expected user shell command to finish while turn was active"
-    );
-    assert!(
-        !saw_replaced_abort,
-        "user shell command should not replace the active turn"
-    );
+        assert!(saw_turn_complete, "expected turn to complete");
+        assert!(
+            saw_user_shell_end,
+            "expected user shell command to finish while turn was active"
+        );
+        assert!(
+            !saw_replaced_abort,
+            "user shell command should not replace the active turn"
+        );
 
-    assert_eq!(
-        mock.requests().len(),
-        2,
-        "active turn should continue and issue the follow-up model request"
-    );
+        assert_eq!(
+            mock.requests().len(),
+            2,
+            "active turn should continue and issue the follow-up model request"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     // Disable it to ease command matching.
     let mut builder = core_test_support::test_codex::test_codex().with_config(move |config| {
         config
@@ -484,6 +489,8 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     assert_regex_match(&expected_pattern, &command_message);
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -537,6 +544,7 @@ async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Re
 #[cfg(not(target_os = "windows"))] // TODO: unignore on windows
 async fn user_shell_command_output_is_truncated_in_history() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let builder = core_test_support::test_codex::test_codex();
     let test = builder
         .with_config(|config| {
@@ -596,6 +604,8 @@ async fn user_shell_command_output_is_truncated_in_history() -> anyhow::Result<(
     assert_regex_match(&expected_pattern, &command_message);
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

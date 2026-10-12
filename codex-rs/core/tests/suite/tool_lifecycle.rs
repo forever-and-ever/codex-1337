@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -126,109 +127,112 @@ async fn tool_start_receives_conversation_history() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let first_call_id = "first-plan-call";
-    let second_call_id = "second-plan-call";
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_reasoning_item("reasoning-1", &["inspect the workspace"], &[]),
-                responses::ev_function_call(
-                    first_call_id,
-                    "update_plan",
-                    &json!({
-                        "plan": [{ "step": "Inspect workspace", "status": "in_progress" }]
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("first-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_function_call(
-                    second_call_id,
-                    "update_plan",
-                    &json!({
-                        "plan": [{ "step": "Inspect workspace", "status": "completed" }]
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("second-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("assistant-1", "done"),
-                responses::ev_completed("third-response"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let first_call_id = "first-plan-call";
+        let second_call_id = "second-plan-call";
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_reasoning_item("reasoning-1", &["inspect the workspace"], &[]),
+                    responses::ev_function_call(
+                        first_call_id,
+                        "update_plan",
+                        &json!({
+                            "plan": [{ "step": "Inspect workspace", "status": "in_progress" }]
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("first-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        second_call_id,
+                        "update_plan",
+                        &json!({
+                            "plan": [{ "step": "Inspect workspace", "status": "completed" }]
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("second-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("assistant-1", "done"),
+                    responses::ev_completed("third-response"),
+                ]),
+            ],
+        )
+        .await;
 
-    let recorder = Arc::new(ConversationHistoryRecorder::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(recorder.clone());
-    let test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| config.update_plan_enabled = true)
-        .build_with_auto_env(&server)
-        .await?;
+        let recorder = Arc::new(ConversationHistoryRecorder::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(recorder.clone());
+        let test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| config.update_plan_enabled = true)
+            .build_with_auto_env(&server)
+            .await?;
 
-    let user_prompt = "Inspect the workspace and update the plan.";
-    test.submit_text_turn(user_prompt).await?;
+        let user_prompt = "Inspect the workspace and update the plan.";
+        test.submit_text_turn(user_prompt).await?;
 
-    let histories = recorder
-        .histories
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let call_ids = histories
-        .iter()
-        .map(|history| history.call_id.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(call_ids, vec![first_call_id, second_call_id]);
-    let arguments = histories
-        .iter()
-        .map(|history| serde_json::from_str::<serde_json::Value>(&history.arguments))
-        .collect::<Result<Vec<_>, _>>()?;
-    assert_eq!(
-        arguments,
-        vec![
-            json!({ "plan": [{ "step": "Inspect workspace", "status": "in_progress" }] }),
-            json!({ "plan": [{ "step": "Inspect workspace", "status": "completed" }] }),
-        ]
-    );
-
-    let first_history = &histories[0].items;
-    assert!(first_history.iter().any(|item| matches!(
-        item,
-        ResponseItem::Message { role, content, .. }
-            if role == "user"
-                && content.iter().any(|content| matches!(
-                    content,
-                    ContentItem::InputText { text } if text == user_prompt
-                ))
-    )));
-    assert!(
-        first_history
+        let histories = recorder
+            .histories
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let call_ids = histories
             .iter()
-            .any(|item| matches!(item, ResponseItem::Reasoning { .. }))
-    );
-    assert!(first_history.iter().any(|item| matches!(
-        item,
-        ResponseItem::FunctionCall { call_id, .. } if call_id == first_call_id
-    )));
+            .map(|history| history.call_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(call_ids, vec![first_call_id, second_call_id]);
+        let arguments = histories
+            .iter()
+            .map(|history| serde_json::from_str::<serde_json::Value>(&history.arguments))
+            .collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(
+            arguments,
+            vec![
+                json!({ "plan": [{ "step": "Inspect workspace", "status": "in_progress" }] }),
+                json!({ "plan": [{ "step": "Inspect workspace", "status": "completed" }] }),
+            ]
+        );
 
-    let second_history = &histories[1].items;
-    assert!(second_history.iter().any(|item| matches!(
-        item,
-        ResponseItem::FunctionCallOutput {
-            call_id: Some(call_id),
-            ..
-        } if call_id == first_call_id
-    )));
-    assert!(second_history.iter().any(|item| matches!(
-        item,
-        ResponseItem::FunctionCall { call_id, .. } if call_id == second_call_id
-    )));
+        let first_history = &histories[0].items;
+        assert!(first_history.iter().any(|item| matches!(
+            item,
+            ResponseItem::Message { role, content, .. }
+                if role == "user"
+                    && content.iter().any(|content| matches!(
+                        content,
+                        ContentItem::InputText { text } if text == user_prompt
+                    ))
+        )));
+        assert!(
+            first_history
+                .iter()
+                .any(|item| matches!(item, ResponseItem::Reasoning { .. }))
+        );
+        assert!(first_history.iter().any(|item| matches!(
+            item,
+            ResponseItem::FunctionCall { call_id, .. } if call_id == first_call_id
+        )));
 
-    Ok(())
+        let second_history = &histories[1].items;
+        assert!(second_history.iter().any(|item| matches!(
+            item,
+            ResponseItem::FunctionCallOutput {
+                call_id: Some(call_id),
+                ..
+            } if call_id == first_call_id
+        )));
+        assert!(second_history.iter().any(|item| matches!(
+            item,
+            ResponseItem::FunctionCall { call_id, .. } if call_id == second_call_id
+        )));
+
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(AppsServerOwner::Host, McpToolSource::Connector; "host_owned_apps")]
@@ -241,78 +245,81 @@ async fn tool_start_receives_executed_mcp_call_for_connector(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let apps_server = AppsTestServer::mount(&server).await?;
-    let call_id = "calendar-lifecycle-call";
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    SEARCH_CALENDAR_NAMESPACE,
-                    SEARCH_CALENDAR_LIST_TOOL,
-                    "{}",
-                ),
-                responses::ev_completed("first-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("assistant-1", "done"),
-                responses::ev_completed("second-response"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let apps_server = AppsTestServer::mount(&server).await?;
+        let call_id = "calendar-lifecycle-call";
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        SEARCH_CALENDAR_NAMESPACE,
+                        SEARCH_CALENDAR_LIST_TOOL,
+                        "{}",
+                    ),
+                    responses::ev_completed("first-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("assistant-1", "done"),
+                    responses::ev_completed("second-response"),
+                ]),
+            ],
+        )
+        .await;
 
-    let recorder = Arc::new(ConversationHistoryRecorder::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(recorder.clone());
-    if matches!(owner, AppsServerOwner::Extension) {
-        extensions.mcp_server_contributor(Arc::new(ExtensionOwnedAppsServer {
-            url: format!("{}/api/codex/ps/mcp", apps_server.chatgpt_base_url),
-        }));
-    }
-    let test = apps_enabled_builder(apps_server.chatgpt_base_url)
-        .with_extensions(Arc::new(extensions.build()))
-        .build_with_auto_env(&server)
-        .await?;
-    wait_for_mcp_server(&test.codex, CODEX_APPS_MCP_SERVER_NAME).await?;
+        let recorder = Arc::new(ConversationHistoryRecorder::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(recorder.clone());
+        if matches!(owner, AppsServerOwner::Extension) {
+            extensions.mcp_server_contributor(Arc::new(ExtensionOwnedAppsServer {
+                url: format!("{}/api/codex/ps/mcp", apps_server.chatgpt_base_url),
+            }));
+        }
+        let test = apps_enabled_builder(apps_server.chatgpt_base_url)
+            .with_extensions(Arc::new(extensions.build()))
+            .build_with_auto_env(&server)
+            .await?;
+        wait_for_mcp_server(&test.codex, CODEX_APPS_MCP_SERVER_NAME).await?;
 
-    test.submit_text_turn("List my calendar events.").await?;
+        test.submit_text_turn("List my calendar events.").await?;
 
-    {
-        let histories = recorder
-            .histories
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let [history] = histories.as_slice() else {
-            panic!("expected one tool start, got {}", histories.len());
-        };
-        assert_eq!(history.call_id, call_id);
+        {
+            let histories = recorder
+                .histories
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let [history] = histories.as_slice() else {
+                panic!("expected one tool start, got {}", histories.len());
+            };
+            assert_eq!(history.call_id, call_id);
+            assert_eq!(
+                history.mcp_tool,
+                Some((
+                    CODEX_APPS_MCP_SERVER_NAME.to_string(),
+                    Some("calendar".to_string()),
+                    expected_source,
+                )),
+            );
+        }
+
+        let executed_call = recorded_apps_tool_call_by_call_id(&server, call_id).await;
         assert_eq!(
-            history.mcp_tool,
-            Some((
-                CODEX_APPS_MCP_SERVER_NAME.to_string(),
-                Some("calendar".to_string()),
-                expected_source,
-            )),
+            executed_call
+                .pointer("/params/name")
+                .and_then(Value::as_str),
+            Some("calendar_list_events")
         );
-    }
+        if matches!(owner, AppsServerOwner::Extension) {
+            assert_eq!(
+                executed_call.pointer("/params/_meta/_codex_apps/root_turn_id"),
+                None
+            );
+        }
 
-    let executed_call = recorded_apps_tool_call_by_call_id(&server, call_id).await;
-    assert_eq!(
-        executed_call
-            .pointer("/params/name")
-            .and_then(Value::as_str),
-        Some("calendar_list_events")
-    );
-    if matches!(owner, AppsServerOwner::Extension) {
-        assert_eq!(
-            executed_call.pointer("/params/_meta/_codex_apps/root_turn_id"),
-            None
-        );
-    }
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -509,64 +516,68 @@ async fn tool_start_receives_frozen_host_plugin_root() -> Result<()> {
     skip_if_wine_exec!(Ok(()), "requires a native test_stdio_server");
 
     let server = responses::start_mock_server().await;
-    let codex_home = Arc::new(tempfile::tempdir()?);
-    let plugin_root = super::plugins::write_sample_plugin_manifest_and_config(codex_home.as_ref());
-    let test_env = test_env().await?;
-    let server_config = json!({
-        "command": super::rmcp_client::remote_aware_stdio_server_bin()?,
-        "environment_id": super::rmcp_client::remote_aware_environment_id(),
-        "cwd": test_env.cwd(),
-    });
-    fs::write(
-        plugin_root.join(".mcp.json"),
-        serde_json::to_vec(&json!({"mcpServers": {"sample": server_config}}))?,
-    )?;
+    mock_server::run(&[&server], async {
+        let codex_home = Arc::new(tempfile::tempdir()?);
+        let plugin_root =
+            super::plugins::write_sample_plugin_manifest_and_config(codex_home.as_ref());
+        let test_env = test_env().await?;
+        let server_config = json!({
+            "command": super::rmcp_client::remote_aware_stdio_server_bin()?,
+            "environment_id": super::rmcp_client::remote_aware_environment_id(),
+            "cwd": test_env.cwd(),
+        });
+        fs::write(
+            plugin_root.join(".mcp.json"),
+            serde_json::to_vec(&json!({"mcpServers": {"sample": server_config}}))?,
+        )?;
 
-    let recorder = Arc::new(ConversationHistoryRecorder::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(recorder.clone());
-    let test = test_codex()
-        .with_home(codex_home)
-        .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
-        .build_with_environment(&server, test_env)
-        .await?;
-    wait_for_mcp_server(&test.codex, "sample").await?;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call_with_namespace(
-                    "plugin-lifecycle-call",
-                    "mcp__sample",
-                    "echo",
-                    r#"{"message":"ping"}"#,
-                ),
-                responses::ev_completed("first-response"),
-            ]),
-            responses::sse(vec![responses::ev_completed("second-response")]),
-        ],
-    )
-    .await;
-    test.submit_text_turn("Call the sample echo tool.").await?;
+        let recorder = Arc::new(ConversationHistoryRecorder::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(recorder.clone());
+        let test = test_codex()
+            .with_home(codex_home)
+            .with_extensions(Arc::new(extensions.build()))
+            .with_model_info_override("gpt-5.4", |model| model.supports_search_tool = false)
+            .build_with_environment(&server, test_env)
+            .await?;
+        wait_for_mcp_server(&test.codex, "sample").await?;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call_with_namespace(
+                        "plugin-lifecycle-call",
+                        "mcp__sample",
+                        "echo",
+                        r#"{"message":"ping"}"#,
+                    ),
+                    responses::ev_completed("first-response"),
+                ]),
+                responses::sse(vec![responses::ev_completed("second-response")]),
+            ],
+        )
+        .await;
+        test.submit_text_turn("Call the sample echo tool.").await?;
 
-    let histories = recorder
-        .histories
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let [history] = histories.as_slice() else {
-        panic!("expected one tool start, got {}", histories.len());
-    };
-    let expected_source = McpToolSource::Plugin {
-        id: "sample@test".to_string(),
-        root: PathUri::from_host_native_path(&plugin_root)?,
-    };
-    assert_eq!(
-        history.mcp_tool,
-        Some(("sample".to_string(), None, expected_source)),
-    );
+        let histories = recorder
+            .histories
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let [history] = histories.as_slice() else {
+            panic!("expected one tool start, got {}", histories.len());
+        };
+        let expected_source = McpToolSource::Plugin {
+            id: "sample@test".to_string(),
+            root: PathUri::from_host_native_path(&plugin_root)?,
+        };
+        assert_eq!(
+            history.mcp_tool,
+            Some(("sample".to_string(), None, expected_source)),
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -575,78 +586,85 @@ async fn tool_start_receives_rewritten_payload_and_post_hook_history() -> Result
     skip_if_wine_exec!(Ok(()), "command hooks require a host-native executor");
 
     let server = responses::start_mock_server().await;
-    let call_id = "rewritten-plan-call";
-    let original_input = json!({
-        "plan": [{ "step": "Original step", "status": "in_progress" }]
-    });
-    let rewritten_input = json!({
-        "plan": [{ "step": "Rewritten step", "status": "completed" }]
-    });
-    let additional_context = "Only available after the pre-tool hook.";
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call(call_id, "update_plan", &original_input.to_string()),
-                responses::ev_completed("first-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("assistant-1", "done"),
-                responses::ev_completed("second-response"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let call_id = "rewritten-plan-call";
+        let original_input = json!({
+            "plan": [{ "step": "Original step", "status": "in_progress" }]
+        });
+        let rewritten_input = json!({
+            "plan": [{ "step": "Rewritten step", "status": "completed" }]
+        });
+        let additional_context = "Only available after the pre-tool hook.";
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call(
+                        call_id,
+                        "update_plan",
+                        &original_input.to_string(),
+                    ),
+                    responses::ev_completed("first-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("assistant-1", "done"),
+                    responses::ev_completed("second-response"),
+                ]),
+            ],
+        )
+        .await;
 
-    let hook_output = json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "updatedInput": rewritten_input,
-            "additionalContext": additional_context,
-        }
-    });
-    let recorder = Arc::new(ConversationHistoryRecorder::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(recorder.clone());
-    let test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_pre_build_hook(move |home| {
-            write_pre_tool_hook(home, "^update_plan$", &hook_output)
-                .expect("write pre-tool hook fixture");
-        })
-        .with_config(trust_discovered_hooks)
-        .with_config(|config| config.update_plan_enabled = true)
-        .build_with_auto_env(&server)
-        .await?;
+        let hook_output = json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": rewritten_input,
+                "additionalContext": additional_context,
+            }
+        });
+        let recorder = Arc::new(ConversationHistoryRecorder::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(recorder.clone());
+        let test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_pre_build_hook(move |home| {
+                write_pre_tool_hook(home, "^update_plan$", &hook_output)
+                    .expect("write pre-tool hook fixture");
+            })
+            .with_config(trust_discovered_hooks)
+            .with_config(|config| config.update_plan_enabled = true)
+            .build_with_auto_env(&server)
+            .await?;
 
-    test.submit_text_turn("Update the plan.").await?;
+        test.submit_text_turn("Update the plan.").await?;
 
-    let histories = recorder
-        .histories
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let [history] = histories.as_slice() else {
-        panic!("expected one tool start, got {}", histories.len());
-    };
-    assert_eq!(
-        (
-            history.call_id.as_str(),
-            serde_json::from_str::<serde_json::Value>(&history.arguments)?,
-        ),
-        (call_id, rewritten_input)
-    );
-    assert!(history.items.iter().any(|item| matches!(
-        item,
-        ResponseItem::Message { role, content, .. }
-            if role == "developer"
-                && content.iter().any(|content| matches!(
-                    content,
-                    ContentItem::InputText { text } if text == additional_context
-                ))
-    )));
+        let histories = recorder
+            .histories
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let [history] = histories.as_slice() else {
+            panic!("expected one tool start, got {}", histories.len());
+        };
+        assert_eq!(
+            (
+                history.call_id.as_str(),
+                serde_json::from_str::<serde_json::Value>(&history.arguments)?,
+            ),
+            (call_id, rewritten_input)
+        );
+        assert!(history.items.iter().any(|item| matches!(
+            item,
+            ResponseItem::Message { role, content, .. }
+                if role == "developer"
+                    && content.iter().any(|content| matches!(
+                        content,
+                        ContentItem::InputText { text } if text == additional_context
+                    ))
+        )));
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

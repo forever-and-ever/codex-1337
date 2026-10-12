@@ -2,6 +2,7 @@
 //! A retired managed opt-out cannot disable capture or later checkpoint promotion.
 
 use codex_protocol::protocol::TurnEnvironmentSelection;
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -178,6 +179,7 @@ async fn independent_history_resume_filters_rolled_back_sources(compaction: &str
 
 pub(super) async fn migration_scenario() -> Result<Vec<responses::ResponsesRequest>> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_history_mode(ThreadHistoryMode::Paginated)
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
@@ -426,4 +428,6 @@ pub(super) async fn migration_scenario() -> Result<Vec<responses::ResponsesReque
     );
     thread.shutdown_and_wait().await?;
     Ok(all_requests)
+    })
+    .await
 }

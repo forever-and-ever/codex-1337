@@ -1,12 +1,14 @@
 //! Content-filter retries retain delivered output and append catalog guidance after each block.
 
 use super::*;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn content_filter_guidance_is_appended_after_each_block() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_config(|config| {
             configure_scenario_catalog(config);
@@ -69,4 +71,6 @@ async fn content_filter_guidance_is_appended_after_each_block() -> Result<()> {
         )
     );
     Ok(())
+    })
+    .await
 }

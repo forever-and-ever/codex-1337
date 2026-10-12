@@ -16,6 +16,7 @@ use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::mount_sse_once;
 use pretty_assertions::assert_eq;
@@ -183,117 +184,123 @@ async fn guardian_tracks_shared_instruction_updates_in_running_descendants() -> 
     }
 
     let server = start_mock_server().await;
-    let provider = Arc::new(RecordingThreadInstructionsProvider::with_text(INITIAL).shared());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(Arc::new(UpdateRulesOnAction(provider.clone())));
-    let test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let root = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            environments: Some(vec![test.executor_environment().request()]),
-            thread_instructions_provider: Some(provider),
-            ..StartThreadOptions::new(test.config.clone())
-        })
-        .await?;
-    let mut descendant = root;
-    for depth in 1..=2 {
-        descendant = test
+    mock_server::run(&[&server], async {
+        let provider = Arc::new(RecordingThreadInstructionsProvider::with_text(INITIAL).shared());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(Arc::new(UpdateRulesOnAction(provider.clone())));
+        let test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let root = test
             .thread_manager
             .start_thread(StartThreadOptions {
                 environments: Some(vec![test.executor_environment().request()]),
-                session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                    parent_thread_id: descendant.thread_id,
-                    depth,
-                    agent_path: None,
-                    agent_nickname: None,
-                    agent_role: None,
-                })),
+                thread_instructions_provider: Some(provider),
                 ..StartThreadOptions::new(test.config.clone())
             })
             .await?;
-    }
-
-    let mut responses = Vec::new();
-    for call_id in ["initial-action", "updated-action", "cleared-action"] {
-        responses.push(sse(vec![
-            ev_response_created(call_id),
-            responses::ev_function_call(
-                call_id,
-                "exec_command",
-                &json!({
-                    "cmd": format!("echo {call_id}"),
-                    "sandbox_permissions": "require_escalated",
-                    "justification": "Review this action against the current rules.",
+        let mut descendant = root;
+        for depth in 1..=2 {
+            descendant = test
+                .thread_manager
+                .start_thread(StartThreadOptions {
+                    environments: Some(vec![test.executor_environment().request()]),
+                    session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                        parent_thread_id: descendant.thread_id,
+                        depth,
+                        agent_path: None,
+                        agent_nickname: None,
+                        agent_role: None,
+                    })),
+                    ..StartThreadOptions::new(test.config.clone())
                 })
-                .to_string(),
-            ),
-            ev_completed(call_id),
-        ]));
-        responses.push(sse(vec![
-            ev_assistant_message("guardian", r#"{"outcome":"deny"}"#),
-            ev_completed(&format!("review-{call_id}")),
-        ]));
-        responses.push(responses::sse_completed(&format!("finished-{call_id}")));
-    }
-    let requests = mount_sse_sequence(&server, responses).await;
-    // Neither ancestor takes another turn during the update and removal.
-    for prompt in [
-        "Check the initial rules.",
-        "Check the updated rules.",
-        "Check after removal.",
-    ] {
-        submit_thread_turn(&descendant.thread, prompt).await?;
-    }
-    let requests = requests.requests();
-    assert_eq!(requests.len(), 9);
-    let initial = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{INITIAL}\n</INSTRUCTIONS>");
-    let updated = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{UPDATED}\n</INSTRUCTIONS>");
+                .await?;
+        }
 
-    assert_eq!(
-        requests
-            .iter()
-            .map(instruction_fragments)
-            .collect::<Vec<_>>(),
-        vec![
-            vec![initial.clone()],
-            vec![initial.clone()],
-            vec![initial.clone()],
-            vec![initial.clone()],
-            vec![updated],
-            vec![initial.clone()],
-            vec![initial.clone()],
-            vec![],
-            vec![initial],
-        ],
-    );
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| instruction_changes(request).len())
-            .collect::<Vec<_>>(),
-        vec![0, 0, 1, 1, 0, 2, 2, 0, 2],
-    );
-    let changes = instruction_changes(&requests[8]);
-    assert!(changes[0].contains(&format!("-{INITIAL}\n+{UPDATED}")));
-    assert!(changes[1].contains(&format!("-{UPDATED}")));
-    let reviewers = [1, 4, 7].map(|index| {
-        let metadata = requests[index].body_json()["client_metadata"].clone();
-        assert_eq!(metadata["x-openai-subagent"], "guardian");
-        metadata["thread_id"]
-            .as_str()
-            .expect("reviewer thread id")
-            .to_owned()
-    });
-    assert_ne!(reviewers[0], reviewers[1]);
-    assert_ne!(reviewers[1], reviewers[2]);
-    Ok(())
+        let mut responses = Vec::new();
+        for call_id in ["initial-action", "updated-action", "cleared-action"] {
+            responses.push(sse(vec![
+                ev_response_created(call_id),
+                responses::ev_function_call(
+                    call_id,
+                    "exec_command",
+                    &json!({
+                        "cmd": format!("echo {call_id}"),
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Review this action against the current rules.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed(call_id),
+            ]));
+            responses.push(sse(vec![
+                ev_assistant_message("guardian", r#"{"outcome":"deny"}"#),
+                ev_completed(&format!("review-{call_id}")),
+            ]));
+            responses.push(responses::sse_completed(&format!("finished-{call_id}")));
+        }
+        let requests = mount_sse_sequence(&server, responses).await;
+        // Neither ancestor takes another turn during the update and removal.
+        for prompt in [
+            "Check the initial rules.",
+            "Check the updated rules.",
+            "Check after removal.",
+        ] {
+            submit_thread_turn(&descendant.thread, prompt).await?;
+        }
+        let requests = requests.requests();
+        assert_eq!(requests.len(), 9);
+        let initial =
+            format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{INITIAL}\n</INSTRUCTIONS>");
+        let updated =
+            format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{UPDATED}\n</INSTRUCTIONS>");
+
+        assert_eq!(
+            requests
+                .iter()
+                .map(instruction_fragments)
+                .collect::<Vec<_>>(),
+            vec![
+                vec![initial.clone()],
+                vec![initial.clone()],
+                vec![initial.clone()],
+                vec![initial.clone()],
+                vec![updated],
+                vec![initial.clone()],
+                vec![initial.clone()],
+                vec![],
+                vec![initial],
+            ],
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| instruction_changes(request).len())
+                .collect::<Vec<_>>(),
+            vec![0, 0, 1, 1, 0, 2, 2, 0, 2],
+        );
+        let changes = instruction_changes(&requests[8]);
+        assert!(changes[0].contains(&format!("-{INITIAL}\n+{UPDATED}")));
+        assert!(changes[1].contains(&format!("-{UPDATED}")));
+        let reviewers = [1, 4, 7].map(|index| {
+            let metadata = requests[index].body_json()["client_metadata"].clone();
+            assert_eq!(metadata["x-openai-subagent"], "guardian");
+            metadata["thread_id"]
+                .as_str()
+                .expect("reviewer thread id")
+                .to_owned()
+        });
+        assert_ne!(reviewers[0], reviewers[1]);
+        assert_ne!(reviewers[1], reviewers[2]);
+        Ok(())
+    })
+    .await
 }
 
 fn instruction_changes(request: &responses::ResponsesRequest) -> Vec<String> {

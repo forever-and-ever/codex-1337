@@ -1,5 +1,6 @@
 //! Verifies host controller selection and routing through existing runtime entry points.
 
+use core_test_support::mock_server;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -279,128 +280,131 @@ async fn test_with_host_control(
 async fn host_threads_preserve_lineage_settings_and_resume_routing() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let (test, controller) = test_with_host_control(&server).await?;
-    let root_id = test.session_configured.thread_id;
-    let mut child_config = test.config.clone();
-    child_config.service_tier = None;
-    let child = test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            reserved_thread_id: Some(ThreadId::new()),
-            environments: Some(vec![test.executor_environment().request()]),
-            session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id: root_id,
-                depth: 1,
-                agent_path: Some(AgentPath::root().join("worker").expect("valid child path")),
-                agent_nickname: None,
-                agent_role: None,
-            })),
-            ..StartThreadOptions::new(child_config.clone())
-        })
-        .await?;
-    assert_eq!(
-        (
-            child.session_configured.session_id,
-            child.session_configured.parent_thread_id
-        ),
-        (controller.identity(), Some(root_id))
-    );
-    assert_eq!(controller.service_tier(), Some("priority".to_string()));
-    child.thread.ensure_rollout_materialized().await;
-    child.thread.flush_rollout().await?;
-    let saved = test
-        .thread_store
-        .load_latest_model_context(codex_thread_store::LoadThreadHistoryParams {
-            thread_id: child.thread_id,
-            include_archived: false,
-        })
-        .await?;
-    assert!(saved.items.iter().any(|item| matches!(item,
-        RolloutItem::SessionMeta(meta) if meta.meta.parent_thread_id == Some(root_id)
-    )));
-
-    controller
-        .agents
-        .lock()
-        .expect("agents lock")
-        .insert("/root/worker".into(), child.thread_id);
-    for (thread, author, recipient, destination) in [
-        (&test.codex, "/root", "/root/worker", "new_channel_name"),
-        (&child.thread, "/root/worker", "/root", "channel_name"),
-    ] {
-        let arguments = serde_json::json!({
-            (destination): "design",
-            "text": "A shared decision.",
-            "agents_to_notify": [recipient],
-        });
-        let mock = responses::mount_sse_sequence(
-            &server,
-            vec![
-                responses::sse(vec![
-                    responses::ev_function_call_with_namespace(
-                        "post",
-                        "wrangler_agents",
-                        "post",
-                        &arguments.to_string(),
-                    ),
-                    responses::ev_completed("post"),
-                ]),
-                responses::sse(vec![responses::ev_completed("done")]),
-            ],
-        )
-        .await;
-        thread
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "Post a decision.".into(),
-                text_elements: Vec::new(),
-            }]))
-            .await?;
-        wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-        let post: PostMetadata = serde_json::from_str(
-            &mock.requests()[1]
-                .function_call_output_text("post")
-                .expect("post result"),
-        )?;
-        assert_eq!(post.author.as_str(), author);
-    }
-
-    // Rejected starts must leave the live tree's settings alone, whether the
-    // requested root already exists or the factory returns the wrong identity.
-    for reserved_thread_id in [root_id, ThreadId::new()] {
-        let rejected = test
+    mock_server::run(&[&server], async {
+        let (test, controller) = test_with_host_control(&server).await?;
+        let root_id = test.session_configured.thread_id;
+        let mut child_config = test.config.clone();
+        child_config.service_tier = None;
+        let child = test
             .thread_manager
             .start_thread(StartThreadOptions {
-                reserved_thread_id: Some(reserved_thread_id),
+                reserved_thread_id: Some(ThreadId::new()),
                 environments: Some(vec![test.executor_environment().request()]),
+                session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id: root_id,
+                    depth: 1,
+                    agent_path: Some(AgentPath::root().join("worker").expect("valid child path")),
+                    agent_nickname: None,
+                    agent_role: None,
+                })),
                 ..StartThreadOptions::new(child_config.clone())
             })
-            .await;
-        let error = rejected
-            .err()
-            .expect("startup must reject the requested root");
-        if reserved_thread_id != root_id {
-            assert!(
-                matches!(error.details(), CodexErrorDetails::InvalidRequest(_)),
-                "{error:?}"
-            );
-        }
+            .await?;
+        assert_eq!(
+            (
+                child.session_configured.session_id,
+                child.session_configured.parent_thread_id
+            ),
+            (controller.identity(), Some(root_id))
+        );
         assert_eq!(controller.service_tier(), Some("priority".to_string()));
-    }
-    child.thread.shutdown_and_wait().await?;
-    test.thread_manager.remove_thread(&child.thread_id).await;
-    let error = test
-        .thread_manager
-        .ensure_multi_agent_v2_child_loaded(child.thread_id)
-        .await
-        .expect_err("child reload must reach the host controller");
-    assert!(
-        matches!(error.details(), CodexErrorDetails::InvalidRequest(message)
-            if message == &format!("host resume rejection for {}", child.thread_id)
-        ),
-        "{error:?}"
-    );
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+        child.thread.ensure_rollout_materialized().await;
+        child.thread.flush_rollout().await?;
+        let saved = test
+            .thread_store
+            .load_latest_model_context(codex_thread_store::LoadThreadHistoryParams {
+                thread_id: child.thread_id,
+                include_archived: false,
+            })
+            .await?;
+        assert!(saved.items.iter().any(|item| matches!(item,
+            RolloutItem::SessionMeta(meta) if meta.meta.parent_thread_id == Some(root_id)
+        )));
+
+        controller
+            .agents
+            .lock()
+            .expect("agents lock")
+            .insert("/root/worker".into(), child.thread_id);
+        for (thread, author, recipient, destination) in [
+            (&test.codex, "/root", "/root/worker", "new_channel_name"),
+            (&child.thread, "/root/worker", "/root", "channel_name"),
+        ] {
+            let arguments = serde_json::json!({
+                (destination): "design",
+                "text": "A shared decision.",
+                "agents_to_notify": [recipient],
+            });
+            let mock = responses::mount_sse_sequence(
+                &server,
+                vec![
+                    responses::sse(vec![
+                        responses::ev_function_call_with_namespace(
+                            "post",
+                            "wrangler_agents",
+                            "post",
+                            &arguments.to_string(),
+                        ),
+                        responses::ev_completed("post"),
+                    ]),
+                    responses::sse(vec![responses::ev_completed("done")]),
+                ],
+            )
+            .await;
+            thread
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "Post a decision.".into(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+            wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+            let post: PostMetadata = serde_json::from_str(
+                &mock.requests()[1]
+                    .function_call_output_text("post")
+                    .expect("post result"),
+            )?;
+            assert_eq!(post.author.as_str(), author);
+        }
+
+        // Rejected starts must leave the live tree's settings alone, whether the
+        // requested root already exists or the factory returns the wrong identity.
+        for reserved_thread_id in [root_id, ThreadId::new()] {
+            let rejected = test
+                .thread_manager
+                .start_thread(StartThreadOptions {
+                    reserved_thread_id: Some(reserved_thread_id),
+                    environments: Some(vec![test.executor_environment().request()]),
+                    ..StartThreadOptions::new(child_config.clone())
+                })
+                .await;
+            let error = rejected
+                .err()
+                .expect("startup must reject the requested root");
+            if reserved_thread_id != root_id {
+                assert!(
+                    matches!(error.details(), CodexErrorDetails::InvalidRequest(_)),
+                    "{error:?}"
+                );
+            }
+            assert_eq!(controller.service_tier(), Some("priority".to_string()));
+        }
+        child.thread.shutdown_and_wait().await?;
+        test.thread_manager.remove_thread(&child.thread_id).await;
+        let error = test
+            .thread_manager
+            .ensure_multi_agent_v2_child_loaded(child.thread_id)
+            .await
+            .expect_err("child reload must reach the host controller");
+        assert!(
+            matches!(error.details(), CodexErrorDetails::InvalidRequest(message)
+                if message == &format!("host resume rejection for {}", child.thread_id)
+            ),
+            "{error:?}"
+        );
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -496,6 +500,7 @@ async fn host_factory_follows_thread_lifecycle() -> anyhow::Result<()> {
 async fn collaboration_tools_dispatch_to_the_host_controller() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let (test, _controller) = test_with_host_control(&server).await?;
     let mut events = vec![responses::ev_response_created("tools")];
     for (call, name, arguments) in [
@@ -552,6 +557,8 @@ async fn collaboration_tools_dispatch_to_the_host_controller() -> anyhow::Result
     }
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InternalSessionSource;

@@ -6,6 +6,7 @@ use codex_features::Feature;
 use codex_protocol::approvals::ExecApprovalKind;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -231,35 +232,38 @@ async fn exec_command_rejects_login_when_disabled() -> Result<()> {
         config.permissions.allow_login_shell = false;
     });
     let harness = TestCodexHarness::with_builder(builder).await?;
-    let call_id = "exec-command-login-disabled";
-    let arguments = json!({
-        "cmd": "echo should not run",
-        "login": true,
-    });
-    mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[harness.server()], async {
+        let call_id = "exec-command-login-disabled";
+        let arguments = json!({
+            "cmd": "echo should not run",
+            "login": true,
+        });
+        mount_sse_sequence(
+            harness.server(),
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    harness.submit("run the command with login").await?;
+        harness.submit("run the command with login").await?;
 
-    assert_eq!(
-        harness.function_call_stdout(call_id).await,
-        "login shell is disabled by config; omit `login` or set it to false."
-    );
+        assert_eq!(
+            harness.function_call_stdout(call_id).await,
+            "login shell is disabled by config; omit `login` or set it to false."
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -272,41 +276,44 @@ async fn exec_command_hides_and_rejects_tty_when_disabled() -> Result<()> {
         ),
     );
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
-    let call_id = "tty-denied";
-    let arguments = json!({"cmd": "echo should-not-run > tty-disabled-rejected", "tty": true});
-    let request_log = mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_response_created(call_id),
-                ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
-                ev_completed(call_id),
-            ]),
-            sse(vec![ev_completed("done")]),
-        ],
-    )
-    .await;
+    mock_server::run(&[harness.server()], async {
+        let call_id = "tty-denied";
+        let arguments = json!({"cmd": "echo should-not-run > tty-disabled-rejected", "tty": true});
+        let request_log = mount_sse_sequence(
+            harness.server(),
+            vec![
+                sse(vec![
+                    ev_response_created(call_id),
+                    ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
+                    ev_completed(call_id),
+                ]),
+                sse(vec![ev_completed("done")]),
+            ],
+        )
+        .await;
 
-    harness
-        .submit("run commands with and without a terminal")
-        .await?;
+        harness
+            .submit("run commands with and without a terminal")
+            .await?;
 
-    let rejection = harness.function_call_stdout("tty-denied").await;
-    insta::assert_snapshot!("exec_command_tty_disabled", rejection);
-    assert!(!harness.path_exists("tty-disabled-rejected").await?);
+        let rejection = harness.function_call_stdout("tty-denied").await;
+        insta::assert_snapshot!("exec_command_tty_disabled", rejection);
+        assert!(!harness.path_exists("tty-disabled-rejected").await?);
 
-    let request = request_log.requests()[0].body_json();
-    let tools = request["tools"]
-        .as_array()
-        .expect("tools should be an array");
-    let exec_tool = tools
-        .iter()
-        .find(|tool| tool["name"] == "exec_command")
-        .expect("exec_command should be available");
-    assert!(exec_tool["parameters"]["properties"].get("tty").is_none());
-    assert!(tools.iter().any(|tool| tool["name"] == "write_stdin"));
+        let request = request_log.requests()[0].body_json();
+        let tools = request["tools"]
+            .as_array()
+            .expect("tools should be an array");
+        let exec_tool = tools
+            .iter()
+            .find(|tool| tool["name"] == "exec_command")
+            .expect("exec_command should be available");
+        assert!(exec_tool["parameters"]["properties"].get("tty").is_none());
+        assert!(tools.iter().any(|tool| tool["name"] == "write_stdin"));
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -323,33 +330,36 @@ async fn exec_command_runs_without_tty_when_tty_disabled() -> Result<()> {
         ),
     );
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
-    let mut responses = Vec::new();
-    for (call_id, arguments) in [
-        ("tty-false", json!({"cmd": "echo pipe-ok", "tty": false})),
-        ("tty-omitted", json!({"cmd": "echo pipe-ok"})),
-    ] {
-        responses.push(sse(vec![
-            ev_response_created(call_id),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
-            ev_completed(call_id),
-        ]));
-    }
-    responses.push(sse(vec![ev_completed("done")]));
-    mount_sse_sequence(harness.server(), responses).await;
+    mock_server::run(&[harness.server()], async {
+        let mut responses = Vec::new();
+        for (call_id, arguments) in [
+            ("tty-false", json!({"cmd": "echo pipe-ok", "tty": false})),
+            ("tty-omitted", json!({"cmd": "echo pipe-ok"})),
+        ] {
+            responses.push(sse(vec![
+                ev_response_created(call_id),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&arguments)?),
+                ev_completed(call_id),
+            ]));
+        }
+        responses.push(sse(vec![ev_completed("done")]));
+        mount_sse_sequence(harness.server(), responses).await;
 
-    harness
-        .submit("run commands with and without a terminal")
-        .await?;
+        harness
+            .submit("run commands with and without a terminal")
+            .await?;
 
-    for call_id in ["tty-false", "tty-omitted"] {
-        let output = parse_unified_exec_output(&harness.function_call_stdout(call_id).await)?;
-        assert_eq!(
-            (output.exit_code, output.output.trim()),
-            (Some(0), "pipe-ok")
-        );
-    }
+        for call_id in ["tty-false", "tty-omitted"] {
+            let output = parse_unified_exec_output(&harness.function_call_stdout(call_id).await)?;
+            assert_eq!(
+                (output.exit_code, output.output.trim()),
+                (Some(0), "pipe-ok")
+            );
+        }
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -371,6 +381,7 @@ async fn exec_command_does_not_expose_configured_noise_auth_token() -> Result<()
         );
     });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
     let command = match core_test_support::test_target_os() {
         core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
             "if [ -n \"${CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN:-}\" ] || [ -n \"${codex_exec_server_noise_auth_token:-}\" ]; then echo leaked; else echo unset; fi"
@@ -404,6 +415,8 @@ async fn exec_command_does_not_expose_configured_noise_auth_token() -> Result<()
     assert_eq!(output.output.trim(), "unset");
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -431,6 +444,7 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         };
     });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
     let selection = harness
         .test()
         .codex
@@ -513,6 +527,8 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         concat!("preserved:missing:missing:", env!("CARGO_PKG_VERSION")),
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -523,6 +539,7 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
 
     let builder = test_codex();
     let harness = TestCodexHarness::with_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
 
     let patch =
         "*** Begin Patch\n*** Add File: uexec_apply.txt\n+hello from unified exec\n*** End Patch";
@@ -647,6 +664,8 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -654,6 +673,7 @@ async fn unified_exec_rejects_justification_without_sandbox_permissions() -> Res
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_model("gpt-5.2");
     let test = builder.build_with_auto_env(&server).await?;
 
@@ -713,6 +733,8 @@ async fn unified_exec_rejects_justification_without_sandbox_permissions() -> Res
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -726,50 +748,52 @@ async fn unified_exec_emits_exec_command_begin_event() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.2");
+        let test = builder.build_with_auto_env(&server).await?;
+        let cwd = test.config.cwd.to_path_buf();
 
-    let mut builder = test_codex().with_model("gpt-5.2");
-    let test = builder.build_with_auto_env(&server).await?;
-    let cwd = test.config.cwd.to_path_buf();
+        let call_id = "uexec-begin-event";
+        let args = json!({
+            "shell": "bash".to_string(),
+            "cmd": "/bin/echo hello unified exec".to_string(),
+            "yield_time_ms": 250,
+        });
 
-    let call_id = "uexec-begin-event";
-    let args = json!({
-        "shell": "bash".to_string(),
-        "cmd": "/bin/echo hello unified exec".to_string(),
-        "yield_time_ms": 250,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "finished"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "emit begin event", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "emit begin event", PermissionProfile::Disabled).await?;
+        let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
 
-    let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        assert_command(&begin_event.command, "-lc", "/bin/echo hello unified exec");
+
+        assert_eq!(begin_event.cwd, PathUri::from_host_native_path(&cwd)?);
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        Ok(())
     })
-    .await;
-
-    assert_command(&begin_event.command, "-lc", "/bin/echo hello unified exec");
-
-    assert_eq!(begin_event.cwd, PathUri::from_host_native_path(&cwd)?);
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -783,59 +807,61 @@ async fn unified_exec_resolves_relative_workdir() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.2");
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex().with_model("gpt-5.2");
-    let test = builder.build_with_auto_env(&server).await?;
+        let workdir_rel = std::path::PathBuf::from("uexec_relative_workdir");
+        let workdir = create_workspace_directory(&test, &workdir_rel).await?;
 
-    let workdir_rel = std::path::PathBuf::from("uexec_relative_workdir");
-    let workdir = create_workspace_directory(&test, &workdir_rel).await?;
+        let call_id = "uexec-workdir-relative";
+        let args = json!({
+            "cmd": "pwd",
+            "yield_time_ms": 250,
+            "workdir": workdir_rel.to_string_lossy().to_string(),
+        });
 
-    let call_id = "uexec-workdir-relative";
-    let args = json!({
-        "cmd": "pwd",
-        "yield_time_ms": 250,
-        "workdir": workdir_rel.to_string_lossy().to_string(),
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "finished"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "run relative workdir test",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "run relative workdir test",
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
 
-    let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        assert_eq!(
+            begin_event.cwd,
+            PathUri::from_host_native_path(&workdir)?,
+            "exec_command cwd should resolve relative workdir against turn cwd",
+        );
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        Ok(())
     })
-    .await;
-
-    assert_eq!(
-        begin_event.cwd,
-        PathUri::from_host_native_path(&workdir)?,
-        "exec_command cwd should resolve relative workdir against turn cwd",
-    );
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -847,56 +873,58 @@ async fn unified_exec_respects_workdir_override() -> Result<()> {
     skip_if_host_windows!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.2");
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex().with_model("gpt-5.2");
-    let test = builder.build_with_auto_env(&server).await?;
+        let workdir = create_workspace_directory(&test, "uexec_workdir_test").await?;
 
-    let workdir = create_workspace_directory(&test, "uexec_workdir_test").await?;
+        let call_id = "uexec-workdir";
+        let args = json!({
+            "cmd": "pwd",
+            "yield_time_ms": 250,
+            "workdir": workdir.to_string_lossy().to_string(),
+        });
 
-    let call_id = "uexec-workdir";
-    let args = json!({
-        "cmd": "pwd",
-        "yield_time_ms": 250,
-        "workdir": workdir.to_string_lossy().to_string(),
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "finished"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "run workdir test", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "run workdir test", PermissionProfile::Disabled).await?;
+        let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
 
-    let begin_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        assert_eq!(
+            begin_event.cwd,
+            PathUri::from_host_native_path(&workdir)?,
+            "exec_command cwd should reflect the requested workdir override"
+        );
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+
+        Ok(())
     })
-    .await;
-
-    assert_eq!(
-        begin_event.cwd,
-        PathUri::from_host_native_path(&workdir)?,
-        "exec_command cwd should reflect the requested workdir override"
-    );
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -907,64 +935,66 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec-end-event";
+        let args = json!({
+            "cmd": "/bin/echo END-EVENT".to_string(),
+            "yield_time_ms": 250,
+        });
+        let poll_call_id = "uexec-end-event-poll";
+        let poll_args = json!({
+            "chars": "",
+            "session_id": 1000,
+            "yield_time_ms": 250,
+        });
 
-    let call_id = "uexec-end-event";
-    let args = json!({
-        "cmd": "/bin/echo END-EVENT".to_string(),
-        "yield_time_ms": 250,
-    });
-    let poll_call_id = "uexec-end-event-poll";
-    let poll_args = json!({
-        "chars": "",
-        "session_id": 1000,
-        "yield_time_ms": 250,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    poll_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&poll_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                poll_call_id,
-                "write_stdin",
-                &serde_json::to_string(&poll_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_assistant_message("msg-1", "finished"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "emit end event", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "emit end event", PermissionProfile::Disabled).await?;
+        let end_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
 
-    let end_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
-        _ => None,
+        assert_eq!(end_event.exit_code, 0);
+        assert!(
+            end_event.aggregated_output.contains("END-EVENT"),
+            "expected aggregated output to contain marker"
+        );
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        Ok(())
     })
-    .await;
-
-    assert_eq!(end_event.exit_code, 0);
-    assert!(
-        end_event.aggregated_output.contains("END-EVENT"),
-        "expected aggregated output to contain marker"
-    );
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -975,6 +1005,7 @@ async fn unified_exec_emits_output_delta_for_exec_command() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     let mut builder = test_codex();
     let test = builder.build_with_auto_env(&server).await?;
@@ -1073,6 +1104,8 @@ async fn unified_exec_emits_output_delta_for_exec_command() -> Result<()> {
         (0, "HELLO-UEXECé�".to_string())
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1083,85 +1116,87 @@ async fn unified_exec_full_lifecycle_with_background_end_event() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec-full-lifecycle";
+        // Print before the subscriber attaches, then keep the process alive.
+        let args = json!({
+            "cmd": "printf 'EARLY-OUTPUT'; sleep 0.5; printf 'HELLO-FULL-LIFECYCLE'",
+            "yield_time_ms": 1000,
+        });
 
-    let call_id = "uexec-full-lifecycle";
-    // Print before the subscriber attaches, then keep the process alive.
-    let args = json!({
-        "cmd": "printf 'EARLY-OUTPUT'; sleep 0.5; printf 'HELLO-FULL-LIFECYCLE'",
-        "yield_time_ms": 1000,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "finished"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "finished"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "exercise full unified exec lifecycle",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "exercise full unified exec lifecycle",
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        let mut begin_event = None;
+        let mut end_event = None;
+        let mut task_completed = false;
 
-    let mut begin_event = None;
-    let mut end_event = None;
-    let mut task_completed = false;
-
-    loop {
-        let msg = wait_for_event(&test.codex, |_| true).await;
-        match msg {
-            EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => begin_event = Some(ev),
-            EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => {
-                assert!(
-                    end_event.is_none(),
-                    "expected a single ExecCommandEnd event for this call id"
-                );
-                end_event = Some(ev);
-                if task_completed && end_event.is_some() {
-                    break;
+        loop {
+            let msg = wait_for_event(&test.codex, |_| true).await;
+            match msg {
+                EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => begin_event = Some(ev),
+                EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => {
+                    assert!(
+                        end_event.is_none(),
+                        "expected a single ExecCommandEnd event for this call id"
+                    );
+                    end_event = Some(ev);
+                    if task_completed && end_event.is_some() {
+                        break;
+                    }
                 }
-            }
-            EventMsg::TurnComplete(_) => {
-                task_completed = true;
-                if task_completed && end_event.is_some() {
-                    break;
+                EventMsg::TurnComplete(_) => {
+                    task_completed = true;
+                    if task_completed && end_event.is_some() {
+                        break;
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
-    }
 
-    let begin_event = begin_event.expect("expected ExecCommandBegin event");
-    assert_eq!(begin_event.call_id, call_id);
-    assert!(
-        begin_event.process_id.is_some(),
-        "begin event should include a process_id for a long-lived session"
-    );
+        let begin_event = begin_event.expect("expected ExecCommandBegin event");
+        assert_eq!(begin_event.call_id, call_id);
+        assert!(
+            begin_event.process_id.is_some(),
+            "begin event should include a process_id for a long-lived session"
+        );
 
-    let end_event = end_event.expect("expected ExecCommandEnd event");
-    assert_eq!(end_event.call_id, call_id);
-    assert_eq!(end_event.exit_code, 0);
-    assert!(
-        end_event.process_id.is_some(),
-        "end event should include process_id emitted by background watcher"
-    );
-    assert_eq!(
-        end_event.aggregated_output,
-        "EARLY-OUTPUTHELLO-FULL-LIFECYCLE"
-    );
-    Ok(())
+        let end_event = end_event.expect("expected ExecCommandEnd event");
+        assert_eq!(end_event.call_id, call_id);
+        assert_eq!(end_event.exit_code, 0);
+        assert!(
+            end_event.process_id.is_some(),
+            "end event should include process_id emitted by background watcher"
+        );
+        assert_eq!(
+            end_event.aggregated_output,
+            "EARLY-OUTPUTHELLO-FULL-LIFECYCLE"
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[test_case::test_case(false; "without_stdin_approval")]
@@ -1176,129 +1211,131 @@ async fn unified_exec_emits_terminal_interaction_for_write_stdin(
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-
-    let mut builder = test_codex().with_config(move |config| {
-        if stdin_approval {
-            config
-                .features
-                .enable(Feature::WriteStdinApproval)
-                .expect("enable stdin approvals");
-        }
-    });
-    let test = builder.build_with_auto_env(&server).await?;
-
-    let open_call_id = "uexec-open";
-    let mut open_args = json!({
-        "cmd": "/bin/bash -i",
-        "yield_time_ms": 200,
-        "tty": true,
-    });
-    if stdin_approval {
-        open_args["sandbox_permissions"] = json!("require_escalated");
-    }
-
-    let stdin_call_id = "uexec-stdin-delta";
-    let stdin_args = json!({
-        "chars": "echo WSTDIN-MARK\\n",
-        "session_id": 1000,
-        "yield_time_ms": 800,
-    });
-
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                open_call_id,
-                "exec_command",
-                &serde_json::to_string(&open_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                stdin_call_id,
-                "write_stdin",
-                &serde_json::to_string(&stdin_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
-
-    if stdin_approval {
-        // Start without waiting for completion so the loop below can answer approvals.
-        test.codex
-            .start_or_steer_turn(
-                TurnInputRequest::user_input(vec![UserInput::Text {
-                    text: "stdin delta".to_string(),
-                    text_elements: Vec::new(),
-                }])
-                .with_thread_settings(ThreadSettingsOverrides {
-                    approval_policy: Some(AskForApproval::OnRequest),
-                    sandbox_policy: Some(SandboxPolicy::ReadOnly {
-                        network_access: false,
-                    }),
-                    ..Default::default()
-                }),
-            )
-            .await?;
-    } else {
-        submit_unified_exec_turn(&test, "stdin delta", PermissionProfile::Disabled).await?;
-    }
-
-    let mut terminal_interaction = None;
-    let mut approvals = Vec::new();
-
-    loop {
-        let msg = wait_for_event(&test.codex, |_| true).await;
-        match msg {
-            EventMsg::ExecApprovalRequest(approval) => {
-                test.codex
-                    .submit(Op::ExecApproval {
-                        id: approval.effective_approval_id(),
-                        turn_id: Some(approval.turn_id),
-                        decision: ReviewDecision::Approved,
-                    })
-                    .await?;
-                approvals.push((approval.kind, approval.call_id, approval.approval_id));
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_config(move |config| {
+            if stdin_approval {
+                config
+                    .features
+                    .enable(Feature::WriteStdinApproval)
+                    .expect("enable stdin approvals");
             }
-            EventMsg::TerminalInteraction(ev) if ev.call_id == open_call_id => {
-                terminal_interaction = Some(ev);
-            }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
-        }
-    }
+        });
+        let test = builder.build_with_auto_env(&server).await?;
 
-    assert_eq!(
-        approvals,
+        let open_call_id = "uexec-open";
+        let mut open_args = json!({
+            "cmd": "/bin/bash -i",
+            "yield_time_ms": 200,
+            "tty": true,
+        });
         if stdin_approval {
-            vec![
-                (ExecApprovalKind::Command, open_call_id.to_string(), None),
-                (
-                    ExecApprovalKind::WriteStdin,
-                    open_call_id.to_string(),
-                    Some(stdin_call_id.to_string()),
+            open_args["sandbox_permissions"] = json!("require_escalated");
+        }
+
+        let stdin_call_id = "uexec-stdin-delta";
+        let stdin_args = json!({
+            "chars": "echo WSTDIN-MARK\\n",
+            "session_id": 1000,
+            "yield_time_ms": 800,
+        });
+
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    open_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&open_args)?,
                 ),
-            ]
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    stdin_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&stdin_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
+
+        if stdin_approval {
+            // Start without waiting for completion so the loop below can answer approvals.
+            test.codex
+                .start_or_steer_turn(
+                    TurnInputRequest::user_input(vec![UserInput::Text {
+                        text: "stdin delta".to_string(),
+                        text_elements: Vec::new(),
+                    }])
+                    .with_thread_settings(ThreadSettingsOverrides {
+                        approval_policy: Some(AskForApproval::OnRequest),
+                        sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                            network_access: false,
+                        }),
+                        ..Default::default()
+                    }),
+                )
+                .await?;
         } else {
-            Vec::new()
+            submit_unified_exec_turn(&test, "stdin delta", PermissionProfile::Disabled).await?;
         }
-    );
-    let delta = terminal_interaction.expect("expected TerminalInteraction event");
-    assert_eq!(delta.process_id, "1000");
-    let expected_stdin = stdin_args
-        .get("chars")
-        .and_then(Value::as_str)
-        .expect("stdin chars");
-    assert_eq!(delta.stdin, expected_stdin);
-    Ok(())
+
+        let mut terminal_interaction = None;
+        let mut approvals = Vec::new();
+
+        loop {
+            let msg = wait_for_event(&test.codex, |_| true).await;
+            match msg {
+                EventMsg::ExecApprovalRequest(approval) => {
+                    test.codex
+                        .submit(Op::ExecApproval {
+                            id: approval.effective_approval_id(),
+                            turn_id: Some(approval.turn_id),
+                            decision: ReviewDecision::Approved,
+                        })
+                        .await?;
+                    approvals.push((approval.kind, approval.call_id, approval.approval_id));
+                }
+                EventMsg::TerminalInteraction(ev) if ev.call_id == open_call_id => {
+                    terminal_interaction = Some(ev);
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
+            }
+        }
+
+        assert_eq!(
+            approvals,
+            if stdin_approval {
+                vec![
+                    (ExecApprovalKind::Command, open_call_id.to_string(), None),
+                    (
+                        ExecApprovalKind::WriteStdin,
+                        open_call_id.to_string(),
+                        Some(stdin_call_id.to_string()),
+                    ),
+                ]
+            } else {
+                Vec::new()
+            }
+        );
+        let delta = terminal_interaction.expect("expected TerminalInteraction event");
+        assert_eq!(delta.process_id, "1000");
+        let expected_stdin = stdin_args
+            .get("chars")
+            .and_then(Value::as_str)
+            .expect("stdin chars");
+        assert_eq!(delta.stdin, expected_stdin);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1309,6 +1346,7 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     let mut builder = test_codex();
     let test = builder.build_with_auto_env(&server).await?;
@@ -1473,6 +1511,8 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1484,114 +1524,116 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
     skip_if_host_windows!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let open_call_id = "uexec-open-session";
+        let open_args = json!({
+            "shell": "bash".to_string(),
+            "cmd": "sleep 0.1".to_string(),
+            "yield_time_ms": 10,
+        });
 
-    let open_call_id = "uexec-open-session";
-    let open_args = json!({
-        "shell": "bash".to_string(),
-        "cmd": "sleep 0.1".to_string(),
-        "yield_time_ms": 10,
-    });
+        let poll_call_id = "uexec-poll-empty";
+        let poll_args = json!({
+            "chars": "",
+            "session_id": 1000,
+            "yield_time_ms": 150,
+        });
 
-    let poll_call_id = "uexec-poll-empty";
-    let poll_args = json!({
-        "chars": "",
-        "session_id": 1000,
-        "yield_time_ms": 150,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    open_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&open_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    poll_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&poll_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "complete"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                open_call_id,
-                "exec_command",
-                &serde_json::to_string(&open_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                poll_call_id,
-                "write_stdin",
-                &serde_json::to_string(&poll_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_assistant_message("msg-1", "complete"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "check poll event behavior",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "check poll event behavior",
-        PermissionProfile::Disabled,
-    )
-    .await?;
-
-    let mut begin_events = Vec::new();
-    let mut end_events = Vec::new();
-    let mut terminal_interactions = Vec::new();
-    let mut task_completed = false;
-    loop {
-        let event_msg = wait_for_event(&test.codex, |_| true).await;
-        match event_msg {
-            EventMsg::ExecCommandBegin(event) if event.call_id == open_call_id => {
-                begin_events.push(event);
+        let mut begin_events = Vec::new();
+        let mut end_events = Vec::new();
+        let mut terminal_interactions = Vec::new();
+        let mut task_completed = false;
+        loop {
+            let event_msg = wait_for_event(&test.codex, |_| true).await;
+            match event_msg {
+                EventMsg::ExecCommandBegin(event) if event.call_id == open_call_id => {
+                    begin_events.push(event);
+                }
+                EventMsg::ExecCommandEnd(event) if event.call_id == open_call_id => {
+                    end_events.push(event);
+                }
+                EventMsg::TerminalInteraction(event) if event.call_id == open_call_id => {
+                    terminal_interactions.push(event);
+                }
+                EventMsg::TurnComplete(_) => {
+                    task_completed = true;
+                }
+                _ => {}
             }
-            EventMsg::ExecCommandEnd(event) if event.call_id == open_call_id => {
-                end_events.push(event);
+            if task_completed && !end_events.is_empty() {
+                break;
             }
-            EventMsg::TerminalInteraction(event) if event.call_id == open_call_id => {
-                terminal_interactions.push(event);
-            }
-            EventMsg::TurnComplete(_) => {
-                task_completed = true;
-            }
-            _ => {}
         }
-        if task_completed && !end_events.is_empty() {
-            break;
-        }
-    }
 
-    assert_eq!(
-        begin_events.len(),
-        1,
-        "expected begin events for the startup command"
-    );
+        assert_eq!(
+            begin_events.len(),
+            1,
+            "expected begin events for the startup command"
+        );
 
-    assert_eq!(
-        end_events.len(),
-        1,
-        "expected end event for the write_stdin call"
-    );
-    assert!(
-        terminal_interactions.is_empty(),
-        "completed empty polls should not emit terminal interactions: {terminal_interactions:?}"
-    );
+        assert_eq!(
+            end_events.len(),
+            1,
+            "expected end event for the write_stdin call"
+        );
+        assert!(
+            terminal_interactions.is_empty(),
+            "completed empty polls should not emit terminal interactions: {terminal_interactions:?}"
+        );
 
-    let open_event = &begin_events[0];
+        let open_event = &begin_events[0];
 
-    assert_command(&open_event.command, "-lc", "sleep 0.1");
+        assert_command(&open_event.command, "-lc", "sleep 0.1");
 
-    assert!(
-        open_event.interaction_input.is_none(),
-        "startup begin events should not include interaction input"
-    );
-    assert_eq!(open_event.source, ExecCommandSource::UnifiedExecStartup);
+        assert!(
+            open_event.interaction_input.is_none(),
+            "startup begin events should not include interaction input"
+        );
+        assert_eq!(open_event.source, ExecCommandSource::UnifiedExecStartup);
 
-    let end_event = &end_events[0];
-    assert_eq!(end_event.call_id, open_call_id);
+        let end_event = &end_events[0];
+        assert_eq!(end_event.call_id, open_call_id);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1602,6 +1644,7 @@ async fn exec_command_preserves_exit_and_truncation_evidence() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     let mut builder = test_codex();
     let test = builder.build_with_auto_env(&server).await?;
@@ -1668,6 +1711,8 @@ async fn exec_command_preserves_exit_and_truncation_evidence() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1678,6 +1723,7 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     let mut builder = test_codex().with_model("gpt-5.5").with_config(|config| {
         config.tool_output_token_limit = Some(50);
@@ -1813,6 +1859,8 @@ async fn exec_command_clamps_model_requested_max_output_tokens_to_policy() -> Re
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1823,6 +1871,7 @@ async fn write_stdin_clamps_model_requested_max_output_tokens_to_policy() -> Res
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     let mut builder = test_codex().with_model("gpt-5.5").with_config(|config| {
         config.tool_output_token_limit = Some(50);
@@ -1899,6 +1948,8 @@ async fn write_stdin_clamps_model_requested_max_output_tokens_to_policy() -> Res
     .await;
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1909,61 +1960,63 @@ async fn unified_exec_defaults_to_pipe() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec-default-pipe";
+        let args = serde_json::json!({
+            "cmd": "python3 -c \"import sys; print(sys.stdin.isatty())\"",
+            "yield_time_ms": 1500,
+        });
 
-    let call_id = "uexec-default-pipe";
-    let args = serde_json::json!({
-        "cmd": "python3 -c \"import sys; print(sys.stdin.isatty())\"",
-        "yield_time_ms": 1500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "check default pipe mode",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "check default pipe mode",
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+        let output = outputs
+            .get(call_id)
+            .expect("missing default pipe unified exec output");
+        let normalized = output.output.replace("\r\n", "\n");
+
+        assert!(
+            normalized.contains("False"),
+            "stdin should not be a tty by default: {normalized:?}"
+        );
+        assert_eq!(output.exit_code, Some(0));
+        Ok(())
     })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-    let output = outputs
-        .get(call_id)
-        .expect("missing default pipe unified exec output");
-    let normalized = output.output.replace("\r\n", "\n");
-
-    assert!(
-        normalized.contains("False"),
-        "stdin should not be a tty by default: {normalized:?}"
-    );
-    assert_eq!(output.exit_code, Some(0));
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1974,58 +2027,60 @@ async fn unified_exec_can_enable_tty() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec-tty-enabled";
+        let args = serde_json::json!({
+            "cmd": "python3 -c \"import sys; print(sys.stdin.isatty())\"",
+            "yield_time_ms": 1500,
+            "tty": true,
+        });
 
-    let call_id = "uexec-tty-enabled";
-    let args = serde_json::json!({
-        "cmd": "python3 -c \"import sys; print(sys.stdin.isatty())\"",
-        "yield_time_ms": 1500,
-        "tty": true,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "check tty enabled", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "check tty enabled", PermissionProfile::Disabled).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+        let output = outputs
+            .get(call_id)
+            .expect("missing tty-enabled unified exec output");
+        let normalized = output.output.replace("\r\n", "\n");
+
+        assert!(
+            normalized.contains("True"),
+            "stdin should be a tty when tty=true: {normalized:?}"
+        );
+        assert_eq!(output.exit_code, Some(0));
+        assert!(output.process_id.is_none(), "process should have exited");
+        Ok(())
     })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-    let output = outputs
-        .get(call_id)
-        .expect("missing tty-enabled unified exec output");
-    let normalized = output.output.replace("\r\n", "\n");
-
-    assert!(
-        normalized.contains("True"),
-        "stdin should be a tty when tty=true: {normalized:?}"
-    );
-    assert_eq!(output.exit_code, Some(0));
-    assert!(output.process_id.is_none(), "process should have exited");
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2036,84 +2091,86 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec-early-exit";
+        let args = serde_json::json!({
+            "cmd": "sleep 0.05",
+            "yield_time_ms": 31415,
+        });
 
-    let call_id = "uexec-early-exit";
-    let args = serde_json::json!({
-        "cmd": "sleep 0.05",
-        "yield_time_ms": 31415,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "watch early exit timing",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "watch early exit timing",
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        let ended = wait_for_event(
+            &test.codex,
+            |event| matches!(event, EventMsg::ExecCommandEnd(ended) if ended.call_id == call_id),
+        )
+        .await;
+        let EventMsg::ExecCommandEnd(ended) = ended else {
+            unreachable!()
+        };
+        assert!(
+            ended.duration.as_secs_f64() < 0.75,
+            "execution duration should reflect early exit, got {:?}",
+            ended.duration
+        );
 
-    let ended = wait_for_event(
-        &test.codex,
-        |event| matches!(event, EventMsg::ExecCommandEnd(ended) if ended.call_id == call_id),
-    )
-    .await;
-    let EventMsg::ExecCommandEnd(ended) = ended else {
-        unreachable!()
-    };
-    assert!(
-        ended.duration.as_secs_f64() < 0.75,
-        "execution duration should reflect early exit, got {:?}",
-        ended.duration
-    );
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+        let output = outputs
+            .get(call_id)
+            .expect("missing early exit unified_exec output");
+
+        assert!(
+            output.process_id.is_none(),
+            "short-lived process should not keep a session alive"
+        );
+        assert_eq!(
+            output.exit_code,
+            Some(0),
+            "short-lived process should exit successfully"
+        );
+
+        assert!(
+            output.output.is_empty(),
+            "sleep command should not emit output, got {:?}",
+            output.output
+        );
+
+        Ok(())
     })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-    let output = outputs
-        .get(call_id)
-        .expect("missing early exit unified_exec output");
-
-    assert!(
-        output.process_id.is_none(),
-        "short-lived process should not keep a session alive"
-    );
-    assert_eq!(
-        output.exit_code,
-        Some(0),
-        "short-lived process should exit successfully"
-    );
-
-    assert!(
-        output.output.is_empty(),
-        "sleep command should not emit output, got {:?}",
-        output.output
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2124,162 +2181,164 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let start_call_id = "uexec-cat-start";
+        let send_call_id = "uexec-cat-send";
+        let exit_call_id = "uexec-cat-exit";
 
-    let start_call_id = "uexec-cat-start";
-    let send_call_id = "uexec-cat-send";
-    let exit_call_id = "uexec-cat-exit";
+        let start_args = serde_json::json!({
+            "cmd": "/bin/cat",
+            "yield_time_ms": 500,
+            "tty": true,
+        });
+        let send_args = serde_json::json!({
+            "chars": "hello unified exec\n",
+            "session_id": 1000,
+            "yield_time_ms": 500,
+        });
+        let exit_args = serde_json::json!({
+            "chars": "\u{0004}",
+            "session_id": 1000,
+            "yield_time_ms": 500,
+        });
 
-    let start_args = serde_json::json!({
-        "cmd": "/bin/cat",
-        "yield_time_ms": 500,
-        "tty": true,
-    });
-    let send_args = serde_json::json!({
-        "chars": "hello unified exec\n",
-        "session_id": 1000,
-        "yield_time_ms": 500,
-    });
-    let exit_args = serde_json::json!({
-        "chars": "\u{0004}",
-        "session_id": 1000,
-        "yield_time_ms": 500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    start_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&start_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    send_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&send_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_function_call(
+                    exit_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&exit_args)?,
+                ),
+                ev_completed("resp-3"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "all done"),
+                ev_completed("resp-4"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                start_call_id,
-                "exec_command",
-                &serde_json::to_string(&start_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                send_call_id,
-                "write_stdin",
-                &serde_json::to_string(&send_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_function_call(
-                exit_call_id,
-                "write_stdin",
-                &serde_json::to_string(&exit_args)?,
-            ),
-            ev_completed("resp-3"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "all done"),
-            ev_completed("resp-4"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "test write_stdin exit behavior",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "test write_stdin exit behavior",
-        PermissionProfile::Disabled,
-    )
-    .await?;
-
-    let mut exit_lifecycle_order = Vec::new();
-    let mut turn_completed = false;
-    loop {
-        let event = wait_for_event(&test.codex, |_| true).await;
-        match event {
-            EventMsg::TerminalInteraction(event)
-                if event.call_id == start_call_id
-                    && event.stdin
-                        == exit_args
-                            .get("chars")
-                            .and_then(Value::as_str)
-                            .expect("exit chars") =>
-            {
-                exit_lifecycle_order.push("terminal_interaction");
+        let mut exit_lifecycle_order = Vec::new();
+        let mut turn_completed = false;
+        loop {
+            let event = wait_for_event(&test.codex, |_| true).await;
+            match event {
+                EventMsg::TerminalInteraction(event)
+                    if event.call_id == start_call_id
+                        && event.stdin
+                            == exit_args
+                                .get("chars")
+                                .and_then(Value::as_str)
+                                .expect("exit chars") =>
+                {
+                    exit_lifecycle_order.push("terminal_interaction");
+                }
+                EventMsg::ExecCommandEnd(event) if event.call_id == start_call_id => {
+                    exit_lifecycle_order.push("exec_command_end");
+                }
+                EventMsg::TurnComplete(_) => turn_completed = true,
+                _ => {}
             }
-            EventMsg::ExecCommandEnd(event) if event.call_id == start_call_id => {
-                exit_lifecycle_order.push("exec_command_end");
+            if turn_completed && exit_lifecycle_order.len() == 2 {
+                break;
             }
-            EventMsg::TurnComplete(_) => turn_completed = true,
-            _ => {}
         }
-        if turn_completed && exit_lifecycle_order.len() == 2 {
-            break;
-        }
-    }
-    assert_eq!(
-        exit_lifecycle_order,
-        ["terminal_interaction", "exec_command_end"],
-        "the interaction that exits a process must precede command completion"
-    );
+        assert_eq!(
+            exit_lifecycle_order,
+            ["terminal_interaction", "exec_command_end"],
+            "the interaction that exits a process must precede command completion"
+        );
 
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
 
-    let outputs = collect_tool_outputs(&bodies)?;
+        let outputs = collect_tool_outputs(&bodies)?;
 
-    let start_output = outputs
-        .get(start_call_id)
-        .expect("missing start output for exec_command");
-    let process_id = start_output
-        .process_id
-        .clone()
-        .expect("expected process id from exec_command");
-    assert!(
-        process_id.len() > 3,
-        "process_id should be at least 4 digits, got {process_id}"
-    );
-    assert!(
-        start_output.exit_code.is_none(),
-        "initial exec_command should not include exit_code while session is running"
-    );
+        let start_output = outputs
+            .get(start_call_id)
+            .expect("missing start output for exec_command");
+        let process_id = start_output
+            .process_id
+            .clone()
+            .expect("expected process id from exec_command");
+        assert!(
+            process_id.len() > 3,
+            "process_id should be at least 4 digits, got {process_id}"
+        );
+        assert!(
+            start_output.exit_code.is_none(),
+            "initial exec_command should not include exit_code while session is running"
+        );
 
-    let send_output = outputs
-        .get(send_call_id)
-        .expect("missing write_stdin echo output");
-    let echoed = send_output.output.as_str();
-    assert!(
-        echoed.contains("hello unified exec"),
-        "expected echoed output from cat, got {echoed:?}"
-    );
-    let echoed_session = send_output
-        .process_id
-        .clone()
-        .expect("write_stdin should return process id while process is running");
-    assert_eq!(
-        echoed_session, process_id,
-        "write_stdin should reuse existing process id"
-    );
-    assert!(
-        send_output.exit_code.is_none(),
-        "write_stdin should not include exit_code while process is running"
-    );
+        let send_output = outputs
+            .get(send_call_id)
+            .expect("missing write_stdin echo output");
+        let echoed = send_output.output.as_str();
+        assert!(
+            echoed.contains("hello unified exec"),
+            "expected echoed output from cat, got {echoed:?}"
+        );
+        let echoed_session = send_output
+            .process_id
+            .clone()
+            .expect("write_stdin should return process id while process is running");
+        assert_eq!(
+            echoed_session, process_id,
+            "write_stdin should reuse existing process id"
+        );
+        assert!(
+            send_output.exit_code.is_none(),
+            "write_stdin should not include exit_code while process is running"
+        );
 
-    let exit_output = outputs
-        .get(exit_call_id)
-        .expect("missing exit metadata output");
-    assert!(
-        exit_output.process_id.is_none(),
-        "process_id should be omitted once the process exits"
-    );
-    let exit_code = exit_output
-        .exit_code
-        .expect("expected exit_code after sending EOF");
-    assert_eq!(exit_code, 0, "cat should exit cleanly after EOF");
+        let exit_output = outputs
+            .get(exit_call_id)
+            .expect("missing exit metadata output");
+        assert!(
+            exit_output.process_id.is_none(),
+            "process_id should be omitted once the process exits"
+        );
+        let exit_code = exit_output
+            .exit_code
+            .expect("expected exit_code after sending EOF");
+        assert_eq!(exit_code, 0, "cat should exit cleanly after EOF");
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2468,85 +2527,87 @@ async fn write_stdin_ctrl_c_terminates_non_tty_session_on_windows() -> Result<()
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let start_call_id = "uexec-windows-interrupt-start";
+        let interrupt_call_id = "uexec-windows-interrupt";
 
-    let start_call_id = "uexec-windows-interrupt-start";
-    let interrupt_call_id = "uexec-windows-interrupt";
+        let start_args = serde_json::json!({
+            "cmd": "Start-Sleep -Seconds 30",
+            "yield_time_ms": 250,
+            "tty": false,
+        });
+        let interrupt_args = serde_json::json!({
+            "chars": "\u{3}",
+            "session_id": 1000,
+            "yield_time_ms": 1000,
+        });
 
-    let start_args = serde_json::json!({
-        "cmd": "Start-Sleep -Seconds 30",
-        "yield_time_ms": 250,
-        "tty": false,
-    });
-    let interrupt_args = serde_json::json!({
-        "chars": "\u{3}",
-        "session_id": 1000,
-        "yield_time_ms": 1000,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    start_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&start_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    interrupt_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&interrupt_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                start_call_id,
-                "exec_command",
-                &serde_json::to_string(&start_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                interrupt_call_id,
-                "write_stdin",
-                &serde_json::to_string(&interrupt_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(
+            &test,
+            "interrupt non-tty unified exec on Windows",
+            PermissionProfile::Disabled,
+        )
+        .await?;
 
-    submit_unified_exec_turn(
-        &test,
-        "interrupt non-tty unified exec on Windows",
-        PermissionProfile::Disabled,
-    )
-    .await?;
+        wait_for_event_with_timeout(
+            &test.codex,
+            |event| matches!(event, EventMsg::TurnComplete(_)),
+            Duration::from_secs(20),
+        )
+        .await;
 
-    wait_for_event_with_timeout(
-        &test.codex,
-        |event| matches!(event, EventMsg::TurnComplete(_)),
-        Duration::from_secs(20),
-    )
-    .await;
+        let start_output = request_log
+            .function_call_output_text(start_call_id)
+            .expect("missing start output for exec_command");
+        let start_output = parse_unified_exec_output(&start_output)?;
+        assert_eq!(
+            start_output.process_id.as_deref(),
+            Some("1000"),
+            "exec_command should leave a running non-TTY session"
+        );
+        let interrupt_output = request_log
+            .function_call_output_text(interrupt_call_id)
+            .expect("missing interrupt output for write_stdin");
+        let interrupt_output = parse_unified_exec_output(&interrupt_output)?;
+        assert!(
+            interrupt_output.process_id.is_none(),
+            "interrupted process should be cleared from the session map"
+        );
+        assert_eq!(interrupt_output.exit_code, Some(1));
 
-    let start_output = request_log
-        .function_call_output_text(start_call_id)
-        .expect("missing start output for exec_command");
-    let start_output = parse_unified_exec_output(&start_output)?;
-    assert_eq!(
-        start_output.process_id.as_deref(),
-        Some("1000"),
-        "exec_command should leave a running non-TTY session"
-    );
-    let interrupt_output = request_log
-        .function_call_output_text(interrupt_call_id)
-        .expect("missing interrupt output for write_stdin");
-    let interrupt_output = parse_unified_exec_output(&interrupt_output)?;
-    assert!(
-        interrupt_output.process_id.is_none(),
-        "interrupted process should be cleared from the session map"
-    );
-    assert_eq!(interrupt_output.exit_code, Some(1));
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2557,83 +2618,85 @@ async fn unified_exec_emits_end_event_when_session_dies_via_stdin() -> Result<()
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let start_call_id = "uexec-end-on-exit-start";
+        let start_args = serde_json::json!({
+            "cmd": "/bin/cat",
+            "yield_time_ms": 200,
+            "tty": true,
+        });
 
-    let start_call_id = "uexec-end-on-exit-start";
-    let start_args = serde_json::json!({
-        "cmd": "/bin/cat",
-        "yield_time_ms": 200,
-        "tty": true,
-    });
+        let echo_call_id = "uexec-end-on-exit-echo";
+        let echo_args = serde_json::json!({
+            "chars": "bye-END\n",
+            "session_id": 1000,
+            "yield_time_ms": 300,
+        });
 
-    let echo_call_id = "uexec-end-on-exit-echo";
-    let echo_args = serde_json::json!({
-        "chars": "bye-END\n",
-        "session_id": 1000,
-        "yield_time_ms": 300,
-    });
+        let exit_call_id = "uexec-end-on-exit";
+        let exit_args = serde_json::json!({
+            "chars": "\u{0004}",
+            "session_id": 1000,
+            "yield_time_ms": 500,
+        });
 
-    let exit_call_id = "uexec-end-on-exit";
-    let exit_args = serde_json::json!({
-        "chars": "\u{0004}",
-        "session_id": 1000,
-        "yield_time_ms": 500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    start_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&start_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    echo_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&echo_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_function_call(
+                    exit_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&exit_args)?,
+                ),
+                ev_completed("resp-3"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-4"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-4"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                start_call_id,
-                "exec_command",
-                &serde_json::to_string(&start_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                echo_call_id,
-                "write_stdin",
-                &serde_json::to_string(&echo_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_function_call(
-                exit_call_id,
-                "write_stdin",
-                &serde_json::to_string(&exit_args)?,
-            ),
-            ev_completed("resp-3"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-4"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-4"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "end on exit", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "end on exit", PermissionProfile::Disabled).await?;
+        // We expect the ExecCommandEnd event to match the initial exec_command call_id.
+        let end_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandEnd(ev) if ev.call_id == start_call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
 
-    // We expect the ExecCommandEnd event to match the initial exec_command call_id.
-    let end_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandEnd(ev) if ev.call_id == start_call_id => Some(ev.clone()),
-        _ => None,
+        assert_eq!(end_event.exit_code, 0);
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        Ok(())
     })
-    .await;
-
-    assert_eq!(end_event.exit_code, 0);
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2643,98 +2706,100 @@ async fn unified_exec_keeps_long_running_session_after_turn_end() -> Result<()> 
     skip_if_host_windows!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let TestCodex {
+            codex,
+            cwd,
+            session_configured,
+            ..
+        } = builder.build(&server).await?;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
-        cwd,
-        session_configured,
-        ..
-    } = builder.build(&server).await?;
+        let temp_dir = tempfile::tempdir()?;
+        let pid_path = temp_dir.path().join("uexec_pid");
+        let pid_path_str = pid_path.to_string_lossy();
 
-    let temp_dir = tempfile::tempdir()?;
-    let pid_path = temp_dir.path().join("uexec_pid");
-    let pid_path_str = pid_path.to_string_lossy();
+        let call_id = "uexec-long-running";
+        let command = format!("printf '%s' $$ > '{pid_path_str}' && exec sleep 3000");
+        let args = json!({
+            "cmd": command,
+            "yield_time_ms": 250,
+        });
 
-    let call_id = "uexec-long-running";
-    let command = format!("printf '%s' $$ > '{pid_path_str}' && exec sleep 3000");
-    let args = json!({
-        "cmd": command,
-        "yield_time_ms": 250,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    mount_sse_sequence(&server, responses).await;
+        let session_model = session_configured.model.clone();
+        let turn_cwd = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, turn_cwd.as_path());
 
-    let session_model = session_configured.model.clone();
-    let turn_cwd = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, turn_cwd.as_path());
-
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "keep unified exec process after turn end".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(turn_cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: session_model,
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "keep unified exec process after turn end".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(turn_cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: session_model,
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let begin_event = wait_for_event_match(&codex, |msg| match msg {
-        EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
-        _ => None,
+        let begin_event = wait_for_event_match(&codex, |msg| match msg {
+            EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
+
+        let _begin_process_id = begin_event
+            .process_id
+            .clone()
+            .expect("expected process_id for long-running unified exec process");
+
+        let pid = wait_for_pid_file(&pid_path).await?;
+        assert!(
+            pid.chars().all(|ch| ch.is_ascii_digit()),
+            "expected numeric pid, got {pid:?}"
+        );
+
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+
+        assert!(
+            process_is_alive(&pid)?,
+            "expected unified exec process to remain alive after turn completion"
+        );
+
+        codex.submit(Op::Shutdown).await?;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+        wait_for_process_exit(&pid).await?;
+
+        Ok(())
     })
-    .await;
-
-    let _begin_process_id = begin_event
-        .process_id
-        .clone()
-        .expect("expected process_id for long-running unified exec process");
-
-    let pid = wait_for_pid_file(&pid_path).await?;
-    assert!(
-        pid.chars().all(|ch| ch.is_ascii_digit()),
-        "expected numeric pid, got {pid:?}"
-    );
-
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-
-    assert!(
-        process_is_alive(&pid)?,
-        "expected unified exec process to remain alive after turn completion"
-    );
-
-    codex.submit(Op::Shutdown).await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::ShutdownComplete)).await;
-    wait_for_process_exit(&pid).await?;
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2834,90 +2899,92 @@ async fn unified_exec_reuses_session_via_stdin() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let first_call_id = "uexec-start";
+        let first_args = serde_json::json!({
+            "cmd": "/bin/cat",
+            "yield_time_ms": 200,
+            "tty": true,
+        });
 
-    let first_call_id = "uexec-start";
-    let first_args = serde_json::json!({
-        "cmd": "/bin/cat",
-        "yield_time_ms": 200,
-        "tty": true,
-    });
+        let second_call_id = "uexec-stdin";
+        let second_args = serde_json::json!({
+            "chars": "hello unified exec\n",
+            "session_id": 1000,
+            "yield_time_ms": 500,
+        });
 
-    let second_call_id = "uexec-stdin";
-    let second_args = serde_json::json!({
-        "chars": "hello unified exec\n",
-        "session_id": 1000,
-        "yield_time_ms": 500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    first_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&first_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    second_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&second_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "all done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                first_call_id,
-                "exec_command",
-                &serde_json::to_string(&first_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                second_call_id,
-                "write_stdin",
-                &serde_json::to_string(&second_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "all done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "run unified exec", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "run unified exec", PermissionProfile::Disabled).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+
+        let start_output = outputs
+            .get(first_call_id)
+            .expect("missing first unified_exec output");
+        let process_id = start_output.process_id.clone().unwrap_or_default();
+        assert!(
+            !process_id.is_empty(),
+            "expected process id in first unified_exec response"
+        );
+        assert!(start_output.output.is_empty());
+
+        let reuse_output = outputs
+            .get(second_call_id)
+            .expect("missing reused unified_exec output");
+        assert_eq!(
+            reuse_output.process_id.clone().unwrap_or_default(),
+            process_id
+        );
+        let echoed = reuse_output.output.as_str();
+        assert!(
+            echoed.contains("hello unified exec"),
+            "expected echoed output, got {echoed:?}"
+        );
+
+        Ok(())
     })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-
-    let start_output = outputs
-        .get(first_call_id)
-        .expect("missing first unified_exec output");
-    let process_id = start_output.process_id.clone().unwrap_or_default();
-    assert!(
-        !process_id.is_empty(),
-        "expected process id in first unified_exec response"
-    );
-    assert!(start_output.output.is_empty());
-
-    let reuse_output = outputs
-        .get(second_call_id)
-        .expect("missing reused unified_exec output");
-    assert_eq!(
-        reuse_output.process_id.clone().unwrap_or_default(),
-        process_id
-    );
-    let echoed = reuse_output.output.as_str();
-    assert!(
-        echoed.contains("hello unified exec"),
-        "expected echoed output, got {echoed:?}"
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3039,79 +3106,81 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let first_call_id = "uexec-timeout";
+        let first_args = serde_json::json!({
+            "cmd": "sleep 0.5; echo ready",
+            "yield_time_ms": 10,
+        });
 
-    let first_call_id = "uexec-timeout";
-    let first_args = serde_json::json!({
-        "cmd": "sleep 0.5; echo ready",
-        "yield_time_ms": 10,
-    });
+        let second_call_id = "uexec-poll";
+        let second_args = serde_json::json!({
+            "chars": "",
+            "session_id": 1000,
+            "yield_time_ms": 800,
+        });
 
-    let second_call_id = "uexec-poll";
-    let second_args = serde_json::json!({
-        "chars": "",
-        "session_id": 1000,
-        "yield_time_ms": 800,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    first_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&first_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    second_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&second_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                first_call_id,
-                "exec_command",
-                &serde_json::to_string(&first_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                second_call_id,
-                "write_stdin",
-                &serde_json::to_string(&second_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "check timeout", PermissionProfile::Disabled).await?;
 
-    submit_unified_exec_turn(&test, "check timeout", PermissionProfile::Disabled).await?;
-
-    loop {
-        let event = test.codex.next_event().await.expect("event");
-        if matches!(event.msg, EventMsg::TurnComplete(_)) {
-            break;
+        loop {
+            let event = test.codex.next_event().await.expect("event");
+            if matches!(event.msg, EventMsg::TurnComplete(_)) {
+                break;
+            }
         }
-    }
 
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
 
-    let outputs = collect_tool_outputs(&bodies)?;
+        let outputs = collect_tool_outputs(&bodies)?;
 
-    let first_output = outputs.get(first_call_id).expect("missing timeout output");
-    assert!(first_output.process_id.is_some());
-    assert!(first_output.output.is_empty());
+        let first_output = outputs.get(first_call_id).expect("missing timeout output");
+        assert!(first_output.process_id.is_some());
+        assert!(first_output.output.is_empty());
 
-    let poll_output = outputs.get(second_call_id).expect("missing poll output");
-    let output_text = poll_output.output.as_str();
-    assert!(
-        output_text.contains("ready"),
-        "expected ready output, got {output_text:?}"
-    );
+        let poll_output = outputs.get(second_call_id).expect("missing poll output");
+        let output_text = poll_output.output.as_str();
+        assert!(
+            output_text.contains("ready"),
+            "expected ready output, got {output_text:?}"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3121,107 +3190,112 @@ async fn managed_unified_exec_disable_runs_commands_without_retained_authority()
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_cloud_config_bundle(
-        CloudConfigBundleFixture::loader_with_enterprise_requirement(
-            r#"
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_cloud_config_bundle(
+            CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                r#"
 [features]
 unified_exec = false
 shell_tool = true
 "#,
-        ),
-    );
-    let test = builder.build_with_auto_env(&server).await?;
-    let late_marker = test.config.cwd.join("one-shot-late-marker");
-    let call_id = "managed-one-shot";
-    let args = json!({
-        "cmd": "sleep 1; printf late > one-shot-late-marker",
-        "timeout_ms": 10,
-    });
-    let request_log = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-                core_test_support::responses::ev_custom_tool_call(
-                    "python-background",
-                    "python",
-                    "# @exec: {\"background\":true}\nprint('forbidden background')",
-                ),
-                core_test_support::responses::ev_custom_tool_call(
-                    "bash-background",
-                    "bash",
-                    "# @exec: {\"background\":true}\nprintf 'forbidden background'",
-                ),
-                core_test_support::responses::ev_custom_tool_call(
-                    "python-foreground",
-                    "python",
-                    "print('one-shot-script')",
-                ),
-                core_test_support::responses::ev_custom_tool_call(
-                    "bash-foreground",
-                    "bash",
-                    "printf 'one-shot-script\\n'",
-                ),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+            ),
+        );
+        let test = builder.build_with_auto_env(&server).await?;
+        let late_marker = test.config.cwd.join("one-shot-late-marker");
+        let call_id = "managed-one-shot";
+        let args = json!({
+            "cmd": "sleep 1; printf late > one-shot-late-marker",
+            "timeout_ms": 10,
+        });
+        let request_log = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                    core_test_support::responses::ev_custom_tool_call(
+                        "python-background",
+                        "python",
+                        "# @exec: {\"background\":true}\nprint('forbidden background')",
+                    ),
+                    core_test_support::responses::ev_custom_tool_call(
+                        "bash-background",
+                        "bash",
+                        "# @exec: {\"background\":true}\nprintf 'forbidden background'",
+                    ),
+                    core_test_support::responses::ev_custom_tool_call(
+                        "python-foreground",
+                        "python",
+                        "print('one-shot-script')",
+                    ),
+                    core_test_support::responses::ev_custom_tool_call(
+                        "bash-foreground",
+                        "bash",
+                        "printf 'one-shot-script\\n'",
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    submit_unified_exec_turn(&test, "run one-shot command", PermissionProfile::Disabled).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+        submit_unified_exec_turn(&test, "run one-shot command", PermissionProfile::Disabled)
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    let outputs = collect_tool_outputs(
-        &request_log
-            .requests()
-            .iter()
-            .map(core_test_support::responses::ResponsesRequest::body_json)
-            .collect::<Vec<_>>(),
-    )?;
-    let output = outputs.get(call_id).expect("missing one-shot output");
-    assert_eq!(output.process_id, None);
-    assert_eq!(output.exit_code, Some(124));
+        let outputs = collect_tool_outputs(
+            &request_log
+                .requests()
+                .iter()
+                .map(core_test_support::responses::ResponsesRequest::body_json)
+                .collect::<Vec<_>>(),
+        )?;
+        let output = outputs.get(call_id).expect("missing one-shot output");
+        assert_eq!(output.process_id, None);
+        assert_eq!(output.exit_code, Some(124));
 
-    let requests = request_log.requests();
-    // Both successful raw languages share one model response and one follow-up, with no JS cell.
-    assert_eq!(requests.len(), 2);
-    let tools = requests[0].body_json()["tools"]
-        .as_array()
-        .expect("model tools")
-        .clone();
-    assert!(!tools.iter().any(|tool| tool["name"] == "write_stdin"));
-    let last = requests.last().expect("follow-up request");
-    for language in ["python", "bash"] {
-        let rejected = last.custom_tool_call_output(&format!("{language}-background"));
+        let requests = request_log.requests();
+        // Both successful raw languages share one model response and one follow-up, with no JS cell.
+        assert_eq!(requests.len(), 2);
+        let tools = requests[0].body_json()["tools"]
+            .as_array()
+            .expect("model tools")
+            .clone();
+        assert!(!tools.iter().any(|tool| tool["name"] == "write_stdin"));
+        let last = requests.last().expect("follow-up request");
+        for language in ["python", "bash"] {
+            let rejected = last.custom_tool_call_output(&format!("{language}-background"));
+            assert!(
+                rejected["output"]
+                    .as_str()
+                    .expect("background rejection")
+                    .contains("Background execution is disabled")
+            );
+            let completed = last.custom_tool_call_output(&format!("{language}-foreground"));
+            let output = parse_unified_exec_output(
+                completed["output"].as_str().expect("foreground output"),
+            )?;
+            assert_eq!(
+                (output.exit_code, output.process_id, output.output),
+                (Some(0), None, "one-shot-script\n".to_string())
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
         assert!(
-            rejected["output"]
-                .as_str()
-                .expect("background rejection")
-                .contains("Background execution is disabled")
+            fs::metadata(late_marker.as_path()).is_err(),
+            "timed-out one-shot command must not survive to write the marker"
         );
-        let completed = last.custom_tool_call_output(&format!("{language}-foreground"));
-        let output =
-            parse_unified_exec_output(completed["output"].as_str().expect("foreground output"))?;
-        assert_eq!(
-            (output.exit_code, output.process_id, output.output),
-            (Some(0), None, "one-shot-script\n".to_string())
-        );
-    }
-    tokio::time::sleep(Duration::from_millis(1_100)).await;
-    assert!(
-        fs::metadata(late_marker.as_path()).is_err(),
-        "timed-out one-shot command must not survive to write the marker"
-    );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3298,88 +3372,92 @@ async fn unified_exec_formats_large_output_summary() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
-
-    let output_line = "token token \n";
-    let output_repetitions = 100_000;
-    let original_output_bytes =
-        b"HEAD\n".len() + output_line.len() * output_repetitions + b"TAIL\n".len();
-    let expected_original_token_count =
-        usize::try_from(approx_tokens_from_byte_count(original_output_bytes)).unwrap_or(usize::MAX);
-    let script = format!(
-        r#"python3 - <<'PY'
+        let output_line = "token token \n";
+        let output_repetitions = 100_000;
+        let original_output_bytes =
+            b"HEAD\n".len() + output_line.len() * output_repetitions + b"TAIL\n".len();
+        let expected_original_token_count =
+            usize::try_from(approx_tokens_from_byte_count(original_output_bytes))
+                .unwrap_or(usize::MAX);
+        let script = format!(
+            r#"python3 - <<'PY'
 import sys
 sys.stdout.write("HEAD\n")
 sys.stdout.write("token token \n" * {output_repetitions})
 sys.stdout.write("TAIL\n")
 PY
 "#
-    );
+        );
 
-    let call_id = "uexec-large-output";
-    let args = serde_json::json!({
-        "cmd": script,
-        "max_output_tokens": 100,
-        "yield_time_ms": 3_000,
-    });
+        let call_id = "uexec-large-output";
+        let args = serde_json::json!({
+            "cmd": script,
+            "max_output_tokens": 100,
+            "yield_time_ms": 3_000,
+        });
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    submit_unified_exec_turn(&test, "summarize large output", PermissionProfile::Disabled).await?;
+        submit_unified_exec_turn(&test, "summarize large output", PermissionProfile::Disabled)
+            .await?;
 
-    let end_event = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::ExecCommandEnd(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        let end_event = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::ExecCommandEnd(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
+        assert!(end_event.aggregated_output.contains("HEAD\n"));
+        assert!(end_event.aggregated_output.contains("TAIL\n"));
+        assert_regex_match(
+            r"\.\.\. \d+ bytes omitted \.\.\.",
+            &end_event.aggregated_output,
+        );
+
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+        let large_output = outputs.get(call_id).expect("missing large output summary");
+
+        let output_text = large_output.output.replace("\r\n", "\n");
+        assert!(output_text.starts_with(&format!(
+            "Warning: truncated output (original token count: {expected_original_token_count})\n"
+        )));
+        assert_regex_match(r"\.\.\. \d+ bytes omitted \.\.\.", &output_text);
+        assert!(output_text.contains("HEAD\n"));
+        assert!(output_text.contains("TAIL\n"));
+        assert_eq!(
+            large_output.original_token_count,
+            Some(expected_original_token_count)
+        );
+
+        Ok(())
     })
-    .await;
-    assert!(end_event.aggregated_output.contains("HEAD\n"));
-    assert!(end_event.aggregated_output.contains("TAIL\n"));
-    assert_regex_match(
-        r"\.\.\. \d+ bytes omitted \.\.\.",
-        &end_event.aggregated_output,
-    );
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-    let large_output = outputs.get(call_id).expect("missing large output summary");
-
-    let output_text = large_output.output.replace("\r\n", "\n");
-    assert!(output_text.starts_with(&format!(
-        "Warning: truncated output (original token count: {expected_original_token_count})\n"
-    )));
-    assert_regex_match(r"\.\.\. \d+ bytes omitted \.\.\.", &output_text);
-    assert!(output_text.contains("HEAD\n"));
-    assert!(output_text.contains("TAIL\n"));
-    assert_eq!(
-        large_output.original_token_count,
-        Some(expected_original_token_count)
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3389,88 +3467,90 @@ async fn unified_exec_runs_under_sandbox() -> Result<()> {
     skip_if_host_windows!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let TestCodex {
+            codex,
+            cwd,
+            session_configured,
+            ..
+        } = builder.build(&server).await?;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
-        cwd,
-        session_configured,
-        ..
-    } = builder.build(&server).await?;
+        let call_id = "uexec";
+        let args = serde_json::json!({
+            "cmd": "echo 'hello'",
+            "yield_time_ms": 500,
+        });
 
-    let call_id = "uexec";
-    let args = serde_json::json!({
-        "cmd": "echo 'hello'",
-        "yield_time_ms": 500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        let session_model = session_configured.model.clone();
+        let turn_cwd = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::read_only(), turn_cwd.as_path());
 
-    let session_model = session_configured.model.clone();
-    let turn_cwd = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::read_only(), turn_cwd.as_path());
-
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "summarize large output".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(turn_cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: session_model,
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "summarize large output".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(turn_cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: session_model,
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let mut ended = None;
-    let mut completed = false;
-    while ended.is_none() || !completed {
-        match wait_for_event(&codex, |_| true).await {
-            EventMsg::ExecCommandEnd(event) if event.call_id == call_id => ended = Some(event),
-            EventMsg::TurnComplete(_) => completed = true,
-            _ => {}
+        let mut ended = None;
+        let mut completed = false;
+        while ended.is_none() || !completed {
+            match wait_for_event(&codex, |_| true).await {
+                EventMsg::ExecCommandEnd(event) if event.call_id == call_id => ended = Some(event),
+                EventMsg::TurnComplete(_) => completed = true,
+                _ => {}
+            }
         }
-    }
-    let ended = ended.unwrap();
+        let ended = ended.unwrap();
 
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
 
-    let outputs = collect_tool_outputs(&bodies)?;
-    assert!(outputs.contains_key(call_id), "missing output");
+        let outputs = collect_tool_outputs(&bodies)?;
+        assert!(outputs.contains_key(call_id), "missing output");
 
-    assert_eq!(ended.exit_code, 0);
-    assert_regex_match("hello[\r\n]+", &ended.aggregated_output);
+        assert_eq!(ended.exit_code, 0);
+        assert_regex_match("hello[\r\n]+", &ended.aggregated_output);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -3487,6 +3567,7 @@ async fn unified_exec_enforces_glob_deny_read_policy() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(move |config| {
         let mut file_system_sandbox_policy = FileSystemSandboxPolicy::default();
         file_system_sandbox_policy
@@ -3606,6 +3687,8 @@ async fn unified_exec_enforces_glob_deny_read_policy() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg(target_os = "macos")]
@@ -3622,123 +3705,125 @@ async fn unified_exec_python_prompt_under_seatbelt() -> Result<()> {
     };
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let TestCodex {
+            codex,
+            cwd,
+            session_configured,
+            ..
+        } = builder.build(&server).await?;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
-        cwd,
-        session_configured,
-        ..
-    } = builder.build(&server).await?;
+        let startup_call_id = "uexec-python-seatbelt";
+        let startup_args = serde_json::json!({
+            "cmd": format!("{} -i", python.display()),
+            "yield_time_ms": 1_500,
+            "tty": true,
+        });
 
-    let startup_call_id = "uexec-python-seatbelt";
-    let startup_args = serde_json::json!({
-        "cmd": format!("{} -i", python.display()),
-        "yield_time_ms": 1_500,
-        "tty": true,
-    });
+        let exit_call_id = "uexec-python-exit";
+        let exit_args = serde_json::json!({
+            "chars": "exit()\n",
+            "session_id": 1000,
+            "yield_time_ms": 1_500,
+        });
 
-    let exit_call_id = "uexec-python-exit";
-    let exit_args = serde_json::json!({
-        "chars": "exit()\n",
-        "session_id": 1000,
-        "yield_time_ms": 1_500,
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(
+                    startup_call_id,
+                    "exec_command",
+                    &serde_json::to_string(&startup_args)?,
+                ),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_function_call(
+                    exit_call_id,
+                    "write_stdin",
+                    &serde_json::to_string(&exit_args)?,
+                ),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-3"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(
-                startup_call_id,
-                "exec_command",
-                &serde_json::to_string(&startup_args)?,
-            ),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_function_call(
-                exit_call_id,
-                "write_stdin",
-                &serde_json::to_string(&exit_args)?,
-            ),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-3"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        let session_model = session_configured.model.clone();
+        let turn_cwd = cwd.abs();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::read_only(), turn_cwd.as_path());
 
-    let session_model = session_configured.model.clone();
-    let turn_cwd = cwd.abs();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::read_only(), turn_cwd.as_path());
-
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "start python under seatbelt".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(turn_cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: session_model,
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "start python under seatbelt".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(turn_cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: session_model,
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
 
-    let outputs = collect_tool_outputs(&bodies)?;
-    let startup_output = outputs
-        .get(startup_call_id)
-        .expect("missing python startup output");
+        let outputs = collect_tool_outputs(&bodies)?;
+        let startup_output = outputs
+            .get(startup_call_id)
+            .expect("missing python startup output");
 
-    let output_text = startup_output.output.replace("\r\n", "\n");
-    // This assert that we are in a TTY.
-    assert!(
-        output_text.contains(">>>"),
-        "python prompt missing from seatbelt output: {output_text:?}"
-    );
+        let output_text = startup_output.output.replace("\r\n", "\n");
+        // This assert that we are in a TTY.
+        assert!(
+            output_text.contains(">>>"),
+            "python prompt missing from seatbelt output: {output_text:?}"
+        );
 
-    assert_eq!(
-        startup_output.process_id.as_deref(),
-        Some("1000"),
-        "python session should stay alive for follow-up input"
-    );
+        assert_eq!(
+            startup_output.process_id.as_deref(),
+            Some("1000"),
+            "python session should stay alive for follow-up input"
+        );
 
-    let exit_output = outputs
-        .get(exit_call_id)
-        .expect("missing python exit output");
+        let exit_output = outputs
+            .get(exit_call_id)
+            .expect("missing python exit output");
 
-    assert_eq!(
-        exit_output.exit_code,
-        Some(0),
-        "python should exit cleanly after exit()"
-    );
+        assert_eq!(
+            exit_output.exit_code,
+            Some(0),
+            "python should exit cleanly after exit()"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3752,57 +3837,60 @@ async fn unified_exec_runs_on_all_platforms() -> Result<()> {
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex();
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut builder = test_codex();
-    let test = builder.build_with_auto_env(&server).await?;
+        let call_id = "uexec";
+        let args = serde_json::json!({
+            "cmd": "echo 'hello crossplat'",
+        });
 
-    let call_id = "uexec";
-    let args = serde_json::json!({
-        "cmd": "echo 'hello crossplat'",
-    });
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        let request_log = mount_sse_sequence(&server, responses).await;
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    let request_log = mount_sse_sequence(&server, responses).await;
+        submit_unified_exec_turn(&test, "summarize large output", PermissionProfile::Disabled)
+            .await?;
 
-    submit_unified_exec_turn(&test, "summarize large output", PermissionProfile::Disabled).await?;
+        let end_event = wait_for_event_match(&test.codex, |msg| match msg {
+            EventMsg::ExecCommandEnd(event) if event.call_id == call_id => Some(event.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(end_event.exit_code, 0);
+        assert_regex_match(".*hello crossplat.*", &end_event.aggregated_output);
 
-    let end_event = wait_for_event_match(&test.codex, |msg| match msg {
-        EventMsg::ExecCommandEnd(event) if event.call_id == call_id => Some(event.clone()),
-        _ => None,
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = request_log.requests();
+        assert!(!requests.is_empty(), "expected at least one POST request");
+        let bodies = requests
+            .into_iter()
+            .map(|request| request.body_json())
+            .collect::<Vec<_>>();
+
+        let outputs = collect_tool_outputs(&bodies)?;
+        let output = outputs.get(call_id).expect("missing output");
+
+        // TODO: Weaker match because windows produces control characters
+        assert_regex_match(".*hello crossplat.*", &output.output);
+
+        Ok(())
     })
-    .await;
-    assert_eq!(end_event.exit_code, 0);
-    assert_regex_match(".*hello crossplat.*", &end_event.aggregated_output);
-
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let requests = request_log.requests();
-    assert!(!requests.is_empty(), "expected at least one POST request");
-    let bodies = requests
-        .into_iter()
-        .map(|request| request.body_json())
-        .collect::<Vec<_>>();
-
-    let outputs = collect_tool_outputs(&bodies)?;
-    let output = outputs.get(call_id).expect("missing output");
-
-    // TODO: Weaker match because windows produces control characters
-    assert_regex_match(".*hello crossplat.*", &output.output);
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3811,6 +3899,7 @@ async fn write_stdin_calls_run_in_parallel_across_sessions() -> Result<()> {
     skip_if_target_windows!(Ok(()), "uses bash and POSIX file rendezvous commands");
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_model("gpt-5.4");
     let test = builder.build_with_auto_env(&server).await?;
 
@@ -3869,6 +3958,8 @@ async fn write_stdin_calls_run_in_parallel_across_sessions() -> Result<()> {
     assert_regex_match(".*beta-ready.*", &outputs["cross-b"].output);
 
     Ok(())
+    })
+    .await
 }
 
 fn assert_command(command: &[String], expected_args: &str, expected_cmd: &str) {

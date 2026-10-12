@@ -39,6 +39,7 @@ use core_test_support::PathBufExt;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_reasoning_item;
 use core_test_support::responses::mount_models_once;
@@ -532,6 +533,7 @@ async fn summarize_context_three_requests_and_instructions(
 
     // Set up a mock server that we can inspect after the run.
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
 
     // SSE 1: assistant replies normally so it is recorded in history.
     let sse1 = sse(vec![
@@ -788,6 +790,8 @@ async fn summarize_context_three_requests_and_instructions(
         "expected a Compacted entry containing the summarizer output"
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1018,137 +1022,140 @@ async fn reasoning_effort_override_remote_v2_compaction_resets_pinned_effort(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let request_log = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_assistant_message("m1", "first reply"),
-                ev_completed("r1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("m2", "second reply"),
-                ev_completed("r2"),
-            ]),
-            if fail_compaction {
-                sse_failed("r3", "server_error", "compaction failed")
-            } else {
-                remote_v2_compaction_response()
+    mock_server::run(&[&server], async {
+        let request_log = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_assistant_message("m1", "first reply"),
+                    ev_completed("r1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("m2", "second reply"),
+                    ev_completed("r2"),
+                ]),
+                if fail_compaction {
+                    sse_failed("r3", "server_error", "compaction failed")
+                } else {
+                    remote_v2_compaction_response()
+                },
+                sse(vec![
+                    ev_assistant_message("m4", "third reply"),
+                    ev_completed("r4"),
+                ]),
+                sse(vec![ev_completed("r5")]),
+                sse(vec![ev_completed("r6")]),
+            ],
+        )
+        .await;
+
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_model_info_override("gpt-5.4", |model| {
+                model.use_responses_lite = true;
+                model.supports_reasoning_effort_updates = true;
+            })
+            .with_config(move |config| {
+                config.model_provider.stream_max_retries = Some(0);
+                config.model_reasoning_effort = Some(ReasoningEffort::Medium);
+                config
+                    .features
+                    .enable(Feature::ReasoningEffortOverride)
+                    .expect("test config should allow feature update");
+                set_test_compact_prompt(config);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+
+        test.submit_text_turn("first message").await?;
+        core_test_support::submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                effort: Some(Some(ReasoningEffort::High)),
+                ..Default::default()
             },
-            sse(vec![
-                ev_assistant_message("m4", "third reply"),
-                ev_completed("r4"),
-            ]),
-            sse(vec![ev_completed("r5")]),
-            sse(vec![ev_completed("r6")]),
-        ],
-    )
-    .await;
-
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model_info_override("gpt-5.4", |model| {
-            model.use_responses_lite = true;
-            model.supports_reasoning_effort_updates = true;
-        })
-        .with_config(move |config| {
-            config.model_provider.stream_max_retries = Some(0);
-            config.model_reasoning_effort = Some(ReasoningEffort::Medium);
-            config
-                .features
-                .enable(Feature::ReasoningEffortOverride)
-                .expect("test config should allow feature update");
-            set_test_compact_prompt(config);
-        })
-        .build_with_auto_env(&server)
+        )
         .await?;
-
-    test.submit_text_turn("first message").await?;
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            effort: Some(Some(ReasoningEffort::High)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    test.submit_text_turn("second message").await?;
-    test.codex.submit(Op::Compact).await?;
-    if fail_compaction {
-        wait_for_event(&test.codex, |event| matches!(event, EventMsg::Error(_))).await;
-    }
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.submit_text_turn("after compaction").await?;
-    test.submit_text_turn("unchanged effort").await?;
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            effort: Some(Some(ReasoningEffort::Low)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    test.submit_text_turn("changed effort").await?;
-
-    let requests = request_log.requests();
-    assert_eq!(requests.len(), 6);
-    let first_body = requests[0].body_json();
-    let second_body = requests[1].body_json();
-    assert_eq!(first_body["reasoning"]["effort"], "medium");
-    assert_eq!(second_body["reasoning"]["effort"], "medium");
-    assert_eq!(requests[2].body_json()["reasoning"]["effort"], "medium");
-    let post_compaction_effort = if fail_compaction { "medium" } else { "high" };
-    assert_eq!(
-        requests[3..]
-            .iter()
-            .map(|request| request.body_json()["reasoning"]["effort"].clone())
-            .collect::<Vec<_>>(),
-        vec![json!(post_compaction_effort); 3],
-    );
-    let updates = requests
-        .iter()
-        .map(|request| {
-            request
-                .input()
-                .into_iter()
-                .filter(|item| item["type"] == "configuration_update")
-                .collect::<Vec<_>>()
+        test.submit_text_turn("second message").await?;
+        test.codex.submit(Op::Compact).await?;
+        if fail_compaction {
+            wait_for_event(&test.codex, |event| matches!(event, EventMsg::Error(_))).await;
+        }
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .collect::<Vec<_>>();
-    let medium = json!({
-        "type": "configuration_update",
-        "reasoning": {"effort": "medium"},
-    });
-    let high = json!({
-        "type": "configuration_update",
-        "reasoning": {"effort": "high"},
-    });
-    let low = json!({
-        "type": "configuration_update",
-        "reasoning": {"effort": "low"},
-    });
-    let retained = if fail_compaction {
-        vec![medium.clone(), high.clone()]
-    } else {
-        vec![]
-    };
-    let mut changed = retained.clone();
-    changed.push(low);
-    assert_eq!(
-        updates,
-        [
-            vec![medium.clone()],
-            vec![medium.clone(), high.clone()],
-            vec![medium, high],
-            retained.clone(),
-            retained,
-            changed,
-        ]
-    );
+        .await;
+        test.submit_text_turn("after compaction").await?;
+        test.submit_text_turn("unchanged effort").await?;
+        core_test_support::submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                effort: Some(Some(ReasoningEffort::Low)),
+                ..Default::default()
+            },
+        )
+        .await?;
+        test.submit_text_turn("changed effort").await?;
 
-    Ok(())
+        let requests = request_log.requests();
+        assert_eq!(requests.len(), 6);
+        let first_body = requests[0].body_json();
+        let second_body = requests[1].body_json();
+        assert_eq!(first_body["reasoning"]["effort"], "medium");
+        assert_eq!(second_body["reasoning"]["effort"], "medium");
+        assert_eq!(requests[2].body_json()["reasoning"]["effort"], "medium");
+        let post_compaction_effort = if fail_compaction { "medium" } else { "high" };
+        assert_eq!(
+            requests[3..]
+                .iter()
+                .map(|request| request.body_json()["reasoning"]["effort"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(post_compaction_effort); 3],
+        );
+        let updates = requests
+            .iter()
+            .map(|request| {
+                request
+                    .input()
+                    .into_iter()
+                    .filter(|item| item["type"] == "configuration_update")
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let medium = json!({
+            "type": "configuration_update",
+            "reasoning": {"effort": "medium"},
+        });
+        let high = json!({
+            "type": "configuration_update",
+            "reasoning": {"effort": "high"},
+        });
+        let low = json!({
+            "type": "configuration_update",
+            "reasoning": {"effort": "low"},
+        });
+        let retained = if fail_compaction {
+            vec![medium.clone(), high.clone()]
+        } else {
+            vec![]
+        };
+        let mut changed = retained.clone();
+        changed.push(low);
+        assert_eq!(
+            updates,
+            [
+                vec![medium.clone()],
+                vec![medium.clone(), high.clone()],
+                vec![medium, high],
+                retained.clone(),
+                retained,
+                changed,
+            ]
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2466,91 +2473,94 @@ async fn pre_sampling_compact_runs_when_comp_hash_changes() {
 async fn previous_model_compaction_resolves_selected_settings() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let request_log = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_assistant_message("m1", "before switch"),
-                ev_completed("r1"),
-            ]),
-            sse(vec![
-                ev_assistant_message("m2", "COMPACTION_SUMMARY"),
-                ev_completed("r2"),
-            ]),
-            responses::sse_completed("r3"),
-        ],
-    )
-    .await;
-    let model_provider = non_openai_model_provider(&server);
-    let test = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.comp_hash = Some("hash-a".to_string());
-            model.default_reasoning_summary = ReasoningSummary::Detailed;
-            model.service_tiers = vec![ModelServiceTier {
-                id: ServiceTier::Fast.request_value().to_string(),
-                name: "Fast".to_string(),
-                description: "Priority processing".to_string(),
-            }];
-        })
-        .with_model_info_override("gpt-5.2", |model| {
-            model.comp_hash = Some("hash-b".to_string());
-            model.default_reasoning_summary = ReasoningSummary::Auto;
-            model.service_tiers.clear();
-        })
-        .with_model("gpt-5.4")
-        .with_config(move |config| {
-            config.model_provider = model_provider;
-            config.model_reasoning_summary = None;
-            config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
-            config
-                .features
-                .enable(Feature::FastMode)
-                .expect("enable FastMode");
-            set_test_compact_prompt(config);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_text_turn("before switch").await?;
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "after switch".to_string(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                model: Some("gpt-5.2".to_string()),
-                ..Default::default()
-            }),
+    mock_server::run(&[&server], async {
+        let request_log = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_assistant_message("m1", "before switch"),
+                    ev_completed("r1"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("m2", "COMPACTION_SUMMARY"),
+                    ev_completed("r2"),
+                ]),
+                responses::sse_completed("r3"),
+            ],
         )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    // The retained priority selection is filtered out for B, restored for
-    // compaction on A, and still omitted from the following B request.
-    let actual = request_log
-        .requests()
-        .iter()
-        .map(|request| {
-            let body = request.body_json();
-            json!([
-                body["model"],
-                body["reasoning"]["summary"],
-                body["service_tier"]
-            ])
+        .await;
+        let model_provider = non_openai_model_provider(&server);
+        let test = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.comp_hash = Some("hash-a".to_string());
+                model.default_reasoning_summary = ReasoningSummary::Detailed;
+                model.service_tiers = vec![ModelServiceTier {
+                    id: ServiceTier::Fast.request_value().to_string(),
+                    name: "Fast".to_string(),
+                    description: "Priority processing".to_string(),
+                }];
+            })
+            .with_model_info_override("gpt-5.2", |model| {
+                model.comp_hash = Some("hash-b".to_string());
+                model.default_reasoning_summary = ReasoningSummary::Auto;
+                model.service_tiers.clear();
+            })
+            .with_model("gpt-5.4")
+            .with_config(move |config| {
+                config.model_provider = model_provider;
+                config.model_reasoning_summary = None;
+                config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
+                config
+                    .features
+                    .enable(Feature::FastMode)
+                    .expect("enable FastMode");
+                set_test_compact_prompt(config);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_text_turn("before switch").await?;
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "after switch".to_string(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    model: Some("gpt-5.2".to_string()),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        actual,
-        vec![
-            json!(["gpt-5.4", "detailed", "priority"]),
-            json!(["gpt-5.4", "detailed", "priority"]),
-            json!(["gpt-5.2", "auto", null]),
-        ]
-    );
-    Ok(())
+        .await;
+
+        // The retained priority selection is filtered out for B, restored for
+        // compaction on A, and still omitted from the following B request.
+        let actual = request_log
+            .requests()
+            .iter()
+            .map(|request| {
+                let body = request.body_json();
+                json!([
+                    body["model"],
+                    body["reasoning"]["summary"],
+                    body["service_tier"]
+                ])
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            vec![
+                json!(["gpt-5.4", "detailed", "priority"]),
+                json!(["gpt-5.4", "detailed", "priority"]),
+                json!(["gpt-5.2", "auto", null]),
+            ]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4564,167 +4574,170 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
 async fn paginated_compaction_cold_resume_from_bounded_suffix() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let request_log = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
-                ev_completed_with_tokens("before-compact", /*total_tokens*/ 96),
-            ]),
-            sse(vec![
-                ev_assistant_message("summary", &auto_summary(AUTO_SUMMARY_TEXT)),
-                ev_completed_with_tokens("compact", /*total_tokens*/ 10),
-            ]),
-            sse(vec![
-                ev_assistant_message("continued", "continued"),
-                ev_completed_with_tokens("continued", /*total_tokens*/ 10),
-            ]),
-            sse(vec![ev_completed_with_tokens(
-                "resumed", /*total_tokens*/ 10,
-            )]),
-        ],
-    )
-    .await;
-    let provider = non_openai_model_provider(&server);
-    let test = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.multi_agent_version = Some(codex_protocol::protocol::MultiAgentVersion::V2);
-        })
-        .with_history_mode(codex_protocol::protocol::ThreadHistoryMode::Paginated)
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::MultiAgentV2)
-                .expect("disable override");
-            config.agents_enabled = true;
-            config.model_provider = provider;
-            config.include_environment_context = false;
-            set_test_compact_prompt(config);
-            config.model_context_window = Some(100);
-            config.model_auto_compact_token_limit = Some(90);
-        })
-        .build_with_auto_env(&server)
+    mock_server::run(&[&server], async {
+        let request_log = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_function_call(DUMMY_CALL_ID, DUMMY_FUNCTION_NAME, "{}"),
+                    ev_completed_with_tokens("before-compact", /*total_tokens*/ 96),
+                ]),
+                sse(vec![
+                    ev_assistant_message("summary", &auto_summary(AUTO_SUMMARY_TEXT)),
+                    ev_completed_with_tokens("compact", /*total_tokens*/ 10),
+                ]),
+                sse(vec![
+                    ev_assistant_message("continued", "continued"),
+                    ev_completed_with_tokens("continued", /*total_tokens*/ 10),
+                ]),
+                sse(vec![ev_completed_with_tokens(
+                    "resumed", /*total_tokens*/ 10,
+                )]),
+            ],
+        )
+        .await;
+        let provider = non_openai_model_provider(&server);
+        let test = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.multi_agent_version = Some(codex_protocol::protocol::MultiAgentVersion::V2);
+            })
+            .with_history_mode(codex_protocol::protocol::ThreadHistoryMode::Paginated)
+            .with_config(move |config| {
+                config
+                    .features
+                    .disable(Feature::MultiAgentV2)
+                    .expect("disable override");
+                config.agents_enabled = true;
+                config.model_provider = provider;
+                config.include_environment_context = false;
+                set_test_compact_prompt(config);
+                config.model_context_window = Some(100);
+                config.model_auto_compact_token_limit = Some(90);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        core_test_support::submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                collaboration_mode: Some(CollaborationMode {
+                    mode: ModeKind::Plan,
+                    settings: Settings {
+                        model: test.session_configured.model.clone(),
+                        reasoning_effort: test.config.model_reasoning_effort.clone(),
+                        developer_instructions: Some(
+                            "Preserve the compaction's plan instructions.".into(),
+                        ),
+                    },
+                }),
+                ..Default::default()
+            },
+        )
         .await?;
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            collaboration_mode: Some(CollaborationMode {
-                mode: ModeKind::Plan,
-                settings: Settings {
-                    model: test.session_configured.model.clone(),
-                    reasoning_effort: test.config.model_reasoning_effort.clone(),
-                    developer_instructions: Some(
-                        "Preserve the compaction's plan instructions.".into(),
-                    ),
-                },
-            }),
-            ..Default::default()
-        },
-    )
-    .await?;
-    let codex_core::TurnInputSubmission::Started { turn_id, .. } = test
-        .codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: FUNCTION_CALL_LIMIT_MSG.into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?
-    else {
-        panic!("initial turn did not start");
-    };
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let expected_settings = test.codex.thread_settings_snapshot().await;
-    let path = test.codex.rollout_path().expect("rollout path");
-    test.codex.shutdown_and_wait().await?;
-    test.thread_manager
-        .remove_thread(&test.session_configured.thread_id)
+        let codex_core::TurnInputSubmission::Started { turn_id, .. } = test
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: FUNCTION_CALL_LIMIT_MSG.into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?
+        else {
+            panic!("initial turn did not start");
+        };
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let expected_settings = test.codex.thread_settings_snapshot().await;
+        let path = test.codex.rollout_path().expect("rollout path");
+        test.codex.shutdown_and_wait().await?;
+        test.thread_manager
+            .remove_thread(&test.session_configured.thread_id)
+            .await;
+
+        let context = test
+            .thread_store
+            .load_latest_model_context(codex_thread_store::LoadThreadHistoryParams {
+                thread_id: test.session_configured.thread_id,
+                include_archived: false,
+            })
+            .await?;
+        let [
+            RolloutItem::SessionMeta(meta),
+            RolloutItem::Compacted(compacted),
+            ..,
+        ] = context.items.as_slice()
+        else {
+            panic!("bounded resume should start with session metadata and the compaction");
+        };
+        assert_eq!(meta.meta.multi_agent_version, None);
+        assert!(compacted.resume_metadata.is_some());
+        let replacement_len = compacted
+            .replacement_history
+            .as_ref()
+            .expect("replacement history")
+            .len();
+
+        let auth_manager = codex_core::test_support::auth_manager_from_auth_with_home(
+            CodexAuth::from_api_key("test"),
+            test.config.codex_home.to_path_buf(),
+        );
+        let resumed = test
+            .thread_manager
+            .resume_thread_with_history(
+                test.config.clone(),
+                codex_history::InitialHistory::Resumed(codex_history::ResumedHistory {
+                    history_revision: None,
+                    conversation_id: context.thread_id,
+                    history: Arc::new(context.items),
+                    rollout_path: Some(path),
+                }),
+                auth_manager,
+                /*parent_trace*/ None,
+                codex_protocol::mcp::ClientMcpExtensions::default(),
+            )
+            .await?;
+        assert_eq!(
+            resumed.thread.thread_settings_snapshot().await,
+            expected_settings
+        );
+        assert_eq!(
+            resumed.thread.multi_agent_version(),
+            Some(codex_protocol::protocol::MultiAgentVersion::V2)
+        );
+        let submission = resumed
+            .thread
+            .continue_turn_if_idle(
+                TurnInputRequest::new(codex_core::TurnInput::ResponseItem(
+                    core_test_support::responses::user_message_item("continue after cold resume"),
+                )),
+                turn_id,
+            )
+            .await?;
+        assert!(matches!(
+            submission,
+            codex_core::TurnInputSubmission::Started { .. }
+        ));
+        wait_for_event(&resumed.thread, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
         .await;
 
-    let context = test
-        .thread_store
-        .load_latest_model_context(codex_thread_store::LoadThreadHistoryParams {
-            thread_id: test.session_configured.thread_id,
-            include_archived: false,
-        })
-        .await?;
-    let [
-        RolloutItem::SessionMeta(meta),
-        RolloutItem::Compacted(compacted),
-        ..,
-    ] = context.items.as_slice()
-    else {
-        panic!("bounded resume should start with session metadata and the compaction");
-    };
-    assert_eq!(meta.meta.multi_agent_version, None);
-    assert!(compacted.resume_metadata.is_some());
-    let replacement_len = compacted
-        .replacement_history
-        .as_ref()
-        .expect("replacement history")
-        .len();
-
-    let auth_manager = codex_core::test_support::auth_manager_from_auth_with_home(
-        CodexAuth::from_api_key("test"),
-        test.config.codex_home.to_path_buf(),
-    );
-    let resumed = test
-        .thread_manager
-        .resume_thread_with_history(
-            test.config.clone(),
-            codex_history::InitialHistory::Resumed(codex_history::ResumedHistory {
-                history_revision: None,
-                conversation_id: context.thread_id,
-                history: Arc::new(context.items),
-                rollout_path: Some(path),
-            }),
-            auth_manager,
-            /*parent_trace*/ None,
-            codex_protocol::mcp::ClientMcpExtensions::default(),
-        )
-        .await?;
-    assert_eq!(
-        resumed.thread.thread_settings_snapshot().await,
-        expected_settings
-    );
-    assert_eq!(
-        resumed.thread.multi_agent_version(),
-        Some(codex_protocol::protocol::MultiAgentVersion::V2)
-    );
-    let submission = resumed
-        .thread
-        .continue_turn_if_idle(
-            TurnInputRequest::new(codex_core::TurnInput::ResponseItem(
-                core_test_support::responses::user_message_item("continue after cold resume"),
-            )),
-            turn_id,
-        )
-        .await?;
-    assert!(matches!(
-        submission,
-        codex_core::TurnInputSubmission::Started { .. }
-    ));
-    wait_for_event(&resumed.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        let requests = request_log.requests();
+        assert_eq!(requests.len(), 4);
+        assert_eq!(
+            &requests[3].input()[..replacement_len],
+            &requests[2].input()[..replacement_len]
+        );
+        insta::assert_snapshot!(
+            "compaction_cold_resume_after_completion",
+            format_history_snapshot(
+                "Real paginated mid-turn compaction and cold resume from the bounded suffix.",
+                &requests,
+            )
+        );
+        Ok(())
     })
-    .await;
-
-    let requests = request_log.requests();
-    assert_eq!(requests.len(), 4);
-    assert_eq!(
-        &requests[3].input()[..replacement_len],
-        &requests[2].input()[..replacement_len]
-    );
-    insta::assert_snapshot!(
-        "compaction_cold_resume_after_completion",
-        format_history_snapshot(
-            "Real paginated mid-turn compaction and cold resume from the bounded suffix.",
-            &requests,
-        )
-    );
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5606,151 +5619,163 @@ async fn snapshot_request_shape_manual_compact_without_previous_user_messages() 
 async fn manual_compaction_refreshes_global_instructions_for_next_turn() -> Result<()> {
     // Set up an initial turn, a manual compaction response, and a post-compaction turn.
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("first-response"),
-                responses::ev_completed("first-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("compact-response"),
-                responses::ev_assistant_message("compact-message", "summary"),
-                responses::ev_completed("compact-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("follow-up-response"),
-                responses::ev_completed("follow-up-response"),
-            ]),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        OLD_GLOBAL_INSTRUCTIONS,
-    )?;
-    let provider = local_compaction_provider(&server);
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("first-response"),
+                    responses::ev_completed("first-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("compact-response"),
+                    responses::ev_assistant_message("compact-message", "summary"),
+                    responses::ev_completed("compact-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("follow-up-response"),
+                    responses::ev_completed("follow-up-response"),
+                ]),
+            ],
+        )
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        let source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            OLD_GLOBAL_INSTRUCTIONS,
+        )?;
+        let provider = local_compaction_provider(&server);
 
-    // Create the thread with the old global source loaded into its instruction snapshot.
-    let mut builder = test_codex()
-        .with_home(Arc::clone(&home))
-        .with_config(move |config| {
-            config.model_provider = provider;
-        });
-    let test = builder.build(&server).await?;
+        // Create the thread with the old global source loaded into its instruction snapshot.
+        let mut builder = test_codex()
+            .with_home(Arc::clone(&home))
+            .with_config(move |config| {
+                config.model_provider = provider;
+            });
+        let test = builder.build(&server).await?;
 
-    // Assert the pre-compaction source list points at the creation-time file.
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "thread reports the creation-time global source before compaction"
-    );
+        // Assert the pre-compaction source list points at the creation-time file.
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "thread reports the creation-time global source before compaction"
+        );
 
-    // Materialize the old snapshot, rewrite the selected file in place, and manually compact.
-    test.submit_turn("first turn").await?;
-    let rewritten_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        NEW_GLOBAL_INSTRUCTIONS,
-    )?;
-    assert_eq!(source, rewritten_source);
+        // Materialize the old snapshot, rewrite the selected file in place, and manually compact.
+        test.submit_turn("first turn").await?;
+        let rewritten_source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            NEW_GLOBAL_INSTRUCTIONS,
+        )?;
+        assert_eq!(source, rewritten_source);
 
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_turn("after compact").await?;
+
+        // The compactor sees current instructions, as does the replacement window.
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
+        let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
+        assert_single_instruction_fragment(&requests[0], &old_fragment);
+        assert_single_instruction_fragment(&requests[1], &new_fragment);
+        assert_single_instruction_fragment(&requests[2], &new_fragment);
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "refreshing same-path instructions preserves their source"
+        );
+
+        Ok(())
     })
-    .await;
-    test.submit_turn("after compact").await?;
-
-    // The compactor sees current instructions, as does the replacement window.
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
-    assert_single_instruction_fragment(&requests[0], &old_fragment);
-    assert_single_instruction_fragment(&requests[1], &new_fragment);
-    assert_single_instruction_fragment(&requests[2], &new_fragment);
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "refreshing same-path instructions preserves their source"
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mid_turn_compaction_uses_refreshed_global_instructions() -> Result<()> {
     // Set up a turn that crosses the auto-compaction limit and a post-compaction response.
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call("call-1", "unsupported_tool", "{}"),
-                responses::ev_completed_with_tokens("first-response", /*total_tokens*/ 96),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("compact-message", "summary"),
-                responses::ev_completed_with_tokens("compact-response", /*total_tokens*/ 10),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("final-message", "done"),
-                responses::ev_completed_with_tokens("follow-up-response", /*total_tokens*/ 10),
-            ]),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        OLD_GLOBAL_INSTRUCTIONS,
-    )?;
-    let provider = local_compaction_provider(&server);
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call("call-1", "unsupported_tool", "{}"),
+                    responses::ev_completed_with_tokens("first-response", /*total_tokens*/ 96),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("compact-message", "summary"),
+                    responses::ev_completed_with_tokens(
+                        "compact-response",
+                        /*total_tokens*/ 10,
+                    ),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("final-message", "done"),
+                    responses::ev_completed_with_tokens(
+                        "follow-up-response",
+                        /*total_tokens*/ 10,
+                    ),
+                ]),
+            ],
+        )
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        let source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            OLD_GLOBAL_INSTRUCTIONS,
+        )?;
+        let provider = local_compaction_provider(&server);
 
-    // Create the thread with the old global source loaded into its instruction snapshot.
-    let mut builder = test_codex()
-        .with_home(Arc::clone(&home))
-        .with_config(move |config| {
-            config.model_provider = provider;
-            config.model_context_window = Some(100);
-            config.model_auto_compact_token_limit = Some(90);
-        });
-    let test = builder.build(&server).await?;
+        // Create the thread with the old global source loaded into its instruction snapshot.
+        let mut builder = test_codex()
+            .with_home(Arc::clone(&home))
+            .with_config(move |config| {
+                config.model_provider = provider;
+                config.model_context_window = Some(100);
+                config.model_auto_compact_token_limit = Some(90);
+            });
+        let test = builder.build(&server).await?;
 
-    // Assert the pre-compaction source list points at the creation-time file.
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "thread reports the creation-time global source before mid-turn compaction"
-    );
+        // Assert the pre-compaction source list points at the creation-time file.
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "thread reports the creation-time global source before mid-turn compaction"
+        );
 
-    // Add a preferred override before the turn triggers automatic mid-turn compaction.
-    let new_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_OVERRIDE_FILENAME,
-        NEW_GLOBAL_INSTRUCTIONS,
-    )?;
-    assert_ne!(source, new_source);
-    test.submit_turn("trigger mid-turn compaction").await?;
+        // Add a preferred override before the turn triggers automatic mid-turn compaction.
+        let new_source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_OVERRIDE_FILENAME,
+            NEW_GLOBAL_INSTRUCTIONS,
+        )?;
+        assert_ne!(source, new_source);
+        test.submit_turn("trigger mid-turn compaction").await?;
 
-    // The next request boundary selects the override; compaction and continuation retain it.
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    let expected_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
-    assert_single_instruction_fragment(&requests[0], &expected_fragment);
-    assert_single_instruction_fragment(&requests[1], &expected_fragment);
-    assert_single_instruction_fragment(&requests[2], &expected_fragment);
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&new_source)],
-        "thread reports the refreshed global override after mid-turn compaction"
-    );
+        // The next request boundary selects the override; compaction and continuation retain it.
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        let expected_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
+        assert_single_instruction_fragment(&requests[0], &expected_fragment);
+        assert_single_instruction_fragment(&requests[1], &expected_fragment);
+        assert_single_instruction_fragment(&requests[2], &expected_fragment);
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&new_source)],
+            "thread reports the refreshed global override after mid-turn compaction"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -5760,133 +5785,136 @@ async fn remote_v2_compaction_refreshes_instructions_and_preserves_them_on_cold_
 
     // Set up an ordinary turn, a remote-v2 compact response, and a post-compaction turn.
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("remote-v2-initial-response"),
-                responses::ev_completed("remote-v2-initial-response"),
-            ]),
-            remote_v2_compaction_response(),
-            responses::sse(vec![
-                responses::ev_response_created("remote-v2-follow-up-response"),
-                responses::ev_completed("remote-v2-follow-up-response"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("remote-v2-resumed-response"),
-                responses::ev_completed("remote-v2-resumed-response"),
-            ]),
-        ],
-    )
-    .await;
-    let home = Arc::new(TempDir::new()?);
-    let source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        OLD_GLOBAL_INSTRUCTIONS,
-    )?;
-    let mut builder = test_codex()
-        .with_home(Arc::clone(&home))
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
-    let test = builder.build(&server).await?;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("remote-v2-initial-response"),
+                    responses::ev_completed("remote-v2-initial-response"),
+                ]),
+                remote_v2_compaction_response(),
+                responses::sse(vec![
+                    responses::ev_response_created("remote-v2-follow-up-response"),
+                    responses::ev_completed("remote-v2-follow-up-response"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("remote-v2-resumed-response"),
+                    responses::ev_completed("remote-v2-resumed-response"),
+                ]),
+            ],
+        )
+        .await;
+        let home = Arc::new(TempDir::new()?);
+        let source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            OLD_GLOBAL_INSTRUCTIONS,
+        )?;
+        let mut builder = test_codex()
+            .with_home(Arc::clone(&home))
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        let test = builder.build(&server).await?;
 
-    // Materialize the old snapshot, rewrite the selected file in place, and compact remotely.
-    test.submit_turn("before remote v2 compaction").await?;
-    let rewritten_source = write_global_file(
-        home.as_ref(),
-        GLOBAL_AGENTS_FILENAME,
-        NEW_GLOBAL_INSTRUCTIONS,
-    )?;
-    assert_eq!(source, rewritten_source);
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        // Materialize the old snapshot, rewrite the selected file in place, and compact remotely.
+        test.submit_turn("before remote v2 compaction").await?;
+        let rewritten_source = write_global_file(
+            home.as_ref(),
+            GLOBAL_AGENTS_FILENAME,
+            NEW_GLOBAL_INSTRUCTIONS,
+        )?;
+        assert_eq!(source, rewritten_source);
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_turn("after remote v2 compaction").await?;
+        test.codex.flush_rollout().await?;
+
+        // The compactor and cold-resumed replacement window share current instructions.
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
+        let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
+        assert_single_instruction_fragment(&requests[0], &old_fragment);
+        assert_single_instruction_fragment(&requests[1], &new_fragment);
+        assert_single_instruction_fragment(&requests[2], &new_fragment);
+        assert_eq!(
+            requests[1].input().last(),
+            Some(&json!({"type": "compaction_trigger"})),
+            "remote-v2 compact request should append exactly one compaction trigger"
+        );
+        let rollout_path = test.codex.rollout_path().expect("rollout path");
+        let replacement_history = replacement_history_from_rollout(&rollout_path)?;
+        assert_eq!(
+            instruction_fragments_in_items(&replacement_history),
+            vec![new_fragment.clone()],
+            "remote-v2 replacement history includes refreshed global instructions"
+        );
+        assert_eq!(
+            test.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "running thread retains the selected same-path source"
+        );
+        assert_eq!(
+            fs::read_to_string(source.as_path())?,
+            NEW_GLOBAL_INSTRUCTIONS,
+            "the selected source path should contain the rewritten text"
+        );
+
+        // Cold-resume the persisted replacement history with freshly loaded same-path configuration.
+        test.codex.submit(Op::Shutdown).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::ShutdownComplete)
+        })
+        .await;
+        let resumed_cwd = test.config.cwd.clone();
+        let mut resume_builder = test_codex()
+            .with_home(Arc::clone(&home))
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(move |config| config.cwd = resumed_cwd);
+        let resumed = resume_builder
+            .resume(&server, Arc::clone(&home), rollout_path)
+            .await?;
+        resumed
+            .submit_turn("after remote v2 compaction cold resume")
+            .await?;
+
+        // Cold resume replays the refreshed context without appending unchanged instructions again.
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 4);
+        assert_single_instruction_fragment(&requests[3], &new_fragment);
+        let resumed_input = requests[3].input();
+        // The retained base declaration becomes the legacy protocol's separate prefix;
+        // every remaining history item still replays verbatim.
+        let (base, retained) = replacement_history
+            .split_first()
+            .expect("replacement prefix");
+        assert_eq!(
+            requests[3].instructions_text(),
+            base["content"][0]["text"].as_str().expect("base text")
+        );
+        assert_eq!(
+            resumed_input.get(1..=retained.len()),
+            Some(retained),
+            "remote-v2 cold resume should replay persisted history after projecting the base prefix"
+        );
+        let post_compact_input = requests[2].input();
+        assert_eq!(
+            resumed_input.get(..post_compact_input.len()),
+            Some(post_compact_input.as_slice()),
+            "remote-v2 cold resume should replay the complete post-compaction structured prefix"
+        );
+        assert_eq!(
+            resumed.codex.instruction_sources().await,
+            vec![PathUri::from_abs_path(&source)],
+            "cold-resumed thread reports the same rewritten source path"
+        );
+
+        Ok(())
     })
-    .await;
-    test.submit_turn("after remote v2 compaction").await?;
-    test.codex.flush_rollout().await?;
-
-    // The compactor and cold-resumed replacement window share current instructions.
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    let old_fragment = expected_instruction_fragment(OLD_GLOBAL_INSTRUCTIONS);
-    let new_fragment = expected_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS);
-    assert_single_instruction_fragment(&requests[0], &old_fragment);
-    assert_single_instruction_fragment(&requests[1], &new_fragment);
-    assert_single_instruction_fragment(&requests[2], &new_fragment);
-    assert_eq!(
-        requests[1].input().last(),
-        Some(&json!({"type": "compaction_trigger"})),
-        "remote-v2 compact request should append exactly one compaction trigger"
-    );
-    let rollout_path = test.codex.rollout_path().expect("rollout path");
-    let replacement_history = replacement_history_from_rollout(&rollout_path)?;
-    assert_eq!(
-        instruction_fragments_in_items(&replacement_history),
-        vec![new_fragment.clone()],
-        "remote-v2 replacement history includes refreshed global instructions"
-    );
-    assert_eq!(
-        test.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "running thread retains the selected same-path source"
-    );
-    assert_eq!(
-        fs::read_to_string(source.as_path())?,
-        NEW_GLOBAL_INSTRUCTIONS,
-        "the selected source path should contain the rewritten text"
-    );
-
-    // Cold-resume the persisted replacement history with freshly loaded same-path configuration.
-    test.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::ShutdownComplete)
-    })
-    .await;
-    let resumed_cwd = test.config.cwd.clone();
-    let mut resume_builder = test_codex()
-        .with_home(Arc::clone(&home))
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(move |config| config.cwd = resumed_cwd);
-    let resumed = resume_builder
-        .resume(&server, Arc::clone(&home), rollout_path)
-        .await?;
-    resumed
-        .submit_turn("after remote v2 compaction cold resume")
-        .await?;
-
-    // Cold resume replays the refreshed context without appending unchanged instructions again.
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 4);
-    assert_single_instruction_fragment(&requests[3], &new_fragment);
-    let resumed_input = requests[3].input();
-    // The retained base declaration becomes the legacy protocol's separate prefix;
-    // every remaining history item still replays verbatim.
-    let (base, retained) = replacement_history
-        .split_first()
-        .expect("replacement prefix");
-    assert_eq!(
-        requests[3].instructions_text(),
-        base["content"][0]["text"].as_str().expect("base text")
-    );
-    assert_eq!(
-        resumed_input.get(1..=retained.len()),
-        Some(retained),
-        "remote-v2 cold resume should replay persisted history after projecting the base prefix"
-    );
-    let post_compact_input = requests[2].input();
-    assert_eq!(
-        resumed_input.get(..post_compact_input.len()),
-        Some(post_compact_input.as_slice()),
-        "remote-v2 cold resume should replay the complete post-compaction structured prefix"
-    );
-    assert_eq!(
-        resumed.codex.instruction_sources().await,
-        vec![PathUri::from_abs_path(&source)],
-        "cold-resumed thread reports the same rewritten source path"
-    );
-
-    Ok(())
+    .await
 }
 
 #[path = "compact_program_tests.rs"]

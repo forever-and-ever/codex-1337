@@ -42,6 +42,7 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -329,6 +330,7 @@ async fn compacted_full_history_fork_replaces_parent_developer_instructions() ->
     const SPAWN_CALL_ID: &str = "spawn-compacted-history-worker";
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let compaction_requests = responses::mount_sse_sequence(
         &server,
         vec![
@@ -505,6 +507,8 @@ async fn compacted_full_history_fork_replaces_parent_developer_instructions() ->
     );
 
     Ok(())
+    })
+    .await
 }
 
 /// Child attachment and owner-mediated cold resume preserve recorded instructions and parent authority.

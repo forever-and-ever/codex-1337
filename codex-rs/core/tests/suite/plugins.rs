@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::sync::Arc;
 use std::time::Duration;
@@ -479,6 +480,7 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let codex_home = Arc::new(TempDir::new()?);
     let script_path = write_remote_plugin_script_and_config(codex_home.as_ref());
     std::fs::write(
@@ -603,6 +605,8 @@ async fn persisted_remote_plugin_command_attribution_flows_through_turn_context(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -615,6 +619,7 @@ async fn plugin_metrics_stdin_works_with_sandbox_approval_disabled(
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let home = Arc::new(TempDir::new()?);
     let script = write_remote_plugin_script_and_config(home.as_ref());
     std::fs::write(
@@ -735,6 +740,8 @@ printf 'STDIN_OK\n'
         }),
     );
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -745,6 +752,7 @@ async fn remote_plugin_measurements_require_the_frontend_version() -> Result<()>
     // and executor caches, rather than the runner's automatic executor selection.
     let executor = super::multi_exec_server_sandbox::ExecServerProcess::start().await?;
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let home = Arc::new(TempDir::new()?);
     let frontend_script = write_remote_plugin_script_and_config(home.as_ref());
     let script = r#"if [ -n "${CODEX_PLUGIN_METRICS_OUTPUT:-}" ]; then
@@ -896,6 +904,8 @@ fi
         })
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -903,145 +913,148 @@ async fn thread_disabled_plugins_filter_skills_and_tools_without_changing_shared
 -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let apps = AppsTestServer::mount_with_connector_name(&server, "Google Calendar").await?;
-    let home = Arc::new(TempDir::new()?);
-    let skill_path = dunce::canonicalize(write_plugin_skill_plugin(home.as_ref()))?;
-    std::fs::write(
-        &skill_path,
-        "---\ndescription: inspect sample data\n---\nTHREAD_PLUGIN_SKILL_BODY\n",
-    )?;
-    write_plugin_mcp_plugin(home.as_ref(), &stdio_server_bin()?);
-    write_plugin_app_plugin_with_name(home.as_ref(), "sample_app");
-    let mut builder = test_codex()
-        .with_home(home)
-        .with_extensions(skills_extensions())
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(move |config| {
-            config.features.enable(Feature::Apps).unwrap();
-            config.chatgpt_base_url = apps.chatgpt_base_url;
-        });
-    let test = builder.build_with_remote_and_local_env(&server).await?;
-    let manager = test.thread_manager.plugins_manager();
-    let plugins_input = test.config.plugins_config_input();
-    let shared_plugins = manager.plugins_for_config(&plugins_input).await;
-    let tool_calls = [
-        (
-            "sample",
-            "echo",
-            Some(serde_json::json!({"message": "plugin check"})),
-        ),
-        (CODEX_APPS_MCP_SERVER_NAME, "calendar_list_events", None),
-    ];
-
-    for (phase, enabled, injection_count) in [(0, true, 1), (1, false, 1), (2, true, 2)] {
-        if !enabled {
-            submit_thread_settings(
-                &test.codex,
-                ThreadSettingsOverrides {
-                    disabled_plugin_ids: Some(vec![SAMPLE_PLUGIN_CONFIG_NAME.to_string()]),
-                    ..Default::default()
-                },
-            )
-            .await?;
-            // Saving pending settings must not change the admitted runtime.
-            for (server_name, tool, arguments) in &tool_calls {
-                test.codex
-                    .call_mcp_tool(server_name, tool, arguments.clone(), /*meta*/ None)
-                    .await?;
-            }
-        }
-        let app_call_id = format!("plugin-app-{phase}");
-        let mcp_call_id = format!("plugin-mcp-{phase}");
-        let mock = mount_sse_sequence(
-            &server,
-            vec![
-                sse(vec![
-                    ev_response_created("search"),
-                    ev_tool_search_call(
-                        &app_call_id,
-                        &serde_json::json!({"query": "create calendar event"}),
-                    ),
-                    ev_tool_search_call(&mcp_call_id, &serde_json::json!({"query": "echo"})),
-                    ev_completed("search"),
-                ]),
-                sse(vec![ev_response_created("done"), ev_completed("done")]),
-            ],
-        )
-        .await;
-        test.codex
-            .start_or_steer_turn(
-                TurnInputRequest::user_input(vec![
-                    UserInput::Skill {
-                        name: "sample:sample-search".into(),
-                        path: skill_path.clone(),
-                    },
-                    UserInput::Mention {
-                        name: "sample".into(),
-                        path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
-                    },
-                ])
-                .with_thread_settings(ThreadSettingsOverrides {
-                    disabled_plugin_ids: enabled.then(Vec::new),
-                    ..Default::default()
-                }),
-            )
-            .await?;
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
-        })
-        .await;
-        let requests = mock.requests();
-        // Previously injected instructions remain in history; disabled turns must add none.
-        for (role, marker) in [
-            ("user", "THREAD_PLUGIN_SKILL_BODY"),
-            ("developer", "Skills from this plugin"),
-        ] {
-            assert_eq!(
-                requests[0]
-                    .message_input_texts(role)
-                    .iter()
-                    .filter(|text| text.contains(marker))
-                    .count(),
-                injection_count
-            );
-        }
-        for (call_id, namespace, tool) in [
+    mock_server::run(&[&server], async {
+        let apps = AppsTestServer::mount_with_connector_name(&server, "Google Calendar").await?;
+        let home = Arc::new(TempDir::new()?);
+        let skill_path = dunce::canonicalize(write_plugin_skill_plugin(home.as_ref()))?;
+        std::fs::write(
+            &skill_path,
+            "---\ndescription: inspect sample data\n---\nTHREAD_PLUGIN_SKILL_BODY\n",
+        )?;
+        write_plugin_mcp_plugin(home.as_ref(), &stdio_server_bin()?);
+        write_plugin_app_plugin_with_name(home.as_ref(), "sample_app");
+        let mut builder = test_codex()
+            .with_home(home)
+            .with_extensions(skills_extensions())
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(move |config| {
+                config.features.enable(Feature::Apps).unwrap();
+                config.chatgpt_base_url = apps.chatgpt_base_url;
+            });
+        let test = builder.build_with_remote_and_local_env(&server).await?;
+        let manager = test.thread_manager.plugins_manager();
+        let plugins_input = test.config.plugins_config_input();
+        let shared_plugins = manager.plugins_for_config(&plugins_input).await;
+        let tool_calls = [
             (
-                &app_call_id,
-                SAMPLE_PLUGIN_APP_NAMESPACE,
-                SEARCH_CALENDAR_CREATE_TOOL,
+                "sample",
+                "echo",
+                Some(serde_json::json!({"message": "plugin check"})),
             ),
-            (&mcp_call_id, SAMPLE_PLUGIN_MCP_NAMESPACE, "echo"),
-        ] {
+            (CODEX_APPS_MCP_SERVER_NAME, "calendar_list_events", None),
+        ];
+
+        for (phase, enabled, injection_count) in [(0, true, 1), (1, false, 1), (2, true, 2)] {
+            if !enabled {
+                submit_thread_settings(
+                    &test.codex,
+                    ThreadSettingsOverrides {
+                        disabled_plugin_ids: Some(vec![SAMPLE_PLUGIN_CONFIG_NAME.to_string()]),
+                        ..Default::default()
+                    },
+                )
+                .await?;
+                // Saving pending settings must not change the admitted runtime.
+                for (server_name, tool, arguments) in &tool_calls {
+                    test.codex
+                        .call_mcp_tool(server_name, tool, arguments.clone(), /*meta*/ None)
+                        .await?;
+                }
+            }
+            let app_call_id = format!("plugin-app-{phase}");
+            let mcp_call_id = format!("plugin-mcp-{phase}");
+            let mock = mount_sse_sequence(
+                &server,
+                vec![
+                    sse(vec![
+                        ev_response_created("search"),
+                        ev_tool_search_call(
+                            &app_call_id,
+                            &serde_json::json!({"query": "create calendar event"}),
+                        ),
+                        ev_tool_search_call(&mcp_call_id, &serde_json::json!({"query": "echo"})),
+                        ev_completed("search"),
+                    ]),
+                    sse(vec![ev_response_created("done"), ev_completed("done")]),
+                ],
+            )
+            .await;
+            test.codex
+                .start_or_steer_turn(
+                    TurnInputRequest::user_input(vec![
+                        UserInput::Skill {
+                            name: "sample:sample-search".into(),
+                            path: skill_path.clone(),
+                        },
+                        UserInput::Mention {
+                            name: "sample".into(),
+                            path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
+                        },
+                    ])
+                    .with_thread_settings(ThreadSettingsOverrides {
+                        disabled_plugin_ids: enabled.then(Vec::new),
+                        ..Default::default()
+                    }),
+                )
+                .await?;
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::TurnComplete(_))
+            })
+            .await;
+            let requests = mock.requests();
+            // Previously injected instructions remain in history; disabled turns must add none.
+            for (role, marker) in [
+                ("user", "THREAD_PLUGIN_SKILL_BODY"),
+                ("developer", "Skills from this plugin"),
+            ] {
+                assert_eq!(
+                    requests[0]
+                        .message_input_texts(role)
+                        .iter()
+                        .filter(|text| text.contains(marker))
+                        .count(),
+                    injection_count
+                );
+            }
+            for (call_id, namespace, tool) in [
+                (
+                    &app_call_id,
+                    SAMPLE_PLUGIN_APP_NAMESPACE,
+                    SEARCH_CALENDAR_CREATE_TOOL,
+                ),
+                (&mcp_call_id, SAMPLE_PLUGIN_MCP_NAMESPACE, "echo"),
+            ] {
+                assert_eq!(
+                    namespace_child_tool(&requests[1].tool_search_output(call_id), namespace, tool)
+                        .is_some(),
+                    enabled
+                );
+            }
+            let calls_before = recorded_apps_tool_calls(&server).await.len();
+            // Direct Apps RPC calls keep their existing behavior outside model tool filtering.
+            for (server_name, tool, arguments) in &tool_calls {
+                let result = test
+                    .codex
+                    .call_mcp_tool(server_name, tool, arguments.clone(), /*meta*/ None)
+                    .await;
+                assert_eq!(
+                    result.is_ok(),
+                    enabled || *server_name == CODEX_APPS_MCP_SERVER_NAME,
+                    "unexpected {server_name}/{tool} result: {result:?}"
+                );
+            }
             assert_eq!(
-                namespace_child_tool(&requests[1].tool_search_output(call_id), namespace, tool)
-                    .is_some(),
-                enabled
+                recorded_apps_tool_calls(&server).await.len() - calls_before,
+                1
+            );
+            assert_eq!(
+                manager.plugins_for_config(&plugins_input).await,
+                shared_plugins
             );
         }
-        let calls_before = recorded_apps_tool_calls(&server).await.len();
-        // Direct Apps RPC calls keep their existing behavior outside model tool filtering.
-        for (server_name, tool, arguments) in &tool_calls {
-            let result = test
-                .codex
-                .call_mcp_tool(server_name, tool, arguments.clone(), /*meta*/ None)
-                .await;
-            assert_eq!(
-                result.is_ok(),
-                enabled || *server_name == CODEX_APPS_MCP_SERVER_NAME,
-                "unexpected {server_name}/{tool} result: {result:?}"
-            );
-        }
-        assert_eq!(
-            recorded_apps_tool_calls(&server).await.len() - calls_before,
-            1
-        );
-        assert_eq!(
-            manager.plugins_for_config(&plugins_input).await,
-            shared_plugins
-        );
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1361,6 +1374,7 @@ async fn agent_plugin_root_mcp_stdio_tool_round_trip_expands_reserved_paths_and_
 -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let search_call_id = "search-agent-echo";
     let tool_call_id = "call-agent-echo";
     let overlay_call_id = "call-agent-overlay-env";
@@ -1508,6 +1522,8 @@ async fn agent_plugin_root_mcp_stdio_tool_round_trip_expands_reserved_paths_and_
             .is_object()
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2234,67 +2250,70 @@ async fn implicit_plugin_skill_invocation_tracks_remote_plugin_id(
     skip_if_remote!(Ok(()), "shell commands use host plugin-cache paths");
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let codex_home = Arc::new(TempDir::new()?);
-    let skill_path = write_remote_plugin_skill_plugin(codex_home.as_ref());
-    persist_sample_remote_plugin_id(codex_home.as_ref());
-    let command = match invocation {
-        ImplicitPluginSkillInvocation::SkillDocumentRead => {
-            format!("cat {}", skill_path.display())
-        }
-        ImplicitPluginSkillInvocation::SkillScriptRun => {
-            let script_path = skill_path
-                .parent()
-                .expect("skill path should have a parent")
-                .join("scripts/test.sh");
-            std::fs::create_dir_all(
-                script_path
+    mock_server::run(&[&server], async {
+        let codex_home = Arc::new(TempDir::new()?);
+        let skill_path = write_remote_plugin_skill_plugin(codex_home.as_ref());
+        persist_sample_remote_plugin_id(codex_home.as_ref());
+        let command = match invocation {
+            ImplicitPluginSkillInvocation::SkillDocumentRead => {
+                format!("cat {}", skill_path.display())
+            }
+            ImplicitPluginSkillInvocation::SkillScriptRun => {
+                let script_path = skill_path
                     .parent()
-                    .expect("script path should have a parent"),
-            )?;
-            std::fs::write(&script_path, "echo skill script invoked\n")?;
-            format!("bash {}", script_path.display())
-        }
-    };
-    let command_args = serde_json::json!({
-        "cmd": command,
-        "login": false,
+                    .expect("skill path should have a parent")
+                    .join("scripts/test.sh");
+                std::fs::create_dir_all(
+                    script_path
+                        .parent()
+                        .expect("script path should have a parent"),
+                )?;
+                std::fs::write(&script_path, "echo skill script invoked\n")?;
+                format!("bash {}", script_path.display())
+            }
+        };
+        let command_args = serde_json::json!({
+            "cmd": command,
+            "login": false,
+        })
+        .to_string();
+        let _resp_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call("call-1", "exec_command", &command_args),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
+        let test_codex = build_analytics_plugin_test_codex(&server, codex_home).await?;
+        let codex = Arc::clone(&test_codex.codex);
+
+        codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "inspect the sample skill".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+        let event = wait_for_analytics_event(&server, "skill_invocation").await;
+        assert_eq!(
+            event["event_params"]["plugin_id"],
+            SAMPLE_REMOTE_PLUGIN_CONFIG_NAME
+        );
+        assert_eq!(
+            event["event_params"]["remote_plugin_id"],
+            SAMPLE_REMOTE_PLUGIN_ID
+        );
+        assert_eq!(event["event_params"]["invoke_type"], "implicit");
+
+        Ok(())
     })
-    .to_string();
-    let _resp_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call("call-1", "exec_command", &command_args),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
-    let test_codex = build_analytics_plugin_test_codex(&server, codex_home).await?;
-    let codex = Arc::clone(&test_codex.codex);
-
-    codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "inspect the sample skill".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    let event = wait_for_analytics_event(&server, "skill_invocation").await;
-    assert_eq!(
-        event["event_params"]["plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_CONFIG_NAME
-    );
-    assert_eq!(
-        event["event_params"]["remote_plugin_id"],
-        SAMPLE_REMOTE_PLUGIN_ID
-    );
-    assert_eq!(event["event_params"]["invoke_type"], "implicit");
-
-    Ok(())
+    .await
 }
 
 fn persist_sample_remote_plugin_id(home: &TempDir) {

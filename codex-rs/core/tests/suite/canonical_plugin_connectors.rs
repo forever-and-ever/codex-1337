@@ -1,5 +1,6 @@
 //! Canonical connector ownership overrides other plugins' shared contributions.
 
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -32,6 +33,7 @@ use wiremock::matchers::path;
 async fn canonical_plugin_disable_overrides_shared_connector_and_can_be_cleared() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let apps = AppsTestServer::mount_with_connector_name(&server, "Google Calendar").await?;
     Mock::given(method("GET"))
         .and(path("/ps/plugins/installed"))
@@ -139,4 +141,6 @@ async fn canonical_plugin_disable_overrides_shared_connector_and_can_be_cleared(
         );
     }
     Ok(())
+    })
+    .await
 }

@@ -55,6 +55,7 @@ use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::user_input::UserInput;
 use core_test_support::fs_wait;
+use core_test_support::mock_server;
 use core_test_support::responses::assert_parent_turn;
 use core_test_support::responses::assert_root_turn;
 use core_test_support::responses::ev_assistant_message;
@@ -197,6 +198,7 @@ async fn guardian_session_inherits_parent_http_fallback(
     let configured_policy = "Use the task-configured Guardian policy.";
     let configured_template = "You are judging one planned coding-agent action.\nConfigured template: {{ tenant_policy_config }}";
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let websocket_fallback = Mock::given(method("GET"))
         .and(path_regex(".*/responses$"))
         .respond_with(ResponseTemplate::new(426))
@@ -353,6 +355,8 @@ async fn guardian_session_inherits_parent_http_fallback(
     test.codex.shutdown_and_wait().await?;
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -549,6 +553,7 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let summary = "Guardian retained the user's standing authorization.";
     let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
     let mut builder = test_codex()
@@ -774,6 +779,8 @@ async fn guardian_review_recovers_after_compaction(with_parent_checkpoint: bool)
     }
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -785,6 +792,7 @@ async fn guardian_requests_record_only_their_own_tool_calls() -> Result<()> {
     );
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(move |config| {
         config
             .features
@@ -882,6 +890,8 @@ async fn guardian_requests_record_only_their_own_tool_calls() -> Result<()> {
         }
     }
     Ok(())
+    })
+    .await
 }
 
 #[test_case(CodexAuth::from_api_key("test-api-key"), true, "gpt-5.6-luna"; "api_key_uses_luna_with_responses_lite")]
@@ -1255,163 +1265,170 @@ async fn guardian_node_repl_policy_follows_production_approval_path(
     );
 
     let server = start_mock_server().await;
-    let mcp_server_bin = remote_aware_stdio_server_bin()?;
-    let node_repl_auto_review_required = scenario != "ineligible_node";
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.6-luna", move |model| {
-            model
-                .model_messages
-                .as_mut()
-                .expect("reviewer model messages")
-                .auto_review = Some(AutoReviewMessages {
-                policy: None,
-                policy_template: None,
-                node_repl_policy: node_repl_policy.map(str::to_string),
-                rejection_instructions: None,
-                timeout_instructions: None,
+    mock_server::run(&[&server], async {
+        let mcp_server_bin = remote_aware_stdio_server_bin()?;
+        let node_repl_auto_review_required = scenario != "ineligible_node";
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.6-luna", move |model| {
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("reviewer model messages")
+                    .auto_review = Some(AutoReviewMessages {
+                    policy: None,
+                    policy_template: None,
+                    node_repl_policy: node_repl_policy.map(str::to_string),
+                    rejection_instructions: None,
+                    timeout_instructions: None,
+                });
+            })
+            .with_model_info_override("gpt-5.4", move |model| {
+                model.node_repl_auto_review_required = node_repl_auto_review_required;
+                model.auto_review_model_override = Some("gpt-5.6-luna".to_string());
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("acting model messages")
+                    .auto_review = Some(AutoReviewMessages {
+                    policy: None,
+                    policy_template: None,
+                    node_repl_policy: Some("Acting-model REPL policy.".to_string()),
+                    rejection_instructions: None,
+                    timeout_instructions: None,
+                });
+            })
+            .with_config(move |config| {
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                let repl: McpServerConfig = serde_json::from_value(json!({
+                    "command": mcp_server_bin,
+                    "environment_id": remote_aware_environment_id(),
+                    "cwd": config.cwd,
+                    "default_tools_approval_mode": "prompt",
+                    "env": { "MCP_TEST_ENABLE_NODE_REPL_JS": "1" }
+                }))
+                .expect("valid REPL MCP test server");
+                config
+                    .mcp_servers
+                    .set([(String::from(repl_server), repl)].into_iter().collect())
+                    .expect("configure REPL MCP test server");
             });
-        })
-        .with_model_info_override("gpt-5.4", move |model| {
-            model.node_repl_auto_review_required = node_repl_auto_review_required;
-            model.auto_review_model_override = Some("gpt-5.6-luna".to_string());
-            model
-                .model_messages
-                .as_mut()
-                .expect("acting model messages")
-                .auto_review = Some(AutoReviewMessages {
-                policy: None,
-                policy_template: None,
-                node_repl_policy: Some("Acting-model REPL policy.".to_string()),
-                rejection_instructions: None,
-                timeout_instructions: None,
-            });
-        })
-        .with_config(move |config| {
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            let repl: McpServerConfig = serde_json::from_value(json!({
-                "command": mcp_server_bin,
-                "environment_id": remote_aware_environment_id(),
-                "cwd": config.cwd,
-                "default_tools_approval_mode": "prompt",
-                "env": { "MCP_TEST_ENABLE_NODE_REPL_JS": "1" }
-            }))
-            .expect("valid REPL MCP test server");
-            config
-                .mcp_servers
-                .set([(String::from(repl_server), repl)].into_iter().collect())
-                .expect("configure REPL MCP test server");
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    wait_for_mcp_server(&test.codex, repl_server).await?;
+        let test = builder.build_with_auto_env(&server).await?;
+        wait_for_mcp_server(&test.codex, repl_server).await?;
 
-    let actions: &[&str] = if scenario == "shell_then_nodes" {
-        &["shell", "node-first", "node-second"]
-    } else {
-        &["node-first"]
-    };
-    let mut responses = Vec::new();
-    for action in actions {
-        let call_id = format!("call-{action}");
-        let tool_call = if *action == "shell" {
-            ev_function_call(
-                &call_id,
-                "exec_command",
-                &json!({
-                    "cmd": "true",
-                    "sandbox_permissions": "require_escalated",
-                    "justification": "Review a shell action before Node REPL."
-                })
-                .to_string(),
-            )
+        let actions: &[&str] = if scenario == "shell_then_nodes" {
+            &["shell", "node-first", "node-second"]
         } else {
-            ev_function_call_with_namespace(
-                &call_id,
-                &format!("mcp__{repl_server}"),
-                "js",
-                r#"{"code":"nodeRepl.empty()"}"#,
-            )
+            &["node-first"]
         };
-        responses.push(sse(vec![
-            ev_response_created(&format!("parent-{action}")),
-            tool_call,
-            ev_completed(&format!("parent-{action}")),
-        ]));
-        responses.push(sse(vec![
-            ev_response_created(&format!("guardian-{action}")),
-            ev_assistant_message(
-                &format!("guardian-message-{action}"),
-                r#"{"outcome":"allow"}"#,
-            ),
-            ev_completed(&format!("guardian-{action}")),
-        ]));
-    }
-    responses.push(sse(vec![ev_completed("parent-complete")]));
-    let response_mock = mount_sse_sequence(&server, responses).await;
-
-    test.submit_text_turn(&format!("Inspect the browser with {repl_server}."))
-        .await?;
-
-    let requests = response_mock.requests();
-    let guardian_requests = requests
-        .iter()
-        .filter(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(guardian_requests.len(), actions.len());
-
-    let bundled_policy = codex_prompts::ResolvedModelMessages::bundled()
-        .auto_review()
-        .node_repl_policy;
-    let policy = node_repl_policy.unwrap_or(bundled_policy);
-    let first_guardian_thread = guardian_requests[0].body_json()["client_metadata"]["thread_id"]
-        .as_str()
-        .expect("Guardian reviewer thread id")
-        .to_string();
-    for (index, request) in guardian_requests.iter().enumerate() {
-        assert_eq!(
-            request.body_json()["client_metadata"]["thread_id"].as_str(),
-            Some(first_guardian_thread.as_str()),
-            "shell and Node approvals must reuse the same Guardian reviewer"
-        );
-        let expected = usize::from(
-            node_repl_auto_review_required
-                && !policy.is_empty()
-                && !(scenario == "shell_then_nodes" && index == 0),
-        );
-        assert_eq!(
-            request
-                .message_input_texts("developer")
-                .into_iter()
-                .filter(|text| {
-                    [bundled_policy, "Acting-model REPL policy.", policy].contains(&text.as_str())
-                })
-                .collect::<Vec<_>>(),
-            vec![policy.to_string(); expected],
-            "Node REPL policy must appear exactly once on eligible Node reviews"
-        );
-        if expected == 1 && (index == 0 || scenario == "shell_then_nodes" && index == 1) {
-            let body = request.body_json();
-            let input = body["input"].as_array().expect("Guardian reviewer input");
-            let policy_index = input
-                .iter()
-                .position(|item| {
-                    item["role"] == "developer"
-                        && item["content"].as_array().is_some_and(|content| {
-                            content.iter().any(|span| span["text"] == policy)
-                        })
-                })
-                .expect("Node REPL developer policy");
-            let user_index = input
-                .iter()
-                .rposition(|item| item["role"] == "user")
-                .expect("Node REPL approval request");
-            assert_eq!(policy_index + 1, user_index);
+        let mut responses = Vec::new();
+        for action in actions {
+            let call_id = format!("call-{action}");
+            let tool_call = if *action == "shell" {
+                ev_function_call(
+                    &call_id,
+                    "exec_command",
+                    &json!({
+                        "cmd": "true",
+                        "sandbox_permissions": "require_escalated",
+                        "justification": "Review a shell action before Node REPL."
+                    })
+                    .to_string(),
+                )
+            } else {
+                ev_function_call_with_namespace(
+                    &call_id,
+                    &format!("mcp__{repl_server}"),
+                    "js",
+                    r#"{"code":"nodeRepl.empty()"}"#,
+                )
+            };
+            responses.push(sse(vec![
+                ev_response_created(&format!("parent-{action}")),
+                tool_call,
+                ev_completed(&format!("parent-{action}")),
+            ]));
+            responses.push(sse(vec![
+                ev_response_created(&format!("guardian-{action}")),
+                ev_assistant_message(
+                    &format!("guardian-message-{action}"),
+                    r#"{"outcome":"allow"}"#,
+                ),
+                ev_completed(&format!("guardian-{action}")),
+            ]));
         }
-    }
+        responses.push(sse(vec![ev_completed("parent-complete")]));
+        let response_mock = mount_sse_sequence(&server, responses).await;
 
-    Ok(())
+        test.submit_text_turn(&format!("Inspect the browser with {repl_server}."))
+            .await?;
+
+        let requests = response_mock.requests();
+        let guardian_requests = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(guardian_requests.len(), actions.len());
+
+        let bundled_policy = codex_prompts::ResolvedModelMessages::bundled()
+            .auto_review()
+            .node_repl_policy;
+        let policy = node_repl_policy.unwrap_or(bundled_policy);
+        let first_guardian_thread =
+            guardian_requests[0].body_json()["client_metadata"]["thread_id"]
+                .as_str()
+                .expect("Guardian reviewer thread id")
+                .to_string();
+        for (index, request) in guardian_requests.iter().enumerate() {
+            assert_eq!(
+                request.body_json()["client_metadata"]["thread_id"].as_str(),
+                Some(first_guardian_thread.as_str()),
+                "shell and Node approvals must reuse the same Guardian reviewer"
+            );
+            let expected = usize::from(
+                node_repl_auto_review_required
+                    && !policy.is_empty()
+                    && !(scenario == "shell_then_nodes" && index == 0),
+            );
+            assert_eq!(
+                request
+                    .message_input_texts("developer")
+                    .into_iter()
+                    .filter(|text| {
+                        [bundled_policy, "Acting-model REPL policy.", policy]
+                            .contains(&text.as_str())
+                    })
+                    .collect::<Vec<_>>(),
+                vec![policy.to_string(); expected],
+                "Node REPL policy must appear exactly once on eligible Node reviews"
+            );
+            if expected == 1 && (index == 0 || scenario == "shell_then_nodes" && index == 1) {
+                let body = request.body_json();
+                let input = body["input"].as_array().expect("Guardian reviewer input");
+                let policy_index = input
+                    .iter()
+                    .position(|item| {
+                        item["role"] == "developer"
+                            && item["content"].as_array().is_some_and(|content| {
+                                content.iter().any(|span| span["text"] == policy)
+                            })
+                    })
+                    .expect("Node REPL developer policy");
+                let user_index = input
+                    .iter()
+                    .rposition(|item| item["role"] == "user")
+                    .expect("Node REPL approval request");
+                assert_eq!(policy_index + 1, user_index);
+            }
+        }
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1439,154 +1456,160 @@ async fn guardian_reviews_delayed_and_new_actions_after_catalog_refresh() -> Res
         }
     }
     let server = wiremock::MockServer::start().await;
-    let mut catalog = guardian_parent_catalog();
-    let mut preferred = catalog.models[0].clone();
-    preferred.slug = "codex-auto-review".to_string();
-    catalog.models.push(preferred);
-    mount_models_once(&server, catalog.clone()).await;
-    let pause = Arc::new(PauseFirstAction::default());
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_lifecycle_contributor(pause.clone());
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model("guardian-parent-a")
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            config.features.enable(Feature::StepModelSwitching).unwrap();
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config.model_reasoning_effort =
-                Some(codex_protocol::openai_models::ReasoningEffort::High);
-            config.model_reasoning_summary =
-                Some(codex_protocol::config_types::ReasoningSummary::Detailed);
+    mock_server::run(&[&server], async {
+        let mut catalog = guardian_parent_catalog();
+        let mut preferred = catalog.models[0].clone();
+        preferred.slug = "codex-auto-review".to_string();
+        catalog.models.push(preferred);
+        mount_models_once(&server, catalog.clone()).await;
+        let pause = Arc::new(PauseFirstAction::default());
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_lifecycle_contributor(pause.clone());
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_model("guardian-parent-a")
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.features.enable(Feature::StepModelSwitching).unwrap();
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config.model_reasoning_effort =
+                    Some(codex_protocol::openai_models::ReasoningEffort::High);
+                config.model_reasoning_summary =
+                    Some(codex_protocol::config_types::ReasoningSummary::Detailed);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let models_manager = test.thread_manager.get_models_manager();
+        assert_eq!(models_manager.get_remote_models().await, catalog.models);
+        let mut events = Vec::new();
+        for (call_id, marker) in [("captured-action", "action-a"), ("new-action", "action-b")] {
+            events.push(sse(vec![
+                ev_response_created(call_id),
+                ev_function_call(
+                    call_id,
+                    "exec_command",
+                    &json!({
+                        "cmd": format!("printf {marker}"),
+                        "sandbox_permissions": SandboxPermissions::RequireEscalated,
+                        "justification": "Verify action-scoped Guardian fallback.",
+                    })
+                    .to_string(),
+                ),
+                ev_completed(call_id),
+            ]));
+            events.push(sse(vec![
+                ev_response_created("guardian"),
+                ev_assistant_message("assessment", r#"{"outcome":"allow"}"#),
+                ev_completed("guardian"),
+            ]));
+        }
+        events.push(sse(vec![ev_response_created("done"), ev_completed("done")]));
+        let responses = mount_sse_sequence(&server, events).await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "run both protected commands".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let turn_id = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
+            _ => None,
         })
-        .build_with_auto_env(&server)
-        .await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    assert_eq!(models_manager.get_remote_models().await, catalog.models);
-    let mut events = Vec::new();
-    for (call_id, marker) in [("captured-action", "action-a"), ("new-action", "action-b")] {
-        events.push(sse(vec![
-            ev_response_created(call_id),
-            ev_function_call(
-                call_id,
-                "exec_command",
-                &json!({
-                    "cmd": format!("printf {marker}"),
-                    "sandbox_permissions": SandboxPermissions::RequireEscalated,
-                    "justification": "Verify action-scoped Guardian fallback.",
-                })
-                .to_string(),
-            ),
-            ev_completed(call_id),
-        ]));
-        events.push(sse(vec![
-            ev_response_created("guardian"),
-            ev_assistant_message("assessment", r#"{"outcome":"allow"}"#),
-            ev_completed("guardian"),
-        ]));
-    }
-    events.push(sse(vec![ev_response_created("done"), ev_completed("done")]));
-    let responses = mount_sse_sequence(&server, events).await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "run both protected commands".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let turn_id = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
-        _ => None,
-    })
-    .await;
-    tokio::time::timeout(Duration::from_secs(10), pause.started.notified()).await?;
-    let (reply, outcome) = tokio::sync::oneshot::channel();
-    test.codex
-        .submit(Op::TurnSettings {
-            turn_id,
-            update: codex_protocol::protocol::TurnSettingsUpdate {
-                model: Some("guardian-parent-b".to_string()),
-                effort: Some(Some(codex_protocol::openai_models::ReasoningEffort::Medium)),
-                summary: Some(codex_protocol::config_types::ReasoningSummary::Concise),
-                ..Default::default()
-            },
-            reply,
-        })
-        .await?;
-    assert_eq!(
-        tokio::time::timeout(Duration::from_secs(10), outcome).await??,
-        codex_protocol::protocol::TurnSettingsUpdateOutcome::Applied
-    );
+        .await;
+        tokio::time::timeout(Duration::from_secs(10), pause.started.notified()).await?;
+        let (reply, outcome) = tokio::sync::oneshot::channel();
+        test.codex
+            .submit(Op::TurnSettings {
+                turn_id,
+                update: codex_protocol::protocol::TurnSettingsUpdate {
+                    model: Some("guardian-parent-b".to_string()),
+                    effort: Some(Some(codex_protocol::openai_models::ReasoningEffort::Medium)),
+                    summary: Some(codex_protocol::config_types::ReasoningSummary::Concise),
+                    ..Default::default()
+                },
+                reply,
+            })
+            .await?;
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), outcome).await??,
+            codex_protocol::protocol::TurnSettingsUpdateOutcome::Applied
+        );
 
-    // A remains paused after the B settings request. Remove the preferred reviewer
-    // and replace A's metadata before review so fallback must use A's captured copy.
-    catalog
-        .models
-        .retain(|model| model.slug != "codex-auto-review");
-    catalog.models[0]
-        .model_messages
-        .as_mut()
-        .unwrap()
-        .auto_review = Some(AutoReviewMessages {
-        policy: Some("refreshed policy".to_string()),
-        policy_template: Some("refreshed template: {{ tenant_policy_config }}".to_string()),
-        node_repl_policy: None,
-        rejection_instructions: None,
-        timeout_instructions: None,
-    });
-    mount_models_once(&server, catalog.clone()).await;
-    assert_eq!(
-        models_manager
-            .raw_model_catalog(
-                RefreshStrategy::Online,
-                codex_core::test_support::default_http_client_factory(),
-            )
-            .await,
+        // A remains paused after the B settings request. Remove the preferred reviewer
+        // and replace A's metadata before review so fallback must use A's captured copy.
         catalog
-    );
-    pause.resume.notify_one();
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let requests = responses.requests();
-    let reviews = requests
-        .iter()
-        .filter(|request| request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian")
-        .map(|request| {
-            let body = request.body_json();
-            assert!(
-                request
-                    .instructions_text()
-                    .starts_with("captured template: captured policy\n")
-            );
-            json!([
-                body["model"],
-                body["reasoning"]["effort"],
-                body["reasoning"]["summary"]
-            ])
+            .models
+            .retain(|model| model.slug != "codex-auto-review");
+        catalog.models[0]
+            .model_messages
+            .as_mut()
+            .unwrap()
+            .auto_review = Some(AutoReviewMessages {
+            policy: Some("refreshed policy".to_string()),
+            policy_template: Some("refreshed template: {{ tenant_policy_config }}".to_string()),
+            node_repl_policy: None,
+            rejection_instructions: None,
+            timeout_instructions: None,
+        });
+        mount_models_once(&server, catalog.clone()).await;
+        assert_eq!(
+            models_manager
+                .raw_model_catalog(
+                    RefreshStrategy::Online,
+                    codex_core::test_support::default_http_client_factory(),
+                )
+                .await,
+            catalog
+        );
+        pause.resume.notify_one();
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        reviews,
-        vec![
-            json!(["guardian-parent-a", "high", "detailed"]),
-            json!(["guardian-parent-b", "medium", "concise"]),
-        ]
-    );
-    assert!(
-        requests[2]
-            .function_call_output("captured-action")
-            .to_string()
-            .contains("action-a")
-    );
-    assert!(
-        requests[4]
-            .function_call_output("new-action")
-            .to_string()
-            .contains("action-b")
-    );
-    Ok(())
+        .await;
+        let requests = responses.requests();
+        let reviews = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+            })
+            .map(|request| {
+                let body = request.body_json();
+                assert!(
+                    request
+                        .instructions_text()
+                        .starts_with("captured template: captured policy\n")
+                );
+                json!([
+                    body["model"],
+                    body["reasoning"]["effort"],
+                    body["reasoning"]["summary"]
+                ])
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            reviews,
+            vec![
+                json!(["guardian-parent-a", "high", "detailed"]),
+                json!(["guardian-parent-b", "medium", "concise"]),
+            ]
+        );
+        assert!(
+            requests[2]
+                .function_call_output("captured-action")
+                .to_string()
+                .contains("action-a")
+        );
+        assert!(
+            requests[4]
+                .function_call_output("new-action")
+                .to_string()
+                .contains("action-b")
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1600,6 +1623,7 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
 
     const SECRET: &str = "guardian-parent-policy-test-secret";
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let approval_policy = AskForApproval::OnRequest;
     let lifecycle_recorder = Arc::new(RecordingToolLifecycleContributor::default());
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
@@ -1903,6 +1927,8 @@ async fn guardian_session_is_reused_for_consecutive_tool_reviews_without_prewarm
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2109,246 +2135,254 @@ async fn guardian_denial_rejects_tool_call_with_rationale(
     );
 
     let server = start_mock_server().await;
-    let approval_policy = AskForApproval::OnRequest;
-    let sandbox_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: vec![],
-        network_access: false,
-        exclude_tmpdir_env_var: true,
-        exclude_slash_tmp: true,
-    };
-    let sandbox_policy_for_config = sandbox_policy.clone();
+    mock_server::run(&[&server], async {
+        let approval_policy = AskForApproval::OnRequest;
+        let sandbox_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![],
+            network_access: false,
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: true,
+        };
+        let sandbox_policy_for_config = sandbox_policy.clone();
 
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.6-luna", |model| {
-            model
-                .model_messages
-                .as_mut()
-                .expect("reviewer model messages")
-                .auto_review = Some(AutoReviewMessages {
-                policy: None,
-                policy_template: None,
-                node_repl_policy: None,
-                rejection_instructions: Some("Reviewer-only rejection instructions.".to_string()),
-                timeout_instructions: None,
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.6-luna", |model| {
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("reviewer model messages")
+                    .auto_review = Some(AutoReviewMessages {
+                    policy: None,
+                    policy_template: None,
+                    node_repl_policy: None,
+                    rejection_instructions: Some(
+                        "Reviewer-only rejection instructions.".to_string(),
+                    ),
+                    timeout_instructions: None,
+                });
+            })
+            .with_model_info_override("gpt-5.5", move |model| {
+                model.auto_review_model_override = Some("gpt-5.6-luna".to_string());
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("acting model messages")
+                    .auto_review = Some(AutoReviewMessages {
+                    policy: None,
+                    policy_template: None,
+                    node_repl_policy: None,
+                    rejection_instructions: rejection_instructions.map(str::to_string),
+                    timeout_instructions: None,
+                });
+            })
+            .with_config(move |config| {
+                config.otel.log_guardian_assessments = log_assessments;
+                config.otel.exporter = OtelExporterKind::OtlpGrpc {
+                    endpoint: "http://127.0.0.1:1".to_string(),
+                    headers: Default::default(),
+                    tls: None,
+                };
+                config.permissions.approval_policy = Constrained::allow_any(approval_policy);
+                config
+                    .set_legacy_sandbox_policy(sandbox_policy_for_config)
+                    .expect("set sandbox policy");
             });
-        })
-        .with_model_info_override("gpt-5.5", move |model| {
-            model.auto_review_model_override = Some("gpt-5.6-luna".to_string());
-            model
-                .model_messages
-                .as_mut()
-                .expect("acting model messages")
-                .auto_review = Some(AutoReviewMessages {
-                policy: None,
-                policy_template: None,
-                node_repl_policy: None,
-                rejection_instructions: rejection_instructions.map(str::to_string),
-                timeout_instructions: None,
-            });
-        })
-        .with_config(move |config| {
-            config.otel.log_guardian_assessments = log_assessments;
-            config.otel.exporter = OtelExporterKind::OtlpGrpc {
-                endpoint: "http://127.0.0.1:1".to_string(),
-                headers: Default::default(),
-                tls: None,
-            };
-            config.permissions.approval_policy = Constrained::allow_any(approval_policy);
-            config
-                .set_legacy_sandbox_policy(sandbox_policy_for_config)
-                .expect("set sandbox policy");
+        let test = builder.build_with_auto_env(&server).await?;
+
+        let output_file = test.cwd.path().join("guardian-denied.txt");
+        let command = format!("printf should-not-run > {}", output_file.display());
+        let tool_args = json!({
+            "cmd": command,
+            "yield_time_ms": 1_000_u64,
+            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+            "justification": "Exercise Guardian denial routing.",
         });
-    let test = builder.build_with_auto_env(&server).await?;
-
-    let output_file = test.cwd.path().join("guardian-denied.txt");
-    let command = format!("printf should-not-run > {}", output_file.display());
-    let tool_args = json!({
-        "cmd": command,
-        "yield_time_ms": 1_000_u64,
-        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-        "justification": "Exercise Guardian denial routing.",
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-parent-tool-denied"),
-                ev_function_call(
-                    "exec-call-denied",
-                    "exec_command",
-                    &serde_json::to_string(&tool_args)?,
-                ),
-                ev_completed("resp-parent-tool-denied"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian-inspect"),
-                ev_function_call(
-                    "exec-guardian-inspect",
-                    "exec_command",
-                    &json!({"cmd": "printf guardian-inspection-evidence"}).to_string(),
-                ),
-                ev_completed("resp-guardian-inspect"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian-denied"),
-                ev_assistant_message(
-                    "msg-guardian-denied",
-                    &json!({
-                        "risk_level": "high",
-                        "user_authorization": "low",
-                        "outcome": "deny",
-                        "rationale": "The requested write has unacceptable test risk.",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-guardian-denied"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-after-denial"),
-                ev_assistant_message("msg-parent-after-denial", "denied"),
-                ev_completed("resp-parent-after-denial"),
-            ]),
-        ],
-    )
-    .await;
-
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run a command that Guardian should deny".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                approval_policy: Some(approval_policy),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
-                sandbox_policy: Some(sandbox_policy),
-                ..Default::default()
-            }),
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-parent-tool-denied"),
+                    ev_function_call(
+                        "exec-call-denied",
+                        "exec_command",
+                        &serde_json::to_string(&tool_args)?,
+                    ),
+                    ev_completed("resp-parent-tool-denied"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-guardian-inspect"),
+                    ev_function_call(
+                        "exec-guardian-inspect",
+                        "exec_command",
+                        &json!({"cmd": "printf guardian-inspection-evidence"}).to_string(),
+                    ),
+                    ev_completed("resp-guardian-inspect"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-guardian-denied"),
+                    ev_assistant_message(
+                        "msg-guardian-denied",
+                        &json!({
+                            "risk_level": "high",
+                            "user_authorization": "low",
+                            "outcome": "deny",
+                            "rationale": "The requested write has unacceptable test risk.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-guardian-denied"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-parent-after-denial"),
+                    ev_assistant_message("msg-parent-after-denial", "denied"),
+                    ev_completed("resp-parent-after-denial"),
+                ]),
+            ],
         )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+        .await;
 
-    let requests = responses.requests();
-    let guardian_request = requests
-        .iter()
-        .find(|request| request.body_contains_text("Exercise Guardian denial routing."))
-        .expect("expected Guardian review request");
-    assert!(guardian_request.body_contains_text(&command));
-    assert_eq!(guardian_request.body_json()["model"], "gpt-5.6-luna");
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run a command that Guardian should deny".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    approval_policy: Some(approval_policy),
+                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    sandbox_policy: Some(sandbox_policy),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    let feedback = codex_feedback::guardian_review_failures(&[test.session_configured.thread_id])
-        .attachment
-        .expect("failed Guardian review");
-    let record: serde_json::Value = serde_json::from_slice(&feedback.buffer)?;
-    assert!(
-        guardian_request.body_contains_text(record["action"].as_str().expect("reviewed action"))
-    );
-    let recorded_history: Vec<ResponseItem> = serde_json::from_value(record["history"].clone())?;
-    let inspection_request = requests
-        .iter()
-        .find(|request| {
-            request
+        let requests = responses.requests();
+        let guardian_request = requests
+            .iter()
+            .find(|request| request.body_contains_text("Exercise Guardian denial routing."))
+            .expect("expected Guardian review request");
+        assert!(guardian_request.body_contains_text(&command));
+        assert_eq!(guardian_request.body_json()["model"], "gpt-5.6-luna");
+
+        let feedback =
+            codex_feedback::guardian_review_failures(&[test.session_configured.thread_id])
+                .attachment
+                .expect("failed Guardian review");
+        let record: serde_json::Value = serde_json::from_slice(&feedback.buffer)?;
+        assert!(
+            guardian_request
+                .body_contains_text(record["action"].as_str().expect("reviewed action"))
+        );
+        let recorded_history: Vec<ResponseItem> =
+            serde_json::from_value(record["history"].clone())?;
+        let inspection_request = requests
+            .iter()
+            .find(|request| {
+                request
+                    .function_call_output_text("exec-guardian-inspect")
+                    .is_some()
+            })
+            .expect("Guardian request following its inspection tool");
+        assert!(
+            inspection_request
                 .function_call_output_text("exec-guardian-inspect")
-                .is_some()
-        })
-        .expect("Guardian request following its inspection tool");
-    assert!(
-        inspection_request
-            .function_call_output_text("exec-guardian-inspect")
-            .expect("inspection output")
-            .contains("guardian-inspection-evidence")
-    );
-    let inspection_output = inspection_request
-        .input()
-        .into_iter()
-        .find(|item| {
-            item["type"] == "function_call_output" && item["call_id"] == "exec-guardian-inspect"
-        })
-        .expect("inspection response item");
-    assert!(recorded_history.contains(&serde_json::from_value(inspection_output)?));
-    assert!(recorded_history.iter().any(|item| {
-        matches!(item, ResponseItem::Message { role, content, .. }
-        if role == "assistant" && content.iter().any(|part| {
-            matches!(part, ContentItem::OutputText { text }
-                if Some(text.as_str()) == record["decision"].as_str())
-        }))
-    }));
-    assert_eq!(
-        json!({
-            "reviewed_thread_id": record["reviewed_thread_id"],
-            "reviewer_thread_id": record["reviewer_thread_id"],
-            "status": record["status"],
-            "decision": serde_json::from_str::<serde_json::Value>(
-                record["decision"].as_str().expect("raw Guardian decision"),
-            )?,
-            "context_omitted": record["context_omitted"],
-        }),
-        json!({
-            "reviewed_thread_id": test.session_configured.thread_id,
-            "reviewer_thread_id": guardian_request.body_json()["client_metadata"]["thread_id"],
-            "status": "denied",
-            "decision": {
-                "risk_level": "high",
-                "user_authorization": "low",
-                "outcome": "deny",
-                "rationale": "The requested write has unacceptable test risk.",
-            },
-            "context_omitted": false,
-        })
-    );
+                .expect("inspection output")
+                .contains("guardian-inspection-evidence")
+        );
+        let inspection_output = inspection_request
+            .input()
+            .into_iter()
+            .find(|item| {
+                item["type"] == "function_call_output" && item["call_id"] == "exec-guardian-inspect"
+            })
+            .expect("inspection response item");
+        assert!(recorded_history.contains(&serde_json::from_value(inspection_output)?));
+        assert!(recorded_history.iter().any(|item| {
+            matches!(item, ResponseItem::Message { role, content, .. }
+            if role == "assistant" && content.iter().any(|part| {
+                matches!(part, ContentItem::OutputText { text }
+                    if Some(text.as_str()) == record["decision"].as_str())
+            }))
+        }));
+        assert_eq!(
+            json!({
+                "reviewed_thread_id": record["reviewed_thread_id"],
+                "reviewer_thread_id": record["reviewer_thread_id"],
+                "status": record["status"],
+                "decision": serde_json::from_str::<serde_json::Value>(
+                    record["decision"].as_str().expect("raw Guardian decision"),
+                )?,
+                "context_omitted": record["context_omitted"],
+            }),
+            json!({
+                "reviewed_thread_id": test.session_configured.thread_id,
+                "reviewer_thread_id": guardian_request.body_json()["client_metadata"]["thread_id"],
+                "status": "denied",
+                "decision": {
+                    "risk_level": "high",
+                    "user_authorization": "low",
+                    "outcome": "deny",
+                    "rationale": "The requested write has unacceptable test risk.",
+                },
+                "context_omitted": false,
+            })
+        );
 
-    let tool_output = requests
-        .iter()
-        .find_map(|request| request.function_call_output_text("exec-call-denied"))
-        .expect("expected rejected tool output to be returned to the parent model");
-    assert!(
-        tool_output.contains("The requested write has unacceptable test risk."),
-        "Guardian rationale missing from rejected tool output: {tool_output}"
-    );
-    assert_eq!(
-        tool_output.contains("The agent must not attempt to achieve the same outcome"),
-        rejection_instructions.is_none(),
-        "legacy rejection instructions should only be used when absent: {tool_output}"
-    );
-    if let Some(rejection_instructions) = rejection_instructions {
-        assert!(tool_output.contains(rejection_instructions));
-    }
-    assert!(!tool_output.contains("Reviewer-only rejection instructions."));
-    assert!(
-        !output_file.exists(),
-        "Guardian-denied command unexpectedly executed"
-    );
-
-    // Approval workers do not inherit the test span, so select the conversation explicitly.
-    let thread_id = test.session_configured.thread_id;
-    let logs = String::from_utf8(
-        tracing_test::internal::global_buf()
-            .lock()
-            .expect("captured logs")
-            .clone(),
-    )?;
-    let assessments: Vec<_> = logs
-        .lines()
-        .filter(|line| {
-            line.contains("codex.guardian_assessment")
-                && line.contains(&format!("conversation.id={thread_id}"))
-        })
-        .collect();
-    assert_eq!(assessments.len(), usize::from(log_assessments));
-    if let Some(log) = assessments.first() {
-        for field in [
-            "status=\"denied\"",
-            "outcome=\"deny\"",
-            "item.id=\"exec-call-denied\"",
-            "rationale=\"The requested write has unacceptable test risk.\"",
-        ] {
-            assert!(log.contains(field), "missing {field}: {log}");
+        let tool_output = requests
+            .iter()
+            .find_map(|request| request.function_call_output_text("exec-call-denied"))
+            .expect("expected rejected tool output to be returned to the parent model");
+        assert!(
+            tool_output.contains("The requested write has unacceptable test risk."),
+            "Guardian rationale missing from rejected tool output: {tool_output}"
+        );
+        assert_eq!(
+            tool_output.contains("The agent must not attempt to achieve the same outcome"),
+            rejection_instructions.is_none(),
+            "legacy rejection instructions should only be used when absent: {tool_output}"
+        );
+        if let Some(rejection_instructions) = rejection_instructions {
+            assert!(tool_output.contains(rejection_instructions));
         }
-    }
-    Ok(())
+        assert!(!tool_output.contains("Reviewer-only rejection instructions."));
+        assert!(
+            !output_file.exists(),
+            "Guardian-denied command unexpectedly executed"
+        );
+
+        // Approval workers do not inherit the test span, so select the conversation explicitly.
+        let thread_id = test.session_configured.thread_id;
+        let logs = String::from_utf8(
+            tracing_test::internal::global_buf()
+                .lock()
+                .expect("captured logs")
+                .clone(),
+        )?;
+        let assessments: Vec<_> = logs
+            .lines()
+            .filter(|line| {
+                line.contains("codex.guardian_assessment")
+                    && line.contains(&format!("conversation.id={thread_id}"))
+            })
+            .collect();
+        assert_eq!(assessments.len(), usize::from(log_assessments));
+        if let Some(log) = assessments.first() {
+            for field in [
+                "status=\"denied\"",
+                "outcome=\"deny\"",
+                "item.id=\"exec-call-denied\"",
+                "rationale=\"The requested write has unacceptable test risk.\"",
+            ] {
+                assert!(log.contains(field), "missing {field}: {log}");
+            }
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(None; "legacy_fallback")]
@@ -2383,86 +2417,90 @@ async fn guardian_timeout_rejects_tool_call_with_acting_model_instructions(
     }
 
     let server = start_mock_server().await;
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.approval_review_contributor(Arc::new(TimedOutReviewContributor));
-    let mut builder = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.5", move |model| {
-            model
-                .model_messages
-                .as_mut()
-                .expect("acting model messages")
-                .auto_review = Some(AutoReviewMessages {
-                policy: None,
-                policy_template: None,
-                node_repl_policy: None,
-                rejection_instructions: None,
-                timeout_instructions: timeout_instructions.map(str::to_string),
+    mock_server::run(&[&server], async {
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.approval_review_contributor(Arc::new(TimedOutReviewContributor));
+        let mut builder = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_model_info_override("gpt-5.5", move |model| {
+                model
+                    .model_messages
+                    .as_mut()
+                    .expect("acting model messages")
+                    .auto_review = Some(AutoReviewMessages {
+                    policy: None,
+                    policy_template: None,
+                    node_repl_policy: None,
+                    rejection_instructions: None,
+                    timeout_instructions: timeout_instructions.map(str::to_string),
+                });
+            })
+            .with_config(|config| {
+                let rules_dir = config.codex_home.join("rules");
+                fs::create_dir_all(&rules_dir).expect("create execution policy directory");
+                fs::write(
+                    rules_dir.join("default.rules"),
+                    r#"prefix_rule(pattern=["touch"], decision="prompt")"#,
+                )
+                .expect("write execution policy rule");
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
             });
-        })
-        .with_config(|config| {
-            let rules_dir = config.codex_home.join("rules");
-            fs::create_dir_all(&rules_dir).expect("create execution policy directory");
-            fs::write(
-                rules_dir.join("default.rules"),
-                r#"prefix_rule(pattern=["touch"], decision="prompt")"#,
-            )
-            .expect("write execution policy rule");
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+        let test = builder.build_with_auto_env(&server).await?;
+        let output_file = test.cwd.path().join("guardian-timed-out.txt");
+        let tool_args = json!({
+            "cmd": format!("touch {}", output_file.display()),
+            "sandbox_permissions": SandboxPermissions::UseDefault,
         });
-    let test = builder.build_with_auto_env(&server).await?;
-    let output_file = test.cwd.path().join("guardian-timed-out.txt");
-    let tool_args = json!({
-        "cmd": format!("touch {}", output_file.display()),
-        "sandbox_permissions": SandboxPermissions::UseDefault,
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_function_call(
-                    "exec-call-timed-out",
-                    "exec_command",
-                    &tool_args.to_string(),
-                ),
-                ev_completed("parent-tool"),
-            ]),
-            sse(vec![ev_completed("parent-complete")]),
-        ],
-    )
-    .await;
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_function_call(
+                        "exec-call-timed-out",
+                        "exec_command",
+                        &tool_args.to_string(),
+                    ),
+                    ev_completed("parent-tool"),
+                ]),
+                sse(vec![ev_completed("parent-complete")]),
+            ],
+        )
+        .await;
 
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "run a command whose approval review will time out".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "run a command whose approval review will time out".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = responses.requests();
+        let tool_output = requests
+            .iter()
+            .find_map(|request| request.function_call_output_text("exec-call-timed-out"))
+            .expect("expected timed-out tool output to be returned to the parent model");
+        assert_eq!(
+            tool_output.contains("did not finish before its deadline"),
+            timeout_instructions.is_none(),
+            "legacy timeout instructions should only be used when absent: {tool_output}"
+        );
+        if let Some(timeout_instructions) = timeout_instructions {
+            assert!(tool_output.contains(timeout_instructions));
+        }
+        assert!(!tool_output.contains("unacceptable risk"));
+        assert!(
+            !output_file.exists(),
+            "command whose approval timed out unexpectedly executed"
+        );
+        Ok(())
     })
-    .await;
-
-    let requests = responses.requests();
-    let tool_output = requests
-        .iter()
-        .find_map(|request| request.function_call_output_text("exec-call-timed-out"))
-        .expect("expected timed-out tool output to be returned to the parent model");
-    assert_eq!(
-        tool_output.contains("did not finish before its deadline"),
-        timeout_instructions.is_none(),
-        "legacy timeout instructions should only be used when absent: {tool_output}"
-    );
-    if let Some(timeout_instructions) = timeout_instructions {
-        assert!(tool_output.contains(timeout_instructions));
-    }
-    assert!(!tool_output.contains("unacceptable risk"));
-    assert!(
-        !output_file.exists(),
-        "command whose approval timed out unexpectedly executed"
-    );
-    Ok(())
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -2648,133 +2686,136 @@ async fn guardian_review_session_does_not_inherit_legacy_notify() -> Result<()> 
     skip_if_sandbox!(Ok(()));
 
     let server = start_mock_server().await;
-    let approval_policy = AskForApproval::OnRequest;
-    let sandbox_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: vec![],
-        network_access: false,
-        exclude_tmpdir_env_var: true,
-        exclude_slash_tmp: true,
-    };
+    mock_server::run(&[&server], async {
+        let approval_policy = AskForApproval::OnRequest;
+        let sandbox_policy = SandboxPolicy::WorkspaceWrite {
+            writable_roots: vec![],
+            network_access: false,
+            exclude_tmpdir_env_var: true,
+            exclude_slash_tmp: true,
+        };
 
-    let notify_dir = TempDir::new()?;
-    let notify_script = notify_dir.path().join("notify.sh");
-    codex_utils_cargo_bin::write_executable(
-        &notify_script,
-        r#"#!/bin/bash
+        let notify_dir = TempDir::new()?;
+        let notify_script = notify_dir.path().join("notify.sh");
+        codex_utils_cargo_bin::write_executable(
+            &notify_script,
+            r#"#!/bin/bash
 set -e
 payload_path="$(dirname "${0}")/notify.jsonl"
 printf '%s\n' "${@: -1}" >> "${payload_path}""#,
-    )?;
-    let notify_file = notify_dir.path().join("notify.jsonl");
-    let notify_script_str = notify_script.to_str().unwrap().to_string();
-    let sandbox_policy_for_config = sandbox_policy.clone();
+        )?;
+        let notify_file = notify_dir.path().join("notify.jsonl");
+        let notify_script_str = notify_script.to_str().unwrap().to_string();
+        let sandbox_policy_for_config = sandbox_policy.clone();
 
-    let mut builder = test_codex().with_config(move |config| {
-        config.notify = Some(vec![notify_script_str]);
-        config.permissions.approval_policy = Constrained::allow_any(approval_policy);
-        config
-            .set_legacy_sandbox_policy(sandbox_policy_for_config)
-            .expect("set sandbox policy");
-    });
-    let test = builder.build(&server).await?;
+        let mut builder = test_codex().with_config(move |config| {
+            config.notify = Some(vec![notify_script_str]);
+            config.permissions.approval_policy = Constrained::allow_any(approval_policy);
+            config
+                .set_legacy_sandbox_policy(sandbox_policy_for_config)
+                .expect("set sandbox policy");
+        });
+        let test = builder.build(&server).await?;
 
-    let output_file = test.cwd.path().join("guardian-review-notify.txt");
-    let command = format!("printf guardian-approved > {}", output_file.display());
-    let tool_args = json!({
-        "cmd": command,
-        "yield_time_ms": 1_000_u64,
-        "sandbox_permissions": SandboxPermissions::RequireEscalated,
-        "justification": "Exercise Guardian approval routing.",
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-parent-tool"),
-                ev_function_call(
-                    "exec-call",
-                    "exec_command",
-                    &serde_json::to_string(&tool_args)?,
-                ),
-                ev_completed("resp-parent-tool"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian-review"),
-                ev_assistant_message(
-                    "msg-guardian-review",
-                    &json!({
-                        "risk_level": "low",
-                        "user_authorization": "high",
-                        "outcome": "allow",
-                        "rationale": "The command writes a marker file in the workspace.",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-guardian-review"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-done"),
-                ev_assistant_message("msg-parent-done", "done"),
-                ev_completed("resp-parent-done"),
-            ]),
-        ],
-    )
-    .await;
-
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run a command that requires Guardian review".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(test.config.cwd.clone())),
-                approval_policy: Some(approval_policy),
-                approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
-                sandbox_policy: Some(sandbox_policy),
-                ..Default::default()
-            }),
+        let output_file = test.cwd.path().join("guardian-review-notify.txt");
+        let command = format!("printf guardian-approved > {}", output_file.display());
+        let tool_args = json!({
+            "cmd": command,
+            "yield_time_ms": 1_000_u64,
+            "sandbox_permissions": SandboxPermissions::RequireEscalated,
+            "justification": "Exercise Guardian approval routing.",
+        });
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-parent-tool"),
+                    ev_function_call(
+                        "exec-call",
+                        "exec_command",
+                        &serde_json::to_string(&tool_args)?,
+                    ),
+                    ev_completed("resp-parent-tool"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-guardian-review"),
+                    ev_assistant_message(
+                        "msg-guardian-review",
+                        &json!({
+                            "risk_level": "low",
+                            "user_authorization": "high",
+                            "outcome": "allow",
+                            "rationale": "The command writes a marker file in the workspace.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-guardian-review"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-parent-done"),
+                    ev_assistant_message("msg-parent-done", "done"),
+                    ev_completed("resp-parent-done"),
+                ]),
+            ],
         )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        .await;
+
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run a command that requires Guardian review".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(test.config.cwd.clone())),
+                    approval_policy: Some(approval_policy),
+                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    sandbox_policy: Some(sandbox_policy),
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let guardian_request = responses
+            .requests()
+            .into_iter()
+            .find(|request| request.body_contains_text("Exercise Guardian approval routing."))
+            .expect("expected Guardian review request");
+        assert!(guardian_request.body_contains_text(&command));
+
+        fs_wait::wait_for_path_exists(&notify_file, Duration::from_secs(5)).await?;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let notify_payload_raw = tokio::fs::read_to_string(&notify_file).await?;
+        let payloads: Vec<Value> = notify_payload_raw
+            .lines()
+            .map(serde_json::from_str::<Value>)
+            .collect::<std::result::Result<_, _>>()?;
+
+        assert_eq!(
+            payloads.len(),
+            1,
+            "unexpected notify payloads: {payloads:?}"
+        );
+        assert_eq!(
+            payloads[0]["input-messages"],
+            json!(["run a command that requires Guardian review"])
+        );
+        assert_eq!(payloads[0]["last-assistant-message"], json!("done"));
+        assert!(
+            !notify_payload_raw.contains(
+                "The following is the Codex agent history whose request action you are assessing."
+            ),
+            "Guardian review transcript leaked into legacy notify payload: {notify_payload_raw}"
+        );
+        assert_eq!(fs::read_to_string(&output_file)?, "guardian-approved");
+
+        Ok(())
     })
-    .await;
-
-    let guardian_request = responses
-        .requests()
-        .into_iter()
-        .find(|request| request.body_contains_text("Exercise Guardian approval routing."))
-        .expect("expected Guardian review request");
-    assert!(guardian_request.body_contains_text(&command));
-
-    fs_wait::wait_for_path_exists(&notify_file, Duration::from_secs(5)).await?;
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let notify_payload_raw = tokio::fs::read_to_string(&notify_file).await?;
-    let payloads: Vec<Value> = notify_payload_raw
-        .lines()
-        .map(serde_json::from_str::<Value>)
-        .collect::<std::result::Result<_, _>>()?;
-
-    assert_eq!(
-        payloads.len(),
-        1,
-        "unexpected notify payloads: {payloads:?}"
-    );
-    assert_eq!(
-        payloads[0]["input-messages"],
-        json!(["run a command that requires Guardian review"])
-    );
-    assert_eq!(payloads[0]["last-assistant-message"], json!("done"));
-    assert!(
-        !notify_payload_raw.contains(
-            "The following is the Codex agent history whose request action you are assessing."
-        ),
-        "Guardian review transcript leaked into legacy notify payload: {notify_payload_raw}"
-    );
-    assert_eq!(fs::read_to_string(&output_file)?, "guardian-approved");
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

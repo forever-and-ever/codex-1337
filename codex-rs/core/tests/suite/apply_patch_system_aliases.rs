@@ -7,6 +7,7 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -43,69 +44,72 @@ async fn system_alias_patch_creates_multiple_files_and_missing_parents_without_r
         second.display(),
     );
     let server = start_mock_server().await;
-    let test = test_codex()
-        .with_config(|config| {
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config
-                .permissions
-                .approval_policy
-                .set(AskForApproval::OnRequest)
-                .expect("allow review in the regression");
-            config
-                .permissions
-                .set_permission_profile(PermissionProfile::workspace_write())
-                .expect("enable the default temporary-directory grants");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let call = if shell {
-        ev_exec_command_call("patch", &format!("apply_patch <<'PATCH'\n{patch}\nPATCH"))
-    } else {
-        ev_apply_patch_custom_tool_call("patch", &patch)
-    };
-    let response = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("patch"),
-                call,
-                ev_completed("patch"),
-            ]),
-            sse(vec![
-                ev_assistant_message("done", "done"),
-                ev_completed("done"),
-            ]),
-        ],
-    )
-    .await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Save both evidence files".into(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    let mut auto_approved = None;
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::PatchApplyBegin(begin) => auto_approved = Some(begin.auto_approved),
-            EventMsg::ApplyPatchApprovalRequest(event) => {
-                panic!("unexpected approval: {}", event.call_id)
+    mock_server::run(&[&server], async {
+        let test = test_codex()
+            .with_config(|config| {
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config
+                    .permissions
+                    .approval_policy
+                    .set(AskForApproval::OnRequest)
+                    .expect("allow review in the regression");
+                config
+                    .permissions
+                    .set_permission_profile(PermissionProfile::workspace_write())
+                    .expect("enable the default temporary-directory grants");
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let call = if shell {
+            ev_exec_command_call("patch", &format!("apply_patch <<'PATCH'\n{patch}\nPATCH"))
+        } else {
+            ev_apply_patch_custom_tool_call("patch", &patch)
+        };
+        let response = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("patch"),
+                    call,
+                    ev_completed("patch"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("done", "done"),
+                    ev_completed("done"),
+                ]),
+            ],
+        )
+        .await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Save both evidence files".into(),
+                text_elements: vec![],
+            }]))
+            .await?;
+        let mut auto_approved = None;
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::PatchApplyBegin(begin) => auto_approved = Some(begin.auto_approved),
+                EventMsg::ApplyPatchApprovalRequest(event) => {
+                    panic!("unexpected approval: {}", event.call_id)
+                }
+                EventMsg::GuardianAssessment(_) => {
+                    panic!("permitted temp patch should not reach Guardian")
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::GuardianAssessment(_) => {
-                panic!("permitted temp patch should not reach Guardian")
-            }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
-    assert_eq!(auto_approved, Some(true));
-    assert_eq!(
-        (
-            std::fs::read_to_string(target)?,
-            std::fs::read_to_string(second)?
-        ),
-        (format!("{contents}\n"), "notes\n".to_string()),
-    );
-    assert_eq!(response.requests().len(), 2);
-    Ok(())
+        assert_eq!(auto_approved, Some(true));
+        assert_eq!(
+            (
+                std::fs::read_to_string(target)?,
+                std::fs::read_to_string(second)?
+            ),
+            (format!("{contents}\n"), "notes\n".to_string()),
+        );
+        assert_eq!(response.requests().len(), 2);
+        Ok(())
+    })
+    .await
 }

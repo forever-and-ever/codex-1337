@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::path::Path;
 use std::time::Duration;
 
@@ -70,343 +71,352 @@ async fn standalone_image_generation_returns_saved_path_hint_to_model(
 ) -> Result<()> {
     let call_id = "image-run-1";
     let server = responses::start_mock_server().await;
-    Mock::given(method("POST"))
-        .and(path("/api/codex/images/generations"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("x-codex-imagegen-request-id", "req-imagegen-123")
-                .set_body_json(json!({
-                    "created": 1,
-                    "background": "opaque",
-                    "data": [
-                        {"b64_json": RESULT, "generation_id": "gen-image-123"},
-                        {"b64_json": "ignored", "generation_id": "gen-other"},
-                    ],
-                })),
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/api/codex/images/generations"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("x-codex-imagegen-request-id", "req-imagegen-123")
+                    .set_body_json(json!({
+                        "created": 1,
+                        "background": "opaque",
+                        "data": [
+                            {"b64_json": RESULT, "generation_id": "gen-image-123"},
+                            {"b64_json": "ignored", "generation_id": "gen-other"},
+                        ],
+                    })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let arguments = imagegen_arguments("paint a blue whale", requested_transparent_background);
+
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &arguments.to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
         )
-        .expect(1)
-        .mount(&server)
         .await;
-    let arguments = imagegen_arguments("paint a blue whale", requested_transparent_background);
 
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &arguments.to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        let turn_id = start_image_generation_turn(
+            &mut mcp,
+            ThreadStartParams {
+                service_name: Some("chatgpt_cca".to_string()),
+                ..Default::default()
+            },
+        )
         .await?;
-    let turn_id = start_image_generation_turn(
-        &mut mcp,
-        ThreadStartParams {
-            service_name: Some("chatgpt_cca".to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
 
-    let completed = timeout(
-        DEFAULT_READ_TIMEOUT,
-        wait_for_image_generation_completed(&mut mcp),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let completed = timeout(
+            DEFAULT_READ_TIMEOUT,
+            wait_for_image_generation_completed(&mut mcp),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let ThreadItem::ImageGeneration(ImageGenerationItem {
-        status,
-        revised_prompt,
-        result,
-        transparent_background,
-        saved_path: Some(saved_path),
-        ..
-    }) = completed.item
-    else {
-        panic!("expected completed image generation item with saved path");
-    };
-    assert_eq!(status, "completed");
-    assert_eq!(revised_prompt.as_deref(), Some("paint a blue whale"));
-    assert_eq!(result, RESULT);
-    assert_eq!(transparent_background, Some(false));
-    assert_eq!(std::fs::read(&saved_path)?, TINY_PNG_BYTES);
+        let ThreadItem::ImageGeneration(ImageGenerationItem {
+            status,
+            revised_prompt,
+            result,
+            transparent_background,
+            saved_path: Some(saved_path),
+            ..
+        }) = completed.item
+        else {
+            panic!("expected completed image generation item with saved path");
+        };
+        assert_eq!(status, "completed");
+        assert_eq!(revised_prompt.as_deref(), Some("paint a blue whale"));
+        assert_eq!(result, RESULT);
+        assert_eq!(transparent_background, Some(false));
+        assert_eq!(std::fs::read(&saved_path)?, TINY_PNG_BYTES);
 
-    let image_request = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?
-        .into_iter()
-        .find(|request| request.url.path() == "/api/codex/images/generations")
-        .context("image generation request should be sent")?;
-    assert_eq!(
-        image_request.body_json::<serde_json::Value>()?,
-        json!({
-            "prompt": "paint a blue whale",
-            "background": expected_background,
-            "model": "gpt-image-2",
-            "quality": "auto",
-            "size": "auto",
-        })
-    );
-    assert_eq!(
-        image_request
-            .headers
-            .get("originator")
-            .context("standalone image generation should include the thread originator")?
-            .to_str()
-            .context("standalone image generation originator should be valid ASCII")?,
-        "chatgpt_cca"
-    );
-    assert_image_turn_id_header(&image_request, &turn_id)?;
+        let image_request = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?
+            .into_iter()
+            .find(|request| request.url.path() == "/api/codex/images/generations")
+            .context("image generation request should be sent")?;
+        assert_eq!(
+            image_request.body_json::<serde_json::Value>()?,
+            json!({
+                "prompt": "paint a blue whale",
+                "background": expected_background,
+                "model": "gpt-image-2",
+                "quality": "auto",
+                "size": "auto",
+            })
+        );
+        assert_eq!(
+            image_request
+                .headers
+                .get("originator")
+                .context("standalone image generation should include the thread originator")?
+                .to_str()
+                .context("standalone image generation originator should be valid ASCII")?,
+            "chatgpt_cca"
+        );
+        assert_image_turn_id_header(&image_request, &turn_id)?;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let output = requests[1].function_call_output(call_id);
-    assert_eq!(
-        output["output"][0],
-        json!({
-            "type": "input_image",
-            "image_url": format!("data:image/png;base64,{RESULT}"),
-            "detail": "high",
-        })
-    );
-    let output_hint = output["output"][1]["text"]
-        .as_str()
-        .context("image output should include model-visible path hint")?;
-    assert!(
-        output_hint.contains(&saved_path.display().to_string()),
-        "output hint should identify the path the extension saved"
-    );
-    assert!(
-        output_hint.contains("already displayed to the user"),
-        "output hint should tell the model not to repeat the generated image: {output_hint}"
-    );
-    assert!(
-        !requests[1]
-            .message_input_texts("developer")
-            .iter()
-            .any(|text| text.contains("Generated images are saved to")),
-        "standalone image generation should not emit the legacy developer-message hint"
-    );
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let output = requests[1].function_call_output(call_id);
+        assert_eq!(
+            output["output"][0],
+            json!({
+                "type": "input_image",
+                "image_url": format!("data:image/png;base64,{RESULT}"),
+                "detail": "high",
+            })
+        );
+        let output_hint = output["output"][1]["text"]
+            .as_str()
+            .context("image output should include model-visible path hint")?;
+        assert!(
+            output_hint.contains(&saved_path.display().to_string()),
+            "output hint should identify the path the extension saved"
+        );
+        assert!(
+            output_hint.contains("already displayed to the user"),
+            "output hint should tell the model not to repeat the generated image: {output_hint}"
+        );
+        assert!(
+            !requests[1]
+                .message_input_texts("developer")
+                .iter()
+                .any(|text| text.contains("Generated images are saved to")),
+            "standalone image generation should not emit the legacy developer-message hint"
+        );
 
-    let event = wait_for_analytics_event(
-        &server,
-        DEFAULT_READ_TIMEOUT,
-        "codex_image_generation_event",
-    )
-    .await?;
-    assert_eq!(
-        event["event_params"]["imagegen_request_id"],
-        json!("req-imagegen-123")
-    );
-    assert_eq!(
-        event["event_params"]["generation_id"],
-        json!("gen-image-123")
-    );
+        let event = wait_for_analytics_event(
+            &server,
+            DEFAULT_READ_TIMEOUT,
+            "codex_image_generation_event",
+        )
+        .await?;
+        assert_eq!(
+            event["event_params"]["imagegen_request_id"],
+            json!("req-imagegen-123")
+        );
+        assert_eq!(
+            event["event_params"]["generation_id"],
+            json!("gen-image-123")
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn transparent_image_preserves_output_metadata_and_persisted_history() -> Result<()> {
     let call_id = "transparent-image-run-1";
     let server = responses::start_mock_server().await;
-    mount_image_response_with_background(&server, "transparent").await;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &json!({
-                        "prompt": "a blue whale on a transparent background",
-                        "transparent_background": true,
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        mount_image_response_with_background(&server, "transparent").await;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &json!({
+                            "prompt": "a blue whale on a transparent background",
+                            "transparent_background": true,
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
 
-    let completed = timeout(
-        DEFAULT_READ_TIMEOUT,
-        wait_for_image_generation_completed(&mut mcp),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    let thread_id = completed.thread_id.clone();
-    let ThreadItem::ImageGeneration(ImageGenerationItem {
-        status,
-        result,
-        transparent_background,
-        ..
-    }) = completed.item
-    else {
-        panic!("expected completed image-generation item");
-    };
-    assert_eq!(status, "completed");
-    assert_eq!(result, RESULT);
-    assert_eq!(transparent_background, Some(true));
+        let completed = timeout(
+            DEFAULT_READ_TIMEOUT,
+            wait_for_image_generation_completed(&mut mcp),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        let thread_id = completed.thread_id.clone();
+        let ThreadItem::ImageGeneration(ImageGenerationItem {
+            status,
+            result,
+            transparent_background,
+            ..
+        }) = completed.item
+        else {
+            panic!("expected completed image-generation item");
+        };
+        assert_eq!(status, "completed");
+        assert_eq!(result, RESULT);
+        assert_eq!(transparent_background, Some(true));
 
-    drop(mcp);
-    let mut resumed = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    let read_id = resumed
-        .send_thread_read_request(ThreadReadParams {
-            thread_id: thread_id.clone(),
-            include_turns: true,
-        })
-        .await?;
-    let ThreadReadResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, resumed.read_response(read_id)).await??;
-    let persisted_image = thread
-        .turns
-        .iter()
-        .flat_map(|turn| turn.items.iter())
-        .find_map(|item| match item {
-            ThreadItem::ImageGeneration(item) => Some(item),
-            _ => None,
-        })
-        .context("persisted legacy history should contain the generated image")?;
-    assert_eq!(persisted_image.transparent_background, Some(true));
+        drop(mcp);
+        let mut resumed = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        let read_id = resumed
+            .send_thread_read_request(ThreadReadParams {
+                thread_id: thread_id.clone(),
+                include_turns: true,
+            })
+            .await?;
+        let ThreadReadResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, resumed.read_response(read_id)).await??;
+        let persisted_image = thread
+            .turns
+            .iter()
+            .flat_map(|turn| turn.items.iter())
+            .find_map(|item| match item {
+                ThreadItem::ImageGeneration(item) => Some(item),
+                _ => None,
+            })
+            .context("persisted legacy history should contain the generated image")?;
+        assert_eq!(persisted_image.transparent_background, Some(true));
 
-    let resume_id = resumed
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id,
-            ..Default::default()
-        })
-        .await?;
-    let ThreadResumeResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, resumed.read_response(resume_id)).await??;
-    let resumed_image = thread
-        .turns
-        .iter()
-        .flat_map(|turn| turn.items.iter())
-        .find_map(|item| match item {
-            ThreadItem::ImageGeneration(item) => Some(item),
-            _ => None,
-        })
-        .context("resumed legacy history should contain the generated image")?;
-    assert_eq!(resumed_image.transparent_background, Some(true));
+        let resume_id = resumed
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id,
+                ..Default::default()
+            })
+            .await?;
+        let ThreadResumeResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, resumed.read_response(resume_id)).await??;
+        let resumed_image = thread
+            .turns
+            .iter()
+            .flat_map(|turn| turn.items.iter())
+            .find_map(|item| match item {
+                ThreadItem::ImageGeneration(item) => Some(item),
+                _ => None,
+            })
+            .context("resumed legacy history should contain the generated image")?;
+        assert_eq!(resumed_image.transparent_background, Some(true));
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn automatic_image_background_preserves_unknown_transparency() -> Result<()> {
     let call_id = "automatic-image-run-1";
     let server = responses::start_mock_server().await;
-    mount_image_response_with_background(&server, "auto").await;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &json!({"prompt": "paint a blue whale"}).to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        mount_image_response_with_background(&server, "auto").await;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &json!({"prompt": "paint a blue whale"}).to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
-    let completed = timeout(
-        DEFAULT_READ_TIMEOUT,
-        wait_for_image_generation_completed(&mut mcp),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    let ThreadItem::ImageGeneration(image) = completed.item else {
-        panic!("expected completed image-generation item");
-    };
-    assert_eq!(image.transparent_background, None);
-    let value = serde_json::to_value(&image)?;
-    assert_eq!(
-        value.get("transparentBackground"),
-        Some(&serde_json::Value::Null),
-        "v2 image-generation items must always include nullable transparency metadata"
-    );
-    Ok(())
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
+        let completed = timeout(
+            DEFAULT_READ_TIMEOUT,
+            wait_for_image_generation_completed(&mut mcp),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        let ThreadItem::ImageGeneration(image) = completed.item else {
+            panic!("expected completed image-generation item");
+        };
+        assert_eq!(image.transparent_background, None);
+        let value = serde_json::to_value(&image)?;
+        assert_eq!(
+            value.get("transparentBackground"),
+            Some(&serde_json::Value::Null),
+            "v2 image-generation items must always include nullable transparency metadata"
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(json!(null); "null")]
@@ -418,74 +428,81 @@ async fn invalid_transparent_background_does_not_dispatch(
 ) -> Result<()> {
     let call_id = "invalid-background";
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &json!({
-                        "prompt": "paint a blue whale",
-                        "transparent_background": transparent_background,
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "The background argument was invalid."),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &json!({
+                            "prompt": "paint a blue whale",
+                            "transparent_background": transparent_background,
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message(
+                        "msg-1",
+                        "The background argument was invalid.",
+                    ),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let output = requests[1].function_call_output(call_id);
-    assert!(
-        output["output"]
-            .as_str()
-            .is_some_and(|text| text.contains("expected a boolean")),
-        "the model should receive the argument validation error: {output}"
-    );
-    assert!(
-        server
-            .received_requests()
-            .await
-            .context("failed to fetch received requests")?
-            .iter()
-            .all(|request| !request.url.path().starts_with("/api/codex/images/"))
-    );
-    Ok(())
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let output = requests[1].function_call_output(call_id);
+        assert!(
+            output["output"]
+                .as_str()
+                .is_some_and(|text| text.contains("expected a boolean")),
+            "the model should receive the argument validation error: {output}"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .context("failed to fetch received requests")?
+                .iter()
+                .all(|request| !request.url.path().starts_with("/api/codex/images/"))
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
 async fn standalone_image_generation_failure_emits_terminal_item() -> Result<()> {
     let call_id = "image-run-failed";
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     Mock::given(method("POST"))
         .and(path("/api/codex/images/generations"))
         .respond_with(
@@ -580,6 +597,8 @@ async fn standalone_image_generation_failure_emits_terminal_item() -> Result<()>
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -587,133 +606,136 @@ async fn image_generation_usage_limit_preserves_correlated_failure_metadata() ->
     let call_id = "image-run-limited";
     let reset_at = 1_786_150_800;
     let server = responses::start_mock_server().await;
-    Mock::given(method("POST"))
-        .and(path("/api/codex/images/generations"))
-        .respond_with(
-            ResponseTemplate::new(429)
-                .insert_header("x-codex-active-limit", "image_gen")
-                .insert_header("x-image-gen-primary-used-percent", "100")
-                .insert_header("x-image-gen-primary-window-minutes", "1440")
-                .insert_header("x-image-gen-primary-reset-at", reset_at.to_string())
-                .set_body_json(json!({
-                    "error": {
-                        "type": "usage_limit_reached",
-                        "message": "image limit reached",
-                        "resets_at": reset_at,
-                        "plan_type": "plus"
-                    }
-                })),
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/api/codex/images/generations"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("x-codex-active-limit", "image_gen")
+                    .insert_header("x-image-gen-primary-used-percent", "100")
+                    .insert_header("x-image-gen-primary-window-minutes", "1440")
+                    .insert_header("x-image-gen-primary-reset-at", reset_at.to_string())
+                    .set_body_json(json!({
+                        "error": {
+                            "type": "usage_limit_reached",
+                            "message": "image limit reached",
+                            "resets_at": reset_at,
+                            "plan_type": "plus"
+                        }
+                    })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &json!({"prompt": "paint a blue whale"}).to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "The image limit was reached."),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
         )
-        .expect(1)
-        .mount(&server)
         .await;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &json!({"prompt": "paint a blue whale"}).to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "The image limit was reached."),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
+        let codex_home = TempDir::new()?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
 
-    let completed = timeout(
-        DEFAULT_READ_TIMEOUT,
-        wait_for_image_generation_completed(&mut mcp),
-    )
-    .await??;
-    let thread_id = completed.thread_id.clone();
-    let ThreadItem::ImageGeneration(image) = completed.item else {
-        panic!("expected failed image-generation item");
-    };
-    assert_eq!(image.status, "failed");
-    assert_eq!(
-        image.failure,
-        Some(ImageGenerationFailure::UsageLimitExceeded {
-            limit_id: "image_gen".to_string(),
-            resets_at: Some(reset_at),
-        })
-    );
+        let completed = timeout(
+            DEFAULT_READ_TIMEOUT,
+            wait_for_image_generation_completed(&mut mcp),
+        )
+        .await??;
+        let thread_id = completed.thread_id.clone();
+        let ThreadItem::ImageGeneration(image) = completed.item else {
+            panic!("expected failed image-generation item");
+        };
+        assert_eq!(image.status, "failed");
+        assert_eq!(
+            image.failure,
+            Some(ImageGenerationFailure::UsageLimitExceeded {
+                limit_id: "image_gen".to_string(),
+                resets_at: Some(reset_at),
+            })
+        );
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    let read_id = mcp
-        .send_thread_read_request(ThreadReadParams {
-            thread_id: thread_id.clone(),
-            include_turns: true,
-        })
-        .await?;
-    let ThreadReadResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(read_id)).await??;
-    let persisted_failure = thread
-        .turns
-        .iter()
-        .flat_map(|turn| turn.items.iter())
-        .find_map(|item| match item {
-            ThreadItem::ImageGeneration(item) => item.failure.as_ref(),
-            _ => None,
-        });
-    assert_eq!(
-        persisted_failure,
-        Some(&ImageGenerationFailure::UsageLimitExceeded {
-            limit_id: "image_gen".to_string(),
-            resets_at: Some(reset_at),
-        })
-    );
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        let read_id = mcp
+            .send_thread_read_request(ThreadReadParams {
+                thread_id: thread_id.clone(),
+                include_turns: true,
+            })
+            .await?;
+        let ThreadReadResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(read_id)).await??;
+        let persisted_failure = thread
+            .turns
+            .iter()
+            .flat_map(|turn| turn.items.iter())
+            .find_map(|item| match item {
+                ThreadItem::ImageGeneration(item) => item.failure.as_ref(),
+                _ => None,
+            });
+        assert_eq!(
+            persisted_failure,
+            Some(&ImageGenerationFailure::UsageLimitExceeded {
+                limit_id: "image_gen".to_string(),
+                resets_at: Some(reset_at),
+            })
+        );
 
-    let resume_id = mcp
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id,
-            ..Default::default()
-        })
-        .await?;
-    let ThreadResumeResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
-    let resumed_failure = thread
-        .turns
-        .iter()
-        .flat_map(|turn| turn.items.iter())
-        .find_map(|item| match item {
-            ThreadItem::ImageGeneration(item) => item.failure.as_ref(),
-            _ => None,
-        });
-    assert_eq!(
-        resumed_failure,
-        Some(&ImageGenerationFailure::UsageLimitExceeded {
-            limit_id: "image_gen".to_string(),
-            resets_at: Some(reset_at),
-        })
-    );
+        let resume_id = mcp
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id,
+                ..Default::default()
+            })
+            .await?;
+        let ThreadResumeResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+        let resumed_failure = thread
+            .turns
+            .iter()
+            .flat_map(|turn| turn.items.iter())
+            .find_map(|item| match item {
+                ThreadItem::ImageGeneration(item) => item.failure.as_ref(),
+                _ => None,
+            });
+        assert_eq!(
+            resumed_failure,
+            Some(&ImageGenerationFailure::UsageLimitExceeded {
+                limit_id: "image_gen".to_string(),
+                resets_at: Some(reset_at),
+            })
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(Some(true), "transparent"; "transparent")]
@@ -865,95 +887,98 @@ async fn standalone_image_generation_is_callable_from_code_mode_only(
 ) -> Result<()> {
     let call_id = "code-mode-image-run-1";
     let server = responses::start_mock_server().await;
-    mount_image_response_with_background(&server, "opaque").await;
-    let arguments = imagegen_arguments("paint a blue whale", requested_transparent_background);
+    mock_server::run(&[&server], async {
+        mount_image_response_with_background(&server, "opaque").await;
+        let arguments = imagegen_arguments("paint a blue whale", requested_transparent_background);
 
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_custom_tool_call(
-                    call_id,
-                    "exec",
-                    &format!(
-                        r#"
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_custom_tool_call(
+                        call_id,
+                        "exec",
+                        &format!(
+                            r#"
 const result = await tools.image_gen__imagegen({arguments});
 generatedImage(result);
 "#
+                        ),
                     ),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        ImagegenTestMode::CodeModeOnly,
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
+        let codex_home = TempDir::new()?;
+        create_config_toml(
+            codex_home.path(),
+            &server.uri(),
+            ImagegenTestMode::CodeModeOnly,
+        )?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
-    start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        start_image_generation_turn(&mut mcp, ThreadStartParams::default()).await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(requests[0].body_contains_text("image_gen__imagegen"));
-    let output = requests[1].custom_tool_call_output(call_id);
-    assert_eq!(
-        output["output"][1],
-        json!({
-            "type": "input_image",
-            "image_url": format!("data:image/png;base64,{RESULT}"),
-            "detail": "high",
-        })
-    );
-    assert!(
-        output["output"][2]["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("Generated images are saved"))
-    );
-    assert_eq!(output["output"].as_array().map(Vec::len), Some(3));
-    let image_request = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?
-        .into_iter()
-        .find(|request| request.url.path() == "/api/codex/images/generations")
-        .context("image generation request should be sent")?;
-    assert_eq!(
-        image_request.body_json::<serde_json::Value>()?,
-        json!({
-            "prompt": "paint a blue whale",
-            "background": expected_background,
-            "model": "gpt-image-2",
-            "quality": "auto",
-            "size": "auto",
-        })
-    );
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[0].body_contains_text("image_gen__imagegen"));
+        let output = requests[1].custom_tool_call_output(call_id);
+        assert_eq!(
+            output["output"][1],
+            json!({
+                "type": "input_image",
+                "image_url": format!("data:image/png;base64,{RESULT}"),
+                "detail": "high",
+            })
+        );
+        assert!(
+            output["output"][2]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Generated images are saved"))
+        );
+        assert_eq!(output["output"].as_array().map(Vec::len), Some(3));
+        let image_request = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?
+            .into_iter()
+            .find(|request| request.url.path() == "/api/codex/images/generations")
+            .context("image generation request should be sent")?;
+        assert_eq!(
+            image_request.body_json::<serde_json::Value>()?,
+            json!({
+                "prompt": "paint a blue whale",
+                "background": expected_background,
+                "model": "gpt-image-2",
+                "quality": "auto",
+                "size": "auto",
+            })
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 fn imagegen_arguments(prompt: &str, transparent_background: Option<bool>) -> serde_json::Value {
@@ -984,89 +1009,92 @@ async fn run_image_edit_test(
 ) -> Result<(serde_json::Value, ImageGenerationItem)> {
     let call_id = "image-edit-1";
     let server = responses::start_mock_server().await;
-    mount_image_edit_response(&server).await;
+    mock_server::run(&[&server], async {
+        mount_image_edit_response(&server).await;
 
-    let codex_home = TempDir::new()?;
-    let (arguments, input) = input(codex_home.path())?;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    call_id,
-                    "image_gen",
-                    "imagegen",
-                    &arguments.to_string(),
-                ),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "Done"),
-                responses::ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+        let codex_home = TempDir::new()?;
+        let (arguments, input) = input(codex_home.path())?;
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        call_id,
+                        "image_gen",
+                        "imagegen",
+                        &arguments.to_string(),
+                    ),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "Done"),
+                    responses::ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("access-chatgpt"),
-        AuthCredentialsStoreMode::File,
-    )?;
+        create_config_toml(codex_home.path(), &server.uri(), ImagegenTestMode::Direct)?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("access-chatgpt"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
+        let turn_id = start_turn(
+            &mut mcp,
+            ThreadStartParams {
+                service_name: Some("chatgpt_cca".to_string()),
+                ..Default::default()
+            },
+            input,
+        )
         .await?;
-    let turn_id = start_turn(
-        &mut mcp,
-        ThreadStartParams {
-            service_name: Some("chatgpt_cca".to_string()),
-            ..Default::default()
-        },
-        input,
-    )
-    .await?;
-    let completed = timeout(
-        DEFAULT_READ_TIMEOUT,
-        wait_for_image_generation_completed(&mut mcp),
-    )
-    .await??;
-    let ThreadItem::ImageGeneration(completed_image) = completed.item else {
-        panic!("expected completed image-generation item");
-    };
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let completed = timeout(
+            DEFAULT_READ_TIMEOUT,
+            wait_for_image_generation_completed(&mut mcp),
+        )
+        .await??;
+        let ThreadItem::ImageGeneration(completed_image) = completed.item else {
+            panic!("expected completed image-generation item");
+        };
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    assert_eq!(response_mock.requests().len(), 2);
-    let requests = server
-        .received_requests()
-        .await
-        .context("failed to fetch received requests")?;
-    let image_request = requests
-        .iter()
-        .find(|request| request.url.path() == "/api/codex/images/edits")
-        .context("image edit request should be sent")?;
-    assert_eq!(
-        image_request
-            .headers
-            .get("originator")
-            .context("standalone image edit should include the thread originator")?
-            .to_str()
-            .context("standalone image edit originator should be valid ASCII")?,
-        "chatgpt_cca"
-    );
-    assert_image_turn_id_header(image_request, &turn_id)?;
-    Ok((
-        image_request.body_json::<serde_json::Value>()?,
-        completed_image,
-    ))
+        assert_eq!(response_mock.requests().len(), 2);
+        let requests = server
+            .received_requests()
+            .await
+            .context("failed to fetch received requests")?;
+        let image_request = requests
+            .iter()
+            .find(|request| request.url.path() == "/api/codex/images/edits")
+            .context("image edit request should be sent")?;
+        assert_eq!(
+            image_request
+                .headers
+                .get("originator")
+                .context("standalone image edit should include the thread originator")?
+                .to_str()
+                .context("standalone image edit originator should be valid ASCII")?,
+            "chatgpt_cca"
+        );
+        assert_image_turn_id_header(image_request, &turn_id)?;
+        Ok((
+            image_request.body_json::<serde_json::Value>()?,
+            completed_image,
+        ))
+    })
+    .await
 }
 
 fn assert_image_turn_id_header(request: &wiremock::Request, expected_turn_id: &str) -> Result<()> {

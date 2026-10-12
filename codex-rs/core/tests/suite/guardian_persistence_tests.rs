@@ -29,6 +29,7 @@ use codex_thread_store::ThreadPage;
 use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreFuture;
 use codex_thread_store::UpdateThreadMetadataParams;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -147,96 +148,100 @@ async fn guardian_saves_each_completed_review_before_releasing_its_action() -> a
     core_test_support::skip_if_no_network!(Ok(()));
     core_test_support::skip_if_wine_exec!(Ok(()), "uses the Unix command approval harness");
     let server = responses::start_mock_server().await;
-    let (saves, mut pending_saves) = mpsc::unbounded_channel();
-    let store = Arc::new(GatedReviewerStore {
-        inner: InMemoryThreadStore::default(),
-        reviewer: Mutex::new(ReviewerSaves::default()),
-        saves,
-    });
-    let test = test_codex()
-        .with_thread_store(store)
-        .with_history_mode(ThreadHistoryMode::Legacy)
-        .with_config(|config| {
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+    mock_server::run(&[&server], async {
+        let (saves, mut pending_saves) = mpsc::unbounded_channel();
+        let store = Arc::new(GatedReviewerStore {
+            inner: InMemoryThreadStore::default(),
+            reviewer: Mutex::new(ReviewerSaves::default()),
+            saves,
+        });
+        let test = test_codex()
+            .with_thread_store(store)
+            .with_history_mode(ThreadHistoryMode::Legacy)
+            .with_config(|config| {
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let command = json!({
+            "cmd": "true", "sandbox_permissions": "require_escalated",
+            "justification": "Run the authorized command.",
         })
-        .build_with_auto_env(&server)
-        .await?;
-    let command = json!({
-        "cmd": "true", "sandbox_permissions": "require_escalated",
-        "justification": "Run the authorized command.",
-    })
-    .to_string();
-    let approval = r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#;
-    let mut turns = Vec::new();
-    for index in 0..2 {
-        turns.push(responses::sse(vec![
-            responses::ev_function_call(&format!("command-{index}"), "exec_command", &command),
-            responses::ev_completed(&format!("parent-{index}")),
-        ]));
-        turns.push(responses::sse(vec![
-            responses::ev_assistant_message(&format!("review-{index}"), approval),
-            responses::ev_completed(&format!("guardian-{index}")),
-        ]));
-    }
-    turns.push(responses::sse(vec![responses::ev_completed("parent-done")]));
-    let mock = responses::mount_sse_sequence(&server, turns).await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Run both commands.".to_owned(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
+        .to_string();
+        let approval = r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#;
+        let mut turns = Vec::new();
+        for index in 0..2 {
+            turns.push(responses::sse(vec![
+                responses::ev_function_call(&format!("command-{index}"), "exec_command", &command),
+                responses::ev_completed(&format!("parent-{index}")),
+            ]));
+            turns.push(responses::sse(vec![
+                responses::ev_assistant_message(&format!("review-{index}"), approval),
+                responses::ev_completed(&format!("guardian-{index}")),
+            ]));
+        }
+        turns.push(responses::sse(vec![responses::ev_completed("parent-done")]));
+        let mock = responses::mount_sse_sequence(&server, turns).await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run both commands.".to_owned(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
 
-    let mut reviewer_id = None;
-    for review in 1..=2 {
-        let pending = timeout(Duration::from_secs(10), pending_saves.recv())
-            .await?
-            .expect("review save");
-        assert_eq!(
-            pending.history.items.iter().find_map(|item| match item {
-                RolloutItem::SessionMeta(meta) => Some(meta.meta.history_mode),
-                _ => None,
-            }),
-            Some(ThreadHistoryMode::Paginated)
-        );
-        assert_eq!(
-            *reviewer_id.get_or_insert(pending.history.thread_id),
-            pending.history.thread_id
-        );
-        assert_eq!(
-            pending
-                .history
-                .items
-                .iter()
-                .filter(|item| matches!(item, RolloutItem::EventMsg(EventMsg::TurnComplete(_))))
-                .count(),
-            review,
-            "the first save after inference must include turn completion"
-        );
-        // The parent cannot consume the approval while its review is still being saved.
-        assert!(
-            timeout(
-                Duration::from_millis(50),
-                wait_for_event(&test.codex, |event| {
-                    matches!(event, EventMsg::ExecCommandBegin(_))
-                })
-            )
-            .await
-            .is_err()
-        );
-        assert_eq!(mock.requests().len(), review * 2);
-        pending.complete.send(()).expect("finish save");
+        let mut reviewer_id = None;
+        for review in 1..=2 {
+            let pending = timeout(Duration::from_secs(10), pending_saves.recv())
+                .await?
+                .expect("review save");
+            assert_eq!(
+                pending.history.items.iter().find_map(|item| match item {
+                    RolloutItem::SessionMeta(meta) => Some(meta.meta.history_mode),
+                    _ => None,
+                }),
+                Some(ThreadHistoryMode::Paginated)
+            );
+            assert_eq!(
+                *reviewer_id.get_or_insert(pending.history.thread_id),
+                pending.history.thread_id
+            );
+            assert_eq!(
+                pending
+                    .history
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item, RolloutItem::EventMsg(EventMsg::TurnComplete(_))))
+                    .count(),
+                review,
+                "the first save after inference must include turn completion"
+            );
+            // The parent cannot consume the approval while its review is still being saved.
+            assert!(
+                timeout(
+                    Duration::from_millis(50),
+                    wait_for_event(&test.codex, |event| {
+                        matches!(event, EventMsg::ExecCommandBegin(_))
+                    })
+                )
+                .await
+                .is_err()
+            );
+            assert_eq!(mock.requests().len(), review * 2);
+            pending.complete.send(()).expect("finish save");
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::ExecCommandEnd(_))
+            })
+            .await;
+        }
         wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::ExecCommandEnd(_))
+            matches!(event, EventMsg::TurnComplete(_))
         })
         .await;
-    }
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        assert_eq!(mock.requests().len(), 5);
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
     })
-    .await;
-    assert_eq!(mock.requests().len(), 5);
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+    .await
 }

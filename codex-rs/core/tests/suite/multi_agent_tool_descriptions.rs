@@ -5,6 +5,7 @@ use codex_core::config::AgentRoleConfig;
 use codex_features::Feature;
 use codex_protocol::openai_models::ToolMessages;
 use codex_protocol::protocol::MultiAgentVersion;
+use core_test_support::mock_server;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
@@ -142,184 +143,193 @@ async fn multi_agent_catalog_messages_change_only_selected_tool_fields(
     }
 
     let server = start_mock_server().await;
-    let response = mount_sse_sequence(
-        &server,
-        vec![sse_completed("resp-default"), sse_completed("resp-catalog")],
-    )
-    .await;
-    for messages in [
-        None,
-        serde_json::from_value::<Option<ToolMessages>>(tool_messages.clone())?,
-    ] {
-        let test = test_codex()
-            .with_model_info_override("gpt-5.2", move |model| {
-                model.multi_agent_version = Some(if matches!(exposure, Exposure::V1) {
-                    MultiAgentVersion::V1
-                } else {
-                    MultiAgentVersion::V2
-                });
-                model.model_messages.as_mut().expect("model messages").tools = messages;
-            })
-            .with_config(move |config| {
-                if matches!(exposure, Exposure::V1) {
-                    config.features.enable(Feature::Collab).expect("enable V1");
-                    config
-                        .features
-                        .disable(Feature::MultiAgentV2)
-                        .expect("disable V2");
-                } else {
-                    config
-                        .features
-                        .enable(Feature::MultiAgentV2)
-                        .expect("enable V2");
-                }
-                if matches!(exposure, Exposure::CodeMode) {
-                    config
-                        .features
-                        .enable(Feature::CodeMode)
-                        .expect("enable Code Mode");
-                    // Inspect declarations even when the test has no Code Mode host to execute them.
-                    config.code_mode.disable_in_process_fallback = true;
-                    config.multi_agent_v2.non_code_mode_only = false;
-                }
-                config.multi_agent_v2.tool_namespace =
-                    (!matches!(exposure, Exposure::Plain)).then(|| "delegation".to_string());
-                config.multi_agent_v2.hide_spawn_agent_metadata = false;
-                config.multi_agent_v2.expose_spawn_agent_model_overrides = true;
-                config.multi_agent_v2.usage_hint_text = Some("Local delegation hint.".to_string());
-                config.agent_roles.insert(
-                    "researcher".to_string(),
-                    AgentRoleConfig {
-                        description: Some("Research the assigned question.".to_string()),
-                        config_file: None,
-                        nickname_candidates: None,
-                    },
-                );
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("Inspect the available tools.").await?;
-    }
+    mock_server::run(&[&server], async {
+        let response = mount_sse_sequence(
+            &server,
+            vec![sse_completed("resp-default"), sse_completed("resp-catalog")],
+        )
+        .await;
+        for messages in [
+            None,
+            serde_json::from_value::<Option<ToolMessages>>(tool_messages.clone())?,
+        ] {
+            let test = test_codex()
+                .with_model_info_override("gpt-5.2", move |model| {
+                    model.multi_agent_version = Some(if matches!(exposure, Exposure::V1) {
+                        MultiAgentVersion::V1
+                    } else {
+                        MultiAgentVersion::V2
+                    });
+                    model.model_messages.as_mut().expect("model messages").tools = messages;
+                })
+                .with_config(move |config| {
+                    if matches!(exposure, Exposure::V1) {
+                        config.features.enable(Feature::Collab).expect("enable V1");
+                        config
+                            .features
+                            .disable(Feature::MultiAgentV2)
+                            .expect("disable V2");
+                    } else {
+                        config
+                            .features
+                            .enable(Feature::MultiAgentV2)
+                            .expect("enable V2");
+                    }
+                    if matches!(exposure, Exposure::CodeMode) {
+                        config
+                            .features
+                            .enable(Feature::CodeMode)
+                            .expect("enable Code Mode");
+                        // Inspect declarations even when the test has no Code Mode host to execute them.
+                        config.code_mode.disable_in_process_fallback = true;
+                        config.multi_agent_v2.non_code_mode_only = false;
+                    }
+                    config.multi_agent_v2.tool_namespace =
+                        (!matches!(exposure, Exposure::Plain)).then(|| "delegation".to_string());
+                    config.multi_agent_v2.hide_spawn_agent_metadata = false;
+                    config.multi_agent_v2.expose_spawn_agent_model_overrides = true;
+                    config.multi_agent_v2.usage_hint_text =
+                        Some("Local delegation hint.".to_string());
+                    config.agent_roles.insert(
+                        "researcher".to_string(),
+                        AgentRoleConfig {
+                            description: Some("Research the assigned question.".to_string()),
+                            config_file: None,
+                            nickname_candidates: None,
+                        },
+                    );
+                })
+                .build_with_auto_env(&server)
+                .await?;
+            test.submit_turn("Inspect the available tools.").await?;
+        }
 
-    let requests = response.requests();
-    assert_eq!(requests.len(), 2);
-    let mut expected = requests[0].body_json()["tools"].clone();
-    let actual = requests[1].body_json()["tools"].clone();
-    if !matches!(exposure, Exposure::V1) {
-        let tools = if matches!(exposure, Exposure::Plain) {
-            expected.as_array_mut().expect("plain tools")
-        } else {
-            expected
-                .as_array_mut()
-                .expect("tools")
-                .iter_mut()
-                .find(|tool| tool["name"] == "delegation")
-                .expect("delegation namespace")["tools"]
-                .as_array_mut()
-                .expect("namespace tools")
-        };
-        let actual_tools = if matches!(exposure, Exposure::Plain) {
-            actual.as_array().expect("plain tools")
-        } else {
-            actual
-                .as_array()
-                .expect("tools")
-                .iter()
-                .find(|tool| tool["name"] == "delegation")
-                .expect("delegation namespace")["tools"]
-                .as_array()
-                .expect("namespace tools")
-        };
-        for name in TOOL_NAMES {
-            let expected_tool = tools
-                .iter_mut()
-                .find(|tool| tool["name"] == name)
-                .expect(name);
-            let actual_tool = actual_tools
-                .iter()
-                .find(|tool| tool["name"] == name)
-                .expect(name);
-            if let Some(description) = tool_messages["multi_agent"][name]["description"].as_str() {
-                let bundled = expected_tool["description"]
-                    .as_str()
-                    .expect("bundled description");
-                let declaration = bundled
-                    .find("\n\nCall: await ")
-                    .map(|index| &bundled[index..])
-                    .unwrap_or_default();
-                if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
-                    assert!(
-                        declaration.contains(&format!("delegation__{name}")),
-                        "Code Mode description for {name}: {bundled}"
-                    );
-                }
-                let description = if matches!(exposure, Exposure::CodeMode) && name != "wait_agent"
+        let requests = response.requests();
+        assert_eq!(requests.len(), 2);
+        let mut expected = requests[0].body_json()["tools"].clone();
+        let actual = requests[1].body_json()["tools"].clone();
+        if !matches!(exposure, Exposure::V1) {
+            let tools = if matches!(exposure, Exposure::Plain) {
+                expected.as_array_mut().expect("plain tools")
+            } else {
+                expected
+                    .as_array_mut()
+                    .expect("tools")
+                    .iter_mut()
+                    .find(|tool| tool["name"] == "delegation")
+                    .expect("delegation namespace")["tools"]
+                    .as_array_mut()
+                    .expect("namespace tools")
+            };
+            let actual_tools = if matches!(exposure, Exposure::Plain) {
+                actual.as_array().expect("plain tools")
+            } else {
+                actual
+                    .as_array()
+                    .expect("tools")
+                    .iter()
+                    .find(|tool| tool["name"] == "delegation")
+                    .expect("delegation namespace")["tools"]
+                    .as_array()
+                    .expect("namespace tools")
+            };
+            for name in TOOL_NAMES {
+                let expected_tool = tools
+                    .iter_mut()
+                    .find(|tool| tool["name"] == name)
+                    .expect(name);
+                let actual_tool = actual_tools
+                    .iter()
+                    .find(|tool| tool["name"] == name)
+                    .expect(name);
+                if let Some(description) =
+                    tool_messages["multi_agent"][name]["description"].as_str()
                 {
-                    description.trim()
-                } else {
-                    description
-                };
-                let replacement = if name == "spawn_agent" {
-                    let actual_description = actual_tool["description"]
+                    let bundled = expected_tool["description"]
                         .as_str()
-                        .expect("spawn description");
-                    assert!(actual_description.contains(description));
-                    assert!(
-                        !actual_description
-                            .contains("Spawns an agent to work on the specified task.")
-                    );
-                    assert!(
-                        actual_description
-                            .strip_suffix(declaration)
-                            .expect("unchanged declaration")
-                            .ends_with("Local delegation hint.")
-                    );
-                    actual_description.to_string()
-                } else {
-                    format!("{description}{declaration}")
-                };
-                expected_tool["description"] = json!(replacement);
-            }
-            if let Some(parameters) = expected_parameters
-                && tool_messages["multi_agent"][name]["parameters"].is_string()
-            {
-                expected_tool["parameters"] = parameters_for(name, parameters)?;
-                if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
-                    expected_tool["parameters"]["properties"]["message"]["encrypted"] = json!(true);
+                        .expect("bundled description");
+                    let declaration = bundled
+                        .find("\n\nCall: await ")
+                        .map(|index| &bundled[index..])
+                        .unwrap_or_default();
+                    if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
+                        assert!(
+                            declaration.contains(&format!("delegation__{name}")),
+                            "Code Mode description for {name}: {bundled}"
+                        );
+                    }
+                    let description =
+                        if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
+                            description.trim()
+                        } else {
+                            description
+                        };
+                    let replacement = if name == "spawn_agent" {
+                        let actual_description = actual_tool["description"]
+                            .as_str()
+                            .expect("spawn description");
+                        assert!(actual_description.contains(description));
+                        assert!(
+                            !actual_description
+                                .contains("Spawns an agent to work on the specified task.")
+                        );
+                        assert!(
+                            actual_description
+                                .strip_suffix(declaration)
+                                .expect("unchanged declaration")
+                                .ends_with("Local delegation hint.")
+                        );
+                        actual_description.to_string()
+                    } else {
+                        format!("{description}{declaration}")
+                    };
+                    expected_tool["description"] = json!(replacement);
                 }
-                if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
-                    // Runtime schemas pass through ordered maps before contract rendering.
-                    expected_tool["parameters"].sort_all_objects();
-                    let description = expected_tool["description"].as_str().expect("description");
-                    let (prefix, contract) =
-                        description.split_once("\nParameters:").expect("parameters");
-                    let (_, result) = contract.split_once("\nReturns:").expect("return shape");
-                    let rendered =
-                        codex_code_mode::augment_tool_definition(codex_code_mode::ToolDefinition {
-                            name: name.into(),
-                            tool_name: codex_tools::ToolName::plain(name),
-                            summary: String::new(),
-                            description: String::new(),
-                            kind: codex_code_mode::CodeModeToolKind::Function,
-                            input_schema: Some(expected_tool["parameters"].clone()),
-                            output_schema: None,
-                        })
+                if let Some(parameters) = expected_parameters
+                    && tool_messages["multi_agent"][name]["parameters"].is_string()
+                {
+                    expected_tool["parameters"] = parameters_for(name, parameters)?;
+                    if matches!(name, "spawn_agent" | "send_message" | "followup_task") {
+                        expected_tool["parameters"]["properties"]["message"]["encrypted"] =
+                            json!(true);
+                    }
+                    if matches!(exposure, Exposure::CodeMode) && name != "wait_agent" {
+                        // Runtime schemas pass through ordered maps before contract rendering.
+                        expected_tool["parameters"].sort_all_objects();
+                        let description =
+                            expected_tool["description"].as_str().expect("description");
+                        let (prefix, contract) =
+                            description.split_once("\nParameters:").expect("parameters");
+                        let (_, result) = contract.split_once("\nReturns:").expect("return shape");
+                        let rendered = codex_code_mode::augment_tool_definition(
+                            codex_code_mode::ToolDefinition {
+                                name: name.into(),
+                                tool_name: codex_tools::ToolName::plain(name),
+                                summary: String::new(),
+                                description: String::new(),
+                                kind: codex_code_mode::CodeModeToolKind::Function,
+                                input_schema: Some(expected_tool["parameters"].clone()),
+                                output_schema: None,
+                            },
+                        )
                         .description;
-                    let (_, parameters) = rendered
-                        .split_once("\nParameters:")
-                        .expect("rendered parameters");
-                    let (parameters, _) = parameters
-                        .split_once("\nReturns:")
-                        .expect("rendered return shape");
-                    expected_tool["description"] = json!(format!(
-                        "{prefix}\nParameters:{parameters}\nReturns:{result}"
-                    ));
+                        let (_, parameters) = rendered
+                            .split_once("\nParameters:")
+                            .expect("rendered parameters");
+                        let (parameters, _) = parameters
+                            .split_once("\nReturns:")
+                            .expect("rendered return shape");
+                        expected_tool["description"] = json!(format!(
+                            "{prefix}\nParameters:{parameters}\nReturns:{result}"
+                        ));
+                    }
                 }
             }
         }
-    }
-    assert_eq!(actual, expected);
-    Ok(())
+        assert_eq!(actual, expected);
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(Exposure::Namespaced; "namespaced")]
@@ -360,79 +370,82 @@ async fn channel_catalog_descriptions_change_only_selected_tools(exposure: Expos
     ];
 
     let server = start_mock_server().await;
-    let response = mount_sse_sequence(
-        &server,
-        vec![
-            sse_completed("default"),
-            sse_completed("all"),
-            sse_completed("sparse"),
-        ],
-    )
-    .await;
-    for message in &messages {
-        let message = serde_json::from_value::<Option<ToolMessages>>(message.clone())?;
-        let test = test_codex()
-            .with_model_info_override("gpt-5.2", move |model| {
-                model.multi_agent_version = Some(MultiAgentVersion::V2);
-                model.model_messages.as_mut().expect("model messages").tools = message;
-            })
-            .with_config(move |config| {
-                config.ephemeral = false;
-                config
-                    .features
-                    .enable(Feature::MultiAgentV2)
-                    .expect("enable V2");
-                config
-                    .features
-                    .enable(Feature::AgentMessageBoard)
-                    .expect("enable channels");
-                config.multi_agent_v2.tool_namespace = Some("delegation".into());
-                if matches!(exposure, Exposure::CodeMode) {
+    mock_server::run(&[&server], async {
+        let response = mount_sse_sequence(
+            &server,
+            vec![
+                sse_completed("default"),
+                sse_completed("all"),
+                sse_completed("sparse"),
+            ],
+        )
+        .await;
+        for message in &messages {
+            let message = serde_json::from_value::<Option<ToolMessages>>(message.clone())?;
+            let test = test_codex()
+                .with_model_info_override("gpt-5.2", move |model| {
+                    model.multi_agent_version = Some(MultiAgentVersion::V2);
+                    model.model_messages.as_mut().expect("model messages").tools = message;
+                })
+                .with_config(move |config| {
+                    config.ephemeral = false;
                     config
                         .features
-                        .enable(Feature::CodeMode)
-                        .expect("enable Code Mode");
-                    config.code_mode.disable_in_process_fallback = true;
-                    config.multi_agent_v2.non_code_mode_only = false;
-                }
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("Inspect the available tools.").await?;
-    }
-
-    let requests = response.requests();
-    assert_eq!(requests.len(), messages.len());
-    let default = requests[0].body_json()["tools"].clone();
-    for (request, message) in requests.iter().zip(&messages).skip(1) {
-        let mut expected = default.clone();
-        let channel_tools = expected
-            .as_array_mut()
-            .expect("tools")
-            .iter_mut()
-            .find(|tool| tool["name"] == "delegation")
-            .expect("delegation namespace")["tools"]
-            .as_array_mut()
-            .expect("namespace tools");
-        for name in names {
-            let tool = channel_tools
-                .iter_mut()
-                .find(|tool| tool["name"] == name)
-                .expect(name);
-            let bundled = tool["description"].as_str().expect("bundled description");
-            if let Some(description) = message["multi_agent"][name]["description"].as_str() {
-                let declaration = if matches!(exposure, Exposure::CodeMode) {
-                    let offset = bundled
-                        .find("\n\nCall: await ")
-                        .expect("Code Mode declaration");
-                    &bundled[offset..]
-                } else {
-                    ""
-                };
-                tool["description"] = json!(format!("{description}{declaration}"));
-            }
+                        .enable(Feature::MultiAgentV2)
+                        .expect("enable V2");
+                    config
+                        .features
+                        .enable(Feature::AgentMessageBoard)
+                        .expect("enable channels");
+                    config.multi_agent_v2.tool_namespace = Some("delegation".into());
+                    if matches!(exposure, Exposure::CodeMode) {
+                        config
+                            .features
+                            .enable(Feature::CodeMode)
+                            .expect("enable Code Mode");
+                        config.code_mode.disable_in_process_fallback = true;
+                        config.multi_agent_v2.non_code_mode_only = false;
+                    }
+                })
+                .build_with_auto_env(&server)
+                .await?;
+            test.submit_turn("Inspect the available tools.").await?;
         }
-        assert_eq!(request.body_json()["tools"], expected);
-    }
-    Ok(())
+
+        let requests = response.requests();
+        assert_eq!(requests.len(), messages.len());
+        let default = requests[0].body_json()["tools"].clone();
+        for (request, message) in requests.iter().zip(&messages).skip(1) {
+            let mut expected = default.clone();
+            let channel_tools = expected
+                .as_array_mut()
+                .expect("tools")
+                .iter_mut()
+                .find(|tool| tool["name"] == "delegation")
+                .expect("delegation namespace")["tools"]
+                .as_array_mut()
+                .expect("namespace tools");
+            for name in names {
+                let tool = channel_tools
+                    .iter_mut()
+                    .find(|tool| tool["name"] == name)
+                    .expect(name);
+                let bundled = tool["description"].as_str().expect("bundled description");
+                if let Some(description) = message["multi_agent"][name]["description"].as_str() {
+                    let declaration = if matches!(exposure, Exposure::CodeMode) {
+                        let offset = bundled
+                            .find("\n\nCall: await ")
+                            .expect("Code Mode declaration");
+                        &bundled[offset..]
+                    } else {
+                        ""
+                    };
+                    tool["description"] = json!(format!("{description}{declaration}"));
+                }
+            }
+            assert_eq!(request.body_json()["tools"], expected);
+        }
+        Ok(())
+    })
+    .await
 }

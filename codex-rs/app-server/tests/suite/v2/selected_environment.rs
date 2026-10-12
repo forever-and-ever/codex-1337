@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::path::Path;
 use std::time::Duration;
 
@@ -233,91 +234,96 @@ async fn command_execution_notifications_preserve_selected_environment_paths() -
         create_final_assistant_message_sse_response("done")?,
     ])
     .await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_root_config("compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 100000")
-        .with_provider_config("supports_websockets = false")
-        .with_sandbox_mode("danger-full-access")
-        .enable_feature(Feature::UnifiedExec)
-        .write(codex_home.path())?;
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-
-    let (expected_path, shell) = {
-        let environment = app_server.auto_env()?;
-        let path = environment.selection().cwd.join("main.rs")?;
-        environment
-            .environment()
-            .get_filesystem()
-            .write_file(
-                &path,
-                b"fn main() {}\n".to_vec(),
-                Default::default(),
-                /*sandbox*/ None,
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .with_root_config(
+                "compact_prompt = \"compact\"\nmodel_auto_compact_token_limit = 100000",
             )
+            .with_provider_config("supports_websockets = false")
+            .with_sandbox_mode("danger-full-access")
+            .enable_feature(Feature::UnifiedExec)
+            .write(codex_home.path())?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
             .await?;
-        (
-            path.inferred_native_path_string(),
-            environment.environment().info().await?.shell,
-        )
-    };
-    let thread = app_server
-        .start_thread(ThreadStartParams::default())
-        .await?
-        .thread;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        app_server.start_turn_and_wait_for_completion(text_turn_params(thread.id, "read main.rs")),
-    )
-    .await??;
 
-    let expected_actions = match shell.name.as_str() {
-        // Windows shell scripts are not yet parsed into file-read command actions.
-        "powershell" => {
-            let command = if detect_shell_type(&shell.path) == Some(ShellType::PowerShell) {
-                "cat main.rs".to_string()
-            } else {
-                shlex::try_join([shell.path.as_str(), "-Command", "cat main.rs"])?
-            };
-            json!([{
-                "type": "unknown",
-                "command": command,
-            }])
-        }
-        "cmd" => {
-            let command = shlex::try_join([shell.path.as_str(), "/c", "cat main.rs"])?;
-            json!([{
-                "type": "unknown",
-                "command": command,
-            }])
-        }
-        _ => json!([{
-            "type": "read",
-            "command": "cat main.rs",
-            "name": "main.rs",
-            "path": expected_path,
-        }]),
-    };
-
-    for method in ["item/started", "item/completed"] {
-        let notification = timeout(
+        let (expected_path, shell) = {
+            let environment = app_server.auto_env()?;
+            let path = environment.selection().cwd.join("main.rs")?;
+            environment
+                .environment()
+                .get_filesystem()
+                .write_file(
+                    &path,
+                    b"fn main() {}\n".to_vec(),
+                    Default::default(),
+                    /*sandbox*/ None,
+                )
+                .await?;
+            (
+                path.inferred_native_path_string(),
+                environment.environment().info().await?.shell,
+            )
+        };
+        let thread = app_server
+            .start_thread(ThreadStartParams::default())
+            .await?
+            .thread;
+        timeout(
             DEFAULT_READ_TIMEOUT,
-            app_server.read_stream_until_matching_notification(method, |notification| {
-                notification.method == method
-                    && notification
-                        .params
-                        .as_ref()
-                        .is_some_and(|params| params["item"]["id"] == "selected-environment-read")
-            }),
+            app_server
+                .start_turn_and_wait_for_completion(text_turn_params(thread.id, "read main.rs")),
         )
         .await??;
-        let params = notification
-            .params
-            .context("command execution notification should include params")?;
-        assert_eq!(params["item"]["commandActions"], expected_actions);
-    }
 
-    Ok(())
+        let expected_actions = match shell.name.as_str() {
+            // Windows shell scripts are not yet parsed into file-read command actions.
+            "powershell" => {
+                let command = if detect_shell_type(&shell.path) == Some(ShellType::PowerShell) {
+                    "cat main.rs".to_string()
+                } else {
+                    shlex::try_join([shell.path.as_str(), "-Command", "cat main.rs"])?
+                };
+                json!([{
+                    "type": "unknown",
+                    "command": command,
+                }])
+            }
+            "cmd" => {
+                let command = shlex::try_join([shell.path.as_str(), "/c", "cat main.rs"])?;
+                json!([{
+                    "type": "unknown",
+                    "command": command,
+                }])
+            }
+            _ => json!([{
+                "type": "read",
+                "command": "cat main.rs",
+                "name": "main.rs",
+                "path": expected_path,
+            }]),
+        };
+
+        for method in ["item/started", "item/completed"] {
+            let notification = timeout(
+                DEFAULT_READ_TIMEOUT,
+                app_server.read_stream_until_matching_notification(method, |notification| {
+                    notification.method == method
+                        && notification.params.as_ref().is_some_and(|params| {
+                            params["item"]["id"] == "selected-environment-read"
+                        })
+                }),
+            )
+            .await??;
+            let params = notification
+                .params
+                .context("command execution notification should include params")?;
+            assert_eq!(params["item"]["commandActions"], expected_actions);
+        }
+
+        Ok(())
+    })
+    .await
 }

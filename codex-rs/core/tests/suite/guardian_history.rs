@@ -26,6 +26,7 @@ use codex_thread_store::ForkBoundary;
 use codex_thread_store::InMemoryThreadStore;
 use codex_thread_store::LoadThreadHistoryParams;
 use codex_thread_store::PrepareForkParams;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -67,221 +68,231 @@ async fn guardian_history_survives_restart_and_user_fork(
         "Guardian approval actions require host-native paths"
     );
     let server = start_mock_server().await;
-    let pathless_store = match &store_config {
-        ThreadStoreConfig::Local => None,
-        ThreadStoreConfig::InMemory { id } => Some(InMemoryThreadStore::for_id(id)),
-    };
-    let mut builder = test_codex()
-        .with_history_mode(history_mode)
-        .with_config(move |config| {
-            config.experimental_thread_store = store_config;
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("enable token budget");
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        });
-    let initial = builder.build_with_auto_env(&server).await?;
-    let authorization = "You may publish the reviewed release.";
-    mount_sse_once(&server, sse(vec![ev_completed("authorized")])).await;
-    initial.submit_text_turn(authorization).await?;
-    initial.codex.submit(Op::Compact).await?;
-    wait_for_event(&initial.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let restriction = "Keep the release private.";
-    mount_sse_once(&server, sse(vec![ev_completed("restriction")])).await;
-    initial.submit_text_turn(restriction).await?;
-    initial.codex.shutdown_and_wait().await?;
-    let thread_id = initial.session_configured.thread_id;
-    initial.thread_manager.remove_thread(&thread_id).await;
-    let model_context = initial
-        .thread_store
-        .load_latest_model_context(LoadThreadHistoryParams {
-            thread_id,
-            include_archived: false,
+    mock_server::run(&[&server], async {
+        let pathless_store = match &store_config {
+            ThreadStoreConfig::Local => None,
+            ThreadStoreConfig::InMemory { id } => Some(InMemoryThreadStore::for_id(id)),
+        };
+        let mut builder = test_codex()
+            .with_history_mode(history_mode)
+            .with_config(move |config| {
+                config.experimental_thread_store = store_config;
+                config
+                    .features
+                    .enable(Feature::TokenBudget)
+                    .expect("enable token budget");
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            });
+        let initial = builder.build_with_auto_env(&server).await?;
+        let authorization = "You may publish the reviewed release.";
+        mount_sse_once(&server, sse(vec![ev_completed("authorized")])).await;
+        initial.submit_text_turn(authorization).await?;
+        initial.codex.submit(Op::Compact).await?;
+        wait_for_event(&initial.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .await?;
-    // Cross the wire boundary even for the pathless in-memory store: replay must not rely on
-    // retained runtime metadata or the original live ContextManager.
-    let items: Vec<RolloutItem> =
-        serde_json::from_value(serde_json::to_value(model_context.items)?)?;
-    let history = InitialHistory::Resumed(ResumedHistory {
-        history_revision: None,
-        conversation_id: thread_id,
-        history: Arc::new(items),
-        rollout_path: None,
-    });
-    let fork = if history_mode == ThreadHistoryMode::Paginated {
-        let prepared = initial
-            .thread_store
-            .prepare_fork(PrepareForkParams {
-                thread_id,
-                boundary: ForkBoundary::Latest,
-            })
-            .await?;
-        initial
-            .thread_manager
-            .fork_prepared_thread(
-                codex_core::StartThreadOptions::new(initial.config.clone()),
-                prepared,
-            )
-            .await?
-    } else {
-        initial
-            .thread_manager
-            .fork_thread_from_history(
-                ForkSnapshot::Interrupted,
-                codex_core::StartThreadOptions::new(initial.config.clone()),
-                history.clone(),
-            )
-            .await?
-    };
-    let resumed = initial
-        .thread_manager
-        .resume_thread_with_history(
-            initial.config.clone(),
-            history,
-            initial.thread_manager.auth_manager(),
-            /*parent_trace*/ None,
-            ClientMcpExtensions::default(),
-        )
-        .await?;
-    for thread in [&fork.thread, &resumed.thread] {
-        if pathless_store.is_some() {
-            assert_eq!(thread.rollout_path(), None);
-        }
-        let review = mount_sse_sequence(
-            &server,
-            vec![
-                sse(vec![
-                    ev_function_call(
-                        "publish",
-                        "exec_command",
-                        r#"{"cmd":"echo publish","sandbox_permissions":"require_escalated"}"#,
-                    ),
-                    ev_completed("publish"),
-                ]),
-                sse(vec![
-                    ev_assistant_message("review", r#"{"outcome":"deny"}"#),
-                    ev_completed("review"),
-                ]),
-                sse(vec![ev_completed("done")]),
-            ],
-        )
         .await;
-        thread
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "Continue with the release.".into(),
-                text_elements: Vec::new(),
-            }]))
-            .await?;
-        wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-        let requests = review.requests();
-        let guardian = requests
-            .iter()
-            .find(|request| {
-                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+
+        let restriction = "Keep the release private.";
+        mount_sse_once(&server, sse(vec![ev_completed("restriction")])).await;
+        initial.submit_text_turn(restriction).await?;
+        initial.codex.shutdown_and_wait().await?;
+        let thread_id = initial.session_configured.thread_id;
+        initial.thread_manager.remove_thread(&thread_id).await;
+        let model_context = initial
+            .thread_store
+            .load_latest_model_context(LoadThreadHistoryParams {
+                thread_id,
+                include_archived: false,
             })
-            .expect("Guardian request");
-        let transcript = serde_json::to_string(&guardian.input())?;
-        assert!(transcript.contains(authorization));
-        assert!(transcript.contains(restriction));
-        assert!(!serde_json::to_string(&requests[0].input())?.contains(authorization));
-        thread.shutdown_and_wait().await?;
-    }
-    if let Some(store) = pathless_store {
-        assert_eq!(store.calls().await.read_thread_by_rollout_path, 0);
-        if let ThreadStoreConfig::InMemory { id } = &initial.config.experimental_thread_store {
-            InMemoryThreadStore::remove_id(id);
+            .await?;
+        // Cross the wire boundary even for the pathless in-memory store: replay must not rely on
+        // retained runtime metadata or the original live ContextManager.
+        let items: Vec<RolloutItem> =
+            serde_json::from_value(serde_json::to_value(model_context.items)?)?;
+        let history = InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
+            conversation_id: thread_id,
+            history: Arc::new(items),
+            rollout_path: None,
+        });
+        let fork = if history_mode == ThreadHistoryMode::Paginated {
+            let prepared = initial
+                .thread_store
+                .prepare_fork(PrepareForkParams {
+                    thread_id,
+                    boundary: ForkBoundary::Latest,
+                })
+                .await?;
+            initial
+                .thread_manager
+                .fork_prepared_thread(
+                    codex_core::StartThreadOptions::new(initial.config.clone()),
+                    prepared,
+                )
+                .await?
+        } else {
+            initial
+                .thread_manager
+                .fork_thread_from_history(
+                    ForkSnapshot::Interrupted,
+                    codex_core::StartThreadOptions::new(initial.config.clone()),
+                    history.clone(),
+                )
+                .await?
+        };
+        let resumed = initial
+            .thread_manager
+            .resume_thread_with_history(
+                initial.config.clone(),
+                history,
+                initial.thread_manager.auth_manager(),
+                /*parent_trace*/ None,
+                ClientMcpExtensions::default(),
+            )
+            .await?;
+        for thread in [&fork.thread, &resumed.thread] {
+            if pathless_store.is_some() {
+                assert_eq!(thread.rollout_path(), None);
+            }
+            let review = mount_sse_sequence(
+                &server,
+                vec![
+                    sse(vec![
+                        ev_function_call(
+                            "publish",
+                            "exec_command",
+                            r#"{"cmd":"echo publish","sandbox_permissions":"require_escalated"}"#,
+                        ),
+                        ev_completed("publish"),
+                    ]),
+                    sse(vec![
+                        ev_assistant_message("review", r#"{"outcome":"deny"}"#),
+                        ev_completed("review"),
+                    ]),
+                    sse(vec![ev_completed("done")]),
+                ],
+            )
+            .await;
+            thread
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "Continue with the release.".into(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+            wait_for_event(thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+            let requests = review.requests();
+            let guardian = requests
+                .iter()
+                .find(|request| {
+                    request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+                })
+                .expect("Guardian request");
+            let transcript = serde_json::to_string(&guardian.input())?;
+            assert!(transcript.contains(authorization));
+            assert!(transcript.contains(restriction));
+            assert!(!serde_json::to_string(&requests[0].input())?.contains(authorization));
+            thread.shutdown_and_wait().await?;
         }
-    }
-    Ok(())
+        if let Some(store) = pathless_store {
+            assert_eq!(store.calls().await.read_thread_by_rollout_path, 0);
+            if let ThreadStoreConfig::InMemory { id } = &initial.config.experimental_thread_store {
+                InMemoryThreadStore::remove_id(id);
+            }
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_history_preserves_reviewer_across_parent_compaction() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_model("gpt-5.5")
-        .with_model_info_override("gpt-5.5", |model| {
-            model.comp_hash = Some("same-model".to_owned());
-            model.auto_review_model_override = Some(model.slug.clone());
-        })
-        .with_config(|config| {
-            config.features.disable(Feature::TokenBudget).unwrap();
-            config
-                .features
-                .disable(Feature::GuardianReuseParentCompaction)
-                .unwrap();
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let review_turn = |prefix: &str| {
-        vec![
-            sse(vec![
-                ev_function_call(
-                    &format!("{prefix}check"),
-                    "exec_command",
-                    r#"{"cmd":"exit 0","sandbox_permissions":"require_escalated"}"#,
-                ),
-                ev_completed(&format!("{prefix}action")),
-            ]),
-            sse(vec![
-                ev_assistant_message(&format!("{prefix}decision"), r#"{"outcome":"deny"}"#),
-                ev_completed(&format!("{prefix}review")),
-            ]),
-            sse(vec![ev_completed(&format!("{prefix}done"))]),
-        ]
-    };
-    let mut events = review_turn("before-");
-    events.push(sse(vec![
+    mock_server::run(&[&server], async {
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_model("gpt-5.5")
+            .with_model_info_override("gpt-5.5", |model| {
+                model.comp_hash = Some("same-model".to_owned());
+                model.auto_review_model_override = Some(model.slug.clone());
+            })
+            .with_config(|config| {
+                config.features.disable(Feature::TokenBudget).unwrap();
+                config
+                    .features
+                    .disable(Feature::GuardianReuseParentCompaction)
+                    .unwrap();
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let review_turn = |prefix: &str| {
+            vec![
+                sse(vec![
+                    ev_function_call(
+                        &format!("{prefix}check"),
+                        "exec_command",
+                        r#"{"cmd":"exit 0","sandbox_permissions":"require_escalated"}"#,
+                    ),
+                    ev_completed(&format!("{prefix}action")),
+                ]),
+                sse(vec![
+                    ev_assistant_message(&format!("{prefix}decision"), r#"{"outcome":"deny"}"#),
+                    ev_completed(&format!("{prefix}review")),
+                ]),
+                sse(vec![ev_completed(&format!("{prefix}done"))]),
+            ]
+        };
+        let mut events = review_turn("before-");
+        events.push(sse(vec![
         json!({"type": "response.output_item.done", "item": {
             "type": "compaction", "id": "parent-checkpoint", "encrypted_content": "parent summary"
         }}),
         ev_completed("compacted"),
     ]));
-    events.extend(review_turn(""));
-    let mock = mount_sse_sequence(&server, events).await;
-    test.submit_text_turn("Keep files private. Run a check before compaction.")
-        .await?;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        events.extend(review_turn(""));
+        let mock = mount_sse_sequence(&server, events).await;
+        test.submit_text_turn("Keep files private. Run a check before compaction.")
+            .await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_text_turn("Run a check after compaction.")
+            .await?;
+        let requests = mock.requests();
+        let reviews = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reviews.len(), 2);
+        assert!(reviews[0].body_json()["client_metadata"]["thread_id"].is_string());
+        assert_eq!(
+            reviews[0].body_json()["client_metadata"]["thread_id"],
+            reviews[1].body_json()["client_metadata"]["thread_id"]
+        );
+        assert!(reviews[1].input().starts_with(&reviews[0].input()));
+        assert!(
+            reviews[1]
+                .message_input_texts("user")
+                .join("\n")
+                .contains(">>> TRANSCRIPT DELTA START")
+        );
+        for review in reviews {
+            assert!(review.inputs_of_type("compaction").is_empty());
+            assert!(review.inputs_of_type("context_compaction").is_empty());
+        }
+        Ok(())
     })
-    .await;
-    test.submit_text_turn("Run a check after compaction.")
-        .await?;
-    let requests = mock.requests();
-    let reviews = requests
-        .iter()
-        .filter(|request| request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian")
-        .collect::<Vec<_>>();
-    assert_eq!(reviews.len(), 2);
-    assert!(reviews[0].body_json()["client_metadata"]["thread_id"].is_string());
-    assert_eq!(
-        reviews[0].body_json()["client_metadata"]["thread_id"],
-        reviews[1].body_json()["client_metadata"]["thread_id"]
-    );
-    assert!(reviews[1].input().starts_with(&reviews[0].input()));
-    assert!(
-        reviews[1]
-            .message_input_texts("user")
-            .join("\n")
-            .contains(">>> TRANSCRIPT DELTA START")
-    );
-    for review in reviews {
-        assert!(review.inputs_of_type("compaction").is_empty());
-        assert!(review.inputs_of_type("context_compaction").is_empty());
-    }
-    Ok(())
+    .await
 }
 
 #[test_case(false; "legacy transcript")]
@@ -296,139 +307,146 @@ async fn guardian_history_uses_deltas_between_eviction_batches(
         "Guardian approval actions require host-native paths"
     );
     let server = start_mock_server().await;
-    let mut test = test_codex()
-        .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::TokenBudget)
-                .expect("enable token-budget resets");
-            if !reuse_parent_checkpoint {
+    mock_server::run(&[&server], async {
+        let mut test = test_codex()
+            .with_config(move |config| {
                 config
                     .features
-                    .disable(Feature::GuardianReuseParentCompaction)
-                    .expect("exercise legacy transcript retention without checkpoint reuse");
+                    .enable(Feature::TokenBudget)
+                    .expect("enable token-budget resets");
+                if !reuse_parent_checkpoint {
+                    config
+                        .features
+                        .disable(Feature::GuardianReuseParentCompaction)
+                        .expect("exercise legacy transcript retention without checkpoint reuse");
+                }
+
+                config.update_plan_enabled = true;
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let plan = r#"{"plan":[{"step":"inspect the repository","status":"completed"}]}"#;
+        let mut inspection: Vec<_> = (0..130)
+            .map(|index| ev_function_call(&format!("initial-{index}"), "update_plan", plan))
+            .collect();
+        inspection.push(ev_completed("inspection"));
+        mount_sse_sequence(
+            &server,
+            vec![sse(inspection), sse(vec![ev_completed("inspected")])],
+        )
+        .await;
+        let restriction = "Only inspect the repository; do not publish it.";
+        test.submit_text_turn(restriction).await?;
+        // Restore a pre-rollout encrypted checkpoint with its legacy review transcript.
+        let history = test.codex.conversation_history_snapshot().await;
+        let checkpoint: RolloutItem = serde_json::from_value(json!({
+            "type": "compacted", "payload": {
+                "message": "old checkpoint",
+                "replacement_history": [{
+                    "type": "compaction", "id": "old", "encrypted_content": "opaque checkpoint"
+                }],
+                "guardian_history": history.review_items().cloned().collect::<Vec<_>>()
             }
+        }))?;
+        test.codex =
+            super::guardian_checkpoint_migration::resume(&test, &test.codex, vec![checkpoint])
+                .await?;
 
-            config.update_plan_enabled = true;
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let plan = r#"{"plan":[{"step":"inspect the repository","status":"completed"}]}"#;
-    let mut inspection: Vec<_> = (0..130)
-        .map(|index| ev_function_call(&format!("initial-{index}"), "update_plan", plan))
-        .collect();
-    inspection.push(ev_completed("inspection"));
-    mount_sse_sequence(
-        &server,
-        vec![sse(inspection), sse(vec![ev_completed("inspected")])],
-    )
-    .await;
-    let restriction = "Only inspect the repository; do not publish it.";
-    test.submit_text_turn(restriction).await?;
-    // Restore a pre-rollout encrypted checkpoint with its legacy review transcript.
-    let history = test.codex.conversation_history_snapshot().await;
-    let checkpoint: RolloutItem = serde_json::from_value(json!({
-        "type": "compacted", "payload": {
-            "message": "old checkpoint",
-            "replacement_history": [{
-                "type": "compaction", "id": "old", "encrypted_content": "opaque checkpoint"
-            }],
-            "guardian_history": history.review_items().cloned().collect::<Vec<_>>()
+        let mut responses = Vec::new();
+        for index in 0..3 {
+            if index == 1 {
+                // Force eviction after the first review has saved its transcript cursor.
+                let mut traffic: Vec<_> = (0..130)
+                    .map(|index| ev_function_call(&format!("later-{index}"), "update_plan", plan))
+                    .collect();
+                traffic.push(ev_completed("more-inspection"));
+                responses.push(sse(traffic));
+            }
+            responses.push(sse(vec![
+                ev_function_call(
+                    &format!("review-{index}"),
+                    "exec_command",
+                    &json!({
+                        "cmd": format!("echo review-{index}"),
+                        "sandbox_permissions": "require_escalated"
+                    })
+                    .to_string(),
+                ),
+                ev_completed(&format!("action-{index}")),
+            ]));
+            // Three consecutive denials would interrupt the parent turn before its final response.
+            let decision = if index == 2 {
+                r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#
+            } else {
+                r#"{"outcome":"deny"}"#
+            };
+            responses.push(sse(vec![
+                ev_assistant_message(&format!("decision-{index}"), decision),
+                ev_completed(&format!("reviewed-{index}")),
+            ]));
         }
-    }))?;
-    test.codex =
-        super::guardian_checkpoint_migration::resume(&test, &test.codex, vec![checkpoint]).await?;
-
-    let mut responses = Vec::new();
-    for index in 0..3 {
-        if index == 1 {
-            // Force eviction after the first review has saved its transcript cursor.
-            let mut traffic: Vec<_> = (0..130)
-                .map(|index| ev_function_call(&format!("later-{index}"), "update_plan", plan))
-                .collect();
-            traffic.push(ev_completed("more-inspection"));
-            responses.push(sse(traffic));
-        }
-        responses.push(sse(vec![
-            ev_function_call(
-                &format!("review-{index}"),
-                "exec_command",
-                &json!({
-                    "cmd": format!("echo review-{index}"),
-                    "sandbox_permissions": "require_escalated"
-                })
-                .to_string(),
-            ),
-            ev_completed(&format!("action-{index}")),
-        ]));
-        // Three consecutive denials would interrupt the parent turn before its final response.
-        let decision = if index == 2 {
-            r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#
-        } else {
-            r#"{"outcome":"deny"}"#
-        };
-        responses.push(sse(vec![
-            ev_assistant_message(&format!("decision-{index}"), decision),
-            ev_completed(&format!("reviewed-{index}")),
-        ]));
-    }
-    responses.push(sse(vec![ev_completed("done")]));
-    let reviews = mount_sse_sequence(&server, responses).await;
-    test.submit_text_turn("Continue inspecting.").await?;
-    let requests = reviews.requests();
-    let guardian_requests = requests
-        .iter()
-        .filter(|request| request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian")
-        .collect::<Vec<_>>();
-    let prompts = guardian_requests
-        .iter()
-        .map(|request| {
-            request
-                .message_input_text_groups("user")
-                .last()
-                .expect("Guardian review prompt")
-                .join("")
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        prompts
+        responses.push(sse(vec![ev_completed("done")]));
+        let reviews = mount_sse_sequence(&server, responses).await;
+        test.submit_text_turn("Continue inspecting.").await?;
+        let requests = reviews.requests();
+        let guardian_requests = requests
             .iter()
-            .map(|prompt| (
-                prompt.contains(">>> TRANSCRIPT START\n"),
-                prompt.contains(">>> TRANSCRIPT DELTA START\n"),
-            ))
-            .collect::<Vec<_>>(),
-        // Evicting the legacy backup only invalidates a cursor that uses it.
-        vec![
-            (true, false),
-            (!reuse_parent_checkpoint, reuse_parent_checkpoint),
-            (false, true)
-        ]
-    );
-    if reuse_parent_checkpoint {
-        // Earlier restrictions travel in the checkpoint, not a replayed backup.
-        for request in &guardian_requests {
-            assert_eq!(
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+            })
+            .collect::<Vec<_>>();
+        let prompts = guardian_requests
+            .iter()
+            .map(|request| {
                 request
-                    .inputs_of_type("compaction")
-                    .iter()
-                    .map(|item| item["encrypted_content"].clone())
-                    .collect::<Vec<_>>(),
-                vec![json!("opaque checkpoint")],
-            );
+                    .message_input_text_groups("user")
+                    .last()
+                    .expect("Guardian review prompt")
+                    .join("")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            prompts
+                .iter()
+                .map(|prompt| (
+                    prompt.contains(">>> TRANSCRIPT START\n"),
+                    prompt.contains(">>> TRANSCRIPT DELTA START\n"),
+                ))
+                .collect::<Vec<_>>(),
+            // Evicting the legacy backup only invalidates a cursor that uses it.
+            vec![
+                (true, false),
+                (!reuse_parent_checkpoint, reuse_parent_checkpoint),
+                (false, true)
+            ]
+        );
+        if reuse_parent_checkpoint {
+            // Earlier restrictions travel in the checkpoint, not a replayed backup.
+            for request in &guardian_requests {
+                assert_eq!(
+                    request
+                        .inputs_of_type("compaction")
+                        .iter()
+                        .map(|item| item["encrypted_content"].clone())
+                        .collect::<Vec<_>>(),
+                    vec![json!("opaque checkpoint")],
+                );
+            }
+        } else {
+            assert!(prompts[1].contains(restriction));
         }
-    } else {
-        assert!(prompts[1].contains(restriction));
-    }
-    assert!(prompts[2].contains("review-2"));
-    assert_eq!(
-        guardian_requests[1].body_json()["client_metadata"]["thread_id"],
-        guardian_requests[2].body_json()["client_metadata"]["thread_id"]
-    );
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+        assert!(prompts[2].contains("review-2"));
+        assert_eq!(
+            guardian_requests[1].body_json()["client_metadata"]["thread_id"],
+            guardian_requests[2].body_json()["client_metadata"]["thread_id"]
+        );
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -439,6 +457,7 @@ async fn guardian_answers_survive_compaction_and_eviction() -> Result<()> {
         "Guardian approval actions require host-native paths"
     );
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_config(|config| {
             config.features.enable(Feature::TokenBudget).unwrap();
@@ -613,4 +632,6 @@ async fn guardian_answers_survive_compaction_and_eviction() -> Result<()> {
             .all(|item| item["call_id"] != "inspect-0" && item["call_id"] != "confirm-publish")
     );
     Ok(())
+    })
+    .await
 }

@@ -31,7 +31,7 @@ use tokio::time::timeout;
 async fn widget_reads_survive_history_modes_compaction_restarts_and_app_only_visibility()
 -> Result<()> {
     let responses_server = responses::start_mock_server().await;
-    mock_server::run(&responses_server, async {
+    mock_server::run(&[&responses_server], async {
         let (apps_server_url, calls, apps_server_handle) = start_resource_apps_mcp_server().await?;
         calls.tools_enabled.store(true, Ordering::Relaxed);
         let (codex_home, mut app_server) = start_resource_test_app_server(

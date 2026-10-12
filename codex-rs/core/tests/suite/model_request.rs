@@ -11,6 +11,7 @@ use codex_extension_api::ResponseEvent;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -97,72 +98,75 @@ impl Drop for Permit {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn model_request_gates_output_and_cancellation() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let response = sse(vec![
-        ev_response_created("r1"),
-        ev_assistant_message("m1", "first"),
-        ev_assistant_message("m2", "done"),
-        ev_completed("r1"),
-    ]);
-    let model = responses::mount_sse_sequence(&server, vec![response.clone(), response]).await;
-    let gates = Arc::new(Gates {
-        delivered: Semaphore::new(0),
-        output_waiting: Semaphore::new(0),
-        cancelled: Semaphore::new(0),
-        output_items: std::sync::atomic::AtomicUsize::new(0),
-    });
-    let mut registry = ExtensionRegistryBuilder::new();
-    registry.model_request_contributor(Arc::new(Contributor(gates.clone())));
-    let mut builder = test_codex().with_extensions(Arc::new(registry.build()));
-    let test = builder.build_with_auto_env(&server).await?;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "hello".into(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    timeout(Duration::from_secs(10), gates.output_waiting.acquire())
-        .await??
-        .forget();
-    assert_eq!(model.requests().len(), 1);
-    assert_eq!(
-        gates.output_items.load(std::sync::atomic::Ordering::SeqCst),
-        2
-    );
-    assert_eq!(
-        model.single_request().body_json()["client_metadata"]["test-interceptor"],
-        "present"
-    );
-    // Drain earlier events and prove no assistant output passes a closed delivery gate.
-    assert!(
-        timeout(
-            Duration::from_millis(100),
-            wait_for_event(&test.codex, |e| matches!(
-                e,
-                EventMsg::AgentMessage(_) | EventMsg::TurnComplete(_)
-            ))
-        )
-        .await
-        .is_err()
-    );
-    gates.delivered.add_permits(1);
-    wait_for_event(&test.codex, |e| matches!(e, EventMsg::TurnComplete(_))).await;
-    assert_eq!(gates.cancelled.available_permits(), 0);
+    mock_server::run(&[&server], async {
+        let response = sse(vec![
+            ev_response_created("r1"),
+            ev_assistant_message("m1", "first"),
+            ev_assistant_message("m2", "done"),
+            ev_completed("r1"),
+        ]);
+        let model = responses::mount_sse_sequence(&server, vec![response.clone(), response]).await;
+        let gates = Arc::new(Gates {
+            delivered: Semaphore::new(0),
+            output_waiting: Semaphore::new(0),
+            cancelled: Semaphore::new(0),
+            output_items: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let mut registry = ExtensionRegistryBuilder::new();
+        registry.model_request_contributor(Arc::new(Contributor(gates.clone())));
+        let mut builder = test_codex().with_extensions(Arc::new(registry.build()));
+        let test = builder.build_with_auto_env(&server).await?;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "hello".into(),
+                text_elements: vec![],
+            }]))
+            .await?;
+        timeout(Duration::from_secs(10), gates.output_waiting.acquire())
+            .await??
+            .forget();
+        assert_eq!(model.requests().len(), 1);
+        assert_eq!(
+            gates.output_items.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+        assert_eq!(
+            model.single_request().body_json()["client_metadata"]["test-interceptor"],
+            "present"
+        );
+        // Drain earlier events and prove no assistant output passes a closed delivery gate.
+        assert!(
+            timeout(
+                Duration::from_millis(100),
+                wait_for_event(&test.codex, |e| matches!(
+                    e,
+                    EventMsg::AgentMessage(_) | EventMsg::TurnComplete(_)
+                ))
+            )
+            .await
+            .is_err()
+        );
+        gates.delivered.add_permits(1);
+        wait_for_event(&test.codex, |e| matches!(e, EventMsg::TurnComplete(_))).await;
+        assert_eq!(gates.cancelled.available_permits(), 0);
 
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "again".into(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    timeout(Duration::from_secs(10), gates.output_waiting.acquire())
-        .await??
-        .forget();
-    test.codex.submit(Op::Interrupt).await?;
-    timeout(Duration::from_secs(10), gates.cancelled.acquire())
-        .await??
-        .forget();
-    assert_eq!(model.requests().len(), 2);
-    Ok(())
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "again".into(),
+                text_elements: vec![],
+            }]))
+            .await?;
+        timeout(Duration::from_secs(10), gates.output_waiting.acquire())
+            .await??
+            .forget();
+        test.codex.submit(Op::Interrupt).await?;
+        timeout(Duration::from_secs(10), gates.cancelled.acquire())
+            .await??
+            .forget();
+        assert_eq!(model.requests().len(), 2);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

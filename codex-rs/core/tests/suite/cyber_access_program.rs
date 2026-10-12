@@ -12,6 +12,7 @@ use codex_protocol::turn_input::CyberAccessProgram;
 use codex_protocol::user_input::UserInput;
 use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
@@ -199,57 +200,60 @@ async fn cyber_access_program_survives_mid_turn_remote_compaction_v2(
 ) -> Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_function_call("call-before-compact", "test_tool", "{}"),
-                responses::ev_completed_with_tokens("resp-1", /*total_tokens*/ 500),
-            ]),
-            responses::sse(vec![
-                serde_json::json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "V2_COMPACT_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("resp-compact"),
-            ]),
-            responses::sse(vec![responses::ev_completed_with_tokens(
-                "resp-2", /*total_tokens*/ 80,
-            )]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(auth)
-        .with_config(|config| {
-            config.model_auto_compact_token_limit = Some(200);
-            config
-                .features
-                .enable(Feature::ApiKeyModelDiscovery)
-                .expect("enable API-key model discovery");
-            config
-                .features
-                .enable(Feature::ApiKeyCyberAccessPrograms)
-                .expect("enable API-key Cyber access programs");
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_function_call("call-before-compact", "test_tool", "{}"),
+                    responses::ev_completed_with_tokens("resp-1", /*total_tokens*/ 500),
+                ]),
+                responses::sse(vec![
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "V2_COMPACT_SUMMARY",
+                        }
+                    }),
+                    responses::ev_completed("resp-compact"),
+                ]),
+                responses::sse(vec![responses::ev_completed_with_tokens(
+                    "resp-2", /*total_tokens*/ 80,
+                )]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(auth)
+            .with_config(|config| {
+                config.model_auto_compact_token_limit = Some(200);
+                config
+                    .features
+                    .enable(Feature::ApiKeyModelDiscovery)
+                    .expect("enable API-key model discovery");
+                config
+                    .features
+                    .enable(Feature::ApiKeyCyberAccessPrograms)
+                    .expect("enable API-key Cyber access programs");
+            })
+            .build_with_auto_env(&server)
+            .await?;
 
-    submit(&test, Some(CyberAccessProgram::DaybreakBlue)).await?;
+        submit(&test, Some(CyberAccessProgram::DaybreakBlue)).await?;
 
-    let requests = requests.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.body_json()["access_programs"].clone())
-            .collect::<Vec<_>>(),
-        vec![json!({"cyber": "daybreak_blue"}); 3]
-    );
-    assert_eq!(requests[1].inputs_of_type("compaction_trigger").len(), 1);
-    Ok(())
+        let requests = requests.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.body_json()["access_programs"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!({"cyber": "daybreak_blue"}); 3]
+        );
+        assert_eq!(requests[1].inputs_of_type("compaction_trigger").len(), 1);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

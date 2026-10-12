@@ -26,6 +26,7 @@ use codex_models_manager::bundled_models_response;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_wine_exec;
 use pretty_assertions::assert_eq;
@@ -56,164 +57,165 @@ async fn settings_updates_report_results_and_preserve_the_target_on_saved_thread
     scenario: UpdateScenario,
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("response-1"),
-                responses::ev_function_call(
-                    "pause-turn",
-                    "request_user_input",
-                    &json!({
-                        "questions": [{
-                            "id": "continue",
-                            "header": "Continue",
-                            "question": "Continue after the settings update?",
-                            "options": [{
-                                "label": "Yes (Recommended)",
-                                "description": "Continue the current turn."
-                            }, {
-                                "label": "No",
-                                "description": "Stop the current turn."
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("response-1"),
+                    responses::ev_function_call(
+                        "pause-turn",
+                        "request_user_input",
+                        &json!({
+                            "questions": [{
+                                "id": "continue",
+                                "header": "Continue",
+                                "question": "Continue after the settings update?",
+                                "options": [{
+                                    "label": "Yes (Recommended)",
+                                    "description": "Continue the current turn."
+                                }, {
+                                    "label": "No",
+                                    "description": "Stop the current turn."
+                                }]
                             }]
-                        }]
-                    })
-                    .to_string(),
-                ),
-                responses::ev_completed("response-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("response-2"),
-                responses::ev_assistant_message("message-2", "first turn done"),
-                responses::ev_completed("response-2"),
-            ]),
-            responses::sse(vec![
-                responses::ev_response_created("response-3"),
-                responses::ev_assistant_message("message-3", "second turn done"),
-                responses::ev_completed("response-3"),
-            ]),
-        ],
-    )
-    .await;
-    let codex_home = TempDir::new()?;
-    mock_config(codex_home.path(), &server.uri())?
-        .enable_feature(Feature::StepModelSwitching)
-        .write(codex_home.path())?;
-    if matches!(scenario, UpdateScenario::Rejected) {
-        let path = codex_home.path().join("step-models.json");
-        let mut catalog: ModelsResponse = serde_json::from_slice(&std::fs::read(&path)?)?;
-        for model in &mut catalog.models {
-            model.node_repl_disabled = model.slug == MODEL_B;
+                        })
+                        .to_string(),
+                    ),
+                    responses::ev_completed("response-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("response-2"),
+                    responses::ev_assistant_message("message-2", "first turn done"),
+                    responses::ev_completed("response-2"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_response_created("response-3"),
+                    responses::ev_assistant_message("message-3", "second turn done"),
+                    responses::ev_completed("response-3"),
+                ]),
+            ],
+        )
+        .await;
+        let codex_home = TempDir::new()?;
+        mock_config(codex_home.path(), &server.uri())?
+            .enable_feature(Feature::StepModelSwitching)
+            .write(codex_home.path())?;
+        if matches!(scenario, UpdateScenario::Rejected) {
+            let path = codex_home.path().join("step-models.json");
+            let mut catalog: ModelsResponse = serde_json::from_slice(&std::fs::read(&path)?)?;
+            for model in &mut catalog.models {
+                model.node_repl_disabled = model.slug == MODEL_B;
+            }
+            std::fs::write(path, serde_json::to_vec(&catalog)?)?;
         }
-        std::fs::write(path, serde_json::to_vec(&catalog)?)?;
-    }
-    let mut app = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized_with_timeout(DEFAULT_TIMEOUT)
-        .await?;
-    let request_id = app
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some(MODEL_A.to_string()),
+        let mut app = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized_with_timeout(DEFAULT_TIMEOUT)
+            .await?;
+        let request_id = app
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some(MODEL_A.to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_TIMEOUT, app.read_response(request_id)).await??;
+        assert!(!thread.ephemeral);
+        let turn_id = start_turn(&mut app, &thread.id).await?;
+
+        let request = timeout(DEFAULT_TIMEOUT, app.read_stream_until_request_message()).await??;
+        let ServerRequest::ToolRequestUserInput { request_id, params } = request else {
+            anyhow::bail!("expected request_user_input, received {request:?}");
+        };
+        assert_eq!(params.thread_id, thread.id);
+
+        let patch = TurnSettingsUpdateParams {
+            thread_id: thread.id.clone(),
+            turn_id: turn_id.clone(),
+            model: Some(MODEL_B.to_string()),
+            effort: Some(ReasoningEffort::High),
+            summary: Some(ReasoningSummary::Detailed),
+            service_tier: Some(Some("priority".to_string())),
             ..Default::default()
-        })
-        .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_TIMEOUT, app.read_response(request_id)).await??;
-    assert!(!thread.ephemeral);
-    let turn_id = start_turn(&mut app, &thread.id).await?;
-
-    let request = timeout(DEFAULT_TIMEOUT, app.read_stream_until_request_message()).await??;
-    let ServerRequest::ToolRequestUserInput { request_id, params } = request else {
-        anyhow::bail!("expected request_user_input, received {request:?}");
-    };
-    assert_eq!(params.thread_id, thread.id);
-
-    let patch = TurnSettingsUpdateParams {
-        thread_id: thread.id.clone(),
-        turn_id: turn_id.clone(),
-        model: Some(MODEL_B.to_string()),
-        effort: Some(ReasoningEffort::High),
-        summary: Some(ReasoningSummary::Detailed),
-        service_tier: Some(Some("priority".to_string())),
-        ..Default::default()
-    };
-    match scenario {
-        UpdateScenario::Future => {
-            let id = app
-                .send_thread_settings_update_request(ThreadSettingsUpdateParams {
-                    thread_id: thread.id.clone(),
-                    model: patch.model,
-                    effort: patch.effort,
-                    summary: patch.summary,
-                    service_tier: patch.service_tier,
-                    ..Default::default()
-                })
-                .await?;
-            let _: ThreadSettingsUpdateResponse =
-                timeout(DEFAULT_TIMEOUT, app.read_response(id)).await??;
-            let updated: ThreadSettingsUpdatedNotification = timeout(
-                DEFAULT_TIMEOUT,
-                app.read_notification("thread/settings/updated"),
-            )
-            .await??;
-            assert_eq!(updated.thread_settings.model, MODEL_B);
-        }
-        UpdateScenario::Current => {
-            let outcome: TurnSettingsUpdateResponse = app
-                .request(|request_id| ClientRequest::TurnSettingsUpdate {
-                    request_id,
-                    params: patch,
-                })
-                .await?;
-            assert_eq!(
-                outcome,
-                TurnSettingsUpdateResponse {
-                    status: TurnSettingsUpdateStatus::Applied,
-                }
-            );
-            // Null keeps public effort/model/summary selections, but clears tier.
-            let id = app
-                .send_request(
-                    "turn/settings/update",
-                    Some(json!({
-                        "threadId": thread.id, "turnId": turn_id,
-                        "model": null, "effort": null, "summary": null, "serviceTier": null,
-                    })),
-                )
-                .await?;
-            let outcome: Value = timeout(DEFAULT_TIMEOUT, app.read_response(id)).await??;
-            assert_eq!(outcome, json!({ "status": "applied" }));
-        }
-        UpdateScenario::Rejected => {
-            for field in [
-                "personality",
-                "permissions",
-                "cwd",
-                "collaborationMode",
-                "scope",
-            ] {
-                let mut params = serde_json::to_value(&patch)?;
-                params[field] = json!("unsupported");
+        };
+        match scenario {
+            UpdateScenario::Future => {
                 let id = app
-                    .send_request("turn/settings/update", Some(params))
+                    .send_thread_settings_update_request(ThreadSettingsUpdateParams {
+                        thread_id: thread.id.clone(),
+                        model: patch.model,
+                        effort: patch.effort,
+                        summary: patch.summary,
+                        service_tier: patch.service_tier,
+                        ..Default::default()
+                    })
+                    .await?;
+                let _: ThreadSettingsUpdateResponse =
+                    timeout(DEFAULT_TIMEOUT, app.read_response(id)).await??;
+                let updated: ThreadSettingsUpdatedNotification = timeout(
+                    DEFAULT_TIMEOUT,
+                    app.read_notification("thread/settings/updated"),
+                )
+                .await??;
+                assert_eq!(updated.thread_settings.model, MODEL_B);
+            }
+            UpdateScenario::Current => {
+                let outcome: TurnSettingsUpdateResponse = app
+                    .request(|request_id| ClientRequest::TurnSettingsUpdate {
+                        request_id,
+                        params: patch,
+                    })
+                    .await?;
+                assert_eq!(
+                    outcome,
+                    TurnSettingsUpdateResponse {
+                        status: TurnSettingsUpdateStatus::Applied,
+                    }
+                );
+                // Null keeps public effort/model/summary selections, but clears tier.
+                let id = app
+                    .send_request(
+                        "turn/settings/update",
+                        Some(json!({
+                            "threadId": thread.id, "turnId": turn_id,
+                            "model": null, "effort": null, "summary": null, "serviceTier": null,
+                        })),
+                    )
+                    .await?;
+                let outcome: Value = timeout(DEFAULT_TIMEOUT, app.read_response(id)).await??;
+                assert_eq!(outcome, json!({ "status": "applied" }));
+            }
+            UpdateScenario::Rejected => {
+                for field in [
+                    "personality",
+                    "permissions",
+                    "cwd",
+                    "collaborationMode",
+                    "scope",
+                ] {
+                    let mut params = serde_json::to_value(&patch)?;
+                    params[field] = json!("unsupported");
+                    let id = app
+                        .send_request("turn/settings/update", Some(params))
+                        .await?;
+                    let error = timeout(
+                        DEFAULT_TIMEOUT,
+                        app.read_stream_until_error_message(RequestId::Integer(id)),
+                    )
+                    .await??;
+                    assert!(error.error.message.contains("unknown field"), "{error:?}");
+                    assert!(error.error.message.contains(field), "{error:?}");
+                }
+                let id = app
+                    .send_request("turn/settings/update", Some(serde_json::to_value(patch)?))
                     .await?;
                 let error = timeout(
                     DEFAULT_TIMEOUT,
                     app.read_stream_until_error_message(RequestId::Integer(id)),
                 )
                 .await??;
-                assert!(error.error.message.contains("unknown field"), "{error:?}");
-                assert!(error.error.message.contains(field), "{error:?}");
-            }
-            let id = app
-                .send_request("turn/settings/update", Some(serde_json::to_value(patch)?))
-                .await?;
-            let error = timeout(
-                DEFAULT_TIMEOUT,
-                app.read_stream_until_error_message(RequestId::Integer(id)),
-            )
-            .await??;
-            assert_eq!(
+                assert_eq!(
                 error.error,
                 JSONRPCErrorError {
                     code: -32600,
@@ -223,59 +225,61 @@ async fn settings_updates_report_results_and_preserve_the_target_on_saved_thread
                     data: None,
                 }
             );
+            }
         }
-    }
 
-    app.send_response(
-        request_id,
-        json!({"answers": {"continue": {"answers": ["Yes (Recommended)"]}}}),
-    )
-    .await?;
-    timeout(
-        DEFAULT_TIMEOUT,
-        app.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    start_turn(&mut app, &thread.id).await?;
-    timeout(
-        DEFAULT_TIMEOUT,
-        app.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        app.send_response(
+            request_id,
+            json!({"answers": {"continue": {"answers": ["Yes (Recommended)"]}}}),
+        )
+        .await?;
+        timeout(
+            DEFAULT_TIMEOUT,
+            app.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        start_turn(&mut app, &thread.id).await?;
+        timeout(
+            DEFAULT_TIMEOUT,
+            app.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let actual = requests
-        .requests()
-        .iter()
-        .map(|request| {
-            let body = request.body_json();
-            json!({
-                "model": body["model"],
-                "reasoning": body["reasoning"],
-                "service_tier": body.get("service_tier"),
+        let actual = requests
+            .requests()
+            .iter()
+            .map(|request| {
+                let body = request.body_json();
+                json!({
+                    "model": body["model"],
+                    "reasoning": body["reasoning"],
+                    "service_tier": body.get("service_tier"),
+                })
             })
-        })
-        .collect::<Vec<_>>();
-    let initial = json!({
-        "model": MODEL_A,
-        "reasoning": { "effort": "low", "summary": "concise" },
-        "service_tier": null,
-    });
-    let changed = json!({
-        "model": MODEL_B,
-        "reasoning": { "effort": "high", "summary": "detailed" },
-        "service_tier": "priority",
-    });
-    let expected = match scenario {
-        UpdateScenario::Future => vec![initial.clone(), initial, changed],
-        UpdateScenario::Current => {
-            let mut continued = changed;
-            continued["service_tier"] = Value::Null;
-            vec![initial.clone(), continued, initial]
-        }
-        UpdateScenario::Rejected => vec![initial.clone(), initial.clone(), initial],
-    };
-    assert_eq!(actual, expected);
-    Ok(())
+            .collect::<Vec<_>>();
+        let initial = json!({
+            "model": MODEL_A,
+            "reasoning": { "effort": "low", "summary": "concise" },
+            "service_tier": null,
+        });
+        let changed = json!({
+            "model": MODEL_B,
+            "reasoning": { "effort": "high", "summary": "detailed" },
+            "service_tier": "priority",
+        });
+        let expected = match scenario {
+            UpdateScenario::Future => vec![initial.clone(), initial, changed],
+            UpdateScenario::Current => {
+                let mut continued = changed;
+                continued["service_tier"] = Value::Null;
+                vec![initial.clone(), continued, initial]
+            }
+            UpdateScenario::Rejected => vec![initial.clone(), initial.clone(), initial],
+        };
+        assert_eq!(actual, expected);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -432,6 +436,7 @@ async fn live_reviewer_updates_route_approvals_without_changing_future_turns(
     skip_if_wine_exec!(Ok(()), "command approval requires host-native paths");
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut replies = vec![responses::sse(vec![
         responses::ev_function_call(
             "pause-turn",
@@ -535,6 +540,8 @@ async fn live_reviewer_updates_route_approvals_without_changing_future_turns(
         .count();
     assert_eq!(guardian_requests, 1);
     Ok(())
+    })
+    .await
 }
 
 async fn start_turn(app: &mut TestAppServer, thread_id: &str) -> Result<String> {

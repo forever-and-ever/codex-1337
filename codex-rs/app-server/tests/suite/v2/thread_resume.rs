@@ -124,6 +124,7 @@ use codex_state::StateRuntime;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_absolute_path::test_support::PathExt;
 use codex_utils_path_uri::LegacyAppPathString;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
@@ -2989,85 +2990,88 @@ async fn thread_resume_keeps_tool_paused_goal_paused() -> Result<()> {
         create_final_assistant_message_sse_response("The goal is paused.")?,
     ])
     .await;
-    let codex_home = TempDir::new()?;
-    mock_responses_config(&server.uri())
-        .enable_feature(Feature::Goals)
-        .write(codex_home.path())?;
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        mock_responses_config(&server.uri())
+            .enable_feature(Feature::Goals)
+            .write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .without_managed_config()
-        .build_initialized()
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .without_managed_config()
+            .build_initialized()
+            .await?;
 
-    let start_id = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("gpt-5.2-codex".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("gpt-5.2-codex".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
 
-    let turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![UserInput::Text {
-                text: "Create a goal to keep polishing, then pause it.".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _turn_resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "Create a goal to keep polishing, then pause it.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _turn_resp: JSONRPCResponse = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let goal_id = mcp
-        .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
-        .await?;
-    let goal: ThreadGoalGetResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(goal_id)).await??;
-    assert_eq!(
-        goal.goal.expect("goal should exist").status,
-        ThreadGoalStatus::Paused
-    );
-    mcp.clear_message_buffer();
+        let goal_id = mcp
+            .send_raw_request("thread/goal/get", Some(json!({ "threadId": thread.id })))
+            .await?;
+        let goal: ThreadGoalGetResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(goal_id)).await??;
+        assert_eq!(
+            goal.goal.expect("goal should exist").status,
+            ThreadGoalStatus::Paused
+        );
+        mcp.clear_message_buffer();
 
-    let resume_id = mcp
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id.clone(),
-            ..Default::default()
-        })
-        .await?;
-    let _resume: ThreadResumeResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
-    let notification = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("thread/goal/updated"),
-    )
-    .await??;
-    let notification: ServerNotification = notification.try_into()?;
-    let ServerNotification::ThreadGoalUpdated(notification) = notification else {
-        anyhow::bail!("expected thread goal update notification");
-    };
-    assert_eq!(notification.goal.status, ThreadGoalStatus::Paused);
-    assert!(
-        !mcp.pending_notification_methods()
-            .iter()
-            .any(|method| method == "turn/started"),
-        "paused goal should not continue after thread resume"
-    );
+        let resume_id = mcp
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let _resume: ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+        let notification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("thread/goal/updated"),
+        )
+        .await??;
+        let notification: ServerNotification = notification.try_into()?;
+        let ServerNotification::ThreadGoalUpdated(notification) = notification else {
+            anyhow::bail!("expected thread goal update notification");
+        };
+        assert_eq!(notification.goal.status, ThreadGoalStatus::Paused);
+        assert!(
+            !mcp.pending_notification_methods()
+                .iter()
+                .any(|method| method == "turn/started"),
+            "paused goal should not continue after thread resume"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -6188,118 +6192,122 @@ async fn thread_resume_accepts_deprecated_personality_override() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let first_body = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "Done"),
-        responses::ev_completed("resp-1"),
-    ]);
-    let second_body = responses::sse(vec![
-        responses::ev_response_created("resp-2"),
-        responses::ev_assistant_message("msg-2", "Done"),
-        responses::ev_completed("resp-2"),
-    ]);
-    let response_mock = responses::mount_sse_sequence(&server, vec![first_body, second_body]).await;
+    mock_server::run(&[&server], async {
+        let first_body = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "Done"),
+            responses::ev_completed("resp-1"),
+        ]);
+        let second_body = responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-2", "Done"),
+            responses::ev_completed("resp-2"),
+        ]);
+        let response_mock =
+            responses::mount_sse_sequence(&server, vec![first_body, second_body]).await;
 
-    let codex_home = TempDir::new()?;
-    mock_responses_config(&server.uri()).write(codex_home.path())?;
+        let codex_home = TempDir::new()?;
+        mock_responses_config(&server.uri()).write(codex_home.path())?;
 
-    let mut primary = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+        let mut primary = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
 
-    let start_id = primary
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("exp-codex-personality".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, primary.read_response(start_id)).await??;
+        let start_id = primary
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("exp-codex-personality".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, primary.read_response(start_id)).await??;
 
-    let materialize_id = primary
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![UserInput::Text {
-                text: "seed history".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        primary.read_stream_until_response_message(RequestId::Integer(materialize_id)),
-    )
-    .await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        primary.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let materialize_id = primary
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "seed history".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            primary.read_stream_until_response_message(RequestId::Integer(materialize_id)),
+        )
+        .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            primary.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    timeout(DEFAULT_READ_TIMEOUT, primary.shutdown_gracefully()).await??;
-    let mut secondary = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
+        timeout(DEFAULT_READ_TIMEOUT, primary.shutdown_gracefully()).await??;
+        let mut secondary = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
 
-    let resume_id = secondary
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id,
-            model: Some("exp-codex-personality".to_string()),
-            personality: Some(Personality::Friendly),
-            ..Default::default()
-        })
-        .await?;
-    let resume: ThreadResumeResponse =
-        timeout(DEFAULT_READ_TIMEOUT, secondary.read_response(resume_id)).await??;
-    assert_eq!(resume.thread.status, ThreadStatus::Idle);
+        let resume_id = secondary
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread.id,
+                model: Some("exp-codex-personality".to_string()),
+                personality: Some(Personality::Friendly),
+                ..Default::default()
+            })
+            .await?;
+        let resume: ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, secondary.read_response(resume_id)).await??;
+        assert_eq!(resume.thread.status, ThreadStatus::Idle);
 
-    let turn_id = secondary
-        .send_turn_start_request(TurnStartParams {
-            thread_id: resume.thread.id,
-            client_user_message_id: None,
-            input: vec![UserInput::Text {
-                text: "Hello".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        secondary.read_stream_until_response_message(RequestId::Integer(turn_id)),
-    )
-    .await??;
+        let turn_id = secondary
+            .send_turn_start_request(TurnStartParams {
+                thread_id: resume.thread.id,
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "Hello".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            secondary.read_stream_until_response_message(RequestId::Integer(turn_id)),
+        )
+        .await??;
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        secondary.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            secondary.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2, "expected initial and resumed turns");
-    let initial_instructions_text = requests[0].instructions_text();
-    let request = requests
-        .last()
-        .expect("expected request for resumed thread turn");
-    let developer_texts = request.message_input_texts("developer");
-    assert!(
-        developer_texts
-            .iter()
-            .all(|text| !text.contains("<personality_spec>")),
-        "deprecated personality override emitted a developer update: {developer_texts:?}"
-    );
-    let instructions_text = request.instructions_text();
-    assert_eq!(
-        instructions_text, initial_instructions_text,
-        "resume should retain the original base instructions"
-    );
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2, "expected initial and resumed turns");
+        let initial_instructions_text = requests[0].instructions_text();
+        let request = requests
+            .last()
+            .expect("expected request for resumed thread turn");
+        let developer_texts = request.message_input_texts("developer");
+        assert!(
+            developer_texts
+                .iter()
+                .all(|text| !text.contains("<personality_spec>")),
+            "deprecated personality override emitted a developer update: {developer_texts:?}"
+        );
+        let instructions_text = request.instructions_text();
+        assert_eq!(
+            instructions_text, initial_instructions_text,
+            "resume should retain the original base instructions"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 fn mock_responses_config(server_uri: &str) -> MockResponsesConfig {

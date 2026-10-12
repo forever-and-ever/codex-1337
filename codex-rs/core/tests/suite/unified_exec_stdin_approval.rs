@@ -22,6 +22,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -76,6 +77,7 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     let harness = harness(test_codex()).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     harness.create_dir_all("allowed").await?;
     let directory = test
@@ -202,6 +204,8 @@ async fn stdin_reviews_retained_grants_after_turn_permissions_expire() -> Result
     );
     assert_eq!(harness.read_file_text("allowed/result").await?, "allowed");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -235,6 +239,7 @@ async fn stdin_reviews_escalated_terminal_with_denied_reads_before_delivering_in
             .unwrap();
     }))
     .await?;
+    mock_server::run(&[harness.server()], async {
     let codex = &harness.test().codex;
     harness.write_file("secret.env", "secret").await?;
     let _open = mount_function_call_agent_response(
@@ -319,6 +324,8 @@ async fn stdin_reviews_escalated_terminal_with_denied_reads_before_delivering_in
     assert!(!harness.path_exists("denied-marker").await?);
     assert_eq!(harness.read_file_text("approved-marker").await?, "approved");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -347,6 +354,7 @@ async fn strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled() ->
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     extensions.approval_review_contributor(calls.clone());
     let harness = harness(test_codex().with_extensions(Arc::new(extensions.build()))).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let opened = mount_sse_sequence(
         harness.server(),
@@ -436,4 +444,6 @@ async fn strict_stdin_review_reaches_guardian_with_sandbox_prompts_disabled() ->
     let output = requests.last().unwrap().function_call_output("allowed");
     assert!(output.to_string().contains("STDIN_REVIEW_OK"), "{output}");
     Ok(())
+    })
+    .await
 }

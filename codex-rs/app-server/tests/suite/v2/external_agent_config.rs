@@ -1,4 +1,5 @@
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -2484,6 +2485,7 @@ async fn external_agent_config_import_returns_before_background_session_import_f
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn external_agent_config_import_compacts_huge_session_before_first_follow_up() -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_log = responses::mount_sse_sequence(
         &server,
         vec![
@@ -2634,6 +2636,8 @@ async fn external_agent_config_import_compacts_huge_session_before_first_follow_
     assert!(second.contains("follow up"));
     assert!(second.contains("LOCAL_SUMMARY"));
     Ok(())
+    })
+    .await
 }
 
 fn write_analytics_config(codex_home: &std::path::Path, base_url: &str) -> std::io::Result<()> {

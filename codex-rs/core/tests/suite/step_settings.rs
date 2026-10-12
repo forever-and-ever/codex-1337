@@ -82,6 +82,7 @@ use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_text;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::recorded_apps_tool_calls;
+use core_test_support::mock_server;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_completed;
@@ -307,6 +308,7 @@ fn request_turn_metadata(request: &ResponsesRequest) -> Value {
 async fn tool_result_history_keeps_originating_model_across_switch_and_replay() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut test = step_settings_test()
         .with_config(|config| {
             for model in &mut config.model_catalog.as_mut().expect("models").models {
@@ -632,6 +634,8 @@ async fn tool_result_history_keeps_originating_model_across_switch_and_replay() 
         }
     }
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -639,6 +643,7 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = step_settings_test()
         .with_model(MODEL_B)
         .with_config(|config| {
@@ -745,6 +750,8 @@ async fn custom_tool_output_replay_preserves_originating_budget() -> Result<()> 
         thread.shutdown_and_wait().await?;
     }
     Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -760,154 +767,157 @@ async fn settings_updates_preserve_turn_identity_and_target(target: SettingsTarg
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let response_mock = mount_response_sequence(
-        &server,
-        vec![
-            sse_response(paused_response("resp-1", "pause-turn"))
-                .insert_header(TURN_STATE_HEADER, "original-turn-state"),
-            sse_response(sse_completed("resp-2")),
-            sse_response(sse_completed("resp-3")),
-        ],
-    )
-    .await;
-    let test = step_settings_test().build_with_auto_env(&server).await?;
-    let original_settings = test.codex.thread_settings_snapshot().await;
-    let request = start_paused_turn(&test.codex).await?;
+    mock_server::run(&[&server], async {
+        let response_mock = mount_response_sequence(
+            &server,
+            vec![
+                sse_response(paused_response("resp-1", "pause-turn"))
+                    .insert_header(TURN_STATE_HEADER, "original-turn-state"),
+                sse_response(sse_completed("resp-2")),
+                sse_response(sse_completed("resp-3")),
+            ],
+        )
+        .await;
+        let test = step_settings_test().build_with_auto_env(&server).await?;
+        let original_settings = test.codex.thread_settings_snapshot().await;
+        let request = start_paused_turn(&test.codex).await?;
 
-    match target {
-        SettingsTarget::Thread => {
-            test.codex
-                .submit(Op::ThreadSettings {
-                    thread_settings: ThreadSettingsOverrides {
-                        model: Some(MODEL_B.to_string()),
-                        effort: Some(Some(ReasoningEffort::High)),
-                        summary: Some(ReasoningSummary::Detailed),
-                        service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
-                        ..Default::default()
-                    },
-                    reply: None,
-                })
-                .await?;
+        match target {
+            SettingsTarget::Thread => {
+                test.codex
+                    .submit(Op::ThreadSettings {
+                        thread_settings: ThreadSettingsOverrides {
+                            model: Some(MODEL_B.to_string()),
+                            effort: Some(Some(ReasoningEffort::High)),
+                            summary: Some(ReasoningSummary::Detailed),
+                            service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
+                            ..Default::default()
+                        },
+                        reply: None,
+                    })
+                    .await?;
+            }
+            SettingsTarget::Turn => {
+                let update = TurnSettingsUpdate {
+                    model: Some(MODEL_B.to_string()),
+                    effort: Some(Some(ReasoningEffort::High)),
+                    summary: Some(ReasoningSummary::Detailed),
+                    service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
+                    ..Default::default()
+                };
+                assert_eq!(
+                    submit_turn_settings(&test.codex, "different-turn", update.clone()).await?,
+                    TurnSettingsUpdateOutcome::TargetUnavailable
+                );
+                assert_eq!(
+                    submit_turn_settings(&test.codex, &request.turn_id, update).await?,
+                    TurnSettingsUpdateOutcome::Applied
+                );
+            }
         }
-        SettingsTarget::Turn => {
-            let update = TurnSettingsUpdate {
-                model: Some(MODEL_B.to_string()),
-                effort: Some(Some(ReasoningEffort::High)),
-                summary: Some(ReasoningSummary::Detailed),
-                service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
-                ..Default::default()
-            };
-            assert_eq!(
-                submit_turn_settings(&test.codex, "different-turn", update.clone()).await?,
-                TurnSettingsUpdateOutcome::TargetUnavailable
-            );
-            assert_eq!(
-                submit_turn_settings(&test.codex, &request.turn_id, update).await?,
-                TurnSettingsUpdateOutcome::Applied
-            );
-        }
-    }
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    let mut settings_events = Vec::new();
-    let mut new_turns = Vec::new();
-    let completion = wait_for_event(&test.codex, |event| match event {
-        EventMsg::ThreadSettingsApplied(event) => {
-            settings_events.push(event.thread_settings.clone());
-            false
-        }
-        EventMsg::TurnStarted(event) => {
-            new_turns.push(event.turn_id.clone());
-            false
-        }
-        EventMsg::Error(error) => panic!("settings activation failed: {}", error.message),
-        EventMsg::TurnComplete(_) => true,
-        _ => false,
-    })
-    .await;
-    let EventMsg::TurnComplete(completion) = completion else {
-        unreachable!("waited for turn completion")
-    };
-    assert_eq!(completion.turn_id, request.turn_id);
-    assert_eq!(new_turns, Vec::<String>::new());
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        let mut settings_events = Vec::new();
+        let mut new_turns = Vec::new();
+        let completion = wait_for_event(&test.codex, |event| match event {
+            EventMsg::ThreadSettingsApplied(event) => {
+                settings_events.push(event.thread_settings.clone());
+                false
+            }
+            EventMsg::TurnStarted(event) => {
+                new_turns.push(event.turn_id.clone());
+                false
+            }
+            EventMsg::Error(error) => panic!("settings activation failed: {}", error.message),
+            EventMsg::TurnComplete(_) => true,
+            _ => false,
+        })
+        .await;
+        let EventMsg::TurnComplete(completion) = completion else {
+            unreachable!("waited for turn completion")
+        };
+        assert_eq!(completion.turn_id, request.turn_id);
+        assert_eq!(new_turns, Vec::<String>::new());
 
-    let mut changed_settings = original_settings.clone();
-    changed_settings.model = MODEL_B.to_string();
-    changed_settings.reasoning_effort = Some(ReasoningEffort::High);
-    changed_settings.reasoning_summary = Some(ReasoningSummary::Detailed);
-    changed_settings.service_tier = Some(ServiceTier::Fast.request_value().to_string());
-    changed_settings.collaboration_mode = changed_settings.collaboration_mode.with_updates(
-        Some(MODEL_B.to_string()),
-        Some(Some(ReasoningEffort::High)),
-        /*developer_instructions*/ None,
-    );
-    let expected_future_settings = match target {
-        SettingsTarget::Turn => {
-            assert_eq!(settings_events, Vec::new());
-            original_settings
-        }
-        SettingsTarget::Thread => {
-            assert_eq!(settings_events, vec![changed_settings.clone()]);
-            changed_settings
-        }
-    };
-    assert_eq!(
-        test.codex.thread_settings_snapshot().await,
-        expected_future_settings
-    );
-    test.submit_text_turn("start the next turn").await?;
+        let mut changed_settings = original_settings.clone();
+        changed_settings.model = MODEL_B.to_string();
+        changed_settings.reasoning_effort = Some(ReasoningEffort::High);
+        changed_settings.reasoning_summary = Some(ReasoningSummary::Detailed);
+        changed_settings.service_tier = Some(ServiceTier::Fast.request_value().to_string());
+        changed_settings.collaboration_mode = changed_settings.collaboration_mode.with_updates(
+            Some(MODEL_B.to_string()),
+            Some(Some(ReasoningEffort::High)),
+            /*developer_instructions*/ None,
+        );
+        let expected_future_settings = match target {
+            SettingsTarget::Turn => {
+                assert_eq!(settings_events, Vec::new());
+                original_settings
+            }
+            SettingsTarget::Thread => {
+                assert_eq!(settings_events, vec![changed_settings.clone()]);
+                changed_settings
+            }
+        };
+        assert_eq!(
+            test.codex.thread_settings_snapshot().await,
+            expected_future_settings
+        );
+        test.submit_text_turn("start the next turn").await?;
 
-    let original_request_settings = json!({
-        "model": MODEL_A,
-        "reasoning": { "effort": "low", "summary": "concise" },
-        "service_tier": null,
-    });
-    let changed_request_settings = json!({
-        "model": MODEL_B,
-        "reasoning": { "effort": "high", "summary": "detailed" },
-        "service_tier": "priority",
-    });
-    let (continued_settings, next_turn_settings) = match target {
-        SettingsTarget::Thread => (original_request_settings.clone(), changed_request_settings),
-        SettingsTarget::Turn => (changed_request_settings, original_request_settings.clone()),
-    };
-    let requests = response_mock.requests();
-    assert_eq!(
-        requests.iter().map(request_settings).collect::<Vec<_>>(),
-        vec![
-            original_request_settings,
-            continued_settings,
-            next_turn_settings,
-        ]
-    );
-    assert_eq!(request_turn_id(&requests[0]), request.turn_id);
-    assert_eq!(request_turn_id(&requests[1]), request.turn_id);
-    assert_ne!(request_turn_id(&requests[2]), request.turn_id);
-    let session_id = requests[0]
-        .header("session-id")
-        .expect("initial request session id");
-    assert_eq!(requests[1].header("session-id"), Some(session_id));
-    assert_eq!(requests[0].header(TURN_STATE_HEADER), None);
-    assert_eq!(
-        requests[1].header(TURN_STATE_HEADER),
-        Some("original-turn-state".to_string())
-    );
-    assert_eq!(requests[2].header(TURN_STATE_HEADER), None);
-    let expected_switch_counts = match target {
-        SettingsTarget::Thread => vec![0, 0, 1],
-        SettingsTarget::Turn => vec![0, 1, 2],
-    };
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request
-                .message_input_texts("developer")
+        let original_request_settings = json!({
+            "model": MODEL_A,
+            "reasoning": { "effort": "low", "summary": "concise" },
+            "service_tier": null,
+        });
+        let changed_request_settings = json!({
+            "model": MODEL_B,
+            "reasoning": { "effort": "high", "summary": "detailed" },
+            "service_tier": "priority",
+        });
+        let (continued_settings, next_turn_settings) = match target {
+            SettingsTarget::Thread => (original_request_settings.clone(), changed_request_settings),
+            SettingsTarget::Turn => (changed_request_settings, original_request_settings.clone()),
+        };
+        let requests = response_mock.requests();
+        assert_eq!(
+            requests.iter().map(request_settings).collect::<Vec<_>>(),
+            vec![
+                original_request_settings,
+                continued_settings,
+                next_turn_settings,
+            ]
+        );
+        assert_eq!(request_turn_id(&requests[0]), request.turn_id);
+        assert_eq!(request_turn_id(&requests[1]), request.turn_id);
+        assert_ne!(request_turn_id(&requests[2]), request.turn_id);
+        let session_id = requests[0]
+            .header("session-id")
+            .expect("initial request session id");
+        assert_eq!(requests[1].header("session-id"), Some(session_id));
+        assert_eq!(requests[0].header(TURN_STATE_HEADER), None);
+        assert_eq!(
+            requests[1].header(TURN_STATE_HEADER),
+            Some("original-turn-state".to_string())
+        );
+        assert_eq!(requests[2].header(TURN_STATE_HEADER), None);
+        let expected_switch_counts = match target {
+            SettingsTarget::Thread => vec![0, 0, 1],
+            SettingsTarget::Turn => vec![0, 1, 2],
+        };
+        assert_eq!(
+            requests
                 .iter()
-                .filter(|text| text.contains("<model_switch>"))
-                .count())
-            .collect::<Vec<_>>(),
-        expected_switch_counts
-    );
-    Ok(())
+                .map(|request| request
+                    .message_input_texts("developer")
+                    .iter()
+                    .filter(|text| text.contains("<model_switch>"))
+                    .count())
+                .collect::<Vec<_>>(),
+            expected_switch_counts
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -935,70 +945,73 @@ async fn new_context_after_model_switch_uses_captured_extension_window() -> Resu
     }
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-a", "pause-before-new-context"),
-            sse(vec![
-                ev_response_created("resp-b"),
-                ev_function_call("new-window", "new_context", "{}"),
-                ev_completed("resp-b"),
-            ]),
-            sse_completed("resp-new-window"),
-        ],
-    )
-    .await;
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.prompt_contributor(Arc::new(WindowContributor));
-    let test = step_settings_test()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            config.features.enable(Feature::TokenBudget).unwrap();
-            config.model_context_window = None;
-            for model in &mut config.model_catalog.as_mut().unwrap().models {
-                model.context_window = None;
-                model.max_context_window = Some(if model.slug == MODEL_A {
-                    128_000
-                } else {
-                    256_000
-                });
-                model.effective_context_window_percent =
-                    if model.slug == MODEL_A { 75 } else { 50 };
-            }
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let paused = start_paused_turn(&test.codex).await?;
-    assert_eq!(
-        submit_turn_settings(
-            &test.codex,
-            &paused.turn_id,
-            TurnSettingsUpdate {
-                model: Some(MODEL_B.to_string()),
-                ..Default::default()
-            },
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-a", "pause-before-new-context"),
+                sse(vec![
+                    ev_response_created("resp-b"),
+                    ev_function_call("new-window", "new_context", "{}"),
+                    ev_completed("resp-b"),
+                ]),
+                sse_completed("resp-new-window"),
+            ],
         )
-        .await?,
-        TurnSettingsUpdateOutcome::Applied
-    );
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+        .await;
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.prompt_contributor(Arc::new(WindowContributor));
+        let test = step_settings_test()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.features.enable(Feature::TokenBudget).unwrap();
+                config.model_context_window = None;
+                for model in &mut config.model_catalog.as_mut().unwrap().models {
+                    model.context_window = None;
+                    model.max_context_window = Some(if model.slug == MODEL_A {
+                        128_000
+                    } else {
+                        256_000
+                    });
+                    model.effective_context_window_percent =
+                        if model.slug == MODEL_A { 75 } else { 50 };
+                }
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let paused = start_paused_turn(&test.codex).await?;
+        assert_eq!(
+            submit_turn_settings(
+                &test.codex,
+                &paused.turn_id,
+                TurnSettingsUpdate {
+                    model: Some(MODEL_B.to_string()),
+                    ..Default::default()
+                },
+            )
+            .await?,
+            TurnSettingsUpdateOutcome::Applied
+        );
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    let requests = responses.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.body_json()["model"].clone())
-            .collect::<Vec<_>>(),
-        vec![json!(MODEL_A), json!(MODEL_B), json!(MODEL_B)]
-    );
-    assert!(requests[0].body_contains_text("Extension window: 96000 tokens."));
-    assert!(requests[2].body_contains_text("Extension window: 128000 tokens."));
-    assert!(!requests[2].body_contains_text("Extension window: 96000 tokens."));
-    Ok(())
+        let requests = responses.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.body_json()["model"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(MODEL_A), json!(MODEL_B), json!(MODEL_B)]
+        );
+        assert!(requests[0].body_contains_text("Extension window: 96000 tokens."));
+        assert!(requests[2].body_contains_text("Extension window: 128000 tokens."));
+        assert!(!requests[2].body_contains_text("Extension window: 96000 tokens."));
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -1037,6 +1050,7 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
     let destination_has_guidance =
         !matches!(scenario, TokenBudgetScenario::DestinationWithoutGuidance);
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = mount_sse_sequence(
         &server,
         vec![
@@ -1259,6 +1273,8 @@ async fn active_model_switch_updates_core_context_from_captured_settings(
     }
 
     Ok(())
+    })
+    .await
 }
 
 #[test_case(Some(ReasoningEffort::Ultra); "selected effort")]
@@ -1271,77 +1287,80 @@ async fn active_model_switch_updates_multi_agent_policy_from_captured_effort(
 
     let use_model_default = effort.is_none();
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-before-effort-switch"),
-            sse_completed("resp-2"),
-        ],
-    )
-    .await;
-    let test = step_settings_test()
-        .with_config(move |config| {
-            config
-                .features
-                .enable(Feature::MultiAgentV2)
-                .expect("enable multi-agent V2");
-            for model in &mut config
-                .model_catalog
-                .as_mut()
-                .expect("controlled model catalog")
-                .models
-            {
-                model
-                    .model_messages
-                    .as_mut()
-                    .expect("model messages")
-                    .multi_agent = None;
-                model
-                    .supported_reasoning_levels
-                    .push(ReasoningEffortPreset {
-                        effort: ReasoningEffort::Ultra,
-                        description: "Ultra".to_string(),
-                    });
-                model.default_reasoning_level =
-                    Some(if model.slug == MODEL_B && use_model_default {
-                        ReasoningEffort::Ultra
-                    } else {
-                        ReasoningEffort::Low
-                    });
-            }
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(
-        submit_turn_settings(
-            &test.codex,
-            &request.turn_id,
-            TurnSettingsUpdate {
-                model: Some(MODEL_B.to_string()),
-                effort: Some(effort),
-                ..Default::default()
-            },
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-1", "pause-before-effort-switch"),
+                sse_completed("resp-2"),
+            ],
         )
-        .await?,
-        TurnSettingsUpdateOutcome::Applied
-    );
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        .await;
+        let test = step_settings_test()
+            .with_config(move |config| {
+                config
+                    .features
+                    .enable(Feature::MultiAgentV2)
+                    .expect("enable multi-agent V2");
+                for model in &mut config
+                    .model_catalog
+                    .as_mut()
+                    .expect("controlled model catalog")
+                    .models
+                {
+                    model
+                        .model_messages
+                        .as_mut()
+                        .expect("model messages")
+                        .multi_agent = None;
+                    model
+                        .supported_reasoning_levels
+                        .push(ReasoningEffortPreset {
+                            effort: ReasoningEffort::Ultra,
+                            description: "Ultra".to_string(),
+                        });
+                    model.default_reasoning_level =
+                        Some(if model.slug == MODEL_B && use_model_default {
+                            ReasoningEffort::Ultra
+                        } else {
+                            ReasoningEffort::Low
+                        });
+                }
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let request = start_paused_turn(&test.codex).await?;
+        assert_eq!(
+            submit_turn_settings(
+                &test.codex,
+                &request.turn_id,
+                TurnSettingsUpdate {
+                    model: Some(MODEL_B.to_string()),
+                    effort: Some(effort),
+                    ..Default::default()
+                },
+            )
+            .await?,
+            TurnSettingsUpdateOutcome::Applied
+        );
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].body_json()["model"], MODEL_A);
+        assert_eq!(requests[1].body_json()["model"], MODEL_B);
+        assert_eq!(requests[1].body_json()["reasoning"]["effort"], "xhigh");
+        let proactive_text = "Proactive multi-agent delegation is active.";
+        assert!(!requests[0].body_contains_text(proactive_text));
+        assert!(requests[1].body_contains_text(proactive_text));
+
+        Ok(())
     })
-    .await;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].body_json()["model"], MODEL_A);
-    assert_eq!(requests[1].body_json()["model"], MODEL_B);
-    assert_eq!(requests[1].body_json()["reasoning"]["effort"], "xhigh");
-    let proactive_text = "Proactive multi-agent delegation is active.";
-    assert!(!requests[0].body_contains_text(proactive_text));
-    assert!(requests[1].body_contains_text(proactive_text));
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1355,195 +1374,198 @@ async fn mcp_confirmation_policy_follows_step_model_changes() -> Result<()> {
     const BROWSER_ONLY_MODEL: &str = "policy-browser-only";
     const COMPUTER_ONLY_MODEL: &str = "policy-computer-only";
     let server = start_mock_server().await;
-    AppsTestServer::mount(&server).await?;
-    let policy_call = |response_id: &str, call_id: &str| {
-        sse(vec![
-            ev_response_created(response_id),
-            ev_function_call_with_namespace(
-                call_id,
-                "mcp__node_repl",
-                "calendar_list_events",
-                "{}",
-            ),
-            ev_completed(response_id),
-        ])
-    };
-    mount_sse_sequence(
-        &server,
-        vec![
-            policy_call("resp-1", "policy-a"),
-            sse_completed("resp-2"),
+    mock_server::run(&[&server], async {
+        AppsTestServer::mount(&server).await?;
+        let policy_call = |response_id: &str, call_id: &str| {
             sse(vec![
-                ev_response_created("resp-3"),
+                ev_response_created(response_id),
                 ev_function_call_with_namespace(
-                    "policy-a-pending",
+                    call_id,
                     "mcp__node_repl",
-                    "calendar_create_event",
-                    &json!({
-                        "title": "Policy snapshot test",
-                        "starts_at": "2026-08-26T12:00:00Z",
-                    })
-                    .to_string(),
+                    "calendar_list_events",
+                    "{}",
                 ),
-                ev_completed("resp-3"),
-            ]),
-            policy_call("resp-4", "policy-b"),
-            sse_completed("resp-5"),
-            policy_call("resp-6", "browser-only"),
-            sse_completed("resp-7"),
-            policy_call("resp-8", "computer-only"),
-            sse_completed("resp-9"),
-            policy_call("resp-10", "no-policy"),
-            sse_completed("resp-11"),
-        ],
-    )
-    .await;
-    let mcp_url = format!("{}/api/codex/ps/mcp", server.uri());
-    let test = step_settings_test()
-        .with_config(move |config| {
-            config
-                .features
-                .disable(Feature::ToolCallMcpElicitation)
-                .expect("disable MCP elicitation for the approval barrier");
-            let models = &mut config.model_catalog.as_mut().expect("test models").models;
-            for slug in [BROWSER_ONLY_MODEL, COMPUTER_ONLY_MODEL] {
-                let mut model = models[0].clone();
-                model.slug = slug.to_string();
-                models.push(model);
-            }
-            for model in models {
-                let messages = model
-                    .model_messages
-                    .as_mut()
-                    .expect("bundled model messages");
-                messages.confirmation_policies = match model.slug.as_str() {
-                    MODEL_A => Some(ConfirmationPolicies {
-                        browser_use: Some(BROWSER_POLICY_A.to_string()),
-                        computer_use: Some(COMPUTER_POLICY_A.to_string()),
-                    }),
-                    MODEL_B => Some(ConfirmationPolicies {
-                        browser_use: Some(BROWSER_POLICY_B.to_string()),
-                        computer_use: Some(COMPUTER_POLICY_B.to_string()),
-                    }),
-                    BROWSER_ONLY_MODEL => Some(ConfirmationPolicies {
-                        browser_use: Some(BROWSER_POLICY_B.to_string()),
-                        computer_use: None,
-                    }),
-                    COMPUTER_ONLY_MODEL => Some(ConfirmationPolicies {
-                        browser_use: None,
-                        computer_use: Some(COMPUTER_POLICY_B.to_string()),
-                    }),
-                    MODEL_C => None,
-                    _ => unreachable!("unexpected test model"),
-                };
-            }
-            let node_repl: McpServerConfig = serde_json::from_value(json!({
-                "url": mcp_url,
-                "tools": {
-                    "calendar_create_event": {
-                        "approval_mode": "prompt",
+                ev_completed(response_id),
+            ])
+        };
+        mount_sse_sequence(
+            &server,
+            vec![
+                policy_call("resp-1", "policy-a"),
+                sse_completed("resp-2"),
+                sse(vec![
+                    ev_response_created("resp-3"),
+                    ev_function_call_with_namespace(
+                        "policy-a-pending",
+                        "mcp__node_repl",
+                        "calendar_create_event",
+                        &json!({
+                            "title": "Policy snapshot test",
+                            "starts_at": "2026-08-26T12:00:00Z",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-3"),
+                ]),
+                policy_call("resp-4", "policy-b"),
+                sse_completed("resp-5"),
+                policy_call("resp-6", "browser-only"),
+                sse_completed("resp-7"),
+                policy_call("resp-8", "computer-only"),
+                sse_completed("resp-9"),
+                policy_call("resp-10", "no-policy"),
+                sse_completed("resp-11"),
+            ],
+        )
+        .await;
+        let mcp_url = format!("{}/api/codex/ps/mcp", server.uri());
+        let test = step_settings_test()
+            .with_config(move |config| {
+                config
+                    .features
+                    .disable(Feature::ToolCallMcpElicitation)
+                    .expect("disable MCP elicitation for the approval barrier");
+                let models = &mut config.model_catalog.as_mut().expect("test models").models;
+                for slug in [BROWSER_ONLY_MODEL, COMPUTER_ONLY_MODEL] {
+                    let mut model = models[0].clone();
+                    model.slug = slug.to_string();
+                    models.push(model);
+                }
+                for model in models {
+                    let messages = model
+                        .model_messages
+                        .as_mut()
+                        .expect("bundled model messages");
+                    messages.confirmation_policies = match model.slug.as_str() {
+                        MODEL_A => Some(ConfirmationPolicies {
+                            browser_use: Some(BROWSER_POLICY_A.to_string()),
+                            computer_use: Some(COMPUTER_POLICY_A.to_string()),
+                        }),
+                        MODEL_B => Some(ConfirmationPolicies {
+                            browser_use: Some(BROWSER_POLICY_B.to_string()),
+                            computer_use: Some(COMPUTER_POLICY_B.to_string()),
+                        }),
+                        BROWSER_ONLY_MODEL => Some(ConfirmationPolicies {
+                            browser_use: Some(BROWSER_POLICY_B.to_string()),
+                            computer_use: None,
+                        }),
+                        COMPUTER_ONLY_MODEL => Some(ConfirmationPolicies {
+                            browser_use: None,
+                            computer_use: Some(COMPUTER_POLICY_B.to_string()),
+                        }),
+                        MODEL_C => None,
+                        _ => unreachable!("unexpected test model"),
+                    };
+                }
+                let node_repl: McpServerConfig = serde_json::from_value(json!({
+                    "url": mcp_url,
+                    "tools": {
+                        "calendar_create_event": {
+                            "approval_mode": "prompt",
+                        },
                     },
-                },
-            }))
-            .expect("valid test MCP server");
-            config
-                .mcp_servers
-                .set(HashMap::from([("node_repl".to_string(), node_repl)]))
-                .expect("configure test MCP server");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    wait_for_mcp_server(&test.codex, "node_repl").await?;
-    test.submit_text_turn("call the tool with model A").await?;
+                }))
+                .expect("valid test MCP server");
+                config
+                    .mcp_servers
+                    .set(HashMap::from([("node_repl".to_string(), node_repl)]))
+                    .expect("configure test MCP server");
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        wait_for_mcp_server(&test.codex, "node_repl").await?;
+        test.submit_text_turn("call the tool with model A").await?;
 
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(request.call_id, "policy-a-pending");
-    // The pending call must retain model A's policies after this settings update.
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    test.codex
-        .submit(Op::UserInputAnswer {
-            id: request.turn_id.clone(),
-            response: RequestUserInputResponse {
-                answers: HashMap::from([(
-                    request.questions[0].id.clone(),
-                    RequestUserInputAnswer {
-                        answers: vec!["Allow".to_string()],
-                    },
-                )]),
-            },
-        })
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    for model in [BROWSER_ONLY_MODEL, COMPUTER_ONLY_MODEL, MODEL_C] {
-        core_test_support::submit_thread_settings(
+        let request = start_paused_turn(&test.codex).await?;
+        assert_eq!(request.call_id, "policy-a-pending");
+        // The pending call must retain model A's policies after this settings update.
+        apply_turn_settings(
             &test.codex,
-            ThreadSettingsOverrides {
-                model: Some(model.to_string()),
+            &request.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_B.to_string()),
                 ..Default::default()
             },
         )
         .await?;
-        test.submit_text_turn("call the tool").await?;
-    }
-
-    assert_eq!(
-        recorded_apps_tool_calls(&server)
-            .await
-            .into_iter()
-            .map(|call| {
-                let meta = &call["params"]["_meta"];
-                (
-                    meta["callId"].clone(),
-                    meta["openai/confirmation_policies"].clone(),
-                )
+        test.codex
+            .submit(Op::UserInputAnswer {
+                id: request.turn_id.clone(),
+                response: RequestUserInputResponse {
+                    answers: HashMap::from([(
+                        request.questions[0].id.clone(),
+                        RequestUserInputAnswer {
+                            answers: vec!["Allow".to_string()],
+                        },
+                    )]),
+                },
             })
-            .collect::<Vec<_>>(),
-        vec![
-            (
-                json!("policy-a"),
-                json!({
-                    "browser_use": BROWSER_POLICY_A,
-                    "computer_use": COMPUTER_POLICY_A,
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        for model in [BROWSER_ONLY_MODEL, COMPUTER_ONLY_MODEL, MODEL_C] {
+            core_test_support::submit_thread_settings(
+                &test.codex,
+                ThreadSettingsOverrides {
+                    model: Some(model.to_string()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            test.submit_text_turn("call the tool").await?;
+        }
+
+        assert_eq!(
+            recorded_apps_tool_calls(&server)
+                .await
+                .into_iter()
+                .map(|call| {
+                    let meta = &call["params"]["_meta"];
+                    (
+                        meta["callId"].clone(),
+                        meta["openai/confirmation_policies"].clone(),
+                    )
                 })
-            ),
-            (
-                json!("policy-a-pending"),
-                json!({
-                    "browser_use": BROWSER_POLICY_A,
-                    "computer_use": COMPUTER_POLICY_A,
-                })
-            ),
-            (
-                json!("policy-b"),
-                json!({
-                    "browser_use": BROWSER_POLICY_B,
-                    "computer_use": COMPUTER_POLICY_B,
-                })
-            ),
-            (
-                json!("browser-only"),
-                json!({"browser_use": BROWSER_POLICY_B})
-            ),
-            (
-                json!("computer-only"),
-                json!({"computer_use": COMPUTER_POLICY_B})
-            ),
-            (json!("no-policy"), json!({})),
-        ],
-    );
-    Ok(())
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    json!("policy-a"),
+                    json!({
+                        "browser_use": BROWSER_POLICY_A,
+                        "computer_use": COMPUTER_POLICY_A,
+                    })
+                ),
+                (
+                    json!("policy-a-pending"),
+                    json!({
+                        "browser_use": BROWSER_POLICY_A,
+                        "computer_use": COMPUTER_POLICY_A,
+                    })
+                ),
+                (
+                    json!("policy-b"),
+                    json!({
+                        "browser_use": BROWSER_POLICY_B,
+                        "computer_use": COMPUTER_POLICY_B,
+                    })
+                ),
+                (
+                    json!("browser-only"),
+                    json!({"browser_use": BROWSER_POLICY_B})
+                ),
+                (
+                    json!("computer-only"),
+                    json!({"computer_use": COMPUTER_POLICY_B})
+                ),
+                (json!("no-policy"), json!({})),
+            ],
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1720,6 +1742,7 @@ async fn captured_model_enables_and_executes_code_mode() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -1810,6 +1833,8 @@ async fn captured_model_enables_and_executes_code_mode() -> Result<()> {
         json!("original"),
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1817,102 +1842,105 @@ async fn response_metadata_uses_the_captured_step_after_a_turn_update() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut created = ev_response_created("resp-2");
-    created["safety_buffering"] = json!({
-        "use_cases": ["cyber"],
-        "reasons": ["policy-check"],
-        "retry_model": MODEL_C,
-    });
-    let response_mock = mount_response_sequence(
-        &server,
-        vec![
-            sse_response(paused_response("resp-1", "pause-turn")),
-            sse_response(sse(vec![created, ev_completed("resp-2")]))
-                .insert_header("OpenAI-Model", MODEL_B),
-        ],
-    )
-    .await;
-    let test = step_settings_test().build_with_auto_env(&server).await?;
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(
-        submit_turn_settings(
-            &test.codex,
-            &request.turn_id,
-            TurnSettingsUpdate {
-                model: Some(MODEL_B.to_string()),
-                effort: Some(Some(ReasoningEffort::High)),
-                ..Default::default()
-            },
+    mock_server::run(&[&server], async {
+        let mut created = ev_response_created("resp-2");
+        created["safety_buffering"] = json!({
+            "use_cases": ["cyber"],
+            "reasons": ["policy-check"],
+            "retry_model": MODEL_C,
+        });
+        let response_mock = mount_response_sequence(
+            &server,
+            vec![
+                sse_response(paused_response("resp-1", "pause-turn")),
+                sse_response(sse(vec![created, ev_completed("resp-2")]))
+                    .insert_header("OpenAI-Model", MODEL_B),
+            ],
         )
-        .await?,
-        TurnSettingsUpdateOutcome::Applied
-    );
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
+        .await;
+        let test = step_settings_test().build_with_auto_env(&server).await?;
+        let request = start_paused_turn(&test.codex).await?;
+        assert_eq!(
+            submit_turn_settings(
+                &test.codex,
+                &request.turn_id,
+                TurnSettingsUpdate {
+                    model: Some(MODEL_B.to_string()),
+                    effort: Some(Some(ReasoningEffort::High)),
+                    ..Default::default()
+                },
+            )
+            .await?,
+            TurnSettingsUpdateOutcome::Applied
+        );
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
 
-    let mut reroutes = Vec::new();
-    let mut buffering_events = Vec::new();
-    wait_for_event(&test.codex, |event| match event {
-        EventMsg::ModelReroute(event) => {
-            reroutes.push(event.clone());
-            false
-        }
-        EventMsg::SafetyBuffering(event) => {
-            buffering_events.push(event.clone());
-            false
-        }
-        EventMsg::Error(error) => panic!("sampling failed: {}", error.message),
-        EventMsg::TurnComplete(_) => true,
-        _ => false,
-    })
-    .await;
+        let mut reroutes = Vec::new();
+        let mut buffering_events = Vec::new();
+        wait_for_event(&test.codex, |event| match event {
+            EventMsg::ModelReroute(event) => {
+                reroutes.push(event.clone());
+                false
+            }
+            EventMsg::SafetyBuffering(event) => {
+                buffering_events.push(event.clone());
+                false
+            }
+            EventMsg::Error(error) => panic!("sampling failed: {}", error.message),
+            EventMsg::TurnComplete(_) => true,
+            _ => false,
+        })
+        .await;
 
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(|request| request.body_json()["model"].clone())
-            .collect::<Vec<_>>(),
-        vec![json!(MODEL_A), json!(MODEL_B)]
-    );
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(request_turn_metadata)
-            .map(|metadata| {
-                json!({
-                    "model": metadata["model"],
-                    "reasoning_effort": metadata["reasoning_effort"],
+        assert_eq!(
+            response_mock
+                .requests()
+                .iter()
+                .map(|request| request.body_json()["model"].clone())
+                .collect::<Vec<_>>(),
+            vec![json!(MODEL_A), json!(MODEL_B)]
+        );
+        assert_eq!(
+            response_mock
+                .requests()
+                .iter()
+                .map(request_turn_metadata)
+                .map(|metadata| {
+                    json!({
+                        "model": metadata["model"],
+                        "reasoning_effort": metadata["reasoning_effort"],
+                    })
                 })
-            })
-            .collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_A,
-                "reasoning_effort": "low",
-            }),
-            json!({
-                "model": MODEL_B,
-                "reasoning_effort": "high",
-            }),
-        ]
-    );
-    // B's matching response header is not a reroute from the turn's initial A.
-    // Buffering metadata likewise belongs to the captured B step.
-    assert_eq!(
-        (reroutes, buffering_events),
-        (
-            vec![],
-            vec![SafetyBufferingEvent {
-                model: MODEL_B.to_string(),
-                use_cases: vec!["cyber".to_string()],
-                reasons: vec!["policy-check".to_string()],
-                show_buffering_ui: true,
-                faster_model: Some(MODEL_C.to_string()),
-            }],
-        )
-    );
-    Ok(())
+                .collect::<Vec<_>>(),
+            vec![
+                json!({
+                    "model": MODEL_A,
+                    "reasoning_effort": "low",
+                }),
+                json!({
+                    "model": MODEL_B,
+                    "reasoning_effort": "high",
+                }),
+            ]
+        );
+        // B's matching response header is not a reroute from the turn's initial A.
+        // Buffering metadata likewise belongs to the captured B step.
+        assert_eq!(
+            (reroutes, buffering_events),
+            (
+                vec![],
+                vec![SafetyBufferingEvent {
+                    model: MODEL_B.to_string(),
+                    use_cases: vec!["cyber".to_string()],
+                    reasons: vec!["policy-check".to_string()],
+                    show_buffering_ui: true,
+                    faster_model: Some(MODEL_C.to_string()),
+                }],
+            )
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1920,131 +1948,134 @@ async fn sparse_updates_preserve_divergent_active_and_future_models() -> Result<
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-first-step"),
-            paused_response("resp-2", "pause-second-step"),
-            sse_completed("resp-3"),
-            sse_completed("resp-4"),
-        ],
-    )
-    .await;
-    let test = step_settings_test().build_with_auto_env(&server).await?;
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(test.codex.current_turn_model("other-turn").await, None);
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-1", "pause-first-step"),
+                paused_response("resp-2", "pause-second-step"),
+                sse_completed("resp-3"),
+                sse_completed("resp-4"),
+            ],
+        )
+        .await;
+        let test = step_settings_test().build_with_auto_env(&server).await?;
+        let request = start_paused_turn(&test.codex).await?;
+        assert_eq!(test.codex.current_turn_model("other-turn").await, None);
 
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    assert_eq!(
-        test.codex.current_turn_model(&request.turn_id).await,
-        Some(MODEL_A.to_string())
-    );
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_C.to_string()),
-            effort: Some(Some(ReasoningEffort::High)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    assert_eq!(
-        test.codex.current_turn_model(&request.turn_id).await,
-        Some(MODEL_C.to_string())
-    );
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    let second_request = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::RequestUserInput(request) => Some(request.clone()),
-        _ => None,
-    })
-    .await;
-    assert_eq!(second_request.turn_id, request.turn_id);
-    assert_eq!(second_request.call_id, "pause-second-step");
+        core_test_support::submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                model: Some(MODEL_B.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(
+            test.codex.current_turn_model(&request.turn_id).await,
+            Some(MODEL_A.to_string())
+        );
+        apply_turn_settings(
+            &test.codex,
+            &request.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_C.to_string()),
+                effort: Some(Some(ReasoningEffort::High)),
+                ..Default::default()
+            },
+        )
+        .await?;
+        assert_eq!(
+            test.codex.current_turn_model(&request.turn_id).await,
+            Some(MODEL_C.to_string())
+        );
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        let second_request = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::RequestUserInput(request) => Some(request.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(second_request.turn_id, request.turn_id);
+        assert_eq!(second_request.call_id, "pause-second-step");
 
-    test.codex
-        .submit(Op::ThreadSettings {
-            thread_settings: ThreadSettingsOverrides {
+        test.codex
+            .submit(Op::ThreadSettings {
+                thread_settings: ThreadSettingsOverrides {
+                    service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
+                    ..Default::default()
+                },
+                reply: None,
+            })
+            .await?;
+        apply_turn_settings(
+            &test.codex,
+            &request.turn_id,
+            TurnSettingsUpdate {
                 service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
                 ..Default::default()
             },
-            reply: None,
-        })
+        )
         .await?;
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            service_tier: Some(Some(ServiceTier::Fast.request_value().to_string())),
-            ..Default::default()
-        },
-    )
-    .await?;
-    let durable_settings = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::ThreadSettingsApplied(event) => Some(event.thread_settings.clone()),
-        _ => None,
-    })
-    .await;
-    assert_eq!(durable_settings.model, MODEL_B);
-    assert_eq!(
-        durable_settings.reasoning_effort,
-        Some(ReasoningEffort::Low)
-    );
-    assert_eq!(
-        durable_settings.service_tier,
-        Some(ServiceTier::Fast.request_value().to_string())
-    );
-    answer_paused_turn(&test.codex, &second_request.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    assert_eq!(test.codex.current_turn_model(&request.turn_id).await, None);
-    test.submit_text_turn("start the next turn").await?;
+        let durable_settings = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::ThreadSettingsApplied(event) => Some(event.thread_settings.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(durable_settings.model, MODEL_B);
+        assert_eq!(
+            durable_settings.reasoning_effort,
+            Some(ReasoningEffort::Low)
+        );
+        assert_eq!(
+            durable_settings.service_tier,
+            Some(ServiceTier::Fast.request_value().to_string())
+        );
+        answer_paused_turn(&test.codex, &second_request.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(test.codex.current_turn_model(&request.turn_id).await, None);
+        test.submit_text_turn("start the next turn").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(
-        requests.iter().map(request_settings).collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_C,
-                "reasoning": { "effort": "high", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_C,
-                "reasoning": { "effort": "high", "summary": "concise" },
-                "service_tier": "priority",
-            }),
-            json!({
-                "model": MODEL_B,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": "priority",
-            }),
-        ]
-    );
-    assert_eq!(
-        requests[..3]
-            .iter()
-            .map(request_turn_id)
-            .collect::<Vec<_>>(),
-        vec![request.turn_id.clone(); 3]
-    );
-    assert_ne!(request_turn_id(&requests[3]), request.turn_id);
+        let requests = response_mock.requests();
+        assert_eq!(
+            requests.iter().map(request_settings).collect::<Vec<_>>(),
+            vec![
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_C,
+                    "reasoning": { "effort": "high", "summary": "concise" },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_C,
+                    "reasoning": { "effort": "high", "summary": "concise" },
+                    "service_tier": "priority",
+                }),
+                json!({
+                    "model": MODEL_B,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": "priority",
+                }),
+            ]
+        );
+        assert_eq!(
+            requests[..3]
+                .iter()
+                .map(request_turn_id)
+                .collect::<Vec<_>>(),
+            vec![request.turn_id.clone(); 3]
+        );
+        assert_ne!(request_turn_id(&requests[3]), request.turn_id);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2052,65 +2083,68 @@ async fn turn_settings_do_not_target_idle_or_finished_turns() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![sse_completed("resp-1"), sse_completed("resp-2")],
-    )
-    .await;
-    let test = step_settings_test().build_with_auto_env(&server).await?;
-
-    for (discarded_model, model) in [(MODEL_C, MODEL_B), (MODEL_A, MODEL_C)] {
-        let turn_id = response_mock
-            .requests()
-            .last()
-            .map(request_turn_id)
-            .unwrap_or_else(|| "never-started".to_string());
-        let before = test.codex.thread_settings_snapshot().await;
-        assert_eq!(
-            submit_turn_settings(
-                &test.codex,
-                &turn_id,
-                TurnSettingsUpdate {
-                    model: Some(discarded_model.to_string()),
-                    ..Default::default()
-                }
-            )
-            .await?,
-            TurnSettingsUpdateOutcome::TargetUnavailable
-        );
-        assert_eq!(test.codex.thread_settings_snapshot().await, before);
-        core_test_support::submit_thread_settings(
-            &test.codex,
-            ThreadSettingsOverrides {
-                model: Some(model.to_string()),
-                ..Default::default()
-            },
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![sse_completed("resp-1"), sse_completed("resp-2")],
         )
-        .await?;
-        test.submit_text_turn("start the next turn").await?;
-    }
+        .await;
+        let test = step_settings_test().build_with_auto_env(&server).await?;
 
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(request_settings)
-            .collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_B,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_C,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": null,
-            }),
-        ]
-    );
+        for (discarded_model, model) in [(MODEL_C, MODEL_B), (MODEL_A, MODEL_C)] {
+            let turn_id = response_mock
+                .requests()
+                .last()
+                .map(request_turn_id)
+                .unwrap_or_else(|| "never-started".to_string());
+            let before = test.codex.thread_settings_snapshot().await;
+            assert_eq!(
+                submit_turn_settings(
+                    &test.codex,
+                    &turn_id,
+                    TurnSettingsUpdate {
+                        model: Some(discarded_model.to_string()),
+                        ..Default::default()
+                    }
+                )
+                .await?,
+                TurnSettingsUpdateOutcome::TargetUnavailable
+            );
+            assert_eq!(test.codex.thread_settings_snapshot().await, before);
+            core_test_support::submit_thread_settings(
+                &test.codex,
+                ThreadSettingsOverrides {
+                    model: Some(model.to_string()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            test.submit_text_turn("start the next turn").await?;
+        }
 
-    Ok(())
+        assert_eq!(
+            response_mock
+                .requests()
+                .iter()
+                .map(request_settings)
+                .collect::<Vec<_>>(),
+            vec![
+                json!({
+                    "model": MODEL_B,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_C,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": null,
+                }),
+            ]
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(None, "detailed"; "unset summary follows the destination model")]
@@ -2123,112 +2157,115 @@ async fn model_activation_uses_destination_metadata_defaults(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-before-model-change"),
-            paused_response("resp-2", "pause-before-restoring-model"),
-            sse_completed("resp-3"),
-        ],
-    )
-    .await;
-    let test = step_settings_test()
-        .with_config(move |config| {
-            config.model_context_window = None;
-            config.model_auto_compact_token_limit = None;
-            config.model_reasoning_summary = configured_summary;
-            config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
-            config.base_instructions = None;
-            for model in &mut config
-                .model_catalog
-                .as_mut()
-                .expect("controlled model catalog")
-                .models
-            {
-                model.context_window = Some(256_000);
-                model.auto_compact_token_limit = Some(200_000);
-                model.default_reasoning_summary = ReasoningSummary::Concise;
-                if model.slug == MODEL_B {
-                    model.context_window = Some(128_000);
-                    model.auto_compact_token_limit = Some(100_000);
-                    model.default_reasoning_summary = ReasoningSummary::Detailed;
-                    model
-                        .service_tiers
-                        .retain(|tier| tier.id != ServiceTier::Fast.request_value());
-                    model
-                        .model_messages
-                        .as_mut()
-                        .expect("model instruction metadata")
-                        .instructions_template =
-                        Some("Destination model instructions.".to_string());
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-1", "pause-before-model-change"),
+                paused_response("resp-2", "pause-before-restoring-model"),
+                sse_completed("resp-3"),
+            ],
+        )
+        .await;
+        let test = step_settings_test()
+            .with_config(move |config| {
+                config.model_context_window = None;
+                config.model_auto_compact_token_limit = None;
+                config.model_reasoning_summary = configured_summary;
+                config.service_tier = Some(ServiceTier::Fast.request_value().to_string());
+                config.base_instructions = None;
+                for model in &mut config
+                    .model_catalog
+                    .as_mut()
+                    .expect("controlled model catalog")
+                    .models
+                {
+                    model.context_window = Some(256_000);
+                    model.auto_compact_token_limit = Some(200_000);
+                    model.default_reasoning_summary = ReasoningSummary::Concise;
+                    if model.slug == MODEL_B {
+                        model.context_window = Some(128_000);
+                        model.auto_compact_token_limit = Some(100_000);
+                        model.default_reasoning_summary = ReasoningSummary::Detailed;
+                        model
+                            .service_tiers
+                            .retain(|tier| tier.id != ServiceTier::Fast.request_value());
+                        model
+                            .model_messages
+                            .as_mut()
+                            .expect("model instruction metadata")
+                            .instructions_template =
+                            Some("Destination model instructions.".to_string());
+                    }
                 }
-            }
-        })
-        .build_with_auto_env(&server)
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let request = start_paused_turn(&test.codex).await?;
+
+        apply_turn_settings(
+            &test.codex,
+            &request.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_B.to_string()),
+                ..Default::default()
+            },
+        )
         .await?;
-    let request = start_paused_turn(&test.codex).await?;
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        let paused = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::RequestUserInput(request) => Some(request.clone()),
+            _ => None,
+        })
+        .await;
+        // B cannot use the requested tier. Switching back must recover that
+        // selection and preserve an unset summary, not reuse B's effective values.
+        apply_turn_settings(
+            &test.codex,
+            &request.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_A.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        wait_for_event(&test.codex, |event| match event {
+            EventMsg::Error(error) => panic!("model activation failed: {}", error.message),
+            EventMsg::TurnComplete(_) => true,
+            _ => false,
+        })
+        .await;
 
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    let paused = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::RequestUserInput(request) => Some(request.clone()),
-        _ => None,
+        let requests = response_mock.requests();
+        assert_eq!(
+            requests.iter().map(request_settings).collect::<Vec<_>>(),
+            vec![
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": "priority",
+                }),
+                json!({
+                    "model": MODEL_B,
+                    "reasoning": { "effort": "low", "summary": expected_summary },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": "priority",
+                }),
+            ]
+        );
+        assert_eq!(
+            requests.iter().map(request_turn_id).collect::<Vec<_>>(),
+            vec![request.turn_id; 3],
+        );
+
+        Ok(())
     })
-    .await;
-    // B cannot use the requested tier. Switching back must recover that
-    // selection and preserve an unset summary, not reuse B's effective values.
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_A.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    wait_for_event(&test.codex, |event| match event {
-        EventMsg::Error(error) => panic!("model activation failed: {}", error.message),
-        EventMsg::TurnComplete(_) => true,
-        _ => false,
-    })
-    .await;
-
-    let requests = response_mock.requests();
-    assert_eq!(
-        requests.iter().map(request_settings).collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": "priority",
-            }),
-            json!({
-                "model": MODEL_B,
-                "reasoning": { "effort": "low", "summary": expected_summary },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": "priority",
-            }),
-        ]
-    );
-    assert_eq!(
-        requests.iter().map(request_turn_id).collect::<Vec<_>>(),
-        vec![request.turn_id; 3],
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2292,6 +2329,7 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
         })
     };
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = mount_sse_sequence(
         &server,
         vec![
@@ -2438,6 +2476,8 @@ async fn tool_messages_follow_mid_turn_model_changes() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2445,6 +2485,7 @@ async fn persistent_instructions_follow_mid_turn_model_changes() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = mount_sse_sequence(
         &server,
         vec![
@@ -2520,6 +2561,8 @@ async fn persistent_instructions_follow_mid_turn_model_changes() -> Result<()> {
         ]
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2527,79 +2570,82 @@ async fn turn_settings_rejection_preserves_independent_future_settings() -> Resu
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-before-node-repl-restriction"),
-            sse_completed("resp-2"),
-            sse_completed("resp-3"),
-        ],
-    )
-    .await;
-    let test = step_settings_test()
-        .with_config(|config| {
-            for model in &mut config
-                .model_catalog
-                .as_mut()
-                .expect("controlled model catalog")
-                .models
-            {
-                model.node_repl_disabled = model.slug == MODEL_B;
-            }
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let request = start_paused_turn(&test.codex).await?;
-    core_test_support::submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    let future = test.codex.thread_settings_snapshot().await;
-    assert_eq!(
-        submit_turn_settings(
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-1", "pause-before-node-repl-restriction"),
+                sse_completed("resp-2"),
+                sse_completed("resp-3"),
+            ],
+        )
+        .await;
+        let test = step_settings_test()
+            .with_config(|config| {
+                for model in &mut config
+                    .model_catalog
+                    .as_mut()
+                    .expect("controlled model catalog")
+                    .models
+                {
+                    model.node_repl_disabled = model.slug == MODEL_B;
+                }
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let request = start_paused_turn(&test.codex).await?;
+        core_test_support::submit_thread_settings(
             &test.codex,
-            &request.turn_id,
-            TurnSettingsUpdate {
+            ThreadSettingsOverrides {
                 model: Some(MODEL_B.to_string()),
                 ..Default::default()
-            }
+            },
         )
-        .await?,
-        TurnSettingsUpdateOutcome::Rejected {
-            reason: "the destination changes the admitted node REPL availability restriction"
-                .to_string(),
-        }
-    );
-    assert_eq!(test.codex.thread_settings_snapshot().await, future);
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.submit_text_turn("admit the next turn").await?;
+        .await?;
+        let future = test.codex.thread_settings_snapshot().await;
+        assert_eq!(
+            submit_turn_settings(
+                &test.codex,
+                &request.turn_id,
+                TurnSettingsUpdate {
+                    model: Some(MODEL_B.to_string()),
+                    ..Default::default()
+                }
+            )
+            .await?,
+            TurnSettingsUpdateOutcome::Rejected {
+                reason: "the destination changes the admitted node REPL availability restriction"
+                    .to_string(),
+            }
+        );
+        assert_eq!(test.codex.thread_settings_snapshot().await, future);
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_text_turn("admit the next turn").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(
-        requests.iter().map(request_settings).collect::<Vec<_>>(),
-        [MODEL_A, MODEL_A, MODEL_B]
-            .into_iter()
-            .map(|model| {
-                json!({
-                    "model": model,
-                    "reasoning": { "effort": "low", "summary": "concise" },
-                    "service_tier": null,
+        let requests = response_mock.requests();
+        assert_eq!(
+            requests.iter().map(request_settings).collect::<Vec<_>>(),
+            [MODEL_A, MODEL_A, MODEL_B]
+                .into_iter()
+                .map(|model| {
+                    json!({
+                        "model": model,
+                        "reasoning": { "effort": "low", "summary": "concise" },
+                        "service_tier": null,
+                    })
                 })
-            })
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(request_turn_id(&requests[1]), request.turn_id);
-    assert_ne!(request_turn_id(&requests[2]), request.turn_id);
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(request_turn_id(&requests[1]), request.turn_id);
+        assert_ne!(request_turn_id(&requests[2]), request.turn_id);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2609,94 +2655,97 @@ async fn request_preference_activation_keeps_admitted_model_metadata() -> Result
     // This test owns both catalog responses. The generic mock-server helper
     // installs an extra one-shot /models response that would shift the sequence.
     let server = wiremock::MockServer::start().await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-1", "pause-before-models-refresh"),
-            sse_completed("resp-2"),
-            sse_completed("resp-3"),
-        ],
-    )
-    .await;
-    let mut models = step_settings_models();
-    for model in &mut models {
-        model.default_reasoning_summary = ReasoningSummary::Concise;
-    }
-    let initial_catalog = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: models.clone(),
-        },
-    )
-    .await;
-    let test = step_settings_test()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            // Use the real refreshable models manager, and retain an unset
-            // preference so the selected model's default is observable.
-            config.model_catalog = None;
-            config.model_reasoning_summary = None;
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let request = start_paused_turn(&test.codex).await?;
-    assert_eq!(initial_catalog.requests().len(), 1);
-
-    for model in &mut models {
-        model.default_reasoning_summary = ReasoningSummary::Detailed;
-    }
-    let refresh = mount_models_once(&server, ModelsResponse { models }).await;
-    test.thread_manager
-        .get_models_manager()
-        .list_models(
-            RefreshStrategy::Online,
-            codex_core::test_support::default_http_client_factory(),
+    mock_server::run(&[&server], async {
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-1", "pause-before-models-refresh"),
+                sse_completed("resp-2"),
+                sse_completed("resp-3"),
+            ],
         )
         .await;
-    assert_eq!(refresh.requests().len(), 1);
+        let mut models = step_settings_models();
+        for model in &mut models {
+            model.default_reasoning_summary = ReasoningSummary::Concise;
+        }
+        let initial_catalog = mount_models_once(
+            &server,
+            ModelsResponse {
+                models: models.clone(),
+            },
+        )
+        .await;
+        let test = step_settings_test()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                // Use the real refreshable models manager, and retain an unset
+                // preference so the selected model's default is observable.
+                config.model_catalog = None;
+                config.model_reasoning_summary = None;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let request = start_paused_turn(&test.codex).await?;
+        assert_eq!(initial_catalog.requests().len(), 1);
 
-    apply_turn_settings(
-        &test.codex,
-        &request.turn_id,
-        TurnSettingsUpdate {
-            effort: Some(Some(ReasoningEffort::High)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &request.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        for model in &mut models {
+            model.default_reasoning_summary = ReasoningSummary::Detailed;
+        }
+        let refresh = mount_models_once(&server, ModelsResponse { models }).await;
+        test.thread_manager
+            .get_models_manager()
+            .list_models(
+                RefreshStrategy::Online,
+                codex_core::test_support::default_http_client_factory(),
+            )
+            .await;
+        assert_eq!(refresh.requests().len(), 1);
+
+        apply_turn_settings(
+            &test.codex,
+            &request.turn_id,
+            TurnSettingsUpdate {
+                effort: Some(Some(ReasoningEffort::High)),
+                ..Default::default()
+            },
+        )
+        .await?;
+        answer_paused_turn(&test.codex, &request.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.submit_text_turn("admit the next turn").await?;
+
+        assert_eq!(
+            response_mock
+                .requests()
+                .iter()
+                .map(request_settings)
+                .collect::<Vec<_>>(),
+            vec![
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "low", "summary": "concise" },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "high", "summary": "concise" },
+                    "service_tier": null,
+                }),
+                json!({
+                    "model": MODEL_A,
+                    "reasoning": { "effort": "low", "summary": "detailed" },
+                    "service_tier": null,
+                }),
+            ]
+        );
+
+        Ok(())
     })
-    .await;
-    test.submit_text_turn("admit the next turn").await?;
-
-    assert_eq!(
-        response_mock
-            .requests()
-            .iter()
-            .map(request_settings)
-            .collect::<Vec<_>>(),
-        vec![
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "high", "summary": "concise" },
-                "service_tier": null,
-            }),
-            json!({
-                "model": MODEL_A,
-                "reasoning": { "effort": "low", "summary": "detailed" },
-                "service_tier": null,
-            }),
-        ]
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2704,143 +2753,148 @@ async fn captured_step_controls_exec_completion_and_write_stdin_output() -> Resu
     core_test_support::skip_if_target_windows!(Ok(()), "uses POSIX read and printf");
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let output = "abcdefghij".repeat(100);
-    let command = format!("stty -echo; printf '{output}'; read line; printf '{output}'; exit 7");
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-a", "pause-a"),
-            sse(vec![
-                ev_response_created("resp-b"),
-                ev_function_call(
-                    "exec-b",
-                    "exec_command",
-                    &json!({
-                        "cmd": command, "tty": true, "yield_time_ms": 10,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-b"),
-            ]),
-            paused_response("resp-b-pause", "pause-b"),
-            sse(vec![
-                ev_response_created("resp-c"),
-                ev_function_call(
-                    "stdin-c",
-                    "write_stdin",
-                    &json!({
-                        "session_id": 1000, "chars": "done\n", "yield_time_ms": 1000,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-c"),
-            ]),
-            sse_completed("resp-result"),
-        ],
-    )
-    .await;
-    let test = direct_tool_settings_test()
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::ShellTool)
-                .expect("shell tools");
-            config
-                .features
-                .enable(Feature::UnifiedExec)
-                .expect("unified exec");
-            config
-                .permissions
-                .set_permission_profile(PermissionProfile::Disabled)
-                .expect("test permissions");
-            for model in &mut config.model_catalog.as_mut().expect("models").models {
-                model.shell_type = ConfigShellToolType::UnifiedExec;
-                model.truncation_policy = codex_protocol::openai_models::TruncationPolicyConfig {
-                    mode: codex_protocol::openai_models::TruncationMode::Bytes,
-                    limit: match model.slug.as_str() {
-                        MODEL_B => 400,
-                        MODEL_C => 800,
-                        _ => 8_000,
-                    },
-                };
-            }
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let paused = start_paused_turn(&test.codex).await?;
-    apply_turn_settings(
-        &test.codex,
-        &paused.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    let paused = wait_for_event_match(&test.codex, |event| match event {
-        EventMsg::RequestUserInput(request) => Some(request.clone()),
-        _ => None,
-    })
-    .await;
-    assert_eq!(paused.call_id, "pause-b");
-    apply_turn_settings(
-        &test.codex,
-        &paused.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_C.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    let mut end = None;
-    let mut turn_complete = false;
-    wait_for_event(&test.codex, |event| {
-        match event {
-            EventMsg::ExecCommandEnd(event) if event.call_id == "exec-b" => {
-                end = Some(event.clone())
-            }
-            EventMsg::TurnComplete(_) => turn_complete = true,
-            _ => {}
-        }
-        end.is_some() && turn_complete
-    })
-    .await;
-    let end = end.expect("exec completion");
-
-    let requests = responses.requests();
-    let exec = requests[2]
-        .function_call_output_text("exec-b")
-        .expect("exec output");
-    // The response budget also reserves space for command metadata and truncation notices.
-    assert_eq!(exec.matches("chars truncated").count(), 1, "{exec}");
-    let stdin = requests[4]
-        .function_call_output_text("stdin-c")
-        .expect("stdin output");
-    assert_eq!(stdin.matches("chars truncated").count(), 1, "{stdin}");
-    for (response, limit) in [(exec, 400), (stdin, 800)] {
-        let (header, actual) = response.split_once('\n').expect("exec output");
-        let output_budget = codex_utils_output_truncation::with_serialization_allowance(
-            TruncationPolicy::Bytes(limit),
+    mock_server::run(&[&server], async {
+        let output = "abcdefghij".repeat(100);
+        let command =
+            format!("stty -echo; printf '{output}'; read line; printf '{output}'; exit 7");
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-a", "pause-a"),
+                sse(vec![
+                    ev_response_created("resp-b"),
+                    ev_function_call(
+                        "exec-b",
+                        "exec_command",
+                        &json!({
+                            "cmd": command, "tty": true, "yield_time_ms": 10,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-b"),
+                ]),
+                paused_response("resp-b-pause", "pause-b"),
+                sse(vec![
+                    ev_response_created("resp-c"),
+                    ev_function_call(
+                        "stdin-c",
+                        "write_stdin",
+                        &json!({
+                            "session_id": 1000, "chars": "done\n", "yield_time_ms": 1000,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-c"),
+                ]),
+                sse_completed("resp-result"),
+            ],
         )
-        .byte_budget()
-        .saturating_sub(header.len() + 1);
-        let mut policy = TruncationPolicy::Bytes(limit);
-        let mut expected = formatted_truncate_text(&output, policy);
-        while expected.len() > output_budget && policy.byte_budget() > 0 {
-            policy = TruncationPolicy::Bytes(
-                policy
-                    .byte_budget()
-                    .saturating_sub(expected.len() - output_budget),
-            );
-            expected = formatted_truncate_text(&output, policy);
+        .await;
+        let test = direct_tool_settings_test()
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::ShellTool)
+                    .expect("shell tools");
+                config
+                    .features
+                    .enable(Feature::UnifiedExec)
+                    .expect("unified exec");
+                config
+                    .permissions
+                    .set_permission_profile(PermissionProfile::Disabled)
+                    .expect("test permissions");
+                for model in &mut config.model_catalog.as_mut().expect("models").models {
+                    model.shell_type = ConfigShellToolType::UnifiedExec;
+                    model.truncation_policy =
+                        codex_protocol::openai_models::TruncationPolicyConfig {
+                            mode: codex_protocol::openai_models::TruncationMode::Bytes,
+                            limit: match model.slug.as_str() {
+                                MODEL_B => 400,
+                                MODEL_C => 800,
+                                _ => 8_000,
+                            },
+                        };
+                }
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let paused = start_paused_turn(&test.codex).await?;
+        apply_turn_settings(
+            &test.codex,
+            &paused.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_B.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        let paused = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::RequestUserInput(request) => Some(request.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(paused.call_id, "pause-b");
+        apply_turn_settings(
+            &test.codex,
+            &paused.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_C.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        let mut end = None;
+        let mut turn_complete = false;
+        wait_for_event(&test.codex, |event| {
+            match event {
+                EventMsg::ExecCommandEnd(event) if event.call_id == "exec-b" => {
+                    end = Some(event.clone())
+                }
+                EventMsg::TurnComplete(_) => turn_complete = true,
+                _ => {}
+            }
+            end.is_some() && turn_complete
+        })
+        .await;
+        let end = end.expect("exec completion");
+
+        let requests = responses.requests();
+        let exec = requests[2]
+            .function_call_output_text("exec-b")
+            .expect("exec output");
+        // The response budget also reserves space for command metadata and truncation notices.
+        assert_eq!(exec.matches("chars truncated").count(), 1, "{exec}");
+        let stdin = requests[4]
+            .function_call_output_text("stdin-c")
+            .expect("stdin output");
+        assert_eq!(stdin.matches("chars truncated").count(), 1, "{stdin}");
+        for (response, limit) in [(exec, 400), (stdin, 800)] {
+            let (header, actual) = response.split_once('\n').expect("exec output");
+            let output_budget = codex_utils_output_truncation::with_serialization_allowance(
+                TruncationPolicy::Bytes(limit),
+            )
+            .byte_budget()
+            .saturating_sub(header.len() + 1);
+            let mut policy = TruncationPolicy::Bytes(limit);
+            let mut expected = formatted_truncate_text(&output, policy);
+            while expected.len() > output_budget && policy.byte_budget() > 0 {
+                policy = TruncationPolicy::Bytes(
+                    policy
+                        .byte_budget()
+                        .saturating_sub(expected.len() - output_budget),
+                );
+                expected = formatted_truncate_text(&output, policy);
+            }
+            assert_eq!(actual, expected);
         }
-        assert_eq!(actual, expected);
-    }
-    assert_eq!(end.exit_code, 7);
-    assert!(end.aggregated_output.contains(&output));
-    Ok(())
+        assert_eq!(end.exit_code, 7);
+        assert!(end.aggregated_output.contains(&output));
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(true; "model fallback and image detail")]
@@ -2849,6 +2903,7 @@ async fn captured_step_controls_exec_completion_and_write_stdin_output() -> Resu
 async fn captured_step_controls_mcp_output_limit(supports_images: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     AppsTestServer::mount(&server).await?;
     let title = "abcdefghij".repeat(100);
     wiremock::Mock::given(wiremock::matchers::method("POST"))
@@ -2974,6 +3029,8 @@ async fn captured_step_controls_mcp_output_limit(supports_images: bool) -> Resul
     assert!(output.contains("truncated"), "{output}");
     assert!(output.matches("abcdefghij").count() < 10, "{output}");
     Ok(())
+    })
+    .await
 }
 
 #[derive(Clone)]
@@ -3035,85 +3092,92 @@ async fn captured_step_settings_and_history_reach_extension_executor(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-a", "pause-a"),
-            sse(vec![
-                ev_response_created("resp-b"),
-                ev_function_call("extension-b", "extension_settings", "{}"),
-                ev_completed("resp-b"),
-            ]),
-            sse_completed("resp-result"),
-            sse_completed("resp-later"),
-        ],
-    )
-    .await;
-    let history = Arc::default();
-    let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.tool_contributor(Arc::new(SettingsEcho(Arc::clone(&history))));
-    let test = direct_tool_settings_test()
-        .with_history_mode(history_mode)
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            for model in &mut config.model_catalog.as_mut().expect("models").models {
-                model.truncation_policy =
-                    TruncationPolicyConfig::bytes(if model.slug == MODEL_B { 512 } else { 8_000 });
-            }
-        })
-        .build_with_auto_env(&server)
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-a", "pause-a"),
+                sse(vec![
+                    ev_response_created("resp-b"),
+                    ev_function_call("extension-b", "extension_settings", "{}"),
+                    ev_completed("resp-b"),
+                ]),
+                sse_completed("resp-result"),
+                sse_completed("resp-later"),
+            ],
+        )
+        .await;
+        let history = Arc::default();
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.tool_contributor(Arc::new(SettingsEcho(Arc::clone(&history))));
+        let test = direct_tool_settings_test()
+            .with_history_mode(history_mode)
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                for model in &mut config.model_catalog.as_mut().expect("models").models {
+                    model.truncation_policy =
+                        TruncationPolicyConfig::bytes(if model.slug == MODEL_B {
+                            512
+                        } else {
+                            8_000
+                        });
+                }
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let paused = start_paused_turn(&test.codex).await?;
+        apply_turn_settings(
+            &test.codex,
+            &paused.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_B.to_string()),
+                effort: Some(Some(ReasoningEffort::High)),
+                ..Default::default()
+            },
+        )
         .await?;
-    let paused = start_paused_turn(&test.codex).await?;
-    apply_turn_settings(
-        &test.codex,
-        &paused.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            effort: Some(Some(ReasoningEffort::High)),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let output = responses.requests()[2]
+            .function_call_output_text("extension-b")
+            .expect("extension output");
+        assert_eq!(
+            serde_json::from_str::<Value>(&output)?,
+            json!({
+                "model": MODEL_B,
+                "metadata_model": MODEL_B,
+                "effort": "high",
+                "output_bytes": 512,
+            })
+        );
+        test.submit_text_turn("later turn").await?;
+        // First read after a later turn: the extension must retain its invocation-time snapshot.
+        let history = history
+            .lock()
+            .expect("history lock")
+            .take()
+            .expect("captured history");
+        let user_texts = history
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                ResponseItem::Message { role, content, .. } if role == "user" => Some(content),
+                _ => None,
+            })
+            .flatten()
+            .filter_map(|item| match item {
+                ContentItem::InputText { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(user_texts.contains(&"pause before continuing"));
+        assert!(!user_texts.contains(&"later turn"));
+        Ok(())
     })
-    .await;
-    let output = responses.requests()[2]
-        .function_call_output_text("extension-b")
-        .expect("extension output");
-    assert_eq!(
-        serde_json::from_str::<Value>(&output)?,
-        json!({
-            "model": MODEL_B,
-            "metadata_model": MODEL_B,
-            "effort": "high",
-            "output_bytes": 512,
-        })
-    );
-    test.submit_text_turn("later turn").await?;
-    // First read after a later turn: the extension must retain its invocation-time snapshot.
-    let history = history
-        .lock()
-        .expect("history lock")
-        .take()
-        .expect("captured history");
-    let user_texts = history
-        .items()
-        .iter()
-        .filter_map(|item| match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => Some(content),
-            _ => None,
-        })
-        .flatten()
-        .filter_map(|item| match item {
-            ContentItem::InputText { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert!(user_texts.contains(&"pause before continuing"));
-    assert!(!user_texts.contains(&"later turn"));
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3132,113 +3196,120 @@ async fn captured_step_controls_mcp_resource_output() -> Result<()> {
         })
     };
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            paused_response("resp-a", "pause-a"),
-            sse(vec![
-                ev_response_created("resp-b"),
-                ev_function_call(
-                    "resource-b",
-                    "read_mcp_resource",
-                    &json!({
-                        "server": "resources", "uri": "memo://codex/example-note",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-b"),
-            ]),
-            sse_completed("resp-result"),
-        ],
-    )
-    .await;
-    let command = remote_aware_stdio_server_bin()?;
-    let test = direct_tool_settings_test()
-        .with_config(move |config| {
-            for model in &mut config.model_catalog.as_mut().expect("models").models {
-                model.truncation_policy =
-                    TruncationPolicyConfig::bytes(if model.slug == MODEL_B { 80 } else { 8_000 });
-                model
-                    .model_messages
-                    .as_mut()
-                    .expect("model messages")
-                    .tools
-                    .get_or_insert_with(Default::default)
-                    .mcp_resources = Some(McpResourceToolMessages {
-                    read_mcp_resource: Some(ToolMessage {
-                        description: Some(format!("Read resource for {}.", model.slug)),
-                        parameters: Some(parameters(&model.slug).to_string()),
-                    }),
-                    ..Default::default()
-                });
-            }
-            config
-                .mcp_servers
-                .set(HashMap::from([(
-                    "resources".to_string(),
-                    serde_json::from_value(json!({
-                        "command": command,
-                        "environment_id": remote_aware_environment_id(),
-                        "cwd": config.cwd,
-                    }))
-                    .expect("test MCP config"),
-                )]))
-                .expect("configure MCP");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    wait_for_mcp_server(&test.codex, "resources").await?;
-    let paused = start_paused_turn(&test.codex).await?;
-    apply_turn_settings(
-        &test.codex,
-        &paused.turn_id,
-        TurnSettingsUpdate {
-            model: Some(MODEL_B.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-    answer_paused_turn(&test.codex, &paused.turn_id).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    let requests = responses.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| {
-                let body = request.body_json();
-                let tool = body["tools"]
-                    .as_array()
-                    .expect("request tools")
-                    .iter()
-                    .find(|tool| tool["name"] == "read_mcp_resource")
-                    .expect("resource tool");
-                (body["model"].clone(), tool.clone())
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                paused_response("resp-a", "pause-a"),
+                sse(vec![
+                    ev_response_created("resp-b"),
+                    ev_function_call(
+                        "resource-b",
+                        "read_mcp_resource",
+                        &json!({
+                            "server": "resources", "uri": "memo://codex/example-note",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-b"),
+                ]),
+                sse_completed("resp-result"),
+            ],
+        )
+        .await;
+        let command = remote_aware_stdio_server_bin()?;
+        let test = direct_tool_settings_test()
+            .with_config(move |config| {
+                for model in &mut config.model_catalog.as_mut().expect("models").models {
+                    model.truncation_policy =
+                        TruncationPolicyConfig::bytes(if model.slug == MODEL_B {
+                            80
+                        } else {
+                            8_000
+                        });
+                    model
+                        .model_messages
+                        .as_mut()
+                        .expect("model messages")
+                        .tools
+                        .get_or_insert_with(Default::default)
+                        .mcp_resources = Some(McpResourceToolMessages {
+                        read_mcp_resource: Some(ToolMessage {
+                            description: Some(format!("Read resource for {}.", model.slug)),
+                            parameters: Some(parameters(&model.slug).to_string()),
+                        }),
+                        ..Default::default()
+                    });
+                }
+                config
+                    .mcp_servers
+                    .set(HashMap::from([(
+                        "resources".to_string(),
+                        serde_json::from_value(json!({
+                            "command": command,
+                            "environment_id": remote_aware_environment_id(),
+                            "cwd": config.cwd,
+                        }))
+                        .expect("test MCP config"),
+                    )]))
+                    .expect("configure MCP");
             })
-            .collect::<Vec<_>>(),
-        [MODEL_A, MODEL_B, MODEL_B]
-            .map(|model| (
-                json!(model),
-                json!({
-                    "type": "function",
-                    "name": "read_mcp_resource",
-                    "description": format!("Read resource for {model}."),
-                    "parameters": parameters(model),
-                    "strict": false,
+            .build_with_auto_env(&server)
+            .await?;
+        wait_for_mcp_server(&test.codex, "resources").await?;
+        let paused = start_paused_turn(&test.codex).await?;
+        apply_turn_settings(
+            &test.codex,
+            &paused.turn_id,
+            TurnSettingsUpdate {
+                model: Some(MODEL_B.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+        answer_paused_turn(&test.codex, &paused.turn_id).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = responses.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| {
+                    let body = request.body_json();
+                    let tool = body["tools"]
+                        .as_array()
+                        .expect("request tools")
+                        .iter()
+                        .find(|tool| tool["name"] == "read_mcp_resource")
+                        .expect("resource tool");
+                    (body["model"].clone(), tool.clone())
                 })
-            ))
-            .to_vec(),
-    );
-    let output = requests[2]
-        .function_call_output_text("resource-b")
-        .expect("resource output");
-    assert!(output.starts_with("{\"server\":\"resources\""), "{output}");
-    assert_eq!(output.matches("truncated").count(), 1, "{output}");
-    // B allows 96 serialized bytes plus the truncation notice; A preserves the full resource.
-    assert!(output.len() < 160, "{output}");
-    Ok(())
+                .collect::<Vec<_>>(),
+            [MODEL_A, MODEL_B, MODEL_B]
+                .map(|model| (
+                    json!(model),
+                    json!({
+                        "type": "function",
+                        "name": "read_mcp_resource",
+                        "description": format!("Read resource for {model}."),
+                        "parameters": parameters(model),
+                        "strict": false,
+                    })
+                ))
+                .to_vec(),
+        );
+        let output = requests[2]
+            .function_call_output_text("resource-b")
+            .expect("resource output");
+        assert!(output.starts_with("{\"server\":\"resources\""), "{output}");
+        assert_eq!(output.matches("truncated").count(), 1, "{output}");
+        // B allows 96 serialized bytes plus the truncation notice; A preserves the full resource.
+        assert!(output.len() < 160, "{output}");
+        Ok(())
+    })
+    .await
 }
 
 #[path = "step_settings_compaction.rs"]

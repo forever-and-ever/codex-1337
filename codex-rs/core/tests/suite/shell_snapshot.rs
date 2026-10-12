@@ -38,6 +38,7 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 #[cfg(unix)]
 use core_test_support::hooks::trust_discovered_hooks;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -163,80 +164,83 @@ async fn run_snapshot_command_with_options(
         config.permissions.shell_environment_policy.r#set = shell_environment_set;
     });
     let harness = TestCodexHarness::with_builder(builder).await?;
-    let args = json!({
-        "cmd": command,
-        "yield_time_ms": 1000,
-    });
-    let call_id = "shell-snapshot-exec";
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-2"),
-        ]),
-    ];
-    mount_sse_sequence(harness.server(), responses).await;
+    mock_server::run(&[harness.server()], async {
+        let args = json!({
+            "cmd": command,
+            "yield_time_ms": 1000,
+        });
+        let call_id = "shell-snapshot-exec";
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_function_call(call_id, "exec_command", &serde_json::to_string(&args)?),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ];
+        mount_sse_sequence(harness.server(), responses).await;
 
-    let test = harness.test();
-    let codex = test.codex.clone();
-    let codex_home = test.home.path().to_path_buf();
-    let session_model = test.session_configured.model.clone();
-    let cwd = test.config.cwd.clone();
-    let (sandbox_policy, permission_profile) =
-        turn_permission_fields(PermissionProfile::Disabled, cwd.as_path());
+        let test = harness.test();
+        let codex = test.codex.clone();
+        let codex_home = test.home.path().to_path_buf();
+        let session_model = test.session_configured.model.clone();
+        let cwd = test.config.cwd.clone();
+        let (sandbox_policy, permission_profile) =
+            turn_permission_fields(PermissionProfile::Disabled, cwd.as_path());
 
-    codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "run unified exec with shell snapshot".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(sandbox_policy),
-                permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: session_model,
-                        reasoning_effort: None,
-                        developer_instructions: None,
-                    },
+        codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "run unified exec with shell snapshot".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(sandbox_policy),
+                    permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: session_model,
+                            reasoning_effort: None,
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
+            )
+            .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
-        EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
-        _ => None,
+        let begin = wait_for_event_match(&codex, |ev| match ev {
+            EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
+        let snapshot_path = wait_for_snapshot(&codex_home).await?;
+        let snapshot_content = fs::read_to_string(&snapshot_path).await?;
+
+        let end = wait_for_event_match(&codex, |ev| match ev {
+            EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
+            _ => None,
+        })
+        .await;
+
+        wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+
+        Ok(SnapshotRun {
+            begin,
+            end,
+            snapshot_path,
+            snapshot_content,
+            codex_home,
+        })
     })
-    .await;
-    let snapshot_path = wait_for_snapshot(&codex_home).await?;
-    let snapshot_content = fs::read_to_string(&snapshot_path).await?;
-
-    let end = wait_for_event_match(&codex, |ev| match ev {
-        EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
-        _ => None,
-    })
-    .await;
-
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
-
-    Ok(SnapshotRun {
-        begin,
-        end,
-        snapshot_path,
-        snapshot_content,
-        codex_home,
-    })
+    .await
 }
 
 async fn run_tool_turn_on_harness(
@@ -652,6 +656,7 @@ async fn shell_snapshot_v2_guardian_uses_its_resolved_permissions_and_tools(
             .expect("require review even for an unrestricted owner environment");
         });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let responses = mount_sse_sequence(
         harness.server(),
@@ -741,6 +746,8 @@ async fn shell_snapshot_v2_guardian_uses_its_resolved_permissions_and_tools(
         "Guardian profile must not inherit writable owner permissions"
     );
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -794,6 +801,7 @@ exec /bin/bash --noprofile --norc "$@"
             };
         });
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
     let snapshot_path = wait_for_snapshot(harness.test().home.path()).await?;
     let snapshot = fs::read_to_string(&snapshot_path).await?;
     for sentinel in [
@@ -833,6 +841,8 @@ exec /bin/bash --noprofile --norc "$@"
     );
     harness.test().codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -1022,6 +1032,7 @@ async fn unified_exec_snapshot_still_intercepts_apply_patch() -> Result<()> {
             .expect("test config should allow feature update");
     });
     let harness = TestCodexHarness::with_builder(builder).await?;
+    mock_server::run(&[harness.server()], async {
 
     let test = harness.test();
     let codex = test.codex.clone();
@@ -1113,6 +1124,8 @@ async fn unified_exec_snapshot_still_intercepts_apply_patch() -> Result<()> {
     wait_for_file_contents(&target, "hello from snapshot\n").await?;
 
     Ok(())
+    })
+    .await
 }
 
 #[cfg_attr(target_os = "windows", ignore)]

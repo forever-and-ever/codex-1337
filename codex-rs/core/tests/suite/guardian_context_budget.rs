@@ -21,6 +21,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::user_input::UserInput;
 use core_test_support::ThreadIdle;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -47,159 +48,165 @@ async fn independent_review_preserves_oversized_instruction_order() -> Result<()
         "Guardian approval actions require host-native paths"
     );
     let server = responses::start_mock_server().await;
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
-    let mut test = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.6-luna", |model| model.context_window = Some(28_000))
-        .with_model_info_override("gpt-5.5", |model| {
-            model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
-        })
-        .with_config(|config| {
-            config
-                .features
-                .disable(Feature::GuardianReuseParentCompaction)
-                .expect("review the legacy transcript rather than the opaque checkpoint");
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config.model_auto_compact_token_limit = Some(1_000_000);
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    let old_history: Vec<RolloutItem> = serde_json::from_value(json!([{
-        "type": "compacted",
-        "payload": {
-            "message": "Historical checkpoint without producer metadata.",
-            "replacement_history": [{
-                "type": "compaction",
-                "id": "old-checkpoint",
-                "encrypted_content": "legacy opaque context"
-            }]
-        }
-    }]))?;
-    test.codex.ensure_rollout_materialized().await;
-    test.codex.append_rollout_items(&old_history).await?;
-    test.codex =
-        super::guardian_checkpoint_migration::resume(&test, &test.codex, old_history).await?;
-    assert_eq!(
-        GuardianContextMode::from_history(
-            test.codex.conversation_history_snapshot().await.as_ref()
-        ),
-        GuardianContextMode::Independent,
-    );
-    let command = json!({
-        "cmd": "echo complete-instructions",
-        "sandbox_permissions": "require_escalated",
-        "justification": "Run the requested command."
-    })
-    .to_string();
-    let events = (0..2)
-        .flat_map(|turn| {
-            let mut events = vec![
-                sse(vec![
-                    ev_function_call(&format!("exec-{turn}"), "exec_command", &command),
-                    ev_completed(&format!("parent-{turn}")),
-                ]),
-                sse(vec![
-                    ev_assistant_message(
-                        "decision",
-                        r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#,
-                    ),
-                    ev_completed(&format!("review-{turn}")),
-                ]),
-                sse(vec![
-                    ev_assistant_message("done", "done"),
-                    ev_completed(&format!("done-{turn}")),
-                ]),
-            ];
-            if turn == 1 {
-                events.insert(
-                    /*index*/ 1,
-                    sse(vec![
-                        json!({
-                            "type": "response.output_item.done",
-                            "item": {
-                                "type": "compaction",
-                                "id": "review-summary",
-                                "encrypted_content": "Earlier reviewer context."
-                            }
-                        }),
-                        ev_completed("review-compaction"),
-                    ]),
-                );
+    mock_server::run(&[&server], async {
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
+        let mut test = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_model_info_override("gpt-5.6-luna", |model| model.context_window = Some(28_000))
+            .with_model_info_override("gpt-5.5", |model| {
+                model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
+            })
+            .with_config(|config| {
+                config
+                    .features
+                    .disable(Feature::GuardianReuseParentCompaction)
+                    .expect("review the legacy transcript rather than the opaque checkpoint");
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config.model_auto_compact_token_limit = Some(1_000_000);
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        let old_history: Vec<RolloutItem> = serde_json::from_value(json!([{
+            "type": "compacted",
+            "payload": {
+                "message": "Historical checkpoint without producer metadata.",
+                "replacement_history": [{
+                    "type": "compaction",
+                    "id": "old-checkpoint",
+                    "encrypted_content": "legacy opaque context"
+                }]
             }
-            events
+        }]))?;
+        test.codex.ensure_rollout_materialized().await;
+        test.codex.append_rollout_items(&old_history).await?;
+        test.codex =
+            super::guardian_checkpoint_migration::resume(&test, &test.codex, old_history).await?;
+        assert_eq!(
+            GuardianContextMode::from_history(
+                test.codex.conversation_history_snapshot().await.as_ref()
+            ),
+            GuardianContextMode::Independent,
+        );
+        let command = json!({
+            "cmd": "echo complete-instructions",
+            "sandbox_permissions": "require_escalated",
+            "justification": "Run the requested command."
         })
-        .collect();
-    let responses = responses::mount_sse_sequence(&server, events).await;
-    let padding = "é🙂 ".repeat(/*n*/ 3_500);
-    let initial = format!(
-        "{padding}Run the requested echo command. You may edit scratch files only.{padding}"
-    );
-    test.submit_text_turn(&initial).await?;
-    ThreadIdle::wait(&test.codex).await;
-    let followup = format!("{padding}{padding}Keep all files private.{padding}{padding}");
-    let approval = format!(
-        "{}\nApproved action: {command}",
-        codex_guardian_context::MANUAL_APPROVAL_DEVELOPER_PREFIX
-    );
-    let restriction = "Revoke permission to edit files. Only run the echo command.";
-    test.codex
-        .inject_response_items(vec![
-            responses::user_message_item(&followup),
-            ResponseItem::Message {
-                id: None,
-                role: "developer".to_owned(),
-                content: vec![ContentItem::InputText {
-                    text: approval.clone(),
-                }],
-                phase: None,
-                internal_chat_message_metadata_passthrough: None,
-            },
-        ])
-        .await?;
-    test.submit_text_turn(restriction).await?;
-    ThreadIdle::wait(&test.codex).await;
-    let (compactions, requests): (Vec<_>, Vec<_>) = responses
-        .requests()
-        .into_iter()
-        .partition(|request| !request.inputs_of_type("compaction_trigger").is_empty());
-    let reviews = requests
-        .iter()
-        .filter(|request| request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian")
-        .collect::<Vec<_>>();
-    assert_eq!((compactions.len(), reviews.len()), (1, 2));
-    assert!(
-        reviews[0]
-            .message_input_text_groups("user")
-            .last()
-            .expect("first review")
-            .concat()
-            .contains(&initial)
-    );
-    let groups = reviews[1].message_input_text_groups("user");
-    let delta = groups.last().expect("follow-up review").concat();
-    assert!(delta.contains("<truncated omitted_approx_tokens="));
-    assert!(
-        delta.contains("User instructions and prior approvals may be incomplete where marked.")
-    );
-    let transcript = delta
-        .split_once(">>> TRANSCRIPT DELTA START\n")
-        .expect("legacy transcript delta")
-        .1
-        .split_once(">>> TRANSCRIPT DELTA END\n")
-        .expect("legacy transcript delta end")
-        .0;
-    let approval_start = transcript.find(&approval).expect("complete prior approval");
-    let restriction_start = transcript.find(restriction).expect("later restriction");
-    assert!(approval_start + approval.len() < restriction_start);
-    assert!(!delta.contains(&initial), "old entries are not resent");
-    assert_eq!(
-        reviews[0].body_json()["client_metadata"]["thread_id"],
-        reviews[1].body_json()["client_metadata"]["thread_id"]
-    );
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+        .to_string();
+        let events = (0..2)
+            .flat_map(|turn| {
+                let mut events = vec![
+                    sse(vec![
+                        ev_function_call(&format!("exec-{turn}"), "exec_command", &command),
+                        ev_completed(&format!("parent-{turn}")),
+                    ]),
+                    sse(vec![
+                        ev_assistant_message(
+                            "decision",
+                            r#"{"risk_level":"low","user_authorization":"high","outcome":"allow"}"#,
+                        ),
+                        ev_completed(&format!("review-{turn}")),
+                    ]),
+                    sse(vec![
+                        ev_assistant_message("done", "done"),
+                        ev_completed(&format!("done-{turn}")),
+                    ]),
+                ];
+                if turn == 1 {
+                    events.insert(
+                        /*index*/ 1,
+                        sse(vec![
+                            json!({
+                                "type": "response.output_item.done",
+                                "item": {
+                                    "type": "compaction",
+                                    "id": "review-summary",
+                                    "encrypted_content": "Earlier reviewer context."
+                                }
+                            }),
+                            ev_completed("review-compaction"),
+                        ]),
+                    );
+                }
+                events
+            })
+            .collect();
+        let responses = responses::mount_sse_sequence(&server, events).await;
+        let padding = "é🙂 ".repeat(/*n*/ 3_500);
+        let initial = format!(
+            "{padding}Run the requested echo command. You may edit scratch files only.{padding}"
+        );
+        test.submit_text_turn(&initial).await?;
+        ThreadIdle::wait(&test.codex).await;
+        let followup = format!("{padding}{padding}Keep all files private.{padding}{padding}");
+        let approval = format!(
+            "{}\nApproved action: {command}",
+            codex_guardian_context::MANUAL_APPROVAL_DEVELOPER_PREFIX
+        );
+        let restriction = "Revoke permission to edit files. Only run the echo command.";
+        test.codex
+            .inject_response_items(vec![
+                responses::user_message_item(&followup),
+                ResponseItem::Message {
+                    id: None,
+                    role: "developer".to_owned(),
+                    content: vec![ContentItem::InputText {
+                        text: approval.clone(),
+                    }],
+                    phase: None,
+                    internal_chat_message_metadata_passthrough: None,
+                },
+            ])
+            .await?;
+        test.submit_text_turn(restriction).await?;
+        ThreadIdle::wait(&test.codex).await;
+        let (compactions, requests): (Vec<_>, Vec<_>) = responses
+            .requests()
+            .into_iter()
+            .partition(|request| !request.inputs_of_type("compaction_trigger").is_empty());
+        let reviews = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!((compactions.len(), reviews.len()), (1, 2));
+        assert!(
+            reviews[0]
+                .message_input_text_groups("user")
+                .last()
+                .expect("first review")
+                .concat()
+                .contains(&initial)
+        );
+        let groups = reviews[1].message_input_text_groups("user");
+        let delta = groups.last().expect("follow-up review").concat();
+        assert!(delta.contains("<truncated omitted_approx_tokens="));
+        assert!(
+            delta.contains("User instructions and prior approvals may be incomplete where marked.")
+        );
+        let transcript = delta
+            .split_once(">>> TRANSCRIPT DELTA START\n")
+            .expect("legacy transcript delta")
+            .1
+            .split_once(">>> TRANSCRIPT DELTA END\n")
+            .expect("legacy transcript delta end")
+            .0;
+        let approval_start = transcript.find(&approval).expect("complete prior approval");
+        let restriction_start = transcript.find(restriction).expect("later restriction");
+        assert!(approval_start + approval.len() < restriction_start);
+        assert!(!delta.contains(&initial), "old entries are not resent");
+        assert_eq!(
+            reviews[0].body_json()["client_metadata"]["thread_id"],
+            reviews[1].body_json()["client_metadata"]["thread_id"]
+        );
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -229,6 +236,7 @@ async fn review_respects_complete_context_budget(
         "Guardian approval actions require host-native paths"
     );
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_cloud_config_bundle(
             CloudConfigBundleFixture::loader_with_enterprise_requirement(
@@ -613,6 +621,8 @@ async fn review_respects_complete_context_budget(
     }
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -635,162 +645,169 @@ async fn oversized_action_preserves_review_policy_and_next_review(
         "Guardian approval actions require host-native paths"
     );
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.5", |model| {
-            model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
-        })
-        .with_model_info_override("gpt-5.6-luna", move |model| {
-            model.context_window = Some(if matches!(review, OversizedActionReview::Fits) {
-                160_000
-            } else {
-                16_000
-            });
-        })
-        .with_config(|config| {
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-        });
-    if matches!(review, OversizedActionReview::RequiredGuardian) {
-        builder = builder.with_model("gpt-5.5").with_cloud_config_bundle(
-            CloudConfigBundleFixture::loader_with_enterprise_requirement(
-                "[auto_review]\nrequired_on_models = [\"gpt-5.5\"]\n",
-            ),
-        );
-    }
-    let test = builder.build_with_auto_env(&server).await?;
-    let oversized_command =
-        "echo ".to_owned() + &"large-action".repeat(/*n*/ 20_000) + "required suffix";
-    let oversized = json!({
-        "cmd": oversized_command,
-        "sandbox_permissions": "require_escalated",
-        "justification": "Run the requested command.",
-    })
-    .to_string();
-    let next = json!({
-        "cmd": "echo complete-action-review",
-        "sandbox_permissions": "require_escalated",
-        "justification": "Run the requested command.",
-    })
-    .to_string();
-    let mut events = vec![
-        sse(vec![
-            ev_function_call("oversized", "exec_command", &oversized),
-            ev_completed("oversized"),
-        ]),
-        sse(vec![
-            ev_function_call("next", "exec_command", &next),
-            ev_completed("next"),
-        ]),
-        sse(vec![
-            ev_assistant_message("decision", r#"{"outcome":"allow"}"#),
-            ev_completed("review"),
-        ]),
-        sse(vec![
-            ev_assistant_message("done", "done"),
-            ev_completed("done"),
-        ]),
-    ];
-    if matches!(review, OversizedActionReview::Fits) {
-        // A real policy denial must not fall through to a user prompt. Avoid
-        // executing the huge command while asserting its complete review input.
-        events.insert(
-            /*index*/ 1,
-            sse(vec![
-                ev_assistant_message(
-                    "decision",
-                    r#"{"outcome":"deny","rationale":"denied by classifier"}"#,
-                ),
-                ev_completed("large-review"),
-            ]),
-        );
-    }
-    let response = responses::mount_sse_sequence(&server, events).await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Run the commands if the approval reviewer allows them.".to_owned(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let mut terminal_assessment = None;
-    let event = wait_for_event(&test.codex, |event| {
-        if let EventMsg::GuardianAssessment(assessment) = event
-            && assessment.status != codex_protocol::protocol::GuardianAssessmentStatus::InProgress
-        {
-            terminal_assessment = Some((assessment.status, assessment.risk_level));
-        }
-        matches!(
-            event,
-            EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
-        )
-    })
-    .await;
-    if let EventMsg::ExecApprovalRequest(approval) = event {
-        assert!(
-            matches!(review, OversizedActionReview::UserFallback),
-            "only exhausted optional review may ask the user"
-        );
-        assert_eq!(
-            terminal_assessment,
-            Some((
-                codex_protocol::protocol::GuardianAssessmentStatus::Aborted,
-                None
-            ))
-        );
-        assert_eq!(approval.command.last(), Some(&oversized_command));
-        test.codex
-            .submit(Op::ExecApproval {
-                id: approval.effective_approval_id(),
-                turn_id: None,
-                decision: ReviewDecision::denied("rejected by user"),
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.5", |model| {
+                model.auto_review_model_override = Some("gpt-5.6-luna".to_owned());
             })
+            .with_model_info_override("gpt-5.6-luna", move |model| {
+                model.context_window = Some(if matches!(review, OversizedActionReview::Fits) {
+                    160_000
+                } else {
+                    16_000
+                });
+            })
+            .with_config(|config| {
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+            });
+        if matches!(review, OversizedActionReview::RequiredGuardian) {
+            builder = builder.with_model("gpt-5.5").with_cloud_config_bundle(
+                CloudConfigBundleFixture::loader_with_enterprise_requirement(
+                    "[auto_review]\nrequired_on_models = [\"gpt-5.5\"]\n",
+                ),
+            );
+        }
+        let test = builder.build_with_auto_env(&server).await?;
+        let oversized_command =
+            "echo ".to_owned() + &"large-action".repeat(/*n*/ 20_000) + "required suffix";
+        let oversized = json!({
+            "cmd": oversized_command,
+            "sandbox_permissions": "require_escalated",
+            "justification": "Run the requested command.",
+        })
+        .to_string();
+        let next = json!({
+            "cmd": "echo complete-action-review",
+            "sandbox_permissions": "require_escalated",
+            "justification": "Run the requested command.",
+        })
+        .to_string();
+        let mut events = vec![
+            sse(vec![
+                ev_function_call("oversized", "exec_command", &oversized),
+                ev_completed("oversized"),
+            ]),
+            sse(vec![
+                ev_function_call("next", "exec_command", &next),
+                ev_completed("next"),
+            ]),
+            sse(vec![
+                ev_assistant_message("decision", r#"{"outcome":"allow"}"#),
+                ev_completed("review"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "done"),
+                ev_completed("done"),
+            ]),
+        ];
+        if matches!(review, OversizedActionReview::Fits) {
+            // A real policy denial must not fall through to a user prompt. Avoid
+            // executing the huge command while asserting its complete review input.
+            events.insert(
+                /*index*/ 1,
+                sse(vec![
+                    ev_assistant_message(
+                        "decision",
+                        r#"{"outcome":"deny","rationale":"denied by classifier"}"#,
+                    ),
+                    ev_completed("large-review"),
+                ]),
+            );
+        }
+        let response = responses::mount_sse_sequence(&server, events).await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run the commands if the approval reviewer allows them.".to_owned(),
+                text_elements: Vec::new(),
+            }]))
             .await?;
-        wait_for_event(&test.codex, |event| {
-            matches!(event, EventMsg::TurnComplete(_))
+        let mut terminal_assessment = None;
+        let event = wait_for_event(&test.codex, |event| {
+            if let EventMsg::GuardianAssessment(assessment) = event
+                && assessment.status
+                    != codex_protocol::protocol::GuardianAssessmentStatus::InProgress
+            {
+                terminal_assessment = Some((assessment.status, assessment.risk_level));
+            }
+            matches!(
+                event,
+                EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
+            )
         })
         .await;
-    } else {
-        assert!(
-            !matches!(review, OversizedActionReview::UserFallback),
-            "exhausted optional review must request user approval"
-        );
-    }
-    let requests = response.requests();
-    let fits = matches!(review, OversizedActionReview::Fits);
-    assert_eq!(requests.len(), if fits { 5 } else { 4 });
-    assert!(
-        requests[if fits { 2 } else { 1 }]
-            .function_call_output("oversized")
-            .to_string()
-            .contains(match review {
-                OversizedActionReview::Fits => "denied by classifier",
-                OversizedActionReview::UserFallback => "rejected by user",
-                OversizedActionReview::RequiredGuardian => "reviewer input budget",
+        if let EventMsg::ExecApprovalRequest(approval) = event {
+            assert!(
+                matches!(review, OversizedActionReview::UserFallback),
+                "only exhausted optional review may ask the user"
+            );
+            assert_eq!(
+                terminal_assessment,
+                Some((
+                    codex_protocol::protocol::GuardianAssessmentStatus::Aborted,
+                    None
+                ))
+            );
+            assert_eq!(approval.command.last(), Some(&oversized_command));
+            test.codex
+                .submit(Op::ExecApproval {
+                    id: approval.effective_approval_id(),
+                    turn_id: None,
+                    decision: ReviewDecision::denied("rejected by user"),
+                })
+                .await?;
+            wait_for_event(&test.codex, |event| {
+                matches!(event, EventMsg::TurnComplete(_))
             })
-    );
-    let reviews = requests
-        .iter()
-        .filter(|request| request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian")
-        .collect::<Vec<_>>();
-    assert_eq!(reviews.len(), if fits { 2 } else { 1 });
-    if fits {
-        let parts = reviews[0].message_input_texts("user");
-        assert!(parts.concat().contains(&oversized_command));
-        assert!(parts.iter().all(|part| part.len() <= 36_000));
-    }
-    let context = reviews
-        .last()
-        .expect("review of the next action")
-        .message_input_texts("user")
-        .concat();
-    assert!(context.contains("echo complete-action-review"));
-    assert!(
-        requests
+            .await;
+        } else {
+            assert!(
+                !matches!(review, OversizedActionReview::UserFallback),
+                "exhausted optional review must request user approval"
+            );
+        }
+        let requests = response.requests();
+        let fits = matches!(review, OversizedActionReview::Fits);
+        assert_eq!(requests.len(), if fits { 5 } else { 4 });
+        assert!(
+            requests[if fits { 2 } else { 1 }]
+                .function_call_output("oversized")
+                .to_string()
+                .contains(match review {
+                    OversizedActionReview::Fits => "denied by classifier",
+                    OversizedActionReview::UserFallback => "rejected by user",
+                    OversizedActionReview::RequiredGuardian => "reviewer input budget",
+                })
+        );
+        let reviews = requests
+            .iter()
+            .filter(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"] == "guardian"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(reviews.len(), if fits { 2 } else { 1 });
+        if fits {
+            let parts = reviews[0].message_input_texts("user");
+            assert!(parts.concat().contains(&oversized_command));
+            assert!(parts.iter().all(|part| part.len() <= 36_000));
+        }
+        let context = reviews
             .last()
-            .expect("parent resumes after review")
-            .function_call_output("next")
-            .to_string()
-            .contains("complete-action-review")
-    );
-    test.codex.shutdown_and_wait().await?;
-    Ok(())
+            .expect("review of the next action")
+            .message_input_texts("user")
+            .concat();
+        assert!(context.contains("echo complete-action-review"));
+        assert!(
+            requests
+                .last()
+                .expect("parent resumes after review")
+                .function_call_output("next")
+                .to_string()
+                .contains("complete-action-review")
+        );
+        test.codex.shutdown_and_wait().await?;
+        Ok(())
+    })
+    .await
 }

@@ -30,6 +30,7 @@ use codex_state::DirectionalThreadSpawnEdgeStatus;
 use codex_state::SqliteConfig;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -362,65 +363,68 @@ async fn thread_delete_removes_persisted_board_even_with_feature_disabled() -> R
         ]),
     ])
     .await;
-    let home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .enable_feature(Feature::AgentMessageBoard)
-        .enable_feature(Feature::MultiAgentV2)
-        .write(home.path())?;
-    let mut app = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .build_initialized()
-        .await?;
-    let thread = app.start_thread(ThreadStartParams::default()).await?.thread;
-    let completed = app
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: thread.id.clone(),
-            input: vec![UserInput::Text {
-                text: "Post the decision".into(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(completed.turn.status, TurnStatus::Completed);
-
-    let sqlite = SqliteConfig::new_for_testing(home.path().abs());
-    let pool = sqlite
-        .open_read_only_pool(
-            &sqlite.home().join("agent_message_board_1.sqlite"),
-            /*busy_timeout*/ None,
-        )
-        .await?;
-    assert_eq!(board_counts(&pool).await?, (1, 1, 2));
-    let _: ThreadArchiveResponse = app
-        .request(|request_id| ClientRequest::ThreadArchive {
-            request_id,
-            params: ThreadArchiveParams {
+    mock_server::run(&[&server], async {
+        let home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .enable_feature(Feature::AgentMessageBoard)
+            .enable_feature(Feature::MultiAgentV2)
+            .write(home.path())?;
+        let mut app = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build_initialized()
+            .await?;
+        let thread = app.start_thread(ThreadStartParams::default()).await?.thread;
+        let completed = app
+            .start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id: thread.id.clone(),
-            },
-        })
-        .await?;
-    app.shutdown_gracefully().await?;
+                input: vec![UserInput::Text {
+                    text: "Post the decision".into(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!(completed.turn.status, TurnStatus::Completed);
 
-    MockResponsesConfig::new(&server.uri())
-        .disable_feature(Feature::AgentMessageBoard)
-        .write(home.path())?;
-    let mut app = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .build_initialized()
-        .await?;
-    assert_eq!(board_counts(&pool).await?, (1, 1, 2));
-    let _: ThreadDeleteResponse = app
-        .request(|request_id| ClientRequest::ThreadDelete {
-            request_id,
-            params: ThreadDeleteParams {
-                thread_id: thread.id,
-            },
-        })
-        .await?;
-    assert_eq!(board_counts(&pool).await?, (0, 0, 0));
-    app.shutdown_gracefully().await?;
-    Ok(())
+        let sqlite = SqliteConfig::new_for_testing(home.path().abs());
+        let pool = sqlite
+            .open_read_only_pool(
+                &sqlite.home().join("agent_message_board_1.sqlite"),
+                /*busy_timeout*/ None,
+            )
+            .await?;
+        assert_eq!(board_counts(&pool).await?, (1, 1, 2));
+        let _: ThreadArchiveResponse = app
+            .request(|request_id| ClientRequest::ThreadArchive {
+                request_id,
+                params: ThreadArchiveParams {
+                    thread_id: thread.id.clone(),
+                },
+            })
+            .await?;
+        app.shutdown_gracefully().await?;
+
+        MockResponsesConfig::new(&server.uri())
+            .disable_feature(Feature::AgentMessageBoard)
+            .write(home.path())?;
+        let mut app = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build_initialized()
+            .await?;
+        assert_eq!(board_counts(&pool).await?, (1, 1, 2));
+        let _: ThreadDeleteResponse = app
+            .request(|request_id| ClientRequest::ThreadDelete {
+                request_id,
+                params: ThreadDeleteParams {
+                    thread_id: thread.id,
+                },
+            })
+            .await?;
+        assert_eq!(board_counts(&pool).await?, (0, 0, 0));
+        app.shutdown_gracefully().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

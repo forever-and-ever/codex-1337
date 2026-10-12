@@ -2,6 +2,7 @@
 
 use super::*;
 use codex_history::RolloutItem;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -9,6 +10,7 @@ async fn remote_slash_compact_preserves_context_across_windows() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mock = mount_sse_sequence(
         &server,
         vec![
@@ -91,4 +93,6 @@ async fn remote_slash_compact_preserves_context_across_windows() -> Result<()> {
         )
     );
     Ok(())
+    })
+    .await
 }

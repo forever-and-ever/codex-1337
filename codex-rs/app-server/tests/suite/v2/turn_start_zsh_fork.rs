@@ -30,6 +30,7 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_features::Feature;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
@@ -211,127 +212,132 @@ async fn turn_start_shell_zsh_fork_exec_approval_v2(
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
-    create_config_toml(
-        &codex_home,
-        &server.uri(),
-        "on-request",
-        &BTreeMap::from([
-            (Feature::UnifiedExec, true),
-            (Feature::ShellZshFork, true),
-            (Feature::ShellSnapshot, false),
-        ]),
-    )?;
+    mock_server::run(&[&server], async {
+        create_config_toml(
+            &codex_home,
+            &server.uri(),
+            "on-request",
+            &BTreeMap::from([
+                (Feature::UnifiedExec, true),
+                (Feature::ShellZshFork, true),
+                (Feature::ShellSnapshot, false),
+            ]),
+        )?;
 
-    let mut mcp = create_zsh_test_mcp_process(&codex_home, &workspace, &zsh_path).await?;
+        let mut mcp = create_zsh_test_mcp_process(&codex_home, &workspace, &zsh_path).await?;
 
-    let start_id = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            ..Default::default()
-        })
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+
+        let turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "run python".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                cwd: Some(workspace.clone()),
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_id)).await??;
+
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req
+        else {
+            panic!("expected CommandExecutionRequestApproval request");
+        };
+        assert_eq!(params.item_id, "call-zsh-fork-decline");
+        assert_eq!(params.thread_id, thread.id);
+
+        mcp.send_response(
+            request_id,
+            serde_json::to_value(CommandExecutionRequestApprovalResponse { decision })?,
+        )
         .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
 
-    let turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "run python".to_string(),
-                text_elements: Vec::new(),
-            }],
-            cwd: Some(workspace.clone()),
-            ..Default::default()
+        let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let completed_notif = mcp
+                    .read_stream_until_notification_message("item/completed")
+                    .await?;
+                let completed: ItemCompletedNotification = serde_json::from_value(
+                    completed_notif
+                        .params
+                        .clone()
+                        .expect("item/completed params"),
+                )?;
+                if let ThreadItem::CommandExecution { .. } = completed.item {
+                    return Ok::<ThreadItem, anyhow::Error>(completed.item);
+                }
+            }
         })
-        .await?;
-    let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_id)).await??;
+        .await??;
+        let ThreadItem::CommandExecution {
+            id,
+            status,
+            exit_code,
+            process_id,
+            duration_ms,
+            aggregated_output,
+            ..
+        } = completed_command_execution
+        else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(id, "call-zsh-fork-decline");
+        assert_eq!(process_id, None);
+        if launch_failed {
+            assert_eq!(
+                (status, exit_code, duration_ms),
+                (CommandExecutionStatus::Failed, Some(-1), Some(0))
+            );
+            assert!(
+                aggregated_output
+                    .expect("launch diagnostic")
+                    .starts_with("Failed to create unified exec process:")
+            );
+        } else {
+            assert_eq!(
+                (status, exit_code, duration_ms),
+                (CommandExecutionStatus::Declined, None, None)
+            );
+            assert!(aggregated_output.is_none());
+        }
 
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req else {
-        panic!("expected CommandExecutionRequestApproval request");
-    };
-    assert_eq!(params.item_id, "call-zsh-fork-decline");
-    assert_eq!(params.thread_id, thread.id);
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(CommandExecutionRequestApprovalResponse { decision })?,
-    )
-    .await?;
-
-    let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let completed_notif = mcp
-                .read_stream_until_notification_message("item/completed")
-                .await?;
-            let completed: ItemCompletedNotification = serde_json::from_value(
-                completed_notif
-                    .params
-                    .clone()
-                    .expect("item/completed params"),
-            )?;
-            if let ThreadItem::CommandExecution { .. } = completed.item {
-                return Ok::<ThreadItem, anyhow::Error>(completed.item);
+        let mut command_events = Vec::new();
+        for method in mcp.pending_notification_methods() {
+            let notification = mcp.read_stream_until_notification_message(&method).await?;
+            if notification.params.expect("notification params")["item"]["id"]
+                == "call-zsh-fork-decline"
+            {
+                command_events.push(method);
             }
         }
+        assert_eq!(command_events, ["item/started"]);
+
+        Ok(())
     })
-    .await??;
-    let ThreadItem::CommandExecution {
-        id,
-        status,
-        exit_code,
-        process_id,
-        duration_ms,
-        aggregated_output,
-        ..
-    } = completed_command_execution
-    else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(id, "call-zsh-fork-decline");
-    assert_eq!(process_id, None);
-    if launch_failed {
-        assert_eq!(
-            (status, exit_code, duration_ms),
-            (CommandExecutionStatus::Failed, Some(-1), Some(0))
-        );
-        assert!(
-            aggregated_output
-                .expect("launch diagnostic")
-                .starts_with("Failed to create unified exec process:")
-        );
-    } else {
-        assert_eq!(
-            (status, exit_code, duration_ms),
-            (CommandExecutionStatus::Declined, None, None)
-        );
-        assert!(aggregated_output.is_none());
-    }
-
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let mut command_events = Vec::new();
-    for method in mcp.pending_notification_methods() {
-        let notification = mcp.read_stream_until_notification_message(&method).await?;
-        if notification.params.expect("notification params")["item"]["id"]
-            == "call-zsh-fork-decline"
-        {
-            command_events.push(method);
-        }
-    }
-    assert_eq!(command_events, ["item/started"]);
-
-    Ok(())
+    .await
 }
 
 #[tokio::test]
@@ -366,98 +372,103 @@ async fn turn_start_shell_zsh_fork_exec_approval_cancel_v2() -> Result<()> {
         "call-zsh-fork-cancel",
     )?];
     let server = create_mock_responses_server_sequence(responses).await;
-    create_config_toml(
-        &codex_home,
-        &server.uri(),
-        "on-request",
-        &BTreeMap::from([
-            (Feature::ShellZshFork, true),
-            (Feature::ShellSnapshot, false),
-        ]),
-    )?;
+    mock_server::run(&[&server], async {
+        create_config_toml(
+            &codex_home,
+            &server.uri(),
+            "on-request",
+            &BTreeMap::from([
+                (Feature::ShellZshFork, true),
+                (Feature::ShellSnapshot, false),
+            ]),
+        )?;
 
-    let mut mcp = create_zsh_test_mcp_process(&codex_home, &workspace, &zsh_path).await?;
+        let mut mcp = create_zsh_test_mcp_process(&codex_home, &workspace, &zsh_path).await?;
 
-    let start_id = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            cwd: Some(workspace.to_string_lossy().into_owned()),
-            ..Default::default()
-        })
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                cwd: Some(workspace.to_string_lossy().into_owned()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+
+        let turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "run python".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                cwd: Some(workspace.clone()),
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_id)).await??;
+
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req
+        else {
+            panic!("expected CommandExecutionRequestApproval request");
+        };
+        assert_eq!(params.item_id, "call-zsh-fork-cancel");
+        assert_eq!(params.thread_id, thread.id.clone());
+
+        mcp.send_response(
+            request_id,
+            serde_json::to_value(CommandExecutionRequestApprovalResponse {
+                decision: CommandExecutionApprovalDecision::Cancel,
+            })?,
+        )
         .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
 
-    let turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "run python".to_string(),
-                text_elements: Vec::new(),
-            }],
-            cwd: Some(workspace.clone()),
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_id)).await??;
-
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req else {
-        panic!("expected CommandExecutionRequestApproval request");
-    };
-    assert_eq!(params.item_id, "call-zsh-fork-cancel");
-    assert_eq!(params.thread_id, thread.id.clone());
-
-    mcp.send_response(
-        request_id,
-        serde_json::to_value(CommandExecutionRequestApprovalResponse {
-            decision: CommandExecutionApprovalDecision::Cancel,
-        })?,
-    )
-    .await?;
-
-    let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
-        loop {
-            let completed_notif = mcp
-                .read_stream_until_notification_message("item/completed")
-                .await?;
-            let completed: ItemCompletedNotification = serde_json::from_value(
-                completed_notif
-                    .params
-                    .clone()
-                    .expect("item/completed params"),
-            )?;
-            if let ThreadItem::CommandExecution { .. } = completed.item {
-                return Ok::<ThreadItem, anyhow::Error>(completed.item);
+        let completed_command_execution = timeout(DEFAULT_READ_TIMEOUT, async {
+            loop {
+                let completed_notif = mcp
+                    .read_stream_until_notification_message("item/completed")
+                    .await?;
+                let completed: ItemCompletedNotification = serde_json::from_value(
+                    completed_notif
+                        .params
+                        .clone()
+                        .expect("item/completed params"),
+                )?;
+                if let ThreadItem::CommandExecution { .. } = completed.item {
+                    return Ok::<ThreadItem, anyhow::Error>(completed.item);
+                }
             }
-        }
+        })
+        .await??;
+        let ThreadItem::CommandExecution { id, status, .. } = completed_command_execution else {
+            unreachable!("loop ensures we break on command execution items");
+        };
+        assert_eq!(id, "call-zsh-fork-cancel");
+        assert_eq!(status, CommandExecutionStatus::Declined);
+
+        let completed_notif = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+        let completed: TurnCompletedNotification = serde_json::from_value(
+            completed_notif
+                .params
+                .expect("turn/completed params must be present"),
+        )?;
+        assert_eq!(completed.thread_id, thread.id);
+        assert_eq!(completed.turn.status, TurnStatus::Interrupted);
+
+        Ok(())
     })
-    .await??;
-    let ThreadItem::CommandExecution { id, status, .. } = completed_command_execution else {
-        unreachable!("loop ensures we break on command execution items");
-    };
-    assert_eq!(id, "call-zsh-fork-cancel");
-    assert_eq!(status, CommandExecutionStatus::Declined);
-
-    let completed_notif = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-    let completed: TurnCompletedNotification = serde_json::from_value(
-        completed_notif
-            .params
-            .expect("turn/completed params must be present"),
-    )?;
-    assert_eq!(completed.thread_id, thread.id);
-    assert_eq!(completed.turn.status, TurnStatus::Interrupted);
-
-    Ok(())
+    .await
 }
 
 #[tokio::test]

@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -287,6 +288,7 @@ async fn managed_plugins_requirement_disables_selected_executor_plugin_capabilit
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn selected_capability_stack_tracks_environment_selection_and_resume() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server], async {
     let (apps_url, apps_server_handle) = start_apps_server_with_delays(
         vec![AppInfo {
             id: CONNECTOR_ID.to_string(),
@@ -502,6 +504,8 @@ async fn selected_capability_stack_tracks_environment_selection_and_resume() -> 
     apps_server_handle.abort();
     let _ = apps_server_handle.await;
     Ok(())
+    })
+    .await
 }
 
 struct SelectedCapabilityFixture {

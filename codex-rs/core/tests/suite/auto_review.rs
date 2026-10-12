@@ -1,4 +1,5 @@
 use codex_core::TurnInputRequest;
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::sync::Arc;
 use std::time::Duration;
@@ -94,78 +95,81 @@ async fn approval_review_contributor_skips_existing_guardian_model_call() -> Res
     skip_if_wine_exec!(Ok(()), "request_permissions requires host-native paths");
 
     let server = MockServer::start().await;
-    let permissions_call_id = "extension-approved-permissions";
-    let permissions_args = json!({
-        "reason": "grant low-risk network access",
-        "permissions": {
-            "network": {
-                "enabled": true,
+    mock_server::run(&[&server], async {
+        let permissions_call_id = "extension-approved-permissions";
+        let permissions_args = json!({
+            "reason": "grant low-risk network access",
+            "permissions": {
+                "network": {
+                    "enabled": true,
+                },
             },
-        },
-    });
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-parent-1"),
-                ev_function_call(
-                    permissions_call_id,
-                    "request_permissions",
-                    &serde_json::to_string(&permissions_args)?,
-                ),
-                ev_completed("resp-parent-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-2"),
-                ev_assistant_message("msg-parent", "done"),
-                ev_completed("resp-parent-2"),
-            ]),
-        ],
-    )
-    .await;
-
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.approval_review_contributor(Arc::new(ApprovedReviewContributor));
-    let mut builder = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config
-                .features
-                .enable(Feature::RequestPermissionsTool)
-                .expect("test config should allow feature update");
         });
-    let test = builder.build_with_auto_env(&server).await?;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "request low-risk network access".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-parent-1"),
+                    ev_function_call(
+                        permissions_call_id,
+                        "request_permissions",
+                        &serde_json::to_string(&permissions_args)?,
+                    ),
+                    ev_completed("resp-parent-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-parent-2"),
+                    ev_assistant_message("msg-parent", "done"),
+                    ev_completed("resp-parent-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::GuardianAssessment(event) => {
-                panic!("approved extension review should not start Guardian: {event:?}")
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.approval_review_contributor(Arc::new(ApprovedReviewContributor));
+        let mut builder = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config
+                    .features
+                    .enable(Feature::RequestPermissionsTool)
+                    .expect("test config should allow feature update");
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "request low-risk network access".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::GuardianAssessment(event) => {
+                    panic!("approved extension review should not start Guardian: {event:?}")
+                }
+                EventMsg::RequestPermissions(event) => {
+                    panic!("approved extension review should not prompt the user: {event:?}")
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::RequestPermissions(event) => {
-                panic!("approved extension review should not prompt the user: {event:?}")
-            }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        requests[1]
-            .function_call_output(permissions_call_id)
-            .to_string()
-            .contains("enabled")
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1]
+                .function_call_output(permissions_call_id)
+                .to_string()
+                .contains("enabled")
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -174,95 +178,100 @@ async fn require_escalated_bypasses_extension_approval_and_runs_guardian() -> Re
     skip_if_wine_exec!(Ok(()), "exec_command requires host-native paths");
 
     let server = MockServer::start().await;
-    let call_id = "require-escalated-command";
-    let justification = "run outside the sandbox after a blocked attempt";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-parent-1"),
-                ev_function_call(
-                    call_id,
-                    "exec_command",
-                    &json!({
-                        "cmd": "pwd",
-                        "sandbox_permissions": "require_escalated",
-                        "justification": justification,
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-parent-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-guardian"),
-                ev_assistant_message(
-                    "msg-guardian",
-                    &json!({
-                        "risk_level": "high",
-                        "user_authorization": "low",
-                        "outcome": "deny",
-                        "rationale": "The unsandboxed command is not authorized.",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-guardian"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-parent-2"),
-                ev_assistant_message("msg-parent", "done"),
-                ev_completed("resp-parent-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let call_id = "require-escalated-command";
+        let justification = "run outside the sandbox after a blocked attempt";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-parent-1"),
+                    ev_function_call(
+                        call_id,
+                        "exec_command",
+                        &json!({
+                            "cmd": "pwd",
+                            "sandbox_permissions": "require_escalated",
+                            "justification": justification,
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-parent-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-guardian"),
+                    ev_assistant_message(
+                        "msg-guardian",
+                        &json!({
+                            "risk_level": "high",
+                            "user_authorization": "low",
+                            "outcome": "deny",
+                            "rationale": "The unsandboxed command is not authorized.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-guardian"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-parent-2"),
+                    ev_assistant_message("msg-parent", "done"),
+                    ev_completed("resp-parent-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.approval_review_contributor(Arc::new(EscalationApprovingReviewContributor));
-    let mut builder = test_codex()
-        .with_extensions(Arc::new(extensions.build()))
-        .with_config(|config| {
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config
-                .permissions
-                .set_permission_profile(PermissionProfile::read_only())
-                .expect("set read-only permission profile");
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "retry the blocked command outside the sandbox".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.approval_review_contributor(Arc::new(EscalationApprovingReviewContributor));
+        let mut builder = test_codex()
+            .with_extensions(Arc::new(extensions.build()))
+            .with_config(|config| {
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config
+                    .permissions
+                    .set_permission_profile(PermissionProfile::read_only())
+                    .expect("set read-only permission profile");
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "retry the blocked command outside the sandbox".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
 
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::ExecApprovalRequest(event) => {
-                panic!("escalated command should not prompt the user: {event:?}")
+        loop {
+            match wait_for_event(&test.codex, |_| true).await {
+                EventMsg::ExecApprovalRequest(event) => {
+                    panic!("escalated command should not prompt the user: {event:?}")
+                }
+                EventMsg::TurnComplete(_) => break,
+                _ => {}
             }
-            EventMsg::TurnComplete(_) => break,
-            _ => {}
         }
-    }
 
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 3);
-    let guardian_request = requests
-        .iter()
-        .find(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
-        })
-        .context("expected full Guardian review for require_escalated")?;
-    assert!(guardian_request.body_contains_text(justification));
-    assert!(
-        responses
-            .function_call_output_text(call_id)
-            .context("expected exec_command output")?
-            .contains("not authorized")
-    );
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 3);
+        let guardian_request = requests
+            .iter()
+            .find(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .context("expected full Guardian review for require_escalated")?;
+        assert!(guardian_request.body_contains_text(justification));
+        assert!(
+            responses
+                .function_call_output_text(call_id)
+                .context("expected exec_command output")?
+                .contains("not authorized")
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -281,126 +290,131 @@ async fn required_model_bypasses_extension_approval_when_guardian_v2_is_disabled
     skip_if_wine_exec!(Ok(()), "request_permissions requires host-native paths");
 
     let server = MockServer::start().await;
-    let model = "gpt-5.4";
-    let call_id = "required-model-permissions";
-    let reason = "request network access under mandatory Guardian review";
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-required-model-parent"),
-                ev_function_call(
-                    call_id,
-                    "request_permissions",
-                    &json!({
-                        "reason": reason,
-                        "permissions": { "network": { "enabled": true } },
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-required-model-parent"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-required-model-review"),
-                ev_assistant_message(
-                    "msg-required-model-review",
-                    &json!({
-                        "risk_level": "high",
-                        "user_authorization": "low",
-                        "outcome": "deny",
-                        "rationale": "The requested network access is not authorized.",
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-required-model-review"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-required-model-followup"),
-                ev_assistant_message("msg-required-model-followup", "done"),
-                ev_completed("resp-required-model-followup"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let model = "gpt-5.4";
+        let call_id = "required-model-permissions";
+        let reason = "request network access under mandatory Guardian review";
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-required-model-parent"),
+                    ev_function_call(
+                        call_id,
+                        "request_permissions",
+                        &json!({
+                            "reason": reason,
+                            "permissions": { "network": { "enabled": true } },
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-required-model-parent"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-required-model-review"),
+                    ev_assistant_message(
+                        "msg-required-model-review",
+                        &json!({
+                            "risk_level": "high",
+                            "user_authorization": "low",
+                            "outcome": "deny",
+                            "rationale": "The requested network access is not authorized.",
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-required-model-review"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-required-model-followup"),
+                    ev_assistant_message("msg-required-model-followup", "done"),
+                    ev_completed("resp-required-model-followup"),
+                ]),
+            ],
+        )
+        .await;
 
-    let (guardian_v2_config, reviewer_requirements) = match disable_source {
-        GuardianV2DisableSource::Config => ("false", ""),
-        GuardianV2DisableSource::ManagedRequirements => {
-            ("true", "allowed_approvals_reviewers = [\"auto_review\"]\n")
-        }
-    };
-    let requirements =
-        format!("{reviewer_requirements}[auto_review]\nrequired_on_models = [\"{model}\"]\n");
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.approval_review_contributor(Arc::new(ApprovedReviewContributor));
-    let mut builder = test_codex()
-        .with_model(model)
-        .with_extensions(Arc::new(extensions.build()))
-        .with_pre_build_hook(move |home| {
-            std::fs::write(
-                home.join("config.toml"),
-                format!("[features]\nguardianv2 = {guardian_v2_config}\n"),
+        let (guardian_v2_config, reviewer_requirements) = match disable_source {
+            GuardianV2DisableSource::Config => ("false", ""),
+            GuardianV2DisableSource::ManagedRequirements => {
+                ("true", "allowed_approvals_reviewers = [\"auto_review\"]\n")
+            }
+        };
+        let requirements =
+            format!("{reviewer_requirements}[auto_review]\nrequired_on_models = [\"{model}\"]\n");
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.approval_review_contributor(Arc::new(ApprovedReviewContributor));
+        let mut builder = test_codex()
+            .with_model(model)
+            .with_extensions(Arc::new(extensions.build()))
+            .with_pre_build_hook(move |home| {
+                std::fs::write(
+                    home.join("config.toml"),
+                    format!("[features]\nguardianv2 = {guardian_v2_config}\n"),
+                )
+                .expect("Guardian v2 configuration should be written");
+            })
+            .with_cloud_config_bundle(
+                CloudConfigBundleFixture::loader_with_enterprise_requirement(requirements),
             )
-            .expect("Guardian v2 configuration should be written");
-        })
-        .with_cloud_config_bundle(
-            CloudConfigBundleFixture::loader_with_enterprise_requirement(requirements),
-        )
-        .with_config(|config| {
-            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-            config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
-            config
-                .permissions
-                .set_permission_profile(PermissionProfile::read_only())
-                .expect("set read-only permission profile");
-            config
-                .features
-                .enable(Feature::RequestPermissionsTool)
-                .expect("test config should allow feature update");
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    assert!(!test.config.features.enabled(Feature::GuardianV2));
+            .with_config(|config| {
+                config.approvals_reviewer = ApprovalsReviewer::AutoReview;
+                config.permissions.approval_policy =
+                    Constrained::allow_any(AskForApproval::OnRequest);
+                config
+                    .permissions
+                    .set_permission_profile(PermissionProfile::read_only())
+                    .expect("set read-only permission profile");
+                config
+                    .features
+                    .enable(Feature::RequestPermissionsTool)
+                    .expect("test config should allow feature update");
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        assert!(!test.config.features.enabled(Feature::GuardianV2));
 
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: reason.into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let event = wait_for_event(&test.codex, |event| {
-        matches!(
-            event,
-            EventMsg::RequestPermissions(_) | EventMsg::TurnComplete(_)
-        )
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: reason.into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let event = wait_for_event(&test.codex, |event| {
+            matches!(
+                event,
+                EventMsg::RequestPermissions(_) | EventMsg::TurnComplete(_)
+            )
+        })
+        .await;
+        assert!(
+            matches!(event, EventMsg::TurnComplete(_)),
+            "required-model review should not prompt the user: {event:?}"
+        );
+
+        let output = responses
+            .function_call_output_text(call_id)
+            .context("expected request_permissions output")?;
+        let actual: RequestPermissionsResponse = serde_json::from_str(&output)?;
+        assert_eq!(
+            actual,
+            RequestPermissionsResponse {
+                permissions: RequestPermissionProfile::default(),
+                scope: PermissionGrantScope::Turn,
+                strict_auto_review: false,
+            }
+        );
+        let requests = responses.requests();
+        let guardian_request = requests
+            .iter()
+            .find(|request| {
+                request.body_json()["client_metadata"]["x-openai-subagent"].as_str()
+                    == Some("guardian")
+            })
+            .context("expected full Guardian review for the required model")?;
+        assert!(guardian_request.body_contains_text(reason));
+
+        Ok(())
     })
-    .await;
-    assert!(
-        matches!(event, EventMsg::TurnComplete(_)),
-        "required-model review should not prompt the user: {event:?}"
-    );
-
-    let output = responses
-        .function_call_output_text(call_id)
-        .context("expected request_permissions output")?;
-    let actual: RequestPermissionsResponse = serde_json::from_str(&output)?;
-    assert_eq!(
-        actual,
-        RequestPermissionsResponse {
-            permissions: RequestPermissionProfile::default(),
-            scope: PermissionGrantScope::Turn,
-            strict_auto_review: false,
-        }
-    );
-    let requests = responses.requests();
-    let guardian_request = requests
-        .iter()
-        .find(|request| {
-            request.body_json()["client_metadata"]["x-openai-subagent"].as_str() == Some("guardian")
-        })
-        .context("expected full Guardian review for the required model")?;
-    assert!(guardian_request.body_contains_text(reason));
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -409,6 +423,7 @@ async fn remote_model_override_uses_catalog_model_for_strict_auto_review() -> Re
     skip_if_sandbox!(Ok(()));
 
     let server = MockServer::start().await;
+    mock_server::run(&[&server], async {
     let model = "remote-auto-review-parent";
     let review_model = "remote-auto-review-reviewer";
     Mock::given(method("GET"))
@@ -593,6 +608,8 @@ async fn remote_model_override_uses_catalog_model_for_strict_auto_review() -> Re
     timeout(Duration::from_secs(10), codex.shutdown_and_wait()).await??;
 
     Ok(())
+    })
+    .await
 }
 
 fn remote_model_with_auto_review_override(slug: &str, review_model: &str) -> ModelInfo {

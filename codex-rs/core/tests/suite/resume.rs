@@ -10,6 +10,7 @@ use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::LoadThreadHistoryParams;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
@@ -129,125 +130,128 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let legacy_instructions = "Legacy model instructions\n# Personality\nBe pragmatic.";
-    let mut builder = test_codex()
-        .with_model_info_override("gpt-5.2", move |model| {
-            model
-                .model_messages
-                .get_or_insert_default()
-                .instructions_template = Some(legacy_instructions.to_string());
-        })
-        .with_config(|config| {
-            config.personality = Some(Personality::Pragmatic);
+    mock_server::run(&[&server], async {
+        let legacy_instructions = "Legacy model instructions\n# Personality\nBe pragmatic.";
+        let mut builder = test_codex()
+            .with_model_info_override("gpt-5.2", move |model| {
+                model
+                    .model_messages
+                    .get_or_insert_default()
+                    .instructions_template = Some(legacy_instructions.to_string());
+            })
+            .with_config(|config| {
+                config.personality = Some(Personality::Pragmatic);
+            });
+        let initial = builder.build(&server).await?;
+        let codex = Arc::clone(&initial.codex);
+
+        let initial_sse = sse(vec![
+            ev_response_created("resp-initial"),
+            ev_assistant_message("msg-1", "Completed first turn"),
+            ev_completed("resp-initial"),
+        ]);
+        let initial_mock = mount_sse_once(&server, initial_sse).await;
+
+        codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Record initial instructions".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        let initial_instructions = initial_mock.single_request().instructions_text();
+        assert_eq!(initial_instructions, legacy_instructions);
+
+        let resumed_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-resume-1"),
+                    ev_assistant_message("msg-2", "Resumed turn"),
+                    ev_completed("resp-resume-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-resume-2"),
+                    ev_assistant_message("msg-3", "Second resumed turn"),
+                    ev_completed("resp-resume-2"),
+                ]),
+            ],
+        )
+        .await;
+
+        let mut resume_builder = test_codex().with_config(|config| {
+            config.model = Some("gpt-5.4".to_string());
+            config.personality = Some(Personality::None);
         });
-    let initial = builder.build(&server).await?;
-    let codex = Arc::clone(&initial.codex);
+        let resumed = resume_builder.restart(&server, &initial).await?;
+        assert_eq!(
+            resumed.session_configured.thread_id,
+            initial.session_configured.thread_id
+        );
+        assert_eq!(
+            resumed.codex.config_snapshot().await.personality,
+            Some(Personality::None)
+        );
+        resumed
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Resume with different model".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&resumed.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    let initial_sse = sse(vec![
-        ev_response_created("resp-initial"),
-        ev_assistant_message("msg-1", "Completed first turn"),
-        ev_completed("resp-initial"),
-    ]);
-    let initial_mock = mount_sse_once(&server, initial_sse).await;
+        resumed
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Second turn after resume".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&resumed.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Record initial instructions".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let initial_instructions = initial_mock.single_request().instructions_text();
-    assert_eq!(initial_instructions, legacy_instructions);
+        let requests = resumed_mock.requests();
+        assert_eq!(requests.len(), 2, "expected two resumed requests");
 
-    let resumed_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-resume-1"),
-                ev_assistant_message("msg-2", "Resumed turn"),
-                ev_completed("resp-resume-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-resume-2"),
-                ev_assistant_message("msg-3", "Second resumed turn"),
-                ev_completed("resp-resume-2"),
-            ]),
-        ],
-    )
-    .await;
-
-    let mut resume_builder = test_codex().with_config(|config| {
-        config.model = Some("gpt-5.4".to_string());
-        config.personality = Some(Personality::None);
-    });
-    let resumed = resume_builder.restart(&server, &initial).await?;
-    assert_eq!(
-        resumed.session_configured.thread_id,
-        initial.session_configured.thread_id
-    );
-    assert_eq!(
-        resumed.codex.config_snapshot().await.personality,
-        Some(Personality::None)
-    );
-    resumed
-        .codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Resume with different model".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&resumed.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    resumed
-        .codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Second turn after resume".into(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&resumed.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-
-    let requests = resumed_mock.requests();
-    assert_eq!(requests.len(), 2, "expected two resumed requests");
-
-    let first_resumed = &requests[0];
-    assert_eq!(first_resumed.instructions_text(), initial_instructions);
-    assert!(
-        first_resumed
-            .message_input_texts("user")
+        let first_resumed = &requests[0];
+        assert_eq!(first_resumed.instructions_text(), initial_instructions);
+        assert!(
+            first_resumed
+                .message_input_texts("user")
+                .iter()
+                .any(|text| text == "Record initial instructions")
+        );
+        let first_developer_texts = first_resumed.message_input_texts("developer");
+        let first_model_switch_count = first_developer_texts
             .iter()
-            .any(|text| text == "Record initial instructions")
-    );
-    let first_developer_texts = first_resumed.message_input_texts("developer");
-    let first_model_switch_count = first_developer_texts
-        .iter()
-        .filter(|text| text.contains("<model_switch>"))
-        .count();
-    assert!(
-        first_model_switch_count >= 1,
-        "expected model switch message on first post-resume turn"
-    );
+            .filter(|text| text.contains("<model_switch>"))
+            .count();
+        assert!(
+            first_model_switch_count >= 1,
+            "expected model switch message on first post-resume turn"
+        );
 
-    let second_resumed = &requests[1];
-    assert_eq!(second_resumed.instructions_text(), initial_instructions);
-    let second_developer_texts = second_resumed.message_input_texts("developer");
-    let second_model_switch_count = second_developer_texts
-        .iter()
-        .filter(|text| text.contains("<model_switch>"))
-        .count();
-    assert_eq!(
-        second_model_switch_count, 1,
-        "did not expect duplicate model switch message after first post-resume turn"
-    );
+        let second_resumed = &requests[1];
+        assert_eq!(second_resumed.instructions_text(), initial_instructions);
+        let second_developer_texts = second_resumed.message_input_texts("developer");
+        let second_model_switch_count = second_developer_texts
+            .iter()
+            .filter(|text| text.contains("<model_switch>"))
+            .count();
+        assert_eq!(
+            second_model_switch_count, 1,
+            "did not expect duplicate model switch message after first post-resume turn"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

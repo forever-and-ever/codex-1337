@@ -26,6 +26,7 @@ use codex_app_server_protocol::UserInput;
 use codex_features::Feature;
 use codex_http_client::HttpClientBuilder;
 use codex_utils_path_uri::PathUri;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::stdio_server_bin;
 use futures::SinkExt;
@@ -92,6 +93,7 @@ const TOOL_CALL_ID: &str = "executor-mcp-call";
 async fn selected_executor_discovers_browser_mcp_with_executor_only_bearer_token() -> Result<()> {
     assert!(std::env::var_os(PROJECT_MCP_BEARER_ENV_NAME).is_none());
     let responses_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server], async {
     let http_listener = TcpListener::bind("127.0.0.1:0").await?;
     let http_addr = http_listener.local_addr()?;
     let http_mcp_service = StreamableHttpService::new(
@@ -238,6 +240,8 @@ async fn selected_executor_discovers_browser_mcp_with_executor_only_bearer_token
     let _ = http_server_handle.await;
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -827,6 +831,7 @@ async fn cached_executor_mcp_cannot_read_host_token_after_capability_downgrade()
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn guardian_review_does_not_discover_executor_mcp() -> Result<()> {
     let responses_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server], async {
     let codex_home = TempDir::new()?;
     let executor_home = TempDir::new()?;
     MockResponsesConfig::new(&responses_server.uri())
@@ -929,12 +934,15 @@ async fn guardian_review_does_not_discover_executor_mcp() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn selected_executor_plugin_exposes_its_mcps_only_to_that_thread() -> Result<()> {
     assert!(std::env::var_os(EXECUTOR_HTTP_AUTH_ENV_NAME).is_none());
     let responses_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server], async {
     let http_listener = TcpListener::bind("127.0.0.1:0").await?;
     let http_addr = http_listener.local_addr()?;
     let http_server_config = StreamableHttpServerConfig::default()
@@ -1497,6 +1505,8 @@ startup_timeout_sec = 10
     let _ = http_server_handle.await;
 
     Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]

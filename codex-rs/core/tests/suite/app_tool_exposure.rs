@@ -11,6 +11,7 @@ use codex_protocol::config_types::ToolExposureSurface;
 use codex_protocol::openai_models::ToolMode;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::apps_test_server::search_capable_apps_builder;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -114,128 +115,131 @@ pub(super) async fn connector_exposure_requests(
     case: ExposureCase,
 ) -> anyhow::Result<Vec<responses::ResponsesRequest>> {
     let server = responses::start_mock_server().await;
-    AppsTestServer::mount_searchable(&server).await?;
-    for rpc_method in ["tools/list", "tools/call"] {
-        Mock::given(method("POST"))
-            .and(body_partial_json(json!({"method": rpc_method})))
-            .respond_with(move |request: &wiremock::Request| {
-                let body: serde_json::Value =
-                    request.body_json().expect("valid MCP fixture request");
-                let result = if rpc_method == "tools/list" {
-                    json!({"tools": [
-                        {
-                            "name": "lookup",
-                            "description": "Look up calendar events",
-                            "inputSchema": {"type": "object", "properties": {}},
-                            "annotations": {"readOnlyHint": true},
-                            "_meta": {"connector_id": "calendar", "connector_name": "calendar"}
-                        },
-                        {
-                            "name": "read",
-                            "description": "Read notes",
-                            "inputSchema": {"type": "object", "properties": {}},
-                            "annotations": {"readOnlyHint": true},
-                            "_meta": {"connector_id": "notes", "connector_name": "notes"}
-                        }
-                    ]})
-                } else {
-                    assert_eq!(body["params"]["name"], "lookup");
-                    json!({"content": [{"type": "text", "text": "calendar-lookup-ok"}]})
-                };
-                ResponseTemplate::new(200).set_body_json(json!({
-                    "jsonrpc": "2.0", "id": body["id"], "result": result
-                }))
-            })
-            .with_priority(1)
-            .mount(&server)
-            .await;
-    }
-    let namespace = "mcp__codex_apps__calendar";
-    let tool_call = if case.expect_exec {
-        responses::ev_custom_tool_call(
-            "lookup",
-            "exec",
-            &format!("text((await tools.{namespace}__lookup({{}})).content[0].text);"),
-        )
-    } else if case.expect_direct {
-        responses::ev_function_call_with_namespace("lookup", namespace, "lookup", "{}")
-    } else {
-        responses::ev_assistant_message("message", "done")
-    };
-    let calls_tool = case.expect_direct || case.expect_exec;
-    let mut events = vec![responses::sse(vec![
-        tool_call,
-        responses::ev_completed("first"),
-    ])];
-    if calls_tool {
-        events.push(responses::sse(vec![responses::ev_completed("second")]));
-    }
-    let response_mock = responses::mount_sse_sequence(&server, events).await;
-    let auth = codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing();
-    let mut extensions = ExtensionRegistryBuilder::new();
-    extensions.mcp_server_contributor(Arc::new(AppsServer(serde_json::from_value(json!(
-        case.server_omissions
-    ))?)));
-    let mut builder = search_capable_apps_builder(server.uri())
-        .with_code_mode_host_program(codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")?)
-        .with_pre_build_hook(move |home| {
-            std::fs::write(
-                home.join("config.toml"),
-                format!("[apps.calendar]\n{}\n", case.app_config),
+    mock_server::run(&[&server], async {
+        AppsTestServer::mount_searchable(&server).await?;
+        for rpc_method in ["tools/list", "tools/call"] {
+            Mock::given(method("POST"))
+                .and(body_partial_json(json!({"method": rpc_method})))
+                .respond_with(move |request: &wiremock::Request| {
+                    let body: serde_json::Value =
+                        request.body_json().expect("valid MCP fixture request");
+                    let result = if rpc_method == "tools/list" {
+                        json!({"tools": [
+                            {
+                                "name": "lookup",
+                                "description": "Look up calendar events",
+                                "inputSchema": {"type": "object", "properties": {}},
+                                "annotations": {"readOnlyHint": true},
+                                "_meta": {"connector_id": "calendar", "connector_name": "calendar"}
+                            },
+                            {
+                                "name": "read",
+                                "description": "Read notes",
+                                "inputSchema": {"type": "object", "properties": {}},
+                                "annotations": {"readOnlyHint": true},
+                                "_meta": {"connector_id": "notes", "connector_name": "notes"}
+                            }
+                        ]})
+                    } else {
+                        assert_eq!(body["params"]["name"], "lookup");
+                        json!({"content": [{"type": "text", "text": "calendar-lookup-ok"}]})
+                    };
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "jsonrpc": "2.0", "id": body["id"], "result": result
+                    }))
+                })
+                .with_priority(1)
+                .mount(&server)
+                .await;
+        }
+        let namespace = "mcp__codex_apps__calendar";
+        let tool_call = if case.expect_exec {
+            responses::ev_custom_tool_call(
+                "lookup",
+                "exec",
+                &format!("text((await tools.{namespace}__lookup({{}})).content[0].text);"),
             )
-            .expect("valid fixture configuration");
-        })
-        .with_auth(auth)
-        .with_extensions(Arc::new(extensions.build()))
-        .with_model_info_override("gpt-5.5", move |model| model.tool_mode = Some(case.mode))
-        .with_config(move |config| {
-            if case.direct_only {
-                config.code_mode.direct_only_tool_namespaces = vec![namespace.to_string()];
-            }
-            config.analytics_enabled = Some(false);
-            config
-                .features
-                .enable(Feature::CodeModeHost)
-                .expect("code mode host");
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    test.submit_turn("Look up my calendar.").await?;
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), if calls_tool { 2 } else { 1 });
-    assert_eq!(
-        requests[0].tool_by_name(namespace, "lookup").is_some(),
-        case.expect_direct
-    );
-    assert!(
-        requests[0]
-            .tool_by_name("mcp__codex_apps__notes", "read")
-            .is_none()
-    );
-    let body = requests[0].body_json();
-    let exec_description = body["tools"]
-        .as_array()
-        .expect("request tool list")
-        .iter()
-        .find(|tool| tool["name"] == "exec")
-        .and_then(|tool| tool["description"].as_str())
-        .unwrap_or_default();
-    // Code Mode Only names an MCP tool in `exec`'s roster and never declares it there.
-    assert_eq!(
-        (
-            exec_description.contains(&format!("{namespace}__lookup(")),
-            exec_description.contains(&format!("\n- {namespace}__lookup")),
-        ),
-        (
-            false,
-            case.expect_exec && case.mode == ToolMode::CodeModeOnly
-        )
-    );
-    assert!(!exec_description.contains("mcp__codex_apps__notes__read"));
-    if calls_tool {
-        assert!(requests[1].body_contains_text("calendar-lookup-ok"));
-    }
-    test.codex.shutdown_and_wait().await?;
-    Ok(requests)
+        } else if case.expect_direct {
+            responses::ev_function_call_with_namespace("lookup", namespace, "lookup", "{}")
+        } else {
+            responses::ev_assistant_message("message", "done")
+        };
+        let calls_tool = case.expect_direct || case.expect_exec;
+        let mut events = vec![responses::sse(vec![
+            tool_call,
+            responses::ev_completed("first"),
+        ])];
+        if calls_tool {
+            events.push(responses::sse(vec![responses::ev_completed("second")]));
+        }
+        let response_mock = responses::mount_sse_sequence(&server, events).await;
+        let auth = codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing();
+        let mut extensions = ExtensionRegistryBuilder::new();
+        extensions.mcp_server_contributor(Arc::new(AppsServer(serde_json::from_value(json!(
+            case.server_omissions
+        ))?)));
+        let mut builder = search_capable_apps_builder(server.uri())
+            .with_code_mode_host_program(codex_utils_cargo_bin::cargo_bin("codex-code-mode-host")?)
+            .with_pre_build_hook(move |home| {
+                std::fs::write(
+                    home.join("config.toml"),
+                    format!("[apps.calendar]\n{}\n", case.app_config),
+                )
+                .expect("valid fixture configuration");
+            })
+            .with_auth(auth)
+            .with_extensions(Arc::new(extensions.build()))
+            .with_model_info_override("gpt-5.5", move |model| model.tool_mode = Some(case.mode))
+            .with_config(move |config| {
+                if case.direct_only {
+                    config.code_mode.direct_only_tool_namespaces = vec![namespace.to_string()];
+                }
+                config.analytics_enabled = Some(false);
+                config
+                    .features
+                    .enable(Feature::CodeModeHost)
+                    .expect("code mode host");
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        test.submit_turn("Look up my calendar.").await?;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), if calls_tool { 2 } else { 1 });
+        assert_eq!(
+            requests[0].tool_by_name(namespace, "lookup").is_some(),
+            case.expect_direct
+        );
+        assert!(
+            requests[0]
+                .tool_by_name("mcp__codex_apps__notes", "read")
+                .is_none()
+        );
+        let body = requests[0].body_json();
+        let exec_description = body["tools"]
+            .as_array()
+            .expect("request tool list")
+            .iter()
+            .find(|tool| tool["name"] == "exec")
+            .and_then(|tool| tool["description"].as_str())
+            .unwrap_or_default();
+        // Code Mode Only names an MCP tool in `exec`'s roster and never declares it there.
+        assert_eq!(
+            (
+                exec_description.contains(&format!("{namespace}__lookup(")),
+                exec_description.contains(&format!("\n- {namespace}__lookup")),
+            ),
+            (
+                false,
+                case.expect_exec && case.mode == ToolMode::CodeModeOnly
+            )
+        );
+        assert!(!exec_description.contains("mcp__codex_apps__notes__read"));
+        if calls_tool {
+            assert!(requests[1].body_contains_text("calendar-lookup-ok"));
+        }
+        test.codex.shutdown_and_wait().await?;
+        Ok(requests)
+    })
+    .await
 }
 
 #[path = "app_tool_exposure_strict_tests.rs"]

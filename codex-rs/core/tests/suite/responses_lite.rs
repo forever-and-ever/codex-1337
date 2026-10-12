@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -517,65 +518,68 @@ async fn responses_lite_compact_request_uses_lite_transport_contract() -> Result
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_response_created("resp-1"),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                serde_json::json!({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "compaction",
-                        "encrypted_content": "RESPONSES_LITE_COMPACT_SUMMARY",
-                    }
-                }),
-                responses::ev_completed("resp-compact"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_response_created("resp-1"),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    serde_json::json!({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "compaction",
+                            "encrypted_content": "RESPONSES_LITE_COMPACT_SUMMARY",
+                        }
+                    }),
+                    responses::ev_completed("resp-compact"),
+                ]),
+            ],
+        )
+        .await;
 
-    let mut builder = test_codex().with_model_info_override("gpt-5.4", |model_info| {
-        model_info.use_responses_lite = true;
-    });
-    let test = builder.build(&server).await?;
+        let mut builder = test_codex().with_model_info_override("gpt-5.4", |model_info| {
+            model_info.use_responses_lite = true;
+        });
+        let test = builder.build(&server).await?;
 
-    test.submit_turn("Compact this conversation").await?;
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        test.submit_turn("Compact this conversation").await?;
+        test.codex.submit(Op::Compact).await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        let compact_request = &requests[1];
+        assert_eq!(compact_request.path(), "/v1/responses");
+        assert_eq!(
+            compact_request.inputs_of_type("compaction_trigger").len(),
+            1
+        );
+        assert_eq!(
+            compact_request.header(RESPONSES_LITE_HEADER).as_deref(),
+            Some("true")
+        );
+        let compact_body = compact_request.body_json();
+        assert_eq!(
+            compact_body
+                .get("reasoning")
+                .and_then(|reasoning| reasoning.get("context"))
+                .and_then(Value::as_str),
+            Some("all_turns")
+        );
+        assert_eq!(
+            compact_body.get("parallel_tool_calls"),
+            Some(&Value::Bool(false))
+        );
+
+        Ok(())
     })
-    .await;
-
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    let compact_request = &requests[1];
-    assert_eq!(compact_request.path(), "/v1/responses");
-    assert_eq!(
-        compact_request.inputs_of_type("compaction_trigger").len(),
-        1
-    );
-    assert_eq!(
-        compact_request.header(RESPONSES_LITE_HEADER).as_deref(),
-        Some("true")
-    );
-    let compact_body = compact_request.body_json();
-    assert_eq!(
-        compact_body
-            .get("reasoning")
-            .and_then(|reasoning| reasoning.get("context"))
-            .and_then(Value::as_str),
-        Some("all_turns")
-    );
-    assert_eq!(
-        compact_body.get("parallel_tool_calls"),
-        Some(&Value::Bool(false))
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -1,5 +1,6 @@
 //! App omissions cannot bypass strict deferral; app access restrictions still apply.
 use super::*;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use std::sync::Mutex;
 
@@ -7,6 +8,7 @@ use std::sync::Mutex;
 #[tracing_test::traced_test]
 async fn strict_ignores_app_omissions_but_preserves_app_access() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut tools = vec![];
     for name in ["lookup", "disabled", "app_only"] {
         let mut tool = json!({
@@ -102,4 +104,6 @@ enabled = false
     }));
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

@@ -16,6 +16,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -273,82 +274,85 @@ async fn unsupported_code_mode_warning_is_emitted_each_turn() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let model_slug = "test-tool-mode-warning-each-turn";
-    let models_mock = mount_models_once(
-        &server,
-        ModelsResponse {
-            models: vec![remote_model(model_slug)],
-        },
-    )
-    .await;
-    let response_mock = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::CodeMode)
-                .expect("test config should allow feature update");
-        })
-        .build(&server)
-        .await?;
-    let models_manager = test.thread_manager.get_models_manager();
-    let available_model = wait_for_model_available(&models_manager, model_slug).await;
-    assert_eq!(available_model.model, model_slug);
-    assert_eq!(models_mock.requests().len(), 1);
-
-    submit_thread_settings(
-        &test.codex,
-        ThreadSettingsOverrides {
-            model: Some(model_slug.to_string()),
-            ..Default::default()
-        },
-    )
-    .await?;
-
-    let mut warning_counts = Vec::new();
-    for prompt in ["first turn", "second turn"] {
-        test.codex
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: prompt.to_string(),
-                text_elements: Vec::new(),
-            }]))
+    mock_server::run(&[&server], async {
+        let model_slug = "test-tool-mode-warning-each-turn";
+        let models_mock = mount_models_once(
+            &server,
+            ModelsResponse {
+                models: vec![remote_model(model_slug)],
+            },
+        )
+        .await;
+        let response_mock = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::CodeMode)
+                    .expect("test config should allow feature update");
+            })
+            .build(&server)
             .await?;
+        let models_manager = test.thread_manager.get_models_manager();
+        let available_model = wait_for_model_available(&models_manager, model_slug).await;
+        assert_eq!(available_model.model, model_slug);
+        assert_eq!(models_mock.requests().len(), 1);
 
-        let mut warning_count = 0;
-        loop {
-            match wait_for_event(&test.codex, |_| true).await {
-                EventMsg::Warning(warning)
-                    if warning.message.contains(UNSUPPORTED_CODE_MODE_WARNING) =>
-                {
-                    warning_count += 1;
+        submit_thread_settings(
+            &test.codex,
+            ThreadSettingsOverrides {
+                model: Some(model_slug.to_string()),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+        let mut warning_counts = Vec::new();
+        for prompt in ["first turn", "second turn"] {
+            test.codex
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: prompt.to_string(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+
+            let mut warning_count = 0;
+            loop {
+                match wait_for_event(&test.codex, |_| true).await {
+                    EventMsg::Warning(warning)
+                        if warning.message.contains(UNSUPPORTED_CODE_MODE_WARNING) =>
+                    {
+                        warning_count += 1;
+                    }
+                    EventMsg::TurnComplete(_) => break,
+                    _ => {}
                 }
-                EventMsg::TurnComplete(_) => break,
-                _ => {}
             }
+            warning_counts.push(warning_count);
         }
-        warning_counts.push(warning_count);
-    }
 
-    assert_eq!(warning_counts, vec![1, 1]);
-    assert_eq!(response_mock.requests().len(), 2);
+        assert_eq!(warning_counts, vec![1, 1]);
+        assert_eq!(response_mock.requests().len(), 2);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

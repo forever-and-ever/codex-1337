@@ -30,6 +30,7 @@ use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_features::Feature;
 use codex_skills::system_cache_root_dir;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -227,81 +228,84 @@ async fn review_start_exec_approval_item_id_matches_command_execution_item() -> 
         create_final_assistant_message_sse_response("done")?,
     ];
     let server = create_mock_responses_server_sequence(responses).await;
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .with_provider_name("Mock provider")
+            .with_approval_policy("on-request")
+            .disable_feature(Feature::ShellSnapshot)
+            .write(codex_home.path())?;
 
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_provider_name("Mock provider")
-        .with_approval_policy("on-request")
-        .disable_feature(Feature::ShellSnapshot)
-        .write(codex_home.path())?;
-
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized()
-        .await?;
-    let thread_id = start_default_thread(&mut mcp).await?;
-    let ReviewStartResponse { turn, .. } = mcp
-        .request(|request_id| ClientRequest::ReviewStart {
-            request_id,
-            params: ReviewStartParams {
-                thread_id,
-                delivery: Some(ReviewDelivery::Inline),
-                target: ReviewTarget::Commit {
-                    sha: "1234567deadbeef".to_string(),
-                    title: Some("Check review approvals".to_string()),
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let thread_id = start_default_thread(&mut mcp).await?;
+        let ReviewStartResponse { turn, .. } = mcp
+            .request(|request_id| ClientRequest::ReviewStart {
+                request_id,
+                params: ReviewStartParams {
+                    thread_id,
+                    delivery: Some(ReviewDelivery::Inline),
+                    target: ReviewTarget::Commit {
+                        sha: "1234567deadbeef".to_string(),
+                        title: Some("Check review approvals".to_string()),
+                    },
                 },
-            },
-        })
-        .await?;
-    let turn_id = turn.id.clone();
-    assert_eq!(turn.items_view, TurnItemsView::NotLoaded);
-    assert_eq!(
-        turn.items,
-        vec![ThreadItem::UserMessage {
-            id: turn_id.clone(),
-            client_id: None,
-            content: vec![V2UserInput::Text {
-                text: "commit 1234567: Check review approvals".to_string(),
-                text_elements: Vec::new(),
-            }],
-        }]
-    );
+            })
+            .await?;
+        let turn_id = turn.id.clone();
+        assert_eq!(turn.items_view, TurnItemsView::NotLoaded);
+        assert_eq!(
+            turn.items,
+            vec![ThreadItem::UserMessage {
+                id: turn_id.clone(),
+                client_id: None,
+                content: vec![V2UserInput::Text {
+                    text: "commit 1234567: Check review approvals".to_string(),
+                    text_elements: Vec::new(),
+                }],
+            }]
+        );
 
-    let server_req = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_request_message(),
-    )
-    .await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req else {
-        panic!("expected CommandExecutionRequestApproval request");
-    };
-    assert_eq!(params.item_id, "review-call-1");
-    assert_eq!(params.turn_id, turn_id);
+        let server_req = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_request_message(),
+        )
+        .await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_req
+        else {
+            panic!("expected CommandExecutionRequestApproval request");
+        };
+        assert_eq!(params.item_id, "review-call-1");
+        assert_eq!(params.turn_id, turn_id);
 
-    let mut command_item_id = None;
-    for _ in 0..10 {
-        let started: ItemStartedNotification =
-            timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("item/started")).await??;
-        if let ThreadItem::CommandExecution { id, .. } = started.item {
-            command_item_id = Some(id);
-            break;
+        let mut command_item_id = None;
+        for _ in 0..10 {
+            let started: ItemStartedNotification =
+                timeout(DEFAULT_READ_TIMEOUT, mcp.read_notification("item/started")).await??;
+            if let ThreadItem::CommandExecution { id, .. } = started.item {
+                command_item_id = Some(id);
+                break;
+            }
         }
-    }
-    let command_item_id = command_item_id.expect("did not observe command execution item");
-    assert_eq!(command_item_id, params.item_id);
+        let command_item_id = command_item_id.expect("did not observe command execution item");
+        assert_eq!(command_item_id, params.item_id);
 
-    mcp.send_response(
-        request_id,
-        serde_json::json!({ "decision": codex_protocol::protocol::ReviewDecision::Approved }),
-    )
-    .await?;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        mcp.send_response(
+            request_id,
+            serde_json::json!({ "decision": codex_protocol::protocol::ReviewDecision::Approved }),
+        )
+        .await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -344,6 +348,7 @@ async fn review_start_rejects_empty_base_branch() -> Result<()> {
 #[tokio::test]
 async fn review_start_with_detached_delivery_returns_new_thread_id() -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response_mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -498,6 +503,8 @@ async fn review_start_with_detached_delivery_returns_new_thread_id() -> Result<(
     assert!(!review_request.body_contains_text(COLLIDING_REVIEW_SKILL_MARKER));
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

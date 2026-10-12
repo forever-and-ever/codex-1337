@@ -48,6 +48,7 @@ use codex_rollout::append_rollout_item_to_path;
 use codex_rollout::read_session_meta_line;
 use codex_state::DirectionalThreadSpawnEdgeStatus;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -264,76 +265,78 @@ async fn thread_list_reports_system_error_idle_flag_after_failed_turn() -> Resul
         responses::sse_failed("resp-2", "server_error", "simulated failure"),
     ];
     let server = create_mock_responses_server_sequence(responses).await;
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        create_runtime_config(codex_home.path(), &server.uri())?;
+        let mut mcp = init_mcp(codex_home.path()).await?;
 
-    let codex_home = TempDir::new()?;
-    create_runtime_config(codex_home.path(), &server.uri())?;
-    let mut mcp = init_mcp(codex_home.path()).await?;
+        let ThreadStartResponse { thread, .. } = mcp
+            .start_thread(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
+        let seed_turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "seed history".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(seed_turn_id)).await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let failed_turn_id = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![UserInput::Text {
+                    text: "fail turn".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(failed_turn_id)).await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("error"),
+        )
+        .await??;
+
+        let ThreadListResponse { data, .. } = list_threads(
+            &mut mcp,
+            /*cursor*/ None,
+            Some(10),
+            Some(vec!["mock_provider".to_string()]),
+            Some(vec![
+                ThreadSourceKind::AppServer,
+                ThreadSourceKind::Cli,
+                ThreadSourceKind::VsCode,
+            ]),
+            /*archived*/ None,
+        )
         .await?;
+        let listed = data
+            .iter()
+            .find(|candidate| candidate.id == thread.id)
+            .expect("expected started thread to be listed");
+        assert_eq!(listed.status, ThreadStatus::SystemError,);
 
-    let seed_turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![UserInput::Text {
-                text: "seed history".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(seed_turn_id)).await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let failed_turn_id = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![UserInput::Text {
-                text: "fail turn".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(failed_turn_id)).await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("error"),
-    )
-    .await??;
-
-    let ThreadListResponse { data, .. } = list_threads(
-        &mut mcp,
-        /*cursor*/ None,
-        Some(10),
-        Some(vec!["mock_provider".to_string()]),
-        Some(vec![
-            ThreadSourceKind::AppServer,
-            ThreadSourceKind::Cli,
-            ThreadSourceKind::VsCode,
-        ]),
-        /*archived*/ None,
-    )
-    .await?;
-    let listed = data
-        .iter()
-        .find(|candidate| candidate.id == thread.id)
-        .expect("expected started thread to be listed");
-    assert_eq!(listed.status, ThreadStatus::SystemError,);
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 // Minimal config.toml for listing.

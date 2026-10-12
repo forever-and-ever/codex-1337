@@ -3,6 +3,7 @@
 use anyhow::Result;
 use codex_protocol::openai_models::ToolMessages;
 use codex_protocol::openai_models::ToolMode;
+use core_test_support::mock_server;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
@@ -29,45 +30,48 @@ async fn code_mode_wait_overrides_are_independent(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let mock = mount_sse_sequence(
-        &server,
-        vec![sse_completed("bundled"), sse_completed("catalog")],
-    )
-    .await;
-    for messages in [
-        None,
-        Some(serde_json::from_value::<ToolMessages>(
-            json!({"code_mode": {"wait": overrides}}),
-        )?),
-    ] {
-        let test = test_codex()
-            .with_model_info_override("gpt-5.5", move |model| {
-                model.tool_mode = Some(tool_mode);
-                model.use_responses_lite = false;
-                model.model_messages.as_mut().expect("model messages").tools = messages;
-            })
-            .with_config(|config| {
-                config.code_mode.disable_in_process_fallback = true;
-            })
-            .build_with_auto_env(&server)
-            .await?;
-        test.submit_turn("Inspect the available tools.").await?;
-    }
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    let mut expected = requests[0].body_json()["tools"].clone();
-    let wait = expected
-        .as_array_mut()
-        .expect("tools")
-        .iter_mut()
-        .find(|tool| tool["name"] == "wait")
-        .expect("wait");
-    if let Some(description) = overrides["description"].as_str() {
-        wait["description"] = json!(description);
-    }
-    if valid_parameters {
-        wait["parameters"] = serde_json::from_str(PARAMETERS)?;
-    }
-    assert_eq!(requests[1].body_json()["tools"], expected);
-    Ok(())
+    mock_server::run(&[&server], async {
+        let mock = mount_sse_sequence(
+            &server,
+            vec![sse_completed("bundled"), sse_completed("catalog")],
+        )
+        .await;
+        for messages in [
+            None,
+            Some(serde_json::from_value::<ToolMessages>(
+                json!({"code_mode": {"wait": overrides}}),
+            )?),
+        ] {
+            let test = test_codex()
+                .with_model_info_override("gpt-5.5", move |model| {
+                    model.tool_mode = Some(tool_mode);
+                    model.use_responses_lite = false;
+                    model.model_messages.as_mut().expect("model messages").tools = messages;
+                })
+                .with_config(|config| {
+                    config.code_mode.disable_in_process_fallback = true;
+                })
+                .build_with_auto_env(&server)
+                .await?;
+            test.submit_turn("Inspect the available tools.").await?;
+        }
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        let mut expected = requests[0].body_json()["tools"].clone();
+        let wait = expected
+            .as_array_mut()
+            .expect("tools")
+            .iter_mut()
+            .find(|tool| tool["name"] == "wait")
+            .expect("wait");
+        if let Some(description) = overrides["description"].as_str() {
+            wait["description"] = json!(description);
+        }
+        if valid_parameters {
+            wait["parameters"] = serde_json::from_str(PARAMETERS)?;
+        }
+        assert_eq!(requests[1].body_json()["tools"], expected);
+        Ok(())
+    })
+    .await
 }

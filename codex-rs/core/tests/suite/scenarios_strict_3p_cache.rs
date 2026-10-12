@@ -10,6 +10,7 @@ use codex_protocol::protocol::McpStartupStatus;
 use core_test_support::apps_test_server::AppsTestServer;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event_match;
@@ -22,6 +23,7 @@ use std::sync::Mutex;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn strict_3p_mcp_refresh_preserves_cache_while_exec_tracks_available_tools() -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let first_mcp = responses::start_mock_server().await;
     let second_mcp = responses::start_mock_server().await;
     let initial = AppsTestServer::mount_with_tools(
@@ -205,4 +207,6 @@ text(JSON.stringify(results));"#;
     insta::assert_snapshot!("strict_3p_mcp_catalog_cache", snapshot);
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

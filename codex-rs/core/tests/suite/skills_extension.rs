@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
@@ -520,64 +521,67 @@ async fn rendered_catalogs_for_turns(
     turn_count: usize,
 ) -> Result<(Vec<String>, Vec<String>)> {
     let server = responses::start_mock_server().await;
-    let response = responses::mount_sse_sequence(
-        &server,
-        (0..turn_count)
-            .map(|index| {
-                let response_id = format!("resp-{index}");
-                sse(vec![
-                    ev_response_created(&response_id),
-                    ev_completed(&response_id),
-                ])
+    mock_server::run(&[&server], async {
+        let response = responses::mount_sse_sequence(
+            &server,
+            (0..turn_count)
+                .map(|index| {
+                    let response_id = format!("resp-{index}");
+                    sse(vec![
+                        ev_response_created(&response_id),
+                        ev_completed(&response_id),
+                    ])
+                })
+                .collect(),
+        )
+        .await;
+        let codex_home = Arc::new(TempDir::new()?);
+        if !host_skills.is_empty() {
+            write_host_skills(codex_home.path(), host_skills)?;
+        }
+        let (extensions, event_rx) =
+            catalog_extensions(executor_catalog(executor_skills), !host_skills.is_empty());
+        let mut builder = test_codex()
+            .with_home(Arc::clone(&codex_home))
+            .with_extensions(extensions)
+            .with_model_info_override("gpt-5.5", move |model_info| {
+                model_info.context_window = Some(context_window);
+                model_info.max_context_window = None;
             })
-            .collect(),
-    )
-    .await;
-    let codex_home = Arc::new(TempDir::new()?);
-    if !host_skills.is_empty() {
-        write_host_skills(codex_home.path(), host_skills)?;
-    }
-    let (extensions, event_rx) =
-        catalog_extensions(executor_catalog(executor_skills), !host_skills.is_empty());
-    let mut builder = test_codex()
-        .with_home(Arc::clone(&codex_home))
-        .with_extensions(extensions)
-        .with_model_info_override("gpt-5.5", move |model_info| {
-            model_info.context_window = Some(context_window);
-            model_info.max_context_window = None;
-        })
-        .with_config(configure_catalog_test);
-    let test = builder.build_with_auto_env(&server).await?;
+            .with_config(configure_catalog_test);
+        let test = builder.build_with_auto_env(&server).await?;
 
-    let mut client_warning_messages = Vec::new();
-    for _ in 0..turn_count {
-        test.codex
-            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "Inspect the available skills.".to_string(),
-                text_elements: Vec::new(),
-            }]))
-            .await?;
-        loop {
-            match core_test_support::wait_for_event(&test.codex, |_| true).await {
-                EventMsg::Warning(warning) => client_warning_messages.push(warning.message),
-                EventMsg::TurnComplete(_) => break,
-                _ => {}
+        let mut client_warning_messages = Vec::new();
+        for _ in 0..turn_count {
+            test.codex
+                .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "Inspect the available skills.".to_string(),
+                    text_elements: Vec::new(),
+                }]))
+                .await?;
+            loop {
+                match core_test_support::wait_for_event(&test.codex, |_| true).await {
+                    EventMsg::Warning(warning) => client_warning_messages.push(warning.message),
+                    EventMsg::TurnComplete(_) => break,
+                    _ => {}
+                }
             }
         }
-    }
-    let developer_texts = response
-        .last_request()
-        .expect("production turn should issue a responses request")
-        .message_input_texts("developer");
-    // Extension warnings are client-visible through the app-server event sink,
-    // while core warnings are delivered through the TestCodex event stream.
-    // Count both paths so duplicate warning ownership cannot hide in this test.
-    client_warning_messages.extend(event_rx.try_iter().filter_map(|event| match event {
-        CapturedExtensionEvent::Warning(warning) => Some(warning.message),
-        CapturedExtensionEvent::Event(_) => None,
-    }));
-    let _codex_home_guard = codex_home;
-    Ok((developer_texts, client_warning_messages))
+        let developer_texts = response
+            .last_request()
+            .expect("production turn should issue a responses request")
+            .message_input_texts("developer");
+        // Extension warnings are client-visible through the app-server event sink,
+        // while core warnings are delivered through the TestCodex event stream.
+        // Count both paths so duplicate warning ownership cannot hide in this test.
+        client_warning_messages.extend(event_rx.try_iter().filter_map(|event| match event {
+            CapturedExtensionEvent::Warning(warning) => Some(warning.message),
+            CapturedExtensionEvent::Event(_) => None,
+        }));
+        let _codex_home_guard = codex_home;
+        Ok((developer_texts, client_warning_messages))
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1413,6 +1417,7 @@ async fn executor_skill_tool_reads_references_under_current_permissions(
         | ExecutorReferenceRead::DeniedContinuation => FileSystemAccessMode::Read,
     };
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
     install_with_providers(
         &mut extensions,
@@ -1804,6 +1809,8 @@ async fn executor_skill_tool_reads_references_under_current_permissions(
         }
     }
     Ok(())
+    })
+    .await
 }
 
 /// Live executor prompts reject oversized resources without rewriting earlier injected content.
@@ -1933,95 +1940,103 @@ async fn executor_skill_invocation_is_environment_scoped_and_deduplicated() -> R
     const SELECTED_RESOURCE: &str = "skill://selected-root/demo/SKILL.md";
 
     let server = responses::start_mock_server().await;
-    let codex_home = Arc::new(TempDir::new()?);
-    let skill_path = codex_home.path().join("executor-skill/SKILL.md");
-    std::fs::create_dir_all(
-        skill_path
-            .parent()
-            .expect("skill path should have a parent"),
-    )?;
-    std::fs::write(&skill_path, "executor skill contents\n")?;
-    let skill_uri = PathUri::from_host_native_path(&skill_path)?;
-    let catalog = SkillCatalog {
-        entries: vec![
-            SkillCatalogEntry::new(
-                SkillPackageId("skill://other-root/demo".to_string()),
-                SkillAuthority::new(SkillSourceKind::Executor, "other-root"),
-                "other-environment-skill",
-                "Skill from another environment.",
-                SkillResourceId::environment(
-                    "skill://other-root/demo/SKILL.md",
-                    "other-environment",
-                    skill_uri.clone(),
+    mock_server::run(&[&server], async {
+        let codex_home = Arc::new(TempDir::new()?);
+        let skill_path = codex_home.path().join("executor-skill/SKILL.md");
+        std::fs::create_dir_all(
+            skill_path
+                .parent()
+                .expect("skill path should have a parent"),
+        )?;
+        std::fs::write(&skill_path, "executor skill contents\n")?;
+        let skill_uri = PathUri::from_host_native_path(&skill_path)?;
+        let catalog = SkillCatalog {
+            entries: vec![
+                SkillCatalogEntry::new(
+                    SkillPackageId("skill://other-root/demo".to_string()),
+                    SkillAuthority::new(SkillSourceKind::Executor, "other-root"),
+                    "other-environment-skill",
+                    "Skill from another environment.",
+                    SkillResourceId::environment(
+                        "skill://other-root/demo/SKILL.md",
+                        "other-environment",
+                        skill_uri.clone(),
+                    ),
                 ),
-            ),
-            SkillCatalogEntry::new(
-                SkillPackageId("skill://selected-root/demo".to_string()),
-                SkillAuthority::new(SkillSourceKind::Executor, "selected-root"),
-                "selected-environment-skill",
-                "Skill from the selected environment.",
-                SkillResourceId::environment(SELECTED_RESOURCE, LOCAL_ENVIRONMENT_ID, skill_uri),
-            ),
-        ],
-        warnings: Vec::new(),
-    };
-    let read_command = if cfg!(windows) {
-        format!("Get-Content -LiteralPath \"{}\"", skill_path.display())
-    } else {
-        format!("cat {}", skill_path.display())
-    };
-    let command = json!({
-        "cmd": read_command,
-        "login": false,
-    })
-    .to_string();
-    let response = responses::mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                responses::ev_function_call("executor-skill-first", "exec_command", &command),
-                responses::ev_function_call("executor-skill-again", "exec_command", &command),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
+                SkillCatalogEntry::new(
+                    SkillPackageId("skill://selected-root/demo".to_string()),
+                    SkillAuthority::new(SkillSourceKind::Executor, "selected-root"),
+                    "selected-environment-skill",
+                    "Skill from the selected environment.",
+                    SkillResourceId::environment(
+                        SELECTED_RESOURCE,
+                        LOCAL_ENVIRONMENT_ID,
+                        skill_uri,
+                    ),
+                ),
+            ],
+            warnings: Vec::new(),
+        };
+        let read_command = if cfg!(windows) {
+            format!("Get-Content -LiteralPath \"{}\"", skill_path.display())
+        } else {
+            format!("cat {}", skill_path.display())
+        };
+        let command = json!({
+            "cmd": read_command,
+            "login": false,
+        })
+        .to_string();
+        let response = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    responses::ev_function_call("executor-skill-first", "exec_command", &command),
+                    responses::ev_function_call("executor-skill-again", "exec_command", &command),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
 
-    let (extensions, _) = catalog_extensions(catalog, /*include_host_provider*/ false);
-    let chatgpt_base_url = server.uri();
-    let mut builder = test_codex()
-        .with_home(codex_home)
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
-        .with_extensions(extensions)
-        .with_config(move |config| {
-            configure_catalog_test(config);
-            config.chatgpt_base_url = chatgpt_base_url;
-        });
-    let test = builder.build_with_auto_env(&server).await?;
-    test.submit_turn("Read the executor skill twice.").await?;
+        let (extensions, _) = catalog_extensions(catalog, /*include_host_provider*/ false);
+        let chatgpt_base_url = server.uri();
+        let mut builder = test_codex()
+            .with_home(codex_home)
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_extensions(extensions)
+            .with_config(move |config| {
+                configure_catalog_test(config);
+                config.chatgpt_base_url = chatgpt_base_url;
+            });
+        let test = builder.build_with_auto_env(&server).await?;
+        test.submit_turn("Read the executor skill twice.").await?;
 
-    for call_id in ["executor-skill-first", "executor-skill-again"] {
-        let output = response
-            .function_call_output_text(call_id)
-            .expect("executor skill command should return output");
-        assert!(
-            output.contains("executor skill contents"),
-            "command output: {output}"
+        for call_id in ["executor-skill-first", "executor-skill-again"] {
+            let output = response
+                .function_call_output_text(call_id)
+                .expect("executor skill command should return output");
+            assert!(
+                output.contains("executor skill contents"),
+                "command output: {output}"
+            );
+        }
+
+        let events =
+            wait_for_analytics_events(&server, "skill_invocation", /*expected_count*/ 1).await;
+        assert_eq!(events.len(), 1, "executor skill should be counted once");
+        assert_eq!(events[0]["skill_name"], "selected-environment-skill");
+        assert_eq!(
+            events[0]["skill_id"],
+            format!("{:x}", sha1::Sha1::digest(SELECTED_RESOURCE.as_bytes()))
         );
-    }
+        assert_eq!(events[0]["event_params"]["invoke_type"], "implicit");
 
-    let events = wait_for_analytics_events(&server, "skill_invocation", /*expected_count*/ 1).await;
-    assert_eq!(events.len(), 1, "executor skill should be counted once");
-    assert_eq!(events[0]["skill_name"], "selected-environment-skill");
-    assert_eq!(
-        events[0]["skill_id"],
-        format!("{:x}", sha1::Sha1::digest(SELECTED_RESOURCE.as_bytes()))
-    );
-    assert_eq!(events[0]["event_params"]["invoke_type"], "implicit");
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2159,6 +2174,7 @@ async fn assert_catalog_model_switch(max_context_tokens: Option<usize>) -> Resul
     const MODEL_A: &str = "skills-model-a";
     const MODEL_B: &str = "skills-model-b";
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response = responses::mount_sse_sequence(
         &server,
         vec![
@@ -2356,6 +2372,8 @@ async fn assert_catalog_model_switch(max_context_tokens: Option<usize>) -> Resul
     assert_eq!(warnings, expected_warnings);
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2465,6 +2483,7 @@ async fn production_turn_keeps_full_host_only_catalog_when_it_fits() -> Result<(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn production_turn_keeps_host_aliases_and_amends_catalog_changes() -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let response = responses::mount_sse_sequence(
         &server,
         [
@@ -2662,6 +2681,8 @@ async fn production_turn_keeps_host_aliases_and_amends_catalog_changes() -> Resu
     }
     assert_eq!(catalogs[1], catalogs[2]);
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3058,6 +3079,7 @@ async fn production_turn_keeps_full_executor_only_catalog_when_it_fits() -> Resu
 async fn production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_resume() -> Result<()>
 {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let skill_name = "cloud-search";
     let skill_description = "Search available company knowledge. ".repeat(40);
     let skill_resource = "skill://codex_apps/cloud-search/SKILL.md";
@@ -3396,6 +3418,8 @@ async fn production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_r
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

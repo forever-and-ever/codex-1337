@@ -2,12 +2,14 @@
 
 use super::*;
 use codex_protocol::models::PermissionProfile;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn custom_provider_capabilities_constrain_web_access_and_enable_compaction() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let home = Arc::new(TempDir::new()?);
     fs::write(
         home.path().join("config.toml"),
@@ -96,4 +98,6 @@ remote_compaction = "v2"
         )
     );
     Ok(())
+    })
+    .await
 }

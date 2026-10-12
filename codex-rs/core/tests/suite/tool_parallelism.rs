@@ -2,6 +2,7 @@
 #![allow(clippy::unwrap_used)]
 
 use codex_core::TurnInputRequest;
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::fs;
 use std::time::Duration;
@@ -94,61 +95,64 @@ async fn read_file_tools_run_in_parallel() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let test = build_codex_with_test_tool(&server).await?;
+    mock_server::run(&[&server], async {
+        let test = build_codex_with_test_tool(&server).await?;
 
-    let warmup_args = json!({
-        "sleep_after_ms": 10,
-        "barrier": {
-            "id": "parallel-test-sync-warmup",
-            "participants": 2,
-            "timeout_ms": 1_000,
-        }
+        let warmup_args = json!({
+            "sleep_after_ms": 10,
+            "barrier": {
+                "id": "parallel-test-sync-warmup",
+                "participants": 2,
+                "timeout_ms": 1_000,
+            }
+        })
+        .to_string();
+
+        let parallel_args = json!({
+            "sleep_after_ms": 300,
+            "barrier": {
+                "id": "parallel-test-sync",
+                "participants": 2,
+                "timeout_ms": 1_000,
+            }
+        })
+        .to_string();
+
+        let warmup_first = sse(vec![
+            json!({"type": "response.created", "response": {"id": "resp-warm-1"}}),
+            ev_function_call("warm-call-1", "test_sync_tool", &warmup_args),
+            ev_function_call("warm-call-2", "test_sync_tool", &warmup_args),
+            ev_completed("resp-warm-1"),
+        ]);
+        let warmup_second = sse(vec![
+            ev_assistant_message("warm-msg-1", "warmup complete"),
+            ev_completed("resp-warm-2"),
+        ]);
+
+        let first_response = sse(vec![
+            json!({"type": "response.created", "response": {"id": "resp-1"}}),
+            ev_function_call("call-1", "test_sync_tool", &parallel_args),
+            ev_function_call("call-2", "test_sync_tool", &parallel_args),
+            ev_completed("resp-1"),
+        ]);
+        let second_response = sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]);
+        mount_sse_sequence(
+            &server,
+            vec![warmup_first, warmup_second, first_response, second_response],
+        )
+        .await;
+
+        run_turn(&test, "warm up parallel tool").await?;
+
+        let duration = run_turn_and_measure(&test, "exercise sync tool").await?;
+        assert_parallel_duration(duration);
+
+        Ok(())
     })
-    .to_string();
-
-    let parallel_args = json!({
-        "sleep_after_ms": 300,
-        "barrier": {
-            "id": "parallel-test-sync",
-            "participants": 2,
-            "timeout_ms": 1_000,
-        }
-    })
-    .to_string();
-
-    let warmup_first = sse(vec![
-        json!({"type": "response.created", "response": {"id": "resp-warm-1"}}),
-        ev_function_call("warm-call-1", "test_sync_tool", &warmup_args),
-        ev_function_call("warm-call-2", "test_sync_tool", &warmup_args),
-        ev_completed("resp-warm-1"),
-    ]);
-    let warmup_second = sse(vec![
-        ev_assistant_message("warm-msg-1", "warmup complete"),
-        ev_completed("resp-warm-2"),
-    ]);
-
-    let first_response = sse(vec![
-        json!({"type": "response.created", "response": {"id": "resp-1"}}),
-        ev_function_call("call-1", "test_sync_tool", &parallel_args),
-        ev_function_call("call-2", "test_sync_tool", &parallel_args),
-        ev_completed("resp-1"),
-    ]);
-    let second_response = sse(vec![
-        ev_assistant_message("msg-1", "done"),
-        ev_completed("resp-2"),
-    ]);
-    mount_sse_sequence(
-        &server,
-        vec![warmup_first, warmup_second, first_response, second_response],
-    )
-    .await;
-
-    run_turn(&test, "warm up parallel tool").await?;
-
-    let duration = run_turn_and_measure(&test, "exercise sync tool").await?;
-    assert_parallel_duration(duration);
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -156,34 +160,37 @@ async fn shell_tools_run_in_parallel() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.4");
-    let test = builder.build(&server).await?;
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_model("gpt-5.4");
+        let test = builder.build(&server).await?;
 
-    let shell_args = json!({
-        "cmd": "sleep 0.25",
-        // Avoid user-specific shell startup cost (e.g. zsh profile scripts) in timing assertions.
-        "login": false,
-        "yield_time_ms": 1_000,
-    });
-    let args_one = serde_json::to_string(&shell_args)?;
-    let args_two = serde_json::to_string(&shell_args)?;
+        let shell_args = json!({
+            "cmd": "sleep 0.25",
+            // Avoid user-specific shell startup cost (e.g. zsh profile scripts) in timing assertions.
+            "login": false,
+            "yield_time_ms": 1_000,
+        });
+        let args_one = serde_json::to_string(&shell_args)?;
+        let args_two = serde_json::to_string(&shell_args)?;
 
-    let first_response = sse(vec![
-        json!({"type": "response.created", "response": {"id": "resp-1"}}),
-        ev_function_call("call-1", "exec_command", &args_one),
-        ev_function_call("call-2", "exec_command", &args_two),
-        ev_completed("resp-1"),
-    ]);
-    let second_response = sse(vec![
-        ev_assistant_message("msg-1", "done"),
-        ev_completed("resp-2"),
-    ]);
-    mount_sse_sequence(&server, vec![first_response, second_response]).await;
+        let first_response = sse(vec![
+            json!({"type": "response.created", "response": {"id": "resp-1"}}),
+            ev_function_call("call-1", "exec_command", &args_one),
+            ev_function_call("call-2", "exec_command", &args_two),
+            ev_completed("resp-1"),
+        ]);
+        let second_response = sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]);
+        mount_sse_sequence(&server, vec![first_response, second_response]).await;
 
-    let duration = run_turn_and_measure(&test, "run exec_command twice").await?;
-    assert_parallel_duration(duration);
+        let duration = run_turn_and_measure(&test, "run exec_command twice").await?;
+        assert_parallel_duration(duration);
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -191,35 +198,38 @@ async fn mixed_parallel_tools_run_in_parallel() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let test = build_codex_with_test_tool(&server).await?;
+    mock_server::run(&[&server], async {
+        let test = build_codex_with_test_tool(&server).await?;
 
-    let sync_args = json!({
-        "sleep_after_ms": 300
+        let sync_args = json!({
+            "sleep_after_ms": 300
+        })
+        .to_string();
+        let shell_args = serde_json::to_string(&json!({
+            "cmd": "sleep 0.25",
+            // Avoid user-specific shell startup cost in timing assertions.
+            "login": false,
+            "yield_time_ms": 1_000,
+        }))?;
+
+        let first_response = sse(vec![
+            json!({"type": "response.created", "response": {"id": "resp-1"}}),
+            ev_function_call("call-1", "test_sync_tool", &sync_args),
+            ev_function_call("call-2", "exec_command", &shell_args),
+            ev_completed("resp-1"),
+        ]);
+        let second_response = sse(vec![
+            ev_assistant_message("msg-1", "done"),
+            ev_completed("resp-2"),
+        ]);
+        mount_sse_sequence(&server, vec![first_response, second_response]).await;
+
+        let duration = run_turn_and_measure(&test, "mix tools").await?;
+        assert_parallel_duration(duration);
+
+        Ok(())
     })
-    .to_string();
-    let shell_args = serde_json::to_string(&json!({
-        "cmd": "sleep 0.25",
-        // Avoid user-specific shell startup cost in timing assertions.
-        "login": false,
-        "yield_time_ms": 1_000,
-    }))?;
-
-    let first_response = sse(vec![
-        json!({"type": "response.created", "response": {"id": "resp-1"}}),
-        ev_function_call("call-1", "test_sync_tool", &sync_args),
-        ev_function_call("call-2", "exec_command", &shell_args),
-        ev_completed("resp-1"),
-    ]);
-    let second_response = sse(vec![
-        ev_assistant_message("msg-1", "done"),
-        ev_completed("resp-2"),
-    ]);
-    mount_sse_sequence(&server, vec![first_response, second_response]).await;
-
-    let duration = run_turn_and_measure(&test, "mix tools").await?;
-    assert_parallel_duration(duration);
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

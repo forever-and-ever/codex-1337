@@ -23,6 +23,7 @@ use codex_app_server_protocol::UserInput as V2UserInput;
 use codex_protocol::ThreadId as CoreThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
@@ -456,143 +457,148 @@ async fn turn_steer_updates_client_metadata_on_follow_up_responses_request_v2() 
     let codex_home = TempDir::new()?;
 
     let server = responses::start_mock_server().await;
-    let first_response = responses::sse_response(responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "Working"),
-        responses::ev_completed("resp-1"),
-    ]))
-    .set_delay(std::time::Duration::from_secs(2));
-    let second_response = responses::sse_response(responses::sse(vec![
-        responses::ev_response_created("resp-2"),
-        responses::ev_assistant_message("msg-2", "Done"),
-        responses::ev_completed("resp-2"),
-    ]));
-    let request_log =
-        responses::mount_response_sequence(&server, vec![first_response, second_response]).await;
+    mock_server::run(&[&server], async {
+        let first_response = responses::sse_response(responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "Working"),
+            responses::ev_completed("resp-1"),
+        ]))
+        .set_delay(std::time::Duration::from_secs(2));
+        let second_response = responses::sse_response(responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-2", "Done"),
+            responses::ev_completed("resp-2"),
+        ]));
+        let request_log =
+            responses::mount_response_sequence(&server, vec![first_response, second_response])
+                .await;
 
-    MockResponsesConfig::new(&server.uri())
-        .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
-        .with_provider_config("supports_websockets = false")
-        .write(codex_home.path())?;
-    mount_analytics_capture(&server, codex_home.path()).await?;
+        MockResponsesConfig::new(&server.uri())
+            .with_root_config(&format!("chatgpt_base_url = \"{}\"", server.uri()))
+            .with_provider_config("supports_websockets = false")
+            .write(codex_home.path())?;
+        mount_analytics_capture(&server, codex_home.path()).await?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
 
-    let thread_req = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
-        .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(thread_req)).await??;
+        let thread_req = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(thread_req)).await??;
 
-    let start_metadata = HashMap::from([
-        ("fiber_run_id".to_string(), "fiber-start-123".to_string()),
-        ("source".to_string(), "initial-source".to_string()),
-        (
-            "misalignment_override".to_string(),
-            r#"{"review_target":"RB._~:-opaque"}"#.to_string(),
-        ),
-    ]);
-    let turn_req = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "Run sleep".to_string(),
-                text_elements: Vec::new(),
-            }],
-            turn_trigger: Some("user".to_string()),
-            responsesapi_client_metadata: Some(start_metadata.clone()),
-            ..Default::default()
-        })
-        .await?;
-    let TurnStartResponse { turn } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_req)).await??;
-    let turn_id = turn.id.clone();
+        let start_metadata = HashMap::from([
+            ("fiber_run_id".to_string(), "fiber-start-123".to_string()),
+            ("source".to_string(), "initial-source".to_string()),
+            (
+                "misalignment_override".to_string(),
+                r#"{"review_target":"RB._~:-opaque"}"#.to_string(),
+            ),
+        ]);
+        let turn_req = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "Run sleep".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                turn_trigger: Some("user".to_string()),
+                responsesapi_client_metadata: Some(start_metadata.clone()),
+                ..Default::default()
+            })
+            .await?;
+        let TurnStartResponse { turn } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turn_req)).await??;
+        let turn_id = turn.id.clone();
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/started"),
-    )
-    .await??;
-    wait_for_request_count(&request_log, /*expected*/ 1).await?;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/started"),
+        )
+        .await??;
+        wait_for_request_count(&request_log, /*expected*/ 1).await?;
 
-    let steer_metadata = HashMap::from([
-        ("fiber_run_id".to_string(), "fiber-steer-456".to_string()),
-        ("origin".to_string(), "gaas".to_string()),
-        ("source".to_string(), "steer-source".to_string()),
-        (
-            "misalignment_override".to_string(),
-            r#"{"review_target":"RC"}"#.to_string(),
-        ),
-    ]);
-    let steer_req = mcp
-        .send_turn_steer_request(TurnSteerParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "Focus on the failure".to_string(),
-                text_elements: Vec::new(),
-            }],
-            responsesapi_client_metadata: Some(steer_metadata.clone()),
-            additional_context: None,
-            expected_turn_id: turn_id.clone(),
-        })
-        .await?;
-    let _turn: TurnSteerResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(steer_req)).await??;
+        let steer_metadata = HashMap::from([
+            ("fiber_run_id".to_string(), "fiber-steer-456".to_string()),
+            ("origin".to_string(), "gaas".to_string()),
+            ("source".to_string(), "steer-source".to_string()),
+            (
+                "misalignment_override".to_string(),
+                r#"{"review_target":"RC"}"#.to_string(),
+            ),
+        ]);
+        let steer_req = mcp
+            .send_turn_steer_request(TurnSteerParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "Focus on the failure".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                responsesapi_client_metadata: Some(steer_metadata.clone()),
+                additional_context: None,
+                expected_turn_id: turn_id.clone(),
+            })
+            .await?;
+        let _turn: TurnSteerResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(steer_req)).await??;
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let requests = request_log.requests();
-    assert_eq!(requests.len(), 2);
-    let first_metadata = requests[0]
-        .header("x-codex-turn-metadata")
-        .as_deref()
-        .map(parse_json_header)
-        .expect("first x-codex-turn-metadata header should be present");
-    assert_eq!(
-        first_metadata["fiber_run_id"].as_str(),
-        Some("fiber-start-123")
-    );
-    assert_eq!(first_metadata["turn_id"].as_str(), Some(turn_id.as_str()));
-    assert_eq!(first_metadata["turn_trigger"].as_str(), Some("user"));
-    assert_eq!(first_metadata["source"].as_str(), Some("initial-source"));
+        let requests = request_log.requests();
+        assert_eq!(requests.len(), 2);
+        let first_metadata = requests[0]
+            .header("x-codex-turn-metadata")
+            .as_deref()
+            .map(parse_json_header)
+            .expect("first x-codex-turn-metadata header should be present");
+        assert_eq!(
+            first_metadata["fiber_run_id"].as_str(),
+            Some("fiber-start-123")
+        );
+        assert_eq!(first_metadata["turn_id"].as_str(), Some(turn_id.as_str()));
+        assert_eq!(first_metadata["turn_trigger"].as_str(), Some("user"));
+        assert_eq!(first_metadata["source"].as_str(), Some("initial-source"));
 
-    let second_metadata = requests[1]
-        .header("x-codex-turn-metadata")
-        .as_deref()
-        .map(parse_json_header)
-        .expect("second x-codex-turn-metadata header should be present");
-    assert_eq!(
-        second_metadata["fiber_run_id"].as_str(),
-        Some("fiber-steer-456")
-    );
-    assert_eq!(second_metadata["origin"].as_str(), Some("gaas"));
-    assert_eq!(second_metadata["turn_id"].as_str(), Some(turn_id.as_str()));
-    assert_eq!(second_metadata["turn_trigger"].as_str(), Some("user"));
-    assert_eq!(second_metadata["source"].as_str(), Some("steer-source"));
-    assert_eq!(
-        second_metadata["misalignment_override"],
-        first_metadata["misalignment_override"],
-    );
+        let second_metadata = requests[1]
+            .header("x-codex-turn-metadata")
+            .as_deref()
+            .map(parse_json_header)
+            .expect("second x-codex-turn-metadata header should be present");
+        assert_eq!(
+            second_metadata["fiber_run_id"].as_str(),
+            Some("fiber-steer-456")
+        );
+        assert_eq!(second_metadata["origin"].as_str(), Some("gaas"));
+        assert_eq!(second_metadata["turn_id"].as_str(), Some(turn_id.as_str()));
+        assert_eq!(second_metadata["turn_trigger"].as_str(), Some("user"));
+        assert_eq!(second_metadata["source"].as_str(), Some("steer-source"));
+        assert_eq!(
+            second_metadata["misalignment_override"],
+            first_metadata["misalignment_override"],
+        );
 
-    let event = wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
-    assert_eq!(
-        (
-            event["event_params"]["turn_trigger"].as_str(),
-            event["event_params"]["codex_turn_source"].as_str(),
-        ),
-        (Some("user"), Some("steer-source"))
-    );
+        let event =
+            wait_for_analytics_event(&server, DEFAULT_READ_TIMEOUT, "codex_turn_event").await?;
+        assert_eq!(
+            (
+                event["event_params"]["turn_trigger"].as_str(),
+                event["event_params"]["codex_turn_source"].as_str(),
+            ),
+            (Some("user"), Some("steer-source"))
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

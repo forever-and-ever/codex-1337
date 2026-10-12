@@ -10,6 +10,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::McpStartupStatus;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
@@ -28,6 +29,7 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(Ok(()), "requires a Windows test_stdio_server binary");
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let command = remote_aware_stdio_server_bin()?;
     let calls = [
         ("list_mcp_resources", r#"{"server":"resources"}"#),
@@ -167,6 +169,8 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
         );
     }
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -174,6 +178,7 @@ async fn resource_helpers_across_server_changes() -> Result<()> {
     skip_if_no_network!(Ok(()));
     skip_if_wine_exec!(Ok(()), "requires a Windows test_stdio_server binary");
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let command = remote_aware_stdio_server_bin()?;
     let test = test_codex()
         .with_config(move |config| {
@@ -271,4 +276,6 @@ async fn resource_helpers_across_server_changes() -> Result<()> {
     }
     test.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

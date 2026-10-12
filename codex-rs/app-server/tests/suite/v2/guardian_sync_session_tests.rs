@@ -25,6 +25,7 @@ use codex_app_server_protocol::TurnError;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_protocol::protocol::SubAgentSource;
+use core_test_support::mock_server;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
@@ -549,6 +550,7 @@ async fn managed_reviewers_reuse_fork_and_resume_after_parent_shutdown(
 async fn inline_review_delegate_runs_strict_guardian_assessment() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let requests = responses::mount_sse_sequence(
         &server,
         vec![
@@ -604,4 +606,6 @@ async fn inline_review_delegate_runs_strict_guardian_assessment() -> Result<()> 
     app.shutdown_gracefully().await?;
     mcp_server.abort();
     Ok(())
+    })
+    .await
 }

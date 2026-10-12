@@ -2,12 +2,14 @@
 
 use super::*;
 use codex_protocol::models::MessagePhase;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn partial_answers_preserve_phase_across_sampling_continuation() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut added = ev_message_item_added("fragment", "");
     added["item"]["phase"] = json!("partial_answer");
     let mut partial = ev_assistant_message("fragment", "The first result is ready.");
@@ -102,12 +104,15 @@ async fn partial_answers_preserve_phase_across_sampling_continuation() -> Result
         )
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn partial_answers_survive_forked_child_requests() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut partial = ev_assistant_message("fragment", "The first result is ready.");
     partial["item"]["phase"] = json!("partial_answer");
     let mut commentary = ev_assistant_message("progress", "Checking the remaining result.");
@@ -213,4 +218,6 @@ async fn partial_answers_survive_forked_child_requests() -> Result<()> {
     );
     child.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

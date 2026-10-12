@@ -4,6 +4,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
 use codex_protocol::protocol::TurnEnvironmentRequests;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_apply_patch_exec_command_call_via_heredoc;
 use core_test_support::responses::ev_exec_command_call;
@@ -964,6 +965,7 @@ async fn intercepted_apply_patch_updates_absolute_target_after_turn_cwd_is_remov
     );
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.5")).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let workspace = test.workspace_path_uri("")?;
     let original_cwd = test.workspace_path_uri("policy-cwd")?;
@@ -1096,6 +1098,8 @@ async fn intercepted_apply_patch_updates_absolute_target_after_turn_cwd_is_remov
         ("changed\n".to_string(), "private\n".to_string()),
     );
     Ok(())
+    })
+    .await
 }
 
 #[cfg(unix)]
@@ -1495,6 +1499,7 @@ async fn apply_patch_exec_command_heredoc_with_cd_updates_relative_workdir() -> 
     skip_if_no_network!(Ok(()));
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.5")).await?;
+    mock_server::run(&[harness.server()], async {
 
     // Prepare a file inside a subdir; update it via cd && apply_patch heredoc form.
     harness.write_file("sub/in_sub.txt", "before\n").await?;
@@ -1523,6 +1528,8 @@ async fn apply_patch_exec_command_heredoc_with_cd_updates_relative_workdir() -> 
     );
     assert_eq!(harness.read_file_text("sub/in_sub.txt").await?, "after\n");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1774,6 +1781,7 @@ async fn apply_patch_exec_command_heredoc_with_cd_emits_turn_diff() -> Result<()
     skip_if_no_network!(Ok(()));
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.5")).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let codex = test.codex.clone();
 
@@ -1829,6 +1837,8 @@ async fn apply_patch_exec_command_heredoc_with_cd_emits_turn_diff() -> Result<()
     let diff = saw_turn_diff.expect("expected TurnDiff event");
     assert!(diff.contains("diff --git"), "diff header missing: {diff:?}");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2025,6 +2035,7 @@ async fn apply_patch_exec_command_failure_propagates_error_and_skips_diff() -> R
     skip_if_no_network!(Ok(()));
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.5")).await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let codex = test.codex.clone();
 
@@ -2075,6 +2086,8 @@ async fn apply_patch_exec_command_failure_propagates_error_and_skips_diff() -> R
     );
     assert_eq!(harness.read_file_text("invalid.txt").await?, "ok\n");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2266,6 +2279,7 @@ async fn apply_patch_turn_diff_tracks_local_and_remote_environment_paths() -> Re
     skip_if_no_remote_env!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex();
     let test = builder.build_with_remote_and_local_env(&server).await?;
     let file_name = "shared-turn-diff.txt";
@@ -2425,6 +2439,8 @@ index 0000000000000000000000000000000000000000..9c998f7b995a7327177b38a90d138517
         .await?;
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2432,6 +2448,7 @@ async fn apply_patch_aggregates_diff_across_multiple_tool_calls() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let harness = apply_patch_harness().await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let codex = test.codex.clone();
 
@@ -2475,6 +2492,8 @@ async fn apply_patch_aggregates_diff_across_multiple_tool_calls() -> Result<()> 
     // Final content reflects v2 for a.txt
     assert!(diff.contains("+v2\n") || diff.contains("v2\n"));
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2482,6 +2501,7 @@ async fn apply_patch_aggregates_diff_preserves_success_after_failure() -> Result
     skip_if_no_network!(Ok(()));
 
     let harness = apply_patch_harness().await?;
+    mock_server::run(&[harness.server()], async {
     let test = harness.test();
     let codex = test.codex.clone();
 
@@ -2548,6 +2568,8 @@ async fn apply_patch_aggregates_diff_preserves_success_after_failure() -> Result
 
     assert_eq!(harness.read_file_text("partial/success.txt").await?, "ok\n");
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2568,57 +2590,61 @@ async fn apply_patch_clears_aggregated_diff_after_inexact_delta() -> Result<()> 
         })
     })
     .await?;
-    let test = harness.test();
-    let codex = test.codex.clone();
+    mock_server::run(&[harness.server()], async {
+        let test = harness.test();
+        let codex = test.codex.clone();
 
-    let call_success = "agg-success";
-    let call_inexact = "agg-inexact";
-    let patch_success = "*** Begin Patch\n*** Add File: partial/success.txt\n+ok\n*** End Patch";
-    let patch_inexact = "*** Begin Patch\n*** Add File: binary.dat\n+text\n*** End Patch";
+        let call_success = "agg-success";
+        let call_inexact = "agg-inexact";
+        let patch_success =
+            "*** Begin Patch\n*** Add File: partial/success.txt\n+ok\n*** End Patch";
+        let patch_inexact = "*** Begin Patch\n*** Add File: binary.dat\n+text\n*** End Patch";
 
-    let responses = vec![
-        sse(vec![
-            ev_response_created("resp-1"),
-            ev_apply_patch_custom_tool_call(call_success, patch_success),
-            ev_completed("resp-1"),
-        ]),
-        sse(vec![
-            ev_response_created("resp-2"),
-            ev_apply_patch_custom_tool_call(call_inexact, patch_inexact),
-            ev_completed("resp-2"),
-        ]),
-        sse(vec![
-            ev_assistant_message("msg-1", "done"),
-            ev_completed("resp-3"),
-        ]),
-    ];
-    mount_sse_sequence(harness.server(), responses).await;
+        let responses = vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_apply_patch_custom_tool_call(call_success, patch_success),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_apply_patch_custom_tool_call(call_inexact, patch_inexact),
+                ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-3"),
+            ]),
+        ];
+        mount_sse_sequence(harness.server(), responses).await;
 
-    submit_without_wait(&harness, "apply patch twice with inexact delta").await?;
+        submit_without_wait(&harness, "apply patch twice with inexact delta").await?;
 
-    let mut last_diff: Option<String> = None;
-    wait_for_event_with_timeout(
-        &codex,
-        |event| match event {
-            EventMsg::TurnDiff(ev) => {
-                last_diff = Some(ev.unified_diff.clone());
-                false
-            }
-            EventMsg::TurnComplete(_) => true,
-            _ => false,
-        },
-        Duration::from_secs(30),
-    )
-    .await;
+        let mut last_diff: Option<String> = None;
+        wait_for_event_with_timeout(
+            &codex,
+            |event| match event {
+                EventMsg::TurnDiff(ev) => {
+                    last_diff = Some(ev.unified_diff.clone());
+                    false
+                }
+                EventMsg::TurnComplete(_) => true,
+                _ => false,
+            },
+            Duration::from_secs(30),
+        )
+        .await;
 
-    assert_eq!(
-        last_diff.as_deref(),
-        Some(""),
-        "inexact delta should clear the aggregate diff"
-    );
-    assert_eq!(harness.read_file_text("partial/success.txt").await?, "ok\n");
-    assert_eq!(harness.read_file_text("binary.dat").await?, "text\n");
-    Ok(())
+        assert_eq!(
+            last_diff.as_deref(),
+            Some(""),
+            "inexact delta should clear the aggregate diff"
+        );
+        assert_eq!(harness.read_file_text("partial/success.txt").await?, "ok\n");
+        assert_eq!(harness.read_file_text("binary.dat").await?, "text\n");
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

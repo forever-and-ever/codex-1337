@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
@@ -282,37 +283,40 @@ async fn wait_for_soundings(
 #[tokio::test]
 async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let model = responses::mount_sse_sequence(
-        &server,
-        vec![
-            response(
-                "arm",
-                vec![alarm_call(
-                    "clock",
-                    json!({"after_seconds": 1, "note": "return to the work"}),
-                )],
-            ),
-            done("armed"),
-            done("sounded"),
-        ],
-    )
-    .await;
-    let (mut app, _home) = alarm_app(&server).await?;
-    let thread_id = start(&mut app).await?;
-    arm_turn(&mut app, &thread_id).await?;
-    assert_eq!(alarms(&mut app, 1).await?.thread_id, thread_id);
-    let soundings = wait_for_soundings(&mut app, &server, 1).await?;
-    assert_eq!(soundings[0].note, "return to the work");
-    assert_eq!(
-        soundings[0].cause,
-        AlarmCause::Clock {
-            late_by_seconds: None
-        }
-    );
-    assert!(soundings[0].still_armed.is_empty());
-    assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
-    assert_eq!(model.requests().len(), 3);
-    Ok(())
+    mock_server::run(&[&server], async {
+        let model = responses::mount_sse_sequence(
+            &server,
+            vec![
+                response(
+                    "arm",
+                    vec![alarm_call(
+                        "clock",
+                        json!({"after_seconds": 1, "note": "return to the work"}),
+                    )],
+                ),
+                done("armed"),
+                done("sounded"),
+            ],
+        )
+        .await;
+        let (mut app, _home) = alarm_app(&server).await?;
+        let thread_id = start(&mut app).await?;
+        arm_turn(&mut app, &thread_id).await?;
+        assert_eq!(alarms(&mut app, 1).await?.thread_id, thread_id);
+        let soundings = wait_for_soundings(&mut app, &server, 1).await?;
+        assert_eq!(soundings[0].note, "return to the work");
+        assert_eq!(
+            soundings[0].cause,
+            AlarmCause::Clock {
+                late_by_seconds: None
+            }
+        );
+        assert!(soundings[0].still_armed.is_empty());
+        assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
+        assert_eq!(model.requests().len(), 3);
+        Ok(())
+    })
+    .await
 }
 
 enum TerminalScenario {

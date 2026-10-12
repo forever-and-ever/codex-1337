@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -95,6 +96,7 @@ async fn exercise_executor_skill(scenario: ExecutorSkillScenario) -> Result<()> 
     }
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let codex_home = TempDir::new()?;
     let (sandbox_config, permission_profile) = if restricted {
         (
@@ -774,4 +776,6 @@ stream_max_retries = 0
     }
 
     Ok(())
+    })
+    .await
 }

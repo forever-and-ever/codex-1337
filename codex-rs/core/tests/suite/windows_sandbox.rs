@@ -34,6 +34,7 @@ use codex_sandboxing::WindowsSandboxProxySettingsMode;
 use codex_utils_path_uri::PathUri;
 use codex_windows_sandbox_test_support::WindowsSandboxAccountTestGuard;
 use core_test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -1073,187 +1074,189 @@ async fn windows_elevated_unified_exec_enforces_large_recursive_deny_reads() -> 
             Ok(())
         });
     let harness = TestCodexHarness::with_builder(builder).await?;
-
-    let config = &harness.test().config;
-    let paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
-        &config.permissions.file_system_sandbox_policy(),
-        &config.cwd,
-    )
-    .map_err(anyhow::Error::msg)?;
-    assert!(
-        paths.len() >= 1_002,
-        "recursive deny fixture was not fully expanded"
-    );
-    // The deny list alone exceeds CreateProcessW's limit, so both wrapper and
-    // setup-refresh must transport the full request outside argv.
-    assert!(serde_json::to_string(&paths)?.encode_utf16().count() > 32_767);
-
-    let command = concat!(
-        "(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & ",
-        "(type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED) & ",
-        "(type nested\\bulk-999.env 1>NUL 2>NUL && echo BULK-READ || echo BULK-DENIED) & ",
-        "type public.txt"
-    );
-    let call_id = "windows-managed-deny-read-exec-command";
-    let unified_args = json!({
-        "cmd": command,
-        "yield_time_ms": 30_000,
-        "tty": false,
-        "login": false,
-    });
-    mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_response_created("resp-windows-unified-deny-read"),
-                ev_function_call(
-                    call_id,
-                    "exec_command",
-                    &serde_json::to_string(&unified_args)?,
-                ),
-                ev_completed("resp-windows-unified-deny-read"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-windows-deny-read", "done"),
-                ev_completed("resp-windows-deny-read-complete"),
-            ]),
-        ],
-    )
-    .await;
-
-    let permission_profile = harness
-        .test()
-        .config
-        .permissions
-        .effective_permission_profile();
-    harness
-        .submit_with_permission_profile("read the sandbox fixtures", permission_profile)
-        .await?;
-
-    let output = harness.function_call_stdout(call_id).await;
-    assert!(
-        harness.request_bodies().await.iter().any(|body| body
-            .to_string()
-            .contains("Preserve the large payload integration fixture.")),
-        "sandboxed AGENTS.md discovery must load the fixture instructions"
-    );
-    assert!(
-        output.contains("BULK-DENIED")
-            && !output.contains("BULK-READ")
-            && !output.contains("bulk secret"),
-        "large recursive deny list must remain enforced: {output:?}"
-    );
-    assert!(
-        output.contains("GLOB-DENIED"),
-        "exec_command should reject glob-denied reads: {output:?}"
-    );
-    assert!(
-        output.contains("EXACT-DENIED"),
-        "exec_command should reject exact-path-denied reads: {output:?}"
-    );
-    assert!(
-        output.contains("public ok"),
-        "exec_command should preserve allowed reads: {output:?}"
-    );
-    assert!(
-        !output.contains("GLOB-READ") && !output.contains("glob secret"),
-        "exec_command leaked glob-denied file contents: {output:?}"
-    );
-    assert!(
-        !output.contains("EXACT-READ") && !output.contains("exact secret"),
-        "exec_command leaked exact-path-denied file contents: {output:?}"
-    );
-
-    // Re-enter real setup after corrupting this test's bookkeeping, then exercise
-    // recovery through the same agent tool path rather than relying on a cached launch.
-    let state_path = codex_home.path().join(".sandbox/deny_read_acl_state.json");
-    std::fs::write(&state_path, b"malformed bookkeeping")?;
-    let permission_profile = harness
-        .test()
-        .config
-        .permissions
-        .effective_permission_profile();
-    run_windows_sandbox_setup(WindowsSandboxSetupRequest {
-        mode: WindowsSandboxSetupMode::Elevated,
-        permission_profile: permission_profile.clone(),
-        workspace_roots: vec![harness.test().config.cwd.clone()],
-        command_cwd: harness.test().cwd_path().to_path_buf(),
-        env_map: std::env::vars().collect(),
-        codex_home: codex_home.path().to_path_buf(),
-    })
-    .await?;
-    let rebuilt: serde_json::Value = serde_json::from_slice(&std::fs::read(&state_path)?)?;
-    let principals = rebuilt["principals"]
-        .as_object()
-        .expect("rebuilt principals");
-    assert!(
-        principals
-            .values()
-            .any(|paths| paths.as_array().is_some_and(|paths| !paths.is_empty()))
-    );
-
-    std::fs::write(
-        harness.test().workspace_path("remove-after-recovery.txt"),
-        b"must be removed by the sandboxed command",
-    )?;
-    let recovery_call_id = "windows-recovered-deny-read-exec-command";
-    let recovery_args = json!({
-        "cmd": concat!(
-            "(echo edited-after-recovery)>public.txt & ",
-            "del remove-after-recovery.txt & ",
-            "(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & ",
-            "(type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED)"
-        ),
-        "yield_time_ms": 30_000,
-        "tty": false,
-        "login": false,
-    });
-    mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_response_created("resp-windows-recovered"),
-                ev_function_call(
-                    recovery_call_id,
-                    "exec_command",
-                    &serde_json::to_string(&recovery_args)?,
-                ),
-                ev_completed("resp-windows-recovered"),
-            ]),
-            sse(vec![
-                ev_assistant_message("msg-windows-recovered", "done"),
-                ev_completed("resp-windows-recovered-complete"),
-            ]),
-        ],
-    )
-    .await;
-    harness
-        .submit_with_permission_profile(
-            "edit and delete the allowed fixtures and try the denied reads",
-            permission_profile,
+    mock_server::run(&[harness.server()], async {
+        let config = &harness.test().config;
+        let paths = codex_windows_sandbox::resolve_windows_deny_read_paths(
+            &config.permissions.file_system_sandbox_policy(),
+            &config.cwd,
         )
-        .await?;
-    let output = harness.function_call_stdout(recovery_call_id).await;
-    assert!(
-        output.contains("GLOB-DENIED") && output.contains("EXACT-DENIED"),
-        "denies must survive recovery: {output:?}"
-    );
-    assert!(
-        !output.contains("GLOB-READ") && !output.contains("EXACT-READ"),
-        "recovery must not allow denied reads: {output:?}"
-    );
-    assert_eq!(
-        std::fs::read(harness.test().workspace_path("public.txt"))?,
-        b"edited-after-recovery\r\n"
-    );
-    assert!(
-        !harness
-            .test()
-            .workspace_path("remove-after-recovery.txt")
-            .exists()
-    );
+        .map_err(anyhow::Error::msg)?;
+        assert!(
+            paths.len() >= 1_002,
+            "recursive deny fixture was not fully expanded"
+        );
+        // The deny list alone exceeds CreateProcessW's limit, so both wrapper and
+        // setup-refresh must transport the full request outside argv.
+        assert!(serde_json::to_string(&paths)?.encode_utf16().count() > 32_767);
 
-    Ok(())
+        let command = concat!(
+            "(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & ",
+            "(type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED) & ",
+            "(type nested\\bulk-999.env 1>NUL 2>NUL && echo BULK-READ || echo BULK-DENIED) & ",
+            "type public.txt"
+        );
+        let call_id = "windows-managed-deny-read-exec-command";
+        let unified_args = json!({
+            "cmd": command,
+            "yield_time_ms": 30_000,
+            "tty": false,
+            "login": false,
+        });
+        mount_sse_sequence(
+            harness.server(),
+            vec![
+                sse(vec![
+                    ev_response_created("resp-windows-unified-deny-read"),
+                    ev_function_call(
+                        call_id,
+                        "exec_command",
+                        &serde_json::to_string(&unified_args)?,
+                    ),
+                    ev_completed("resp-windows-unified-deny-read"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-windows-deny-read", "done"),
+                    ev_completed("resp-windows-deny-read-complete"),
+                ]),
+            ],
+        )
+        .await;
+
+        let permission_profile = harness
+            .test()
+            .config
+            .permissions
+            .effective_permission_profile();
+        harness
+            .submit_with_permission_profile("read the sandbox fixtures", permission_profile)
+            .await?;
+
+        let output = harness.function_call_stdout(call_id).await;
+        assert!(
+            harness.request_bodies().await.iter().any(|body| body
+                .to_string()
+                .contains("Preserve the large payload integration fixture.")),
+            "sandboxed AGENTS.md discovery must load the fixture instructions"
+        );
+        assert!(
+            output.contains("BULK-DENIED")
+                && !output.contains("BULK-READ")
+                && !output.contains("bulk secret"),
+            "large recursive deny list must remain enforced: {output:?}"
+        );
+        assert!(
+            output.contains("GLOB-DENIED"),
+            "exec_command should reject glob-denied reads: {output:?}"
+        );
+        assert!(
+            output.contains("EXACT-DENIED"),
+            "exec_command should reject exact-path-denied reads: {output:?}"
+        );
+        assert!(
+            output.contains("public ok"),
+            "exec_command should preserve allowed reads: {output:?}"
+        );
+        assert!(
+            !output.contains("GLOB-READ") && !output.contains("glob secret"),
+            "exec_command leaked glob-denied file contents: {output:?}"
+        );
+        assert!(
+            !output.contains("EXACT-READ") && !output.contains("exact secret"),
+            "exec_command leaked exact-path-denied file contents: {output:?}"
+        );
+
+        // Re-enter real setup after corrupting this test's bookkeeping, then exercise
+        // recovery through the same agent tool path rather than relying on a cached launch.
+        let state_path = codex_home.path().join(".sandbox/deny_read_acl_state.json");
+        std::fs::write(&state_path, b"malformed bookkeeping")?;
+        let permission_profile = harness
+            .test()
+            .config
+            .permissions
+            .effective_permission_profile();
+        run_windows_sandbox_setup(WindowsSandboxSetupRequest {
+            mode: WindowsSandboxSetupMode::Elevated,
+            permission_profile: permission_profile.clone(),
+            workspace_roots: vec![harness.test().config.cwd.clone()],
+            command_cwd: harness.test().cwd_path().to_path_buf(),
+            env_map: std::env::vars().collect(),
+            codex_home: codex_home.path().to_path_buf(),
+        })
+        .await?;
+        let rebuilt: serde_json::Value = serde_json::from_slice(&std::fs::read(&state_path)?)?;
+        let principals = rebuilt["principals"]
+            .as_object()
+            .expect("rebuilt principals");
+        assert!(
+            principals
+                .values()
+                .any(|paths| paths.as_array().is_some_and(|paths| !paths.is_empty()))
+        );
+
+        std::fs::write(
+            harness.test().workspace_path("remove-after-recovery.txt"),
+            b"must be removed by the sandboxed command",
+        )?;
+        let recovery_call_id = "windows-recovered-deny-read-exec-command";
+        let recovery_args = json!({
+            "cmd": concat!(
+                "(echo edited-after-recovery)>public.txt & ",
+                "del remove-after-recovery.txt & ",
+                "(type secret.env 1>NUL 2>NUL && echo GLOB-READ || echo GLOB-DENIED) & ",
+                "(type exact-secret.txt 1>NUL 2>NUL && echo EXACT-READ || echo EXACT-DENIED)"
+            ),
+            "yield_time_ms": 30_000,
+            "tty": false,
+            "login": false,
+        });
+        mount_sse_sequence(
+            harness.server(),
+            vec![
+                sse(vec![
+                    ev_response_created("resp-windows-recovered"),
+                    ev_function_call(
+                        recovery_call_id,
+                        "exec_command",
+                        &serde_json::to_string(&recovery_args)?,
+                    ),
+                    ev_completed("resp-windows-recovered"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("msg-windows-recovered", "done"),
+                    ev_completed("resp-windows-recovered-complete"),
+                ]),
+            ],
+        )
+        .await;
+        harness
+            .submit_with_permission_profile(
+                "edit and delete the allowed fixtures and try the denied reads",
+                permission_profile,
+            )
+            .await?;
+        let output = harness.function_call_stdout(recovery_call_id).await;
+        assert!(
+            output.contains("GLOB-DENIED") && output.contains("EXACT-DENIED"),
+            "denies must survive recovery: {output:?}"
+        );
+        assert!(
+            !output.contains("GLOB-READ") && !output.contains("EXACT-READ"),
+            "recovery must not allow denied reads: {output:?}"
+        );
+        assert_eq!(
+            std::fs::read(harness.test().workspace_path("public.txt"))?,
+            b"edited-after-recovery\r\n"
+        );
+        assert!(
+            !harness
+                .test()
+                .workspace_path("remove-after-recovery.txt")
+                .exists()
+        );
+
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

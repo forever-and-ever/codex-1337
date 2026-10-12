@@ -8,6 +8,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodexBuilder;
@@ -54,6 +55,7 @@ fn builder(incremental_tools: bool, token_budget: bool) -> TestCodexBuilder {
 async fn legacy_resume_switches_only_after_window_replacement(token_budget: bool) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut replies = (1..=2)
         .map(|i| {
             responses::sse(vec![responses::ev_completed_with_tokens(
@@ -134,12 +136,15 @@ async fn legacy_resume_switches_only_after_window_replacement(token_budget: bool
         )
     );
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn disable_incremental_tools_at_next_window() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mock = responses::mount_sse_sequence(
         &server,
         vec![
@@ -199,4 +204,6 @@ async fn disable_incremental_tools_at_next_window() -> Result<()> {
         )
     );
     Ok(())
+    })
+    .await
 }

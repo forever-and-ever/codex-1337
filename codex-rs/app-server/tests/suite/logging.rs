@@ -31,6 +31,7 @@ use codex_state::LogQuery;
 use codex_state::SqliteConfig;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
@@ -66,135 +67,138 @@ async fn submission_metadata_reaches_persisted_and_feedback_logs() -> Result<()>
         create_final_assistant_message_sse_response("done")?,
     ])
     .await;
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri())
-        .with_approval_policy("on-request")
-        .with_provider_config("supports_websockets = false")
-        .write(codex_home.path())?;
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        // SQLite and feedback diagnostics must remain safe independently of stderr.
-        .with_env_overrides(&[("RUST_LOG", Some("off"))])
-        .build()
-        .await?;
-    app_server.initialize().await?;
-    let thread = app_server
-        .start_thread(ThreadStartParams::default())
-        .await?
-        .thread;
-    let _: ThreadApproveGuardianDeniedActionResponse = app_server
-        .request(
-            |request_id| ClientRequest::ThreadApproveGuardianDeniedAction {
-                request_id,
-                params: ThreadApproveGuardianDeniedActionParams {
-                    thread_id: thread.id.clone(),
-                    event: json!({
-                        "id": "guardian-review",
-                        "target_item_id": "guardian-item",
-                        "turn_id": "guardian-turn",
-                        "status": "denied",
-                        "action": {
-                            "type": "mcp_tool_call",
-                            "server": "example",
-                            "tool_name": "write",
-                        },
-                    }),
+    mock_server::run(&[&server], async {
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri())
+            .with_approval_policy("on-request")
+            .with_provider_config("supports_websockets = false")
+            .write(codex_home.path())?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            // SQLite and feedback diagnostics must remain safe independently of stderr.
+            .with_env_overrides(&[("RUST_LOG", Some("off"))])
+            .build()
+            .await?;
+        app_server.initialize().await?;
+        let thread = app_server
+            .start_thread(ThreadStartParams::default())
+            .await?
+            .thread;
+        let _: ThreadApproveGuardianDeniedActionResponse = app_server
+            .request(
+                |request_id| ClientRequest::ThreadApproveGuardianDeniedAction {
+                    request_id,
+                    params: ThreadApproveGuardianDeniedActionParams {
+                        thread_id: thread.id.clone(),
+                        event: json!({
+                            "id": "guardian-review",
+                            "target_item_id": "guardian-item",
+                            "turn_id": "guardian-turn",
+                            "status": "denied",
+                            "action": {
+                                "type": "mcp_tool_call",
+                                "server": "example",
+                                "tool_name": "write",
+                            },
+                        }),
+                    },
                 },
-            },
+            )
+            .await?;
+        let _: TurnStartResponse = app_server
+            .request(|request_id| ClientRequest::TurnStart {
+                request_id,
+                params: TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "run echo".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    approval_policy: Some(AskForApproval::OnRequest),
+                    approvals_reviewer: Some(ApprovalsReviewer::User),
+                    sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                        network_access: false,
+                    }),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        let server_request =
+            timeout(READ_TIMEOUT, app_server.read_stream_until_request_message()).await??;
+        let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_request
+        else {
+            anyhow::bail!("expected command approval request");
+        };
+        let approval_id = params.approval_id.unwrap_or(params.item_id);
+        app_server
+            .send_response(request_id, json!({ "decision": "decline" }))
+            .await?;
+        timeout(
+            READ_TIMEOUT,
+            app_server.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let state = StateRuntime::init(
+            SqliteConfig::new_for_testing(codex_home.path().abs()),
+            "mock_provider".into(),
         )
         .await?;
-    let _: TurnStartResponse = app_server
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: TurnStartParams {
-                thread_id: thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "run echo".into(),
-                    text_elements: Vec::new(),
-                }],
-                approval_policy: Some(AskForApproval::OnRequest),
-                approvals_reviewer: Some(ApprovalsReviewer::User),
-                sandbox_policy: Some(SandboxPolicy::ReadOnly {
-                    network_access: false,
-                }),
-                ..Default::default()
-            },
-        })
-        .await?;
-    let server_request =
-        timeout(READ_TIMEOUT, app_server.read_stream_until_request_message()).await??;
-    let ServerRequest::CommandExecutionRequestApproval { request_id, params } = server_request
-    else {
-        anyhow::bail!("expected command approval request");
-    };
-    let approval_id = params.approval_id.unwrap_or(params.item_id);
-    app_server
-        .send_response(request_id, json!({ "decision": "decline" }))
-        .await?;
-    timeout(
-        READ_TIMEOUT,
-        app_server.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
-
-    let state = StateRuntime::init(
-        SqliteConfig::new_for_testing(codex_home.path().abs()),
-        "mock_provider".into(),
-    )
-    .await?;
-    // Feedback is read from SQLite, so this also verifies persistence.
-    let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
-        loop {
-            let logs =
-                String::from_utf8(state.query_feedback_logs_for_threads(&[&thread.id]).await?)?;
-            if logs
-                .lines()
-                .any(|line| line.contains("Submission") && line.contains("exec_approval"))
-            {
-                break Ok::<_, anyhow::Error>(logs);
+        // Feedback is read from SQLite, so this also verifies persistence.
+        let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
+            loop {
+                let logs =
+                    String::from_utf8(state.query_feedback_logs_for_threads(&[&thread.id]).await?)?;
+                if logs
+                    .lines()
+                    .any(|line| line.contains("Submission") && line.contains("exec_approval"))
+                {
+                    break Ok::<_, anyhow::Error>(logs);
+                }
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
             }
-            tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
+        })
+        .await??;
+        state.close().await;
+        for (operation, fields) in [
+            (
+                "exec_approval",
+                vec![
+                    format!("thread_id={}", thread.id),
+                    format!("id: \"{approval_id}\""),
+                    format!("turn_id: Some(\"{}\")", params.turn_id),
+                    "decision: denied".into(),
+                ],
+            ),
+            (
+                "approve_guardian_denied_action",
+                vec![
+                    "review_id: \"guardian-review\"".into(),
+                    "target_item_id: Some(\"guardian-item\")".into(),
+                    "turn_id: \"guardian-turn\"".into(),
+                    "status: Denied".into(),
+                ],
+            ),
+            (
+                "turn_input",
+                vec![
+                    "approval_policy: Some(OnRequest)".into(),
+                    "approvals_reviewer: Some(User)".into(),
+                    "sandbox_policy: Some(read-only)".into(),
+                ],
+            ),
+        ] {
+            let line = feedback
+                .lines()
+                .find(|line| line.contains("Submission") && line.contains(operation))
+                .with_context(|| format!("missing {operation} submission"))?;
+            for field in fields {
+                anyhow::ensure!(line.contains(&field), "missing {field}: {line}");
+            }
         }
+        Ok(())
     })
-    .await??;
-    state.close().await;
-    for (operation, fields) in [
-        (
-            "exec_approval",
-            vec![
-                format!("thread_id={}", thread.id),
-                format!("id: \"{approval_id}\""),
-                format!("turn_id: Some(\"{}\")", params.turn_id),
-                "decision: denied".into(),
-            ],
-        ),
-        (
-            "approve_guardian_denied_action",
-            vec![
-                "review_id: \"guardian-review\"".into(),
-                "target_item_id: Some(\"guardian-item\")".into(),
-                "turn_id: \"guardian-turn\"".into(),
-                "status: Denied".into(),
-            ],
-        ),
-        (
-            "turn_input",
-            vec![
-                "approval_policy: Some(OnRequest)".into(),
-                "approvals_reviewer: Some(User)".into(),
-                "sandbox_policy: Some(read-only)".into(),
-            ],
-        ),
-    ] {
-        let line = feedback
-            .lines()
-            .find(|line| line.contains("Submission") && line.contains(operation))
-            .with_context(|| format!("missing {operation} submission"))?;
-        for field in fields {
-            anyhow::ensure!(line.contains(&field), "missing {field}: {line}");
-        }
-    }
-    Ok(())
+    .await
 }
 
 #[tokio::test]
@@ -218,27 +222,28 @@ async fn credentials_stay_out_of_persisted_and_feedback_logs() -> Result<()> {
             .chatgpt_account_id(account_id),
     )?;
     let server = MockServer::start().await;
-    let success = responses::sse_response(create_final_assistant_message_sse_response("done")?);
-    let responses = responses::mount_response_sequence(
-        &server,
-        vec![success.clone(), ResponseTemplate::new(401), success],
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/settings/user"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "commit_attribution_enabled": false,
-        })))
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        let success = responses::sse_response(create_final_assistant_message_sse_response("done")?);
+        let responses = responses::mount_response_sequence(
+            &server,
+            vec![success.clone(), ResponseTemplate::new(401), success],
+        )
         .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/settings/user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "commit_attribution_enabled": false,
+            })))
+            .mount(&server)
+            .await;
 
-    let codex_home = TempDir::new()?;
-    let server_uri = server.uri();
-    MockResponsesConfig::new(&server_uri)
-        .with_root_config(&format!("chatgpt_base_url = \"{server_uri}/backend-api\""))
-        .with_provider_config("requires_openai_auth = true\nsupports_websockets = false")
-        .with_extra_config(&format!(
-            r#"
+        let codex_home = TempDir::new()?;
+        let server_uri = server.uri();
+        MockResponsesConfig::new(&server_uri)
+            .with_root_config(&format!("chatgpt_base_url = \"{server_uri}/backend-api\""))
+            .with_provider_config("requires_openai_auth = true\nsupports_websockets = false")
+            .with_extra_config(&format!(
+                r#"
 [model_providers.bearer_provider]
 name = "Bearer provider"
 base_url = "{server_uri}/v1"
@@ -246,157 +251,161 @@ experimental_bearer_token = "{bearer}"
 http_headers = {{ X-Credential = "{header}" }}
 supports_websockets = false
 "#
-        ))
-        .write(codex_home.path())?;
-    write_models_cache(codex_home.path()).await?;
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None)])
-        .build()
-        .await?;
-    let initialized = app_server
-        .initialize_with_capabilities(
-            ClientInfo {
-                name: "codex_desktop".into(),
-                title: None,
-                version: "0.1.0".into(),
-            },
-            Some(InitializeCapabilities {
-                experimental_api: true,
-                request_attestation: true,
-                ..Default::default()
-            }),
-        )
-        .await?;
-    anyhow::ensure!(
-        matches!(initialized, JSONRPCMessage::Response(_)),
-        "initialization failed"
-    );
-    let login_id = app_server
-        .send_chatgpt_auth_tokens_login_request(
-            initial_token.clone(),
-            account_id.into(),
-            Some("pro".into()),
-        )
-        .await?;
-    let _: LoginAccountResponse = app_server.read_response(login_id).await?;
-
-    let mut thread_ids = Vec::new();
-    for provider in ["bearer_provider", "mock_provider"] {
-        let thread = app_server
-            .start_thread(ThreadStartParams {
-                model_provider: Some(provider.into()),
-                ..Default::default()
-            })
-            .await?
-            .thread;
-        app_server
-            .send_turn_start_request(TurnStartParams {
-                thread_id: thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "hello".into(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            })
+            ))
+            .write(codex_home.path())?;
+        write_models_cache(codex_home.path()).await?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None)])
+            .build()
             .await?;
-        timeout(Duration::from_secs(/*secs*/ 60), async {
-            loop {
-                match app_server.read_next_message().await? {
-                    JSONRPCMessage::Request(request) => {
-                        let (request_id, result) = match ServerRequest::try_from(request)? {
-                            ServerRequest::AttestationGenerate { request_id, .. } => {
-                                (request_id, json!({ "token": attestation }))
-                            }
-                            ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => (
-                                request_id,
-                                json!({
-                                    "accessToken": refreshed_token,
-                                    "chatgptAccountId": account_id,
-                                    "chatgptPlanType": "pro",
-                                }),
-                            ),
-                            request => anyhow::bail!("unexpected request: {request:?}"),
-                        };
-                        app_server.send_response(request_id, result).await?;
+        let initialized = app_server
+            .initialize_with_capabilities(
+                ClientInfo {
+                    name: "codex_desktop".into(),
+                    title: None,
+                    version: "0.1.0".into(),
+                },
+                Some(InitializeCapabilities {
+                    experimental_api: true,
+                    request_attestation: true,
+                    ..Default::default()
+                }),
+            )
+            .await?;
+        anyhow::ensure!(
+            matches!(initialized, JSONRPCMessage::Response(_)),
+            "initialization failed"
+        );
+        let login_id = app_server
+            .send_chatgpt_auth_tokens_login_request(
+                initial_token.clone(),
+                account_id.into(),
+                Some("pro".into()),
+            )
+            .await?;
+        let _: LoginAccountResponse = app_server.read_response(login_id).await?;
+
+        let mut thread_ids = Vec::new();
+        for provider in ["bearer_provider", "mock_provider"] {
+            let thread = app_server
+                .start_thread(ThreadStartParams {
+                    model_provider: Some(provider.into()),
+                    ..Default::default()
+                })
+                .await?
+                .thread;
+            app_server
+                .send_turn_start_request(TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "hello".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            timeout(Duration::from_secs(/*secs*/ 60), async {
+                loop {
+                    match app_server.read_next_message().await? {
+                        JSONRPCMessage::Request(request) => {
+                            let (request_id, result) = match ServerRequest::try_from(request)? {
+                                ServerRequest::AttestationGenerate { request_id, .. } => {
+                                    (request_id, json!({ "token": attestation }))
+                                }
+                                ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => (
+                                    request_id,
+                                    json!({
+                                        "accessToken": refreshed_token,
+                                        "chatgptAccountId": account_id,
+                                        "chatgptPlanType": "pro",
+                                    }),
+                                ),
+                                request => anyhow::bail!("unexpected request: {request:?}"),
+                            };
+                            app_server.send_response(request_id, result).await?;
+                        }
+                        JSONRPCMessage::Notification(notification)
+                            if notification.method == "turn/completed" =>
+                        {
+                            let params = notification
+                                .params
+                                .context("missing turn/completed params")?;
+                            assert_eq!(params["turn"]["status"], "completed");
+                            break Ok::<_, anyhow::Error>(());
+                        }
+                        JSONRPCMessage::Error(error) => {
+                            anyhow::bail!("unexpected error: {error:?}")
+                        }
+                        JSONRPCMessage::Response(_) | JSONRPCMessage::Notification(_) => {}
                     }
-                    JSONRPCMessage::Notification(notification)
-                        if notification.method == "turn/completed" =>
-                    {
-                        let params = notification
-                            .params
-                            .context("missing turn/completed params")?;
-                        assert_eq!(params["turn"]["status"], "completed");
-                        break Ok::<_, anyhow::Error>(());
-                    }
-                    JSONRPCMessage::Error(error) => anyhow::bail!("unexpected error: {error:?}"),
-                    JSONRPCMessage::Response(_) | JSONRPCMessage::Notification(_) => {}
                 }
+            })
+            .await??;
+            thread_ids.push(thread.id);
+        }
+        let requests = responses.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.header("authorization"))
+                .collect::<Vec<_>>(),
+            vec![
+                Some(format!("Bearer {bearer}")),
+                Some(format!("Bearer {initial_token}")),
+                Some(format!("Bearer {refreshed_token}")),
+            ]
+        );
+        assert_eq!(requests[0].header("x-credential").as_deref(), Some(header));
+        assert_eq!(
+            requests[2].header("x-oai-attestation"),
+            Some(format!(r#"{{"v":1,"s":0,"t":"{attestation}"}}"#))
+        );
+
+        // Wait for a later event so buffered logs cannot hide a leak.
+        let barrier = "credential-log-barrier";
+        app_server
+            .send_response(RequestId::String(barrier.into()), json!({}))
+            .await?;
+        let state = StateRuntime::init(
+            SqliteConfig::new_for_testing(codex_home.path().abs()),
+            "mock_provider".into(),
+        )
+        .await?;
+        let thread_ids = thread_ids.iter().map(String::as_str).collect::<Vec<_>>();
+        let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
+            loop {
+                let logs =
+                    String::from_utf8(state.query_feedback_logs_for_threads(&thread_ids).await?)?;
+                if logs.contains(barrier) {
+                    break Ok::<_, anyhow::Error>(logs);
+                }
+                tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
             }
         })
         .await??;
-        thread_ids.push(thread.id);
-    }
-    let requests = responses.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.header("authorization"))
-            .collect::<Vec<_>>(),
-        vec![
-            Some(format!("Bearer {bearer}")),
-            Some(format!("Bearer {initial_token}")),
-            Some(format!("Bearer {refreshed_token}")),
-        ]
-    );
-    assert_eq!(requests[0].header("x-credential").as_deref(), Some(header));
-    assert_eq!(
-        requests[2].header("x-oai-attestation"),
-        Some(format!(r#"{{"v":1,"s":0,"t":"{attestation}"}}"#))
-    );
-
-    // Wait for a later event so buffered logs cannot hide a leak.
-    let barrier = "credential-log-barrier";
-    app_server
-        .send_response(RequestId::String(barrier.into()), json!({}))
-        .await?;
-    let state = StateRuntime::init(
-        SqliteConfig::new_for_testing(codex_home.path().abs()),
-        "mock_provider".into(),
-    )
-    .await?;
-    let thread_ids = thread_ids.iter().map(String::as_str).collect::<Vec<_>>();
-    let feedback = timeout(Duration::from_secs(/*secs*/ 60), async {
-        loop {
-            let logs =
-                String::from_utf8(state.query_feedback_logs_for_threads(&thread_ids).await?)?;
-            if logs.contains(barrier) {
-                break Ok::<_, anyhow::Error>(logs);
+        let persisted = format!("{:?}", state.query_logs(&LogQuery::default()).await?);
+        state.close().await;
+        // The HTTP assertions above prove the credentials were used. The barrier
+        // confirms earlier queued logs were persisted before we check for leaks.
+        for (sink, logs) in [("SQLite", persisted), ("feedback", feedback)] {
+            anyhow::ensure!(logs.contains(barrier), "missing log barrier in {sink} logs");
+            for secret in [
+                bearer,
+                header,
+                &initial_token,
+                &refreshed_token,
+                attestation,
+            ] {
+                anyhow::ensure!(
+                    !logs.contains(secret),
+                    "credential leaked into {sink} logs: {secret}"
+                );
             }
-            tokio::time::sleep(Duration::from_millis(/*millis*/ 50)).await;
         }
+        Ok(())
     })
-    .await??;
-    let persisted = format!("{:?}", state.query_logs(&LogQuery::default()).await?);
-    state.close().await;
-    // The HTTP assertions above prove the credentials were used. The barrier
-    // confirms earlier queued logs were persisted before we check for leaks.
-    for (sink, logs) in [("SQLite", persisted), ("feedback", feedback)] {
-        anyhow::ensure!(logs.contains(barrier), "missing log barrier in {sink} logs");
-        for secret in [
-            bearer,
-            header,
-            &initial_token,
-            &refreshed_token,
-            attestation,
-        ] {
-            anyhow::ensure!(
-                !logs.contains(secret),
-                "credential leaked into {sink} logs: {secret}"
-            );
-        }
-    }
-    Ok(())
+    .await
 }
 
 #[test]
@@ -430,6 +439,7 @@ async fn app_server_emits_structured_tool_call_timing_event() -> Result<()> {
         create_final_assistant_message_sse_response("done")?,
     ])
     .await;
+    mock_server::run(&[&server], async {
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri())
         .enable_feature(Feature::UnifiedExec)
@@ -529,4 +539,6 @@ async fn app_server_emits_structured_tool_call_timing_event() -> Result<()> {
     );
 
     Ok(())
+    })
+    .await
 }

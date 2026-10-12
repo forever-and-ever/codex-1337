@@ -19,6 +19,7 @@ use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelsResponse;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 use wiremock::matchers::body_json;
 use wiremock::matchers::header;
@@ -263,6 +264,7 @@ default_claude_account = {}
 async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> {
     let home = TempDir::new()?;
     let server = MockServer::start().await;
+    mock_server::run(&[&server], async {
     create_config_toml(
         home.path(),
         CreateConfigTomlParams {
@@ -1322,4 +1324,6 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         (Some("alice:alice"), None)
     );
     Ok(())
+    })
+    .await
 }

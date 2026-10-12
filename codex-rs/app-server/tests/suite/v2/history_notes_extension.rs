@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -300,6 +301,7 @@ async fn history_notes_and_async_message_emit_control_tool_analytics() -> Result
         ),
     ];
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let backend = responses::start_mock_server().await;
     for (namespace, tool, arguments) in &calls[..9] {
         Mock::given(method("POST"))
@@ -445,4 +447,6 @@ async fn history_notes_and_async_message_emit_control_tool_analytics() -> Result
     );
 
     Ok(())
+    })
+    .await
 }

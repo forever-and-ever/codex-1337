@@ -4,6 +4,7 @@ use super::EnvVarGuard;
 use super::OAuthCredentialExpiry;
 use super::read_only_user_turn;
 use super::write_fallback_oauth_tokens;
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID;
@@ -41,6 +42,7 @@ async fn http_auth_challenge_reaches_agent_tool_call_events_without_replay() -> 
 
     let responses_server = responses::start_mock_server().await;
     let mcp_server = responses::start_mock_server().await;
+    mock_server::run(&[&responses_server, &mcp_server], async {
     let http_server = AppsTestServer::mount(&mcp_server).await?;
     let challenge = r#"Bearer error="invalid_token", scope="calendar:read", resource_metadata="https://example.com/.well-known/oauth-protected-resource""#;
     Mock::given(method("POST"))
@@ -134,6 +136,8 @@ async fn http_auth_challenge_reaches_agent_tool_call_events_without_replay() -> 
     mcp_server.verify().await;
     fixture.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }
 
 #[test_case(ConfigRefreshPath::Runtime; "runtime configuration refresh")]

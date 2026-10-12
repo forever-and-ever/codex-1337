@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -76,214 +77,217 @@ async fn daybreak_metadata_follows_the_actual_plugin_call(case: AccessCase) -> R
         "get_codex_security_daybreak_access"
     };
     let server = responses::start_mock_server().await;
-    Mock::given(method("GET"))
-        .and(path("/accounts/verified_access"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "programs": [{"program":"cyber", "state":"active", "grants":[
-                {"level":"tac1", "source":"individual"}
-            ]}]
-        })))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/remote-mcp"))
-        .respond_with(|request: &Request| {
-            let body: Value = request.body_json().expect("MCP JSON-RPC request");
-            let result = match body["method"].as_str() {
-                Some("initialize") => json!({
-                    "protocolVersion": body["params"]["protocolVersion"],
-                    "capabilities":{"tools":{}},
-                    "serverInfo":{"name":"daybreak-test", "version":"1"}
-                }),
-                Some("tools/list") => json!({"tools":[{
-                    "name":"get_daybreak_access", "description":"Check Daybreak access",
-                    "inputSchema":{"type":"object", "properties":{}},
-                    "annotations":{"readOnlyHint":true}
-                }]}),
-                Some("tools/call") => json!({
-                    "content":[], "structuredContent":body["params"]["_meta"]
-                }),
-                _ => return ResponseTemplate::new(202),
-            };
-            ResponseTemplate::new(200).set_body_json(json!({
-                "jsonrpc":"2.0", "id":body["id"], "result":result
-            }))
-        })
-        .mount(&server)
-        .await;
+    mock_server::run(&[&server], async {
+        Mock::given(method("GET"))
+            .and(path("/accounts/verified_access"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "programs": [{"program":"cyber", "state":"active", "grants":[
+                    {"level":"tac1", "source":"individual"}
+                ]}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/remote-mcp"))
+            .respond_with(|request: &Request| {
+                let body: Value = request.body_json().expect("MCP JSON-RPC request");
+                let result = match body["method"].as_str() {
+                    Some("initialize") => json!({
+                        "protocolVersion": body["params"]["protocolVersion"],
+                        "capabilities":{"tools":{}},
+                        "serverInfo":{"name":"daybreak-test", "version":"1"}
+                    }),
+                    Some("tools/list") => json!({"tools":[{
+                        "name":"get_daybreak_access", "description":"Check Daybreak access",
+                        "inputSchema":{"type":"object", "properties":{}},
+                        "annotations":{"readOnlyHint":true}
+                    }]}),
+                    Some("tools/call") => json!({
+                        "content":[], "structuredContent":body["params"]["_meta"]
+                    }),
+                    _ => return ResponseTemplate::new(202),
+                };
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc":"2.0", "id":body["id"], "result":result
+                }))
+            })
+            .mount(&server)
+            .await;
 
-    let arguments = if matches!(case, AccessCase::NonemptyArguments) {
-        r#"{"refresh":true}"#
-    } else {
-        "{}"
-    };
-    let home = Arc::new(TempDir::new()?);
-    let plugin_root = super::plugins::write_sample_plugin_manifest_and_config(&home);
-    let server_config = if matches!(case, AccessCase::InstalledHttp) {
-        json!({"url":format!("{}/remote-mcp", server.uri())})
-    } else {
-        json!({
-            "command":stdio_server_bin()?,
-            "cwd":plugin_root,
-            "environment_id": if remote_url.is_some() { "remote" } else { "local" },
-            "default_tools_approval_mode":"approve",
-            "env":{"MCP_TEST_DAYBREAK_READ_ONLY":
-                if matches!(case, AccessCase::MutableStdio) { "false" } else { "true" }}
-        })
-    };
-    if matches!(case, AccessCase::UnownedStdio) {
-        let config_path = home.path().join("config.toml");
-        let existing = std::fs::read_to_string(&config_path)?;
-        let extra = toml::to_string(&json!({"mcp_servers":{"sample":server_config}}))?;
-        std::fs::write(config_path, format!("{existing}\n{extra}"))?;
-    } else {
-        std::fs::write(
-            plugin_root.join(".mcp.json"),
-            serde_json::to_vec(&json!({
-                "mcpServers":{"sample":server_config}
-            }))?,
-        )?;
-    }
-    let auth = if matches!(case, AccessCase::ApiKey) {
-        CodexAuth::from_api_key("test-api-key")
-    } else if matches!(case, AccessCase::ExternalTokens) {
-        CodexAuth::from_external_chatgpt_tokens(
-            "header.e30.external",
-            "external-account",
-            /*chatgpt_plan_type*/ None,
-        )?
-    } else {
-        CodexAuth::create_dummy_chatgpt_auth_for_testing()
-    };
-    let base_url = server.uri();
-    let mut builder = test_codex()
-        .with_home(home)
-        .with_auth(auth)
-        .with_config(move |config| config.chatgpt_base_url = base_url);
-    if let Some(remote_url) = &remote_url {
-        builder = builder.with_exec_server_url(remote_url.clone());
-    }
-    let test = builder.build_with_remote_and_local_env(&server).await?;
-    if remote_url.is_some() {
-        assert!(
-            test.thread_manager
-                .environment_manager()
-                .get_environment("remote")
-                .expect("remote executor")
-                .is_remote()
-        );
-        let (config, _) = test.codex.current_mcp_config_and_runtime_context().await;
-        assert_eq!(
-            config.mcp_server_catalog.configured_servers()["sample"].environment_id,
-            "remote"
-        );
-    }
-    wait_for_mcp_server(&test.codex, "sample").await?;
-    let mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                responses::ev_tool_search_call("search", &json!({"query":tool_name})),
-                responses::ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_function_call_with_namespace(
-                    "daybreak-call",
-                    "mcp__sample",
-                    tool_name,
-                    arguments,
-                ),
-                responses::ev_completed("resp-2"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("done", "done"),
-                responses::ev_completed("resp-3"),
-            ]),
-        ],
-    )
-    .await;
-    test.codex
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Call the sample Daybreak access tool".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    let end = wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::McpToolCallEnd(_))
-    })
-    .await;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
-    test.codex.shutdown_and_wait().await?;
-    let EventMsg::McpToolCallEnd(end) = end else {
-        unreachable!()
-    };
-    let metadata = end
-        .result
-        .expect("successful MCP call")
-        .structured_content
-        .expect("echoed metadata");
-    let expected_context = match case {
-        AccessCase::InstalledStdio | AccessCase::ExternalTokens => {
-            Some(json!({"schemaVersion":1, "entitlements":{
-                "cyber_trusted_access":{"schemaVersion":1,"status":"granted","grants":[
-                    {"level":"tac1","source":"user"}
-                ],"stale":false}
-            }}))
-        }
-        #[cfg(unix)]
-        AccessCase::RemoteStdio => None,
-        AccessCase::UndeclaredDaybreakName
-        | AccessCase::UnownedStdio
-        | AccessCase::InstalledHttp
-        | AccessCase::MutableStdio
-        | AccessCase::NonemptyArguments
-        | AccessCase::ApiKey => None,
-    };
-    assert_eq!(
-        metadata.get("openai/entitlementContext"),
-        expected_context.as_ref()
-    );
-    assert_eq!(
-        end.plugin_id.as_deref(),
-        if matches!(case, AccessCase::UnownedStdio) {
-            None
+        let arguments = if matches!(case, AccessCase::NonemptyArguments) {
+            r#"{"refresh":true}"#
         } else {
-            Some("sample@test")
-        }
-    );
-    assert!(metadata["threadId"].is_string());
-    assert!(!metadata.to_string().contains("Access Token"));
-    assert!(!metadata.to_string().contains("header.e30.external"));
-    let requests = server.received_requests().await.expect("recorded requests");
-    let access_requests: Vec<_> = requests
-        .iter()
-        .filter(|request| request.url.path() == "/accounts/verified_access")
-        .collect();
-    assert_eq!(
-        access_requests.len(),
-        usize::from(matches!(
-            case,
-            AccessCase::InstalledStdio | AccessCase::ExternalTokens
-        ))
-    );
-    if let Some(request) = access_requests.first() {
-        let (authorization, account_id) = if matches!(case, AccessCase::ExternalTokens) {
-            ("Bearer header.e30.external", "external-account")
-        } else {
-            ("Bearer Access Token", "account_id")
+            "{}"
         };
-        assert_eq!(request.headers["authorization"], authorization);
-        assert_eq!(request.headers["chatgpt-account-id"], account_id);
-    }
-    assert!(
-        mock.requests()[2]
-            .function_call_output("daybreak-call")
-            .is_object()
-    );
-    Ok(())
+        let home = Arc::new(TempDir::new()?);
+        let plugin_root = super::plugins::write_sample_plugin_manifest_and_config(&home);
+        let server_config = if matches!(case, AccessCase::InstalledHttp) {
+            json!({"url":format!("{}/remote-mcp", server.uri())})
+        } else {
+            json!({
+                "command":stdio_server_bin()?,
+                "cwd":plugin_root,
+                "environment_id": if remote_url.is_some() { "remote" } else { "local" },
+                "default_tools_approval_mode":"approve",
+                "env":{"MCP_TEST_DAYBREAK_READ_ONLY":
+                    if matches!(case, AccessCase::MutableStdio) { "false" } else { "true" }}
+            })
+        };
+        if matches!(case, AccessCase::UnownedStdio) {
+            let config_path = home.path().join("config.toml");
+            let existing = std::fs::read_to_string(&config_path)?;
+            let extra = toml::to_string(&json!({"mcp_servers":{"sample":server_config}}))?;
+            std::fs::write(config_path, format!("{existing}\n{extra}"))?;
+        } else {
+            std::fs::write(
+                plugin_root.join(".mcp.json"),
+                serde_json::to_vec(&json!({
+                    "mcpServers":{"sample":server_config}
+                }))?,
+            )?;
+        }
+        let auth = if matches!(case, AccessCase::ApiKey) {
+            CodexAuth::from_api_key("test-api-key")
+        } else if matches!(case, AccessCase::ExternalTokens) {
+            CodexAuth::from_external_chatgpt_tokens(
+                "header.e30.external",
+                "external-account",
+                /*chatgpt_plan_type*/ None,
+            )?
+        } else {
+            CodexAuth::create_dummy_chatgpt_auth_for_testing()
+        };
+        let base_url = server.uri();
+        let mut builder = test_codex()
+            .with_home(home)
+            .with_auth(auth)
+            .with_config(move |config| config.chatgpt_base_url = base_url);
+        if let Some(remote_url) = &remote_url {
+            builder = builder.with_exec_server_url(remote_url.clone());
+        }
+        let test = builder.build_with_remote_and_local_env(&server).await?;
+        if remote_url.is_some() {
+            assert!(
+                test.thread_manager
+                    .environment_manager()
+                    .get_environment("remote")
+                    .expect("remote executor")
+                    .is_remote()
+            );
+            let (config, _) = test.codex.current_mcp_config_and_runtime_context().await;
+            assert_eq!(
+                config.mcp_server_catalog.configured_servers()["sample"].environment_id,
+                "remote"
+            );
+        }
+        wait_for_mcp_server(&test.codex, "sample").await?;
+        let mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    responses::ev_tool_search_call("search", &json!({"query":tool_name})),
+                    responses::ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_function_call_with_namespace(
+                        "daybreak-call",
+                        "mcp__sample",
+                        tool_name,
+                        arguments,
+                    ),
+                    responses::ev_completed("resp-2"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("done", "done"),
+                    responses::ev_completed("resp-3"),
+                ]),
+            ],
+        )
+        .await;
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Call the sample Daybreak access tool".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        let end = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::McpToolCallEnd(_))
+        })
+        .await;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        test.codex.shutdown_and_wait().await?;
+        let EventMsg::McpToolCallEnd(end) = end else {
+            unreachable!()
+        };
+        let metadata = end
+            .result
+            .expect("successful MCP call")
+            .structured_content
+            .expect("echoed metadata");
+        let expected_context = match case {
+            AccessCase::InstalledStdio | AccessCase::ExternalTokens => {
+                Some(json!({"schemaVersion":1, "entitlements":{
+                    "cyber_trusted_access":{"schemaVersion":1,"status":"granted","grants":[
+                        {"level":"tac1","source":"user"}
+                    ],"stale":false}
+                }}))
+            }
+            #[cfg(unix)]
+            AccessCase::RemoteStdio => None,
+            AccessCase::UndeclaredDaybreakName
+            | AccessCase::UnownedStdio
+            | AccessCase::InstalledHttp
+            | AccessCase::MutableStdio
+            | AccessCase::NonemptyArguments
+            | AccessCase::ApiKey => None,
+        };
+        assert_eq!(
+            metadata.get("openai/entitlementContext"),
+            expected_context.as_ref()
+        );
+        assert_eq!(
+            end.plugin_id.as_deref(),
+            if matches!(case, AccessCase::UnownedStdio) {
+                None
+            } else {
+                Some("sample@test")
+            }
+        );
+        assert!(metadata["threadId"].is_string());
+        assert!(!metadata.to_string().contains("Access Token"));
+        assert!(!metadata.to_string().contains("header.e30.external"));
+        let requests = server.received_requests().await.expect("recorded requests");
+        let access_requests: Vec<_> = requests
+            .iter()
+            .filter(|request| request.url.path() == "/accounts/verified_access")
+            .collect();
+        assert_eq!(
+            access_requests.len(),
+            usize::from(matches!(
+                case,
+                AccessCase::InstalledStdio | AccessCase::ExternalTokens
+            ))
+        );
+        if let Some(request) = access_requests.first() {
+            let (authorization, account_id) = if matches!(case, AccessCase::ExternalTokens) {
+                ("Bearer header.e30.external", "external-account")
+            } else {
+                ("Bearer Access Token", "account_id")
+            };
+            assert_eq!(request.headers["authorization"], authorization);
+            assert_eq!(request.headers["chatgpt-account-id"], account_id);
+        }
+        assert!(
+            mock.requests()[2]
+                .function_call_output("daybreak-call")
+                .is_object()
+        );
+        Ok(())
+    })
+    .await
 }
 
 struct SelectedAuth(CodexAuth);
@@ -302,6 +306,7 @@ impl ExternalAuth for SelectedAuth {
 async fn daybreak_discards_in_flight_account_changes_without_apps() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let base_url = format!("http://{}", listener.local_addr()?);
     let (request_tx, request_rx) = oneshot::channel();
@@ -445,4 +450,6 @@ async fn daybreak_discards_in_flight_account_changes_without_apps() -> Result<()
         })
     );
     Ok(())
+    })
+    .await
 }

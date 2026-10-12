@@ -1,5 +1,6 @@
 //! Snapshots cloud-preferred skill deduplication and stable executor aliases in model requests.
 
+use core_test_support::mock_server;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -29,6 +30,7 @@ async fn cloud_preference_preserves_executor_aliases_and_description_budget() ->
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let roots = [
         format!("skill://executor-a/{}", "a".repeat(180)),
         format!("skill://executor-b/{}", "b".repeat(180)),
@@ -148,4 +150,6 @@ async fn cloud_preference_preserves_executor_aliases_and_description_budget() ->
         )
     );
     Ok(())
+    })
+    .await
 }

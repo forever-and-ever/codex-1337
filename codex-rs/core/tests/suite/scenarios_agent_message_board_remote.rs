@@ -11,6 +11,7 @@ use codex_protocol::protocol::Op;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::context_snapshot::SnapshotEntry;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -34,6 +35,7 @@ use wiremock::matchers::path;
 async fn remote_board_uses_the_existing_tools_and_session_identity() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
     let board = responses::start_mock_server().await;
+    mock_server::run(&[&server, &board], async {
     let token = "research-board-credential-for-runtime-test";
     let url = board.uri();
     let root = test_codex()
@@ -217,4 +219,6 @@ async fn remote_board_uses_the_existing_tools_and_session_identity() -> anyhow::
     );
     root.codex.shutdown_and_wait().await?;
     Ok(())
+    })
+    .await
 }

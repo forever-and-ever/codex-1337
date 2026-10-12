@@ -30,6 +30,7 @@ use codex_protocol::protocol::UserMessageEvent;
 use codex_protocol::user_input::UserInput;
 use codex_thread_store::ThreadMetadataPatch;
 use codex_web_search_extension::install as install_web_search_extension;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -316,115 +317,119 @@ async fn staged_metadata_is_persisted_on_first_turn() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resume_restores_dynamic_tools_from_rollout_with_sqlite_enabled() -> Result<()> {
     let server = start_mock_server().await;
-    let mock = mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            responses::sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let mock = mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                responses::sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
 
-    let namespace = "resume_tools";
-    let namespace_description = "Tools available after resume.";
-    let tool_name = "resume_lookup";
-    let tool_description = "Look up a value after resume.";
-    let input_schema = json!({
-        "type": "object",
-        "properties": { "query": { "type": "string" } },
-        "required": ["query"],
-        "additionalProperties": false,
-    });
-    let dynamic_tool = DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
-        name: namespace.to_string(),
-        description: namespace_description.to_string(),
-        tools: vec![DynamicToolNamespaceTool::Function(
-            DynamicToolFunctionSpec {
-                name: tool_name.to_string(),
-                description: tool_description.to_string(),
-                input_schema: input_schema.clone(),
-                defer_loading: false,
-            },
-        )],
-    });
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow feature update");
-    });
-    let base_test = builder.build(&server).await?;
-    let started = base_test
-        .thread_manager
-        .start_thread(StartThreadOptions {
-            dynamic_tools: vec![dynamic_tool],
-            history_mode: Some(codex_protocol::protocol::ThreadHistoryMode::Legacy),
-            ..StartThreadOptions::new(base_test.config.clone())
+        let namespace = "resume_tools";
+        let namespace_description = "Tools available after resume.";
+        let tool_name = "resume_lookup";
+        let tool_description = "Look up a value after resume.";
+        let input_schema = json!({
+            "type": "object",
+            "properties": { "query": { "type": "string" } },
+            "required": ["query"],
+            "additionalProperties": false,
+        });
+        let dynamic_tool = DynamicToolSpec::Namespace(DynamicToolNamespaceSpec {
+            name: namespace.to_string(),
+            description: namespace_description.to_string(),
+            tools: vec![DynamicToolNamespaceTool::Function(
+                DynamicToolFunctionSpec {
+                    name: tool_name.to_string(),
+                    description: tool_description.to_string(),
+                    input_schema: input_schema.clone(),
+                    defer_loading: false,
+                },
+            )],
+        });
+        let mut builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("test config should allow feature update");
+        });
+        let base_test = builder.build(&server).await?;
+        let started = base_test
+            .thread_manager
+            .start_thread(StartThreadOptions {
+                dynamic_tools: vec![dynamic_tool],
+                history_mode: Some(codex_protocol::protocol::ThreadHistoryMode::Legacy),
+                ..StartThreadOptions::new(base_test.config.clone())
+            })
+            .await?;
+        let rollout_path = started
+            .session_configured
+            .rollout_path
+            .clone()
+            .expect("rollout path");
+
+        started
+            .thread
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "persist this thread".to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&started.thread, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
         })
-        .await?;
-    let rollout_path = started
-        .session_configured
-        .rollout_path
-        .clone()
-        .expect("rollout path");
+        .await;
 
-    started
-        .thread
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "persist this thread".to_string(),
-            text_elements: Vec::new(),
-        }]))
-        .await?;
-    wait_for_event(&started.thread, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+        started.thread.shutdown_and_wait().await?;
+        let mut resume_builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("test config should allow feature update");
+        });
+        let resumed = resume_builder
+            .resume(&server, base_test.home.clone(), rollout_path)
+            .await?;
+        resumed.submit_turn("use the restored tool").await?;
+
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 2);
+        let resumed_body = requests[1].body_json();
+        let tools = resumed_body
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .expect("resumed request tools");
+        let restored_namespace = tools
+            .iter()
+            .find(|tool| tool.get("name") == Some(&json!(namespace)))
+            .expect("dynamic tool namespace should be restored from rollout metadata");
+        assert_eq!(
+            restored_namespace,
+            &json!({
+                "type": "namespace",
+                "name": namespace,
+                "description": namespace_description,
+                "tools": [{
+                    "type": "function",
+                    "name": tool_name,
+                    "description": tool_description,
+                    "strict": false,
+                    "parameters": input_schema,
+                }],
+            })
+        );
+
+        Ok(())
     })
-    .await;
-
-    started.thread.shutdown_and_wait().await?;
-    let mut resume_builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow feature update");
-    });
-    let resumed = resume_builder
-        .resume(&server, base_test.home.clone(), rollout_path)
-        .await?;
-    resumed.submit_turn("use the restored tool").await?;
-
-    let requests = mock.requests();
-    assert_eq!(requests.len(), 2);
-    let resumed_body = requests[1].body_json();
-    let tools = resumed_body
-        .get("tools")
-        .and_then(serde_json::Value::as_array)
-        .expect("resumed request tools");
-    let restored_namespace = tools
-        .iter()
-        .find(|tool| tool.get("name") == Some(&json!(namespace)))
-        .expect("dynamic tool namespace should be restored from rollout metadata");
-    assert_eq!(
-        restored_namespace,
-        &json!({
-            "type": "namespace",
-            "name": namespace,
-            "description": namespace_description,
-            "tools": [{
-                "type": "function",
-                "name": tool_name,
-                "description": tool_description,
-                "strict": false,
-                "parameters": input_schema,
-            }],
-        })
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resume_restores_legacy_dynamic_tools_from_rollout_with_sqlite_enabled() -> Result<()> {
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mock = mount_sse_sequence(
         &server,
         vec![
@@ -537,6 +542,8 @@ async fn resume_restores_legacy_dynamic_tools_from_rollout_with_sqlite_enabled()
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -658,93 +665,99 @@ async fn backfill_scans_existing_rollouts() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_messages_persist_in_state_db() -> Result<()> {
     let server = start_mock_server().await;
-    mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
-            responses::sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]),
+                responses::sse(vec![ev_response_created("resp-2"), ev_completed("resp-2")]),
+            ],
+        )
+        .await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow feature update");
-    });
-    let test = builder.build(&server).await?;
+        let mut builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("test config should allow feature update");
+        });
+        let test = builder.build(&server).await?;
 
-    let db_path = test.config.sqlite.state_db_path();
-    for _ in 0..100 {
-        if tokio::fs::try_exists(&db_path).await.unwrap_or(false) {
-            break;
+        let db_path = test.config.sqlite.state_db_path();
+        for _ in 0..100 {
+            if tokio::fs::try_exists(&db_path).await.unwrap_or(false) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    test.submit_turn("hello from sqlite").await?;
-    test.submit_turn("another message").await?;
+        test.submit_turn("hello from sqlite").await?;
+        test.submit_turn("another message").await?;
 
-    let db = test.codex.state_db().expect("state db enabled");
-    let thread_id = test.session_configured.thread_id;
+        let db = test.codex.state_db().expect("state db enabled");
+        let thread_id = test.session_configured.thread_id;
 
-    let mut metadata = None;
-    for _ in 0..100 {
-        metadata = db.get_thread(thread_id).await?;
-        if metadata
-            .as_ref()
-            .map(|entry| entry.first_user_message.is_some())
-            .unwrap_or(false)
-        {
-            break;
+        let mut metadata = None;
+        for _ in 0..100 {
+            metadata = db.get_thread(thread_id).await?;
+            if metadata
+                .as_ref()
+                .map(|entry| entry.first_user_message.is_some())
+                .unwrap_or(false)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    let metadata = metadata.expect("thread should exist in state db");
-    assert!(metadata.first_user_message.is_some());
+        let metadata = metadata.expect("thread should exist in state db");
+        assert!(metadata.first_user_message.is_some());
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn web_search_marks_thread_memory_mode_polluted_when_configured() -> Result<()> {
     let server = start_mock_server().await;
-    mount_sse_sequence(
-        &server,
-        vec![responses::sse(vec![
-            ev_response_created("resp-1"),
-            ev_web_search_call_done("ws-1", "completed", "weather seattle"),
-            ev_completed("resp-1"),
-        ])],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        mount_sse_sequence(
+            &server,
+            vec![responses::sse(vec![
+                ev_response_created("resp-1"),
+                ev_web_search_call_done("ws-1", "completed", "weather seattle"),
+                ev_completed("resp-1"),
+            ])],
+        )
+        .await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow feature update");
-        config.memories.disable_on_external_context = true;
-    });
-    let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
-    let thread_id = test.session_configured.thread_id;
+        let mut builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("test config should allow feature update");
+            config.memories.disable_on_external_context = true;
+        });
+        let test = builder.build(&server).await?;
+        let db = test.codex.state_db().expect("state db enabled");
+        let thread_id = test.session_configured.thread_id;
 
-    test.submit_turn("search the web").await?;
+        test.submit_turn("search the web").await?;
 
-    let mut memory_mode = None;
-    for _ in 0..100 {
-        memory_mode = db.get_thread_memory_mode(thread_id).await?;
-        if memory_mode.as_deref() == Some("polluted") {
-            break;
+        let mut memory_mode = None;
+        for _ in 0..100 {
+            memory_mode = db.get_thread_memory_mode(thread_id).await?;
+            if memory_mode.as_deref() == Some("polluted") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    assert_eq!(memory_mode.as_deref(), Some("polluted"));
-    Ok(())
+        assert_eq!(memory_mode.as_deref(), Some("polluted"));
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -752,77 +765,80 @@ async fn standalone_web_search_marks_thread_memory_mode_polluted_when_configured
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/alpha/search"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "output": "Search result",
-        })))
-        .expect(1)
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        Mock::given(method("POST"))
+            .and(path("/v1/alpha/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "output": "Search result",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    ev_response_created("resp-1"),
+                    responses::ev_function_call_with_namespace(
+                        "web-run-1",
+                        "web",
+                        "run",
+                        &json!({
+                            "search_query": [{"q": "standalone web search"}],
+                        })
+                        .to_string(),
+                    ),
+                    ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![
+                    responses::ev_assistant_message("msg-1", "done"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
         .await;
-    mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                ev_response_created("resp-1"),
-                responses::ev_function_call_with_namespace(
-                    "web-run-1",
-                    "web",
-                    "run",
-                    &json!({
-                        "search_query": [{"q": "standalone web search"}],
-                    })
-                    .to_string(),
-                ),
-                ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![
-                responses::ev_assistant_message("msg-1", "done"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
 
-    let auth = CodexAuth::from_api_key("dummy");
-    let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
-    let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
-    install_web_search_extension(&mut extension_builder, auth_manager);
-    let mut builder = test_codex()
-        .with_auth(auth)
-        .with_extensions(Arc::new(extension_builder.build()))
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::Sqlite)
-                .expect("test config should allow feature update");
-            config
-                .features
-                .enable(Feature::StandaloneWebSearch)
-                .expect("standalone web search should be enabled");
-            config.memories.disable_on_external_context = true;
-            config
-                .web_search_mode
-                .set(WebSearchMode::Live)
-                .expect("web search mode should be accepted");
-        });
-    let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
-    let thread_id = test.session_configured.thread_id;
+        let auth = CodexAuth::from_api_key("dummy");
+        let auth_manager = codex_core::test_support::auth_manager_from_auth(auth.clone());
+        let mut extension_builder = ExtensionRegistryBuilder::<Config>::new();
+        install_web_search_extension(&mut extension_builder, auth_manager);
+        let mut builder = test_codex()
+            .with_auth(auth)
+            .with_extensions(Arc::new(extension_builder.build()))
+            .with_config(|config| {
+                config
+                    .features
+                    .enable(Feature::Sqlite)
+                    .expect("test config should allow feature update");
+                config
+                    .features
+                    .enable(Feature::StandaloneWebSearch)
+                    .expect("standalone web search should be enabled");
+                config.memories.disable_on_external_context = true;
+                config
+                    .web_search_mode
+                    .set(WebSearchMode::Live)
+                    .expect("web search mode should be accepted");
+            });
+        let test = builder.build(&server).await?;
+        let db = test.codex.state_db().expect("state db enabled");
+        let thread_id = test.session_configured.thread_id;
 
-    test.submit_turn("search the web").await?;
+        test.submit_turn("search the web").await?;
 
-    let mut memory_mode = None;
-    for _ in 0..100 {
-        memory_mode = db.get_thread_memory_mode(thread_id).await?;
-        if memory_mode.as_deref() == Some("polluted") {
-            break;
+        let mut memory_mode = None;
+        for _ in 0..100 {
+            memory_mode = db.get_thread_memory_mode(thread_id).await?;
+            if memory_mode.as_deref() == Some("polluted") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    assert_eq!(memory_mode.as_deref(), Some("polluted"));
-    Ok(())
+        assert_eq!(memory_mode.as_deref(), Some("polluted"));
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -961,78 +977,81 @@ async fn mcp_call_marks_thread_memory_mode_polluted_when_configured() -> Result<
 #[tokio::test(flavor = "current_thread")]
 async fn tool_call_logs_include_thread_id() -> Result<()> {
     let server = start_mock_server().await;
-    let call_id = "call-1";
-    let args = json!({
-        "cmd": "echo hello",
-        "yield_time_ms": 1_000,
-        "login": false,
-    });
-    let args_json = serde_json::to_string(&args)?;
-    mount_sse_sequence(
-        &server,
-        vec![
-            responses::sse(vec![
-                ev_response_created("resp-1"),
-                ev_function_call(call_id, "exec_command", &args_json),
-                ev_completed("resp-1"),
-            ]),
-            responses::sse(vec![ev_completed("resp-2")]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let call_id = "call-1";
+        let args = json!({
+            "cmd": "echo hello",
+            "yield_time_ms": 1_000,
+            "login": false,
+        });
+        let args_json = serde_json::to_string(&args)?;
+        mount_sse_sequence(
+            &server,
+            vec![
+                responses::sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_function_call(call_id, "exec_command", &args_json),
+                    ev_completed("resp-1"),
+                ]),
+                responses::sse(vec![ev_completed("resp-2")]),
+            ],
+        )
+        .await;
 
-    let mut builder = test_codex().with_config(|config| {
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow feature update");
-    });
-    let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
-    let expected_thread_id = test.session_configured.thread_id.to_string();
+        let mut builder = test_codex().with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("test config should allow feature update");
+        });
+        let test = builder.build(&server).await?;
+        let db = test.codex.state_db().expect("state db enabled");
+        let expected_thread_id = test.session_configured.thread_id.to_string();
 
-    test.submit_turn("run a shell command").await?;
+        test.submit_turn("run a shell command").await?;
 
-    let log_db_layer =
-        codex_state::log_db::start(db.clone(), Arc::new(codex_feedback::CodexFeedback::new()));
-    let subscriber = tracing_subscriber::registry().with(log_db_layer.clone());
-    let dispatch = tracing::Dispatch::new(subscriber);
-    tracing::dispatcher::with_default(&dispatch, || {
-        let span = tracing::info_span!("test_log_span", thread_id = %expected_thread_id);
-        let _entered = span.enter();
-        tracing::info!("ToolCall: exec_command {{\"cmd\":\"echo hello\"}}");
-    });
-    log_db_layer.flush().await;
+        let log_db_layer =
+            codex_state::log_db::start(db.clone(), Arc::new(codex_feedback::CodexFeedback::new()));
+        let subscriber = tracing_subscriber::registry().with(log_db_layer.clone());
+        let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            let span = tracing::info_span!("test_log_span", thread_id = %expected_thread_id);
+            let _entered = span.enter();
+            tracing::info!("ToolCall: exec_command {{\"cmd\":\"echo hello\"}}");
+        });
+        log_db_layer.flush().await;
 
-    let mut found = None;
-    for _ in 0..80 {
-        let query = codex_state::LogQuery {
-            descending: true,
-            limit: Some(20),
-            ..Default::default()
-        };
-        let rows = db.query_logs(&query).await?;
-        if let Some(row) = rows.into_iter().find(|row| {
-            row.message
-                .as_deref()
-                .is_some_and(|m| m.contains("ToolCall:"))
-        }) {
-            let thread_id = row.thread_id;
-            let message = row.message;
-            found = Some((thread_id, message));
-            break;
+        let mut found = None;
+        for _ in 0..80 {
+            let query = codex_state::LogQuery {
+                descending: true,
+                limit: Some(20),
+                ..Default::default()
+            };
+            let rows = db.query_logs(&query).await?;
+            if let Some(row) = rows.into_iter().find(|row| {
+                row.message
+                    .as_deref()
+                    .is_some_and(|m| m.contains("ToolCall:"))
+            }) {
+                let thread_id = row.thread_id;
+                let message = row.message;
+                found = Some((thread_id, message));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
 
-    let (thread_id, message) = found.expect("expected ToolCall log row");
-    assert_eq!(thread_id, Some(expected_thread_id));
-    assert!(
-        message
-            .as_deref()
-            .is_some_and(|text| text.contains("ToolCall:")),
-        "expected ToolCall message, got {message:?}"
-    );
+        let (thread_id, message) = found.expect("expected ToolCall log row");
+        assert_eq!(thread_id, Some(expected_thread_id));
+        assert!(
+            message
+                .as_deref()
+                .is_some_and(|text| text.contains("ToolCall:")),
+            "expected ToolCall message, got {message:?}"
+        );
 
-    Ok(())
+        Ok(())
+    })
+    .await
 }

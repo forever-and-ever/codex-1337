@@ -10,6 +10,7 @@ use codex_protocol::protocol::SubAgentActivityKind;
 use codex_protocol::protocol::WorkStatus;
 use codex_protocol::user_input::UserInput;
 use codex_rollout::RolloutRecorder;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -144,6 +145,7 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -> Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(|config| {
         config.features.enable(Feature::CodeModeOnly).unwrap();
         config.features.enable(Feature::MultiAgentV2).unwrap();
@@ -262,4 +264,6 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
     })
     .await?;
     Ok(())
+    })
+    .await
 }

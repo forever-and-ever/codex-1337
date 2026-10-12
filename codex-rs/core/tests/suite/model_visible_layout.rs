@@ -1,5 +1,6 @@
 use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_protocol::protocol::TurnEnvironmentRequests;
+use core_test_support::mock_server;
 use core_test_support::test_codex::local_requests;
 use std::fs;
 use std::sync::Arc;
@@ -267,111 +268,114 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let responses = mount_sse_sequence(
-        &server,
-        vec![
-            sse(vec![
-                ev_response_created("resp-1"),
-                ev_assistant_message("msg-1", "turn one complete"),
-                ev_completed("resp-1"),
-            ]),
-            sse(vec![
-                ev_response_created("resp-2"),
-                ev_assistant_message("msg-2", "turn two complete"),
-                ev_completed("resp-2"),
-            ]),
-        ],
-    )
-    .await;
+    mock_server::run(&[&server], async {
+        let responses = mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_response_created("resp-1"),
+                    ev_assistant_message("msg-1", "turn one complete"),
+                    ev_completed("resp-1"),
+                ]),
+                sse(vec![
+                    ev_response_created("resp-2"),
+                    ev_assistant_message("msg-2", "turn two complete"),
+                    ev_completed("resp-2"),
+                ]),
+            ],
+        )
+        .await;
 
-    let mut builder = test_codex()
-        .with_extensions(skills_extensions())
-        .with_model("gpt-5.5")
-        .with_config(|config| {
-            config.update_plan_enabled = true;
-        });
-    let test = builder.build(&server).await?;
-    let preturn_context_diff_cwd = test.cwd_path().join(PRETURN_CONTEXT_DIFF_CWD);
-    fs::create_dir_all(&preturn_context_diff_cwd)?;
-    let preturn_context_diff_cwd = preturn_context_diff_cwd.abs();
-    let first_turn_cwd = test.config.cwd.clone();
-    let (first_sandbox_policy, first_permission_profile) =
-        turn_permission_fields(PermissionProfile::read_only(), first_turn_cwd.as_path());
+        let mut builder = test_codex()
+            .with_extensions(skills_extensions())
+            .with_model("gpt-5.5")
+            .with_config(|config| {
+                config.update_plan_enabled = true;
+            });
+        let test = builder.build(&server).await?;
+        let preturn_context_diff_cwd = test.cwd_path().join(PRETURN_CONTEXT_DIFF_CWD);
+        fs::create_dir_all(&preturn_context_diff_cwd)?;
+        let preturn_context_diff_cwd = preturn_context_diff_cwd.abs();
+        let first_turn_cwd = test.config.cwd.clone();
+        let (first_sandbox_policy, first_permission_profile) =
+            turn_permission_fields(PermissionProfile::read_only(), first_turn_cwd.as_path());
 
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "first turn".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(first_turn_cwd)),
-                approval_policy: Some(AskForApproval::Never),
-                sandbox_policy: Some(first_sandbox_policy),
-                permission_profile: first_permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: test.session_configured.model.clone(),
-                        reasoning_effort: test.config.model_reasoning_effort.clone(),
-                        developer_instructions: None,
-                    },
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "first turn".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(first_turn_cwd)),
+                    approval_policy: Some(AskForApproval::Never),
+                    sandbox_policy: Some(first_sandbox_policy),
+                    permission_profile: first_permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: test.session_configured.model.clone(),
+                            reasoning_effort: test.config.model_reasoning_effort.clone(),
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
-    })
-    .await;
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
 
-    let (second_sandbox_policy, second_permission_profile) = turn_permission_fields(
-        PermissionProfile::read_only(),
-        preturn_context_diff_cwd.as_path(),
-    );
-    test.codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "second turn with context updates".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_requests(preturn_context_diff_cwd)),
-                approval_policy: Some(AskForApproval::OnRequest),
-                sandbox_policy: Some(second_sandbox_policy),
-                permission_profile: second_permission_profile,
-                collaboration_mode: Some(CollaborationMode {
-                    mode: ModeKind::Default,
-                    settings: Settings {
-                        model: test.session_configured.model.clone(),
-                        reasoning_effort: test.config.model_reasoning_effort.clone(),
-                        developer_instructions: None,
-                    },
+        let (second_sandbox_policy, second_permission_profile) = turn_permission_fields(
+            PermissionProfile::read_only(),
+            preturn_context_diff_cwd.as_path(),
+        );
+        test.codex
+            .start_or_steer_turn(
+                TurnInputRequest::user_input(vec![UserInput::Text {
+                    text: "second turn with context updates".into(),
+                    text_elements: Vec::new(),
+                }])
+                .with_thread_settings(ThreadSettingsOverrides {
+                    environments: Some(local_requests(preturn_context_diff_cwd)),
+                    approval_policy: Some(AskForApproval::OnRequest),
+                    sandbox_policy: Some(second_sandbox_policy),
+                    permission_profile: second_permission_profile,
+                    collaboration_mode: Some(CollaborationMode {
+                        mode: ModeKind::Default,
+                        settings: Settings {
+                            model: test.session_configured.model.clone(),
+                            reasoning_effort: test.config.model_reasoning_effort.clone(),
+                            developer_instructions: None,
+                        },
+                    }),
+                    ..Default::default()
                 }),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_event(&test.codex, |event| {
-        matches!(event, EventMsg::TurnComplete(_))
+            )
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+
+        let requests = responses.requests();
+        assert_eq!(requests.len(), 2, "expected two requests");
+        insta::assert_snapshot!(
+            "model_visible_layout_turn_overrides",
+            format_labeled_requests_snapshot(
+                "Second turn changes cwd and approval policy while keeping model constant.",
+                &[
+                    ("First Request (Baseline)", &requests[0]),
+                    ("Second Request (Turn Overrides)", &requests[1]),
+                ]
+            )
+        );
+
+        Ok(())
     })
-    .await;
-
-    let requests = responses.requests();
-    assert_eq!(requests.len(), 2, "expected two requests");
-    insta::assert_snapshot!(
-        "model_visible_layout_turn_overrides",
-        format_labeled_requests_snapshot(
-            "Second turn changes cwd and approval policy while keeping model constant.",
-            &[
-                ("First Request (Baseline)", &requests[0]),
-                ("Second Request (Turn Overrides)", &requests[1]),
-            ]
-        )
-    );
-
-    Ok(())
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -379,6 +383,7 @@ async fn snapshot_model_visible_layout_cwd_change_refreshes_agents() -> Result<(
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let responses = mount_sse_sequence(
         &server,
         vec![
@@ -500,6 +505,8 @@ async fn snapshot_model_visible_layout_cwd_change_refreshes_agents() -> Result<(
     );
 
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

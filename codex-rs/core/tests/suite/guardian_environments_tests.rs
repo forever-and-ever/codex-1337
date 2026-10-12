@@ -5,6 +5,7 @@ use codex_core::context::UserGoalUpdate;
 use codex_history::RolloutItem;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::TurnEnvironmentRequests;
+use core_test_support::mock_server;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
@@ -32,6 +33,7 @@ async fn guardian_reviews_target_environment_and_reuses_prefix(tool: &str) -> Re
     attach.send(()).expect("attach secondary executor");
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_pre_build_hook(|home| {
             std::fs::write(
@@ -290,6 +292,8 @@ async fn guardian_reviews_target_environment_and_reuses_prefix(tool: &str) -> Re
     shutdown.send(()).expect("stop secondary executor");
     executor.await?;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

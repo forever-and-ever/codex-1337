@@ -11,6 +11,7 @@ use codex_protocol::user_input::UserInput;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::context_snapshot::SnapshotEntry;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::ev_assistant_message;
@@ -142,6 +143,7 @@ async fn board_post_and_reads_reach_model_context_without_self_notices(
     in_memory: bool,
 ) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mock = responses::mount_sse_sequence(&server, vec![
         tool("post-decision", "post", json!({"new_channel_name":"design", "text":"A shared decision.", "agents_to_notify":["/root"]})),
         tool("find-decision", "search_posts", json!({"channel_name":"design","query":"decision"})),
@@ -210,6 +212,8 @@ async fn board_post_and_reads_reach_model_context_without_self_notices(
         )
     );
     Ok(())
+    })
+    .await
 }
 
 #[test_case::test_case(false; "disk")]
@@ -219,158 +223,161 @@ async fn board_shares_posts_with_children_and_preserves_storage_policy(
     in_memory: bool,
 ) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
-        configure(config);
-        config.multi_agent_v2.message_board_in_memory = in_memory;
-        config.ephemeral = in_memory;
-    });
-    let root = builder.build_with_auto_env(&server).await?;
-    let root_id = root.session_configured.thread_id;
-    // Completion mail may wake the root between explicit board operations. It must not
-    // consume responses scripted for the child's tools or the next human request.
-    wiremock::Mock::given(wiremock::matchers::method("POST"))
-        .and(wiremock::matchers::path("/v1/responses"))
-        .and(move |request: &wiremock::Request| {
-            let body = ResponsesRequest::from(request.clone()).body_json();
-            body["client_metadata"]["thread_id"] == json!(root_id)
-                && body["input"]
-                    .as_array()
-                    .and_then(|input| input.last())
-                    .is_some_and(|item| item["type"] == "agent_message")
-        })
-        .respond_with(responses::sse_response(done()))
-        .with_priority(10)
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        let mut builder = test_codex().with_config(move |config| {
+            configure(config);
+            config.multi_agent_v2.message_board_in_memory = in_memory;
+            config.ephemeral = in_memory;
+        });
+        let root = builder.build_with_auto_env(&server).await?;
+        let root_id = root.session_configured.thread_id;
+        // Completion mail may wake the root between explicit board operations. It must not
+        // consume responses scripted for the child's tools or the next human request.
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/v1/responses"))
+            .and(move |request: &wiremock::Request| {
+                let body = ResponsesRequest::from(request.clone()).body_json();
+                body["client_metadata"]["thread_id"] == json!(root_id)
+                    && body["input"]
+                        .as_array()
+                        .and_then(|input| input.last())
+                        .is_some_and(|item| item["type"] == "agent_message")
+            })
+            .respond_with(responses::sse_response(done()))
+            .with_priority(10)
+            .mount(&server)
+            .await;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                tool(
+                    "create-design",
+                    "create_channel",
+                    json!({"channel_name":"design"}),
+                ),
+                done(),
+            ],
+        )
         .await;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool(
-                "create-design",
-                "create_channel",
-                json!({"channel_name":"design"}),
-            ),
-            done(),
-        ],
-    )
-    .await;
-    root.submit_turn("Create the design channel and subscribe.")
-        .await?;
-    responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool(
-                "spawn-worker",
-                "spawn_agent",
-                json!({"task_name":"worker","message":"Say ready.","fork_turns":"none"}),
-            ),
-            done(),
-            done(),
-        ],
-    )
-    .await;
-    root.submit_turn("Spawn a worker and finish your turn.")
-        .await?;
-    let child_id = root
-        .thread_manager
-        .list_thread_ids()
-        .await
-        .into_iter()
-        .find(|id| *id != root.session_configured.thread_id)
-        .expect("child runtime");
-    let child = root.thread_manager.get_thread(child_id).await?;
-    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let child_post = responses::mount_sse_sequence_match(
-        &server,
-        move |request: &wiremock::Request| {
-            ResponsesRequest::from(request.clone()).body_json()["client_metadata"]["thread_id"]
-                == json!(child_id)
-        },
-        vec![
-            tool(
-                "worker-post",
-                "post",
-                json!({"channel_name":"design","text":"Worker's durable decision."}),
-            ),
-            done(),
-        ],
-    )
-    .await;
-    child
-        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "Post your decision.".into(),
-            text_elements: vec![],
-        }]))
-        .await?;
-    wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let requests = child_post.requests();
-    let output = requests[1]
-        .function_call_output_text("worker-post")
-        .expect("child post result");
-    let post: Value =
-        serde_json::from_str(&output).with_context(|| format!("child post result: {output}"))?;
-    assert_eq!(post["author"], "/root/worker");
-    let read = responses::mount_sse_sequence_match(
-        &server,
-        move |request: &wiremock::Request| {
-            let request = ResponsesRequest::from(request.clone());
-            request.body_json()["client_metadata"]["thread_id"] == json!(root_id)
-                && request.body_contains_text("Read the worker's decision.")
-        },
-        vec![
-            tool(
-                "root-read",
-                "search_posts",
-                json!({"channel_name":"design"}),
-            ),
-            done(),
-        ],
-    )
-    .await;
-    root.submit_turn("Read the worker's decision.").await?;
-    let output = read.requests()[1]
-        .function_call_output_text("root-read")
-        .expect("read result");
-    let result: Value =
-        serde_json::from_str(&output).with_context(|| format!("root read result: {output}"))?;
-    assert_eq!(result["results"][0]["message_id"], post["message_id"]);
-    child.shutdown_and_wait().await?;
-    if in_memory {
-        assert!(
-            !root
-                .config
-                .sqlite_config()
-                .home()
-                .join("agent_message_board_1.sqlite")
-                .exists()
-        );
-        return Ok(());
-    }
-    let resumed = test_codex()
-        .with_config(configure)
-        .restart(&server, &root)
-        .await?;
-    let read = responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool(
-                "resumed-read",
-                "read_post",
-                json!({"message_id":post["message_id"]}),
-            ),
-            done(),
-        ],
-    )
-    .await;
-    resumed.submit_turn("Read the saved decision.").await?;
-    let output = read.requests()[1]
-        .function_call_output_text("resumed-read")
-        .expect("resumed read result");
-    let result: Value =
-        serde_json::from_str(&output).with_context(|| format!("resumed read result: {output}"))?;
-    assert_eq!(result["text"], "Worker's durable decision.");
-    assert_eq!(result["author"], "/root/worker");
-    Ok(())
+        root.submit_turn("Create the design channel and subscribe.")
+            .await?;
+        responses::mount_sse_sequence(
+            &server,
+            vec![
+                tool(
+                    "spawn-worker",
+                    "spawn_agent",
+                    json!({"task_name":"worker","message":"Say ready.","fork_turns":"none"}),
+                ),
+                done(),
+                done(),
+            ],
+        )
+        .await;
+        root.submit_turn("Spawn a worker and finish your turn.")
+            .await?;
+        let child_id = root
+            .thread_manager
+            .list_thread_ids()
+            .await
+            .into_iter()
+            .find(|id| *id != root.session_configured.thread_id)
+            .expect("child runtime");
+        let child = root.thread_manager.get_thread(child_id).await?;
+        wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        let child_post = responses::mount_sse_sequence_match(
+            &server,
+            move |request: &wiremock::Request| {
+                ResponsesRequest::from(request.clone()).body_json()["client_metadata"]["thread_id"]
+                    == json!(child_id)
+            },
+            vec![
+                tool(
+                    "worker-post",
+                    "post",
+                    json!({"channel_name":"design","text":"Worker's durable decision."}),
+                ),
+                done(),
+            ],
+        )
+        .await;
+        child
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Post your decision.".into(),
+                text_elements: vec![],
+            }]))
+            .await?;
+        wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        let requests = child_post.requests();
+        let output = requests[1]
+            .function_call_output_text("worker-post")
+            .expect("child post result");
+        let post: Value = serde_json::from_str(&output)
+            .with_context(|| format!("child post result: {output}"))?;
+        assert_eq!(post["author"], "/root/worker");
+        let read = responses::mount_sse_sequence_match(
+            &server,
+            move |request: &wiremock::Request| {
+                let request = ResponsesRequest::from(request.clone());
+                request.body_json()["client_metadata"]["thread_id"] == json!(root_id)
+                    && request.body_contains_text("Read the worker's decision.")
+            },
+            vec![
+                tool(
+                    "root-read",
+                    "search_posts",
+                    json!({"channel_name":"design"}),
+                ),
+                done(),
+            ],
+        )
+        .await;
+        root.submit_turn("Read the worker's decision.").await?;
+        let output = read.requests()[1]
+            .function_call_output_text("root-read")
+            .expect("read result");
+        let result: Value =
+            serde_json::from_str(&output).with_context(|| format!("root read result: {output}"))?;
+        assert_eq!(result["results"][0]["message_id"], post["message_id"]);
+        child.shutdown_and_wait().await?;
+        if in_memory {
+            assert!(
+                !root
+                    .config
+                    .sqlite_config()
+                    .home()
+                    .join("agent_message_board_1.sqlite")
+                    .exists()
+            );
+            return Ok(());
+        }
+        let resumed = test_codex()
+            .with_config(configure)
+            .restart(&server, &root)
+            .await?;
+        let read = responses::mount_sse_sequence(
+            &server,
+            vec![
+                tool(
+                    "resumed-read",
+                    "read_post",
+                    json!({"message_id":post["message_id"]}),
+                ),
+                done(),
+            ],
+        )
+        .await;
+        resumed.submit_turn("Read the saved decision.").await?;
+        let output = read.requests()[1]
+            .function_call_output_text("resumed-read")
+            .expect("resumed read result");
+        let result: Value = serde_json::from_str(&output)
+            .with_context(|| format!("resumed read result: {output}"))?;
+        assert_eq!(result["text"], "Worker's durable decision.");
+        assert_eq!(result["author"], "/root/worker");
+        Ok(())
+    })
+    .await
 }
 
 #[test_case::test_case(false; "before_final")]
@@ -555,6 +562,7 @@ async fn board_unsubscribe_survives_post_and_resume_until_resubscribed(
     disable_direct_message: bool,
 ) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     let root = test_codex()
         .with_config(move |config| {
             configure(config);
@@ -866,53 +874,59 @@ async fn board_unsubscribe_survives_post_and_resume_until_resubscribed(
     resumed.codex.shutdown_and_wait().await?;
     streaming.shutdown().await;
     Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn board_clock_failure_does_not_fall_back_or_create_a_channel() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let mock = responses::mount_sse_sequence(
-        &server,
-        vec![
-            tool(
-                "failed-post",
-                "post",
-                json!({"new_channel_name":"design","text":"Not accepted."}),
-            ),
-            tool("channels-after-failure", "get_channels", json!({})),
-            done(),
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            configure(config);
-            config.include_environment_context = false;
-            config.current_time_reminder = Some(codex_core::config::CurrentTimeReminderConfig {
-                clock_source: codex_features::CurrentTimeSource::External,
-                ..Default::default()
-            });
-        })
-        .with_external_time_provider(std::sync::Arc::new(BoardClock::Unavailable))
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("Post the decision and list channels.")
-        .await?;
-    let requests = mock.requests();
-    assert!(
-        requests[1]
-            .function_call_output_text("failed-post")
-            .expect("clock error")
-            .contains("board clock unavailable")
-    );
-    let result: Value = serde_json::from_str(
-        &requests[2]
-            .function_call_output_text("channels-after-failure")
-            .expect("channels result"),
-    )?;
-    assert_eq!(
-        result,
-        json!({"results":[],"n_returned":0,"has_more":false,"next_cursor":null})
-    );
-    Ok(())
+    mock_server::run(&[&server], async {
+        let mock = responses::mount_sse_sequence(
+            &server,
+            vec![
+                tool(
+                    "failed-post",
+                    "post",
+                    json!({"new_channel_name":"design","text":"Not accepted."}),
+                ),
+                tool("channels-after-failure", "get_channels", json!({})),
+                done(),
+            ],
+        )
+        .await;
+        let test = test_codex()
+            .with_config(|config| {
+                configure(config);
+                config.include_environment_context = false;
+                config.current_time_reminder =
+                    Some(codex_core::config::CurrentTimeReminderConfig {
+                        clock_source: codex_features::CurrentTimeSource::External,
+                        ..Default::default()
+                    });
+            })
+            .with_external_time_provider(std::sync::Arc::new(BoardClock::Unavailable))
+            .build_with_auto_env(&server)
+            .await?;
+        test.submit_turn("Post the decision and list channels.")
+            .await?;
+        let requests = mock.requests();
+        assert!(
+            requests[1]
+                .function_call_output_text("failed-post")
+                .expect("clock error")
+                .contains("board clock unavailable")
+        );
+        let result: Value = serde_json::from_str(
+            &requests[2]
+                .function_call_output_text("channels-after-failure")
+                .expect("channels result"),
+        )?;
+        assert_eq!(
+            result,
+            json!({"results":[],"n_returned":0,"has_more":false,"next_cursor":null})
+        );
+        Ok(())
+    })
+    .await
 }

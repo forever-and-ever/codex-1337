@@ -1,3 +1,4 @@
+use core_test_support::mock_server;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -69,138 +70,142 @@ async fn git_attribution_follows_authenticated_workspace_policy() -> Result<()> 
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let settings_server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        [
-            "Unavailable",
-            "Recovered",
-            "Cached",
-            "After switch",
-            "After switching back",
-        ]
-        .into_iter()
-        .map(create_final_assistant_message_sse_response)
-        .collect::<Result<Vec<_>>>()?,
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/config/bundle"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        let settings_server = responses::start_mock_server().await;
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            [
+                "Unavailable",
+                "Recovered",
+                "Cached",
+                "After switch",
+                "After switching back",
+            ]
+            .into_iter()
+            .map(create_final_assistant_message_sse_response)
+            .collect::<Result<Vec<_>>>()?,
+        )
         .await;
-    let enabled_settings_requests = Arc::new(AtomicUsize::new(0));
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/settings/user"))
-        .and(header("chatgpt-account-id", "workspace-enabled"))
-        .respond_with({
-            let enabled_settings_requests = enabled_settings_requests.clone();
-            move |_request: &wiremock::Request| {
-                if enabled_settings_requests.fetch_add(1, Ordering::SeqCst) == 0 {
-                    ResponseTemplate::new(503)
-                } else {
-                    ResponseTemplate::new(200).set_body_json(json!({
-                        "commit_attribution_enabled": true,
-                    }))
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/config/bundle"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+        let enabled_settings_requests = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/settings/user"))
+            .and(header("chatgpt-account-id", "workspace-enabled"))
+            .respond_with({
+                let enabled_settings_requests = enabled_settings_requests.clone();
+                move |_request: &wiremock::Request| {
+                    if enabled_settings_requests.fetch_add(1, Ordering::SeqCst) == 0 {
+                        ResponseTemplate::new(503)
+                    } else {
+                        ResponseTemplate::new(200).set_body_json(json!({
+                            "commit_attribution_enabled": true,
+                        }))
+                    }
                 }
-            }
-        })
-        .expect(3)
-        .mount(&server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/settings/user"))
-        .and(header("chatgpt-account-id", "workspace-disabled"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "commit_attribution_enabled": false,
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
+            })
+            .expect(3)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/settings/user"))
+            .and(header("chatgpt-account-id", "workspace-disabled"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "commit_attribution_enabled": false,
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
 
-    let codex_home = TempDir::new()?;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        codex_home.path(),
-        &server.uri(),
-        &format!("{}/backend-api", server.uri()),
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("workspace-enabled")
-            .plan_type("enterprise"),
-        AuthCredentialsStoreMode::File,
-    )?;
+        let codex_home = TempDir::new()?;
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            codex_home.path(),
+            &server.uri(),
+            &format!("{}/backend-api", server.uri()),
+        )?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("workspace-enabled")
+                .plan_type("enterprise"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
-        .build()
-        .await?;
-    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
+            .build()
+            .await?;
+        timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
 
-    let request_id = app_server
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            config: Some(HashMap::from([(
-                "chatgpt_base_url".to_string(),
-                json!(format!("{}/backend-api", settings_server.uri())),
-            )])),
-            history_mode: Some(ThreadHistoryMode::Legacy),
-            ..Default::default()
-        })
-        .await?;
-    let ThreadStartResponse { thread, .. } = read_response(&mut app_server, request_id).await?;
-    run_turn(&mut app_server, &thread.id, "First turn").await?;
-    run_turn(&mut app_server, &thread.id, "Second turn").await?;
-    run_turn(&mut app_server, &thread.id, "Third turn").await?;
+        let request_id = app_server
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                config: Some(HashMap::from([(
+                    "chatgpt_base_url".to_string(),
+                    json!(format!("{}/backend-api", settings_server.uri())),
+                )])),
+                history_mode: Some(ThreadHistoryMode::Legacy),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } = read_response(&mut app_server, request_id).await?;
+        run_turn(&mut app_server, &thread.id, "First turn").await?;
+        run_turn(&mut app_server, &thread.id, "Second turn").await?;
+        run_turn(&mut app_server, &thread.id, "Third turn").await?;
 
-    let request_id = app_server
-        .send_chatgpt_auth_tokens_login_request(
-            "e30.e30.c2ln".to_string(),
-            "workspace-disabled".to_string(),
-            Some("enterprise".to_string()),
-        )
-        .await?;
-    let _: LoginAccountResponse = read_response(&mut app_server, request_id).await?;
-    run_turn(&mut app_server, &thread.id, "Turn after workspace switch").await?;
+        let request_id = app_server
+            .send_chatgpt_auth_tokens_login_request(
+                "e30.e30.c2ln".to_string(),
+                "workspace-disabled".to_string(),
+                Some("enterprise".to_string()),
+            )
+            .await?;
+        let _: LoginAccountResponse = read_response(&mut app_server, request_id).await?;
+        run_turn(&mut app_server, &thread.id, "Turn after workspace switch").await?;
 
-    let request_id = app_server
-        .send_chatgpt_auth_tokens_login_request(
-            "e30.e30.c2ln".to_string(),
-            "workspace-enabled".to_string(),
-            Some("enterprise".to_string()),
-        )
-        .await?;
-    let _: LoginAccountResponse = read_response(&mut app_server, request_id).await?;
-    run_turn(&mut app_server, &thread.id, "Turn after switching back").await?;
+        let request_id = app_server
+            .send_chatgpt_auth_tokens_login_request(
+                "e30.e30.c2ln".to_string(),
+                "workspace-enabled".to_string(),
+                Some("enterprise".to_string()),
+            )
+            .await?;
+        let _: LoginAccountResponse = read_response(&mut app_server, request_id).await?;
+        run_turn(&mut app_server, &thread.id, "Turn after switching back").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 5);
-    for (request, expected) in requests
-        .into_iter()
-        .zip([(0, 0), (1, 0), (1, 0), (1, 1), (2, 1)])
-    {
-        let developer_text = request.message_input_texts("developer").join("\n");
-        assert_eq!(
-            (
-                developer_text.matches(COMMIT_ATTRIBUTION).count(),
-                developer_text.matches(PR_ATTRIBUTION).count(),
-                developer_text.matches(ATTRIBUTION_DISABLED).count(),
-            ),
-            (expected.0, expected.0, expected.1)
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 5);
+        for (request, expected) in
+            requests
+                .into_iter()
+                .zip([(0, 0), (1, 0), (1, 0), (1, 1), (2, 1)])
+        {
+            let developer_text = request.message_input_texts("developer").join("\n");
+            assert_eq!(
+                (
+                    developer_text.matches(COMMIT_ATTRIBUTION).count(),
+                    developer_text.matches(PR_ATTRIBUTION).count(),
+                    developer_text.matches(ATTRIBUTION_DISABLED).count(),
+                ),
+                (expected.0, expected.0, expected.1)
+            );
+        }
+        server.verify().await;
+        assert!(
+            settings_server
+                .received_requests()
+                .await
+                .context("failed to fetch thread-override requests")?
+                .iter()
+                .all(|request| request.url.path() != "/backend-api/wham/settings/user"),
+            "attribution settings must use the process-level base URL"
         );
-    }
-    server.verify().await;
-    assert!(
-        settings_server
-            .received_requests()
-            .await
-            .context("failed to fetch thread-override requests")?
-            .iter()
-            .all(|request| request.url.path() != "/backend-api/wham/settings/user"),
-        "attribution settings must use the process-level base URL"
-    );
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[test_case(LegacyAttribution::CommitOnly; "commit_only")]
@@ -212,104 +217,108 @@ async fn cold_resume_replaces_legacy_attribution_without_duplication(
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let response_mock = responses::mount_sse_sequence(
-        &server,
-        ["Initial", "Resumed", "Resumed again"]
-            .into_iter()
-            .map(create_final_assistant_message_sse_response)
-            .collect::<Result<Vec<_>>>()?,
-    )
-    .await;
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/config/bundle"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
-        .mount(&server)
+    mock_server::run(&[&server], async {
+        let response_mock = responses::mount_sse_sequence(
+            &server,
+            ["Initial", "Resumed", "Resumed again"]
+                .into_iter()
+                .map(create_final_assistant_message_sse_response)
+                .collect::<Result<Vec<_>>>()?,
+        )
         .await;
-    let settings_requests = Arc::new(AtomicUsize::new(0));
-    Mock::given(method("GET"))
-        .and(path("/backend-api/wham/settings/user"))
-        .and(header("chatgpt-account-id", "workspace-resume"))
-        .respond_with({
-            let settings_requests = Arc::clone(&settings_requests);
-            move |_request: &wiremock::Request| {
-                ResponseTemplate::new(200).set_body_json(json!({
-                    "commit_attribution_enabled": settings_requests
-                        .fetch_add(1, Ordering::SeqCst)
-                        == 0,
-                }))
-            }
-        })
-        .expect(2)
-        .mount(&server)
-        .await;
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/config/bundle"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+        let settings_requests = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("GET"))
+            .and(path("/backend-api/wham/settings/user"))
+            .and(header("chatgpt-account-id", "workspace-resume"))
+            .respond_with({
+                let settings_requests = Arc::clone(&settings_requests);
+                move |_request: &wiremock::Request| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "commit_attribution_enabled": settings_requests
+                            .fetch_add(1, Ordering::SeqCst)
+                            == 0,
+                    }))
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
 
-    let codex_home = TempDir::new()?;
-    write_mock_responses_config_toml_with_chatgpt_base_url(
-        codex_home.path(),
-        &server.uri(),
-        &format!("{}/backend-api", server.uri()),
-    )?;
-    write_chatgpt_auth(
-        codex_home.path(),
-        ChatGptAuthFixture::new("chatgpt-token")
-            .account_id("workspace-resume")
-            .plan_type("enterprise"),
-        AuthCredentialsStoreMode::File,
-    )?;
+        let codex_home = TempDir::new()?;
+        write_mock_responses_config_toml_with_chatgpt_base_url(
+            codex_home.path(),
+            &server.uri(),
+            &format!("{}/backend-api", server.uri()),
+        )?;
+        write_chatgpt_auth(
+            codex_home.path(),
+            ChatGptAuthFixture::new("chatgpt-token")
+                .account_id("workspace-resume")
+                .plan_type("enterprise"),
+            AuthCredentialsStoreMode::File,
+        )?;
 
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
-        .without_auto_env()
-        .build()
-        .await?;
-    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
-    let request_id = app_server
-        .send_thread_start_request(ThreadStartParams::default())
-        .await?;
-    let ThreadStartResponse { thread, .. } = read_response(&mut app_server, request_id).await?;
-    run_turn(&mut app_server, &thread.id, "persist enabled attribution").await?;
-    let rollout_path = thread
-        .path
-        .context("initial thread should have a rollout path")?;
-    let status = timeout(DEFAULT_READ_TIMEOUT, app_server.shutdown_gracefully()).await??;
-    anyhow::ensure!(
-        status.success(),
-        "initial app-server did not exit successfully"
-    );
-    replace_attribution_fragment_with_legacy(&rollout_path, legacy_attribution)?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
+            .without_auto_env()
+            .build()
+            .await?;
+        timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+        let request_id = app_server
+            .send_thread_start_request(ThreadStartParams::default())
+            .await?;
+        let ThreadStartResponse { thread, .. } = read_response(&mut app_server, request_id).await?;
+        run_turn(&mut app_server, &thread.id, "persist enabled attribution").await?;
+        let rollout_path = thread
+            .path
+            .context("initial thread should have a rollout path")?;
+        let status = timeout(DEFAULT_READ_TIMEOUT, app_server.shutdown_gracefully()).await??;
+        anyhow::ensure!(
+            status.success(),
+            "initial app-server did not exit successfully"
+        );
+        replace_attribution_fragment_with_legacy(&rollout_path, legacy_attribution)?;
 
-    let mut app_server = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
-        .without_auto_env()
-        .build()
-        .await?;
-    timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
-    let request_id = app_server
-        .send_thread_resume_request(ThreadResumeParams {
-            thread_id: thread.id,
-            ..Default::default()
-        })
-        .await?;
-    let ThreadResumeResponse { thread, .. } = read_response(&mut app_server, request_id).await?;
-    run_turn(&mut app_server, &thread.id, "resume disabled attribution").await?;
-    run_turn(&mut app_server, &thread.id, "continue disabled attribution").await?;
+        let mut app_server = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .with_env_overrides(&[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)])
+            .without_auto_env()
+            .build()
+            .await?;
+        timeout(DEFAULT_READ_TIMEOUT, app_server.initialize()).await??;
+        let request_id = app_server
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id: thread.id,
+                ..Default::default()
+            })
+            .await?;
+        let ThreadResumeResponse { thread, .. } =
+            read_response(&mut app_server, request_id).await?;
+        run_turn(&mut app_server, &thread.id, "resume disabled attribution").await?;
+        run_turn(&mut app_server, &thread.id, "continue disabled attribution").await?;
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 3);
-    let initial_text = requests[0].message_input_texts("developer").join("\n");
-    assert_eq!(initial_text.matches(COMMIT_ATTRIBUTION).count(), 1);
-    assert_eq!(initial_text.matches(PR_ATTRIBUTION).count(), 1);
-    assert_eq!(initial_text.matches(ATTRIBUTION_DISABLED).count(), 0);
-    for request in &requests[1..] {
-        let developer_text = request.message_input_texts("developer").join("\n");
-        assert_eq!(developer_text.matches(COMMIT_ATTRIBUTION).count(), 1);
-        assert_eq!(developer_text.matches(PR_ATTRIBUTION).count(), 0);
-        assert_eq!(developer_text.matches(ATTRIBUTION_DISABLED).count(), 1);
-    }
-    server.verify().await;
-    Ok(())
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 3);
+        let initial_text = requests[0].message_input_texts("developer").join("\n");
+        assert_eq!(initial_text.matches(COMMIT_ATTRIBUTION).count(), 1);
+        assert_eq!(initial_text.matches(PR_ATTRIBUTION).count(), 1);
+        assert_eq!(initial_text.matches(ATTRIBUTION_DISABLED).count(), 0);
+        for request in &requests[1..] {
+            let developer_text = request.message_input_texts("developer").join("\n");
+            assert_eq!(developer_text.matches(COMMIT_ATTRIBUTION).count(), 1);
+            assert_eq!(developer_text.matches(PR_ATTRIBUTION).count(), 0);
+            assert_eq!(developer_text.matches(ATTRIBUTION_DISABLED).count(), 1);
+        }
+        server.verify().await;
+        Ok(())
+    })
+    .await
 }
 
 fn replace_attribution_fragment_with_legacy(

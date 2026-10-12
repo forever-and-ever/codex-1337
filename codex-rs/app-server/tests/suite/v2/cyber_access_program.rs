@@ -26,6 +26,7 @@ use codex_app_server_protocol::UserInput;
 use codex_login::AuthCredentialsStoreMode;
 use codex_login::AuthKeyringBackendKind;
 use codex_login::login_with_api_key;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -44,69 +45,74 @@ use wiremock::matchers::path;
 async fn thread_start_stages_daybreak_until_persistence() -> Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    responses::mount_sse_sequence(
-        &server,
-        (0..3)
-            .map(|index| responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))]))
-            .collect(),
-    )
-    .await;
-    let home = TempDir::new()?;
-    let mut app = start_chatgpt_app(home.path(), &server).await?;
-    let mut threads = Vec::new();
-    for daybreak_enabled in [Some(true), Some(false), None] {
-        let started = app
-            .start_thread(ThreadStartParams {
-                daybreak_enabled,
-                ..Default::default()
-            })
-            .await?;
-        assert_eq!(started.thread.daybreak_enabled, daybreak_enabled);
-        let notification: ThreadStartedNotification =
-            app.read_notification("thread/started").await?;
-        assert_eq!(notification.thread, started.thread);
-        let read: ThreadReadResponse = app
-            .request(|request_id| ClientRequest::ThreadRead {
-                request_id,
-                params: ThreadReadParams {
+    mock_server::run(&[&server], async {
+        responses::mount_sse_sequence(
+            &server,
+            (0..3)
+                .map(|index| {
+                    responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))])
+                })
+                .collect(),
+        )
+        .await;
+        let home = TempDir::new()?;
+        let mut app = start_chatgpt_app(home.path(), &server).await?;
+        let mut threads = Vec::new();
+        for daybreak_enabled in [Some(true), Some(false), None] {
+            let started = app
+                .start_thread(ThreadStartParams {
+                    daybreak_enabled,
+                    ..Default::default()
+                })
+                .await?;
+            assert_eq!(started.thread.daybreak_enabled, daybreak_enabled);
+            let notification: ThreadStartedNotification =
+                app.read_notification("thread/started").await?;
+            assert_eq!(notification.thread, started.thread);
+            let read: ThreadReadResponse = app
+                .request(|request_id| ClientRequest::ThreadRead {
+                    request_id,
+                    params: ThreadReadParams {
+                        thread_id: started.thread.id.clone(),
+                        include_turns: false,
+                    },
+                })
+                .await?;
+            assert_eq!(read.thread.daybreak_enabled, daybreak_enabled);
+            let completed = app
+                .start_turn_and_wait_for_completion(TurnStartParams {
                     thread_id: started.thread.id.clone(),
-                    include_turns: false,
-                },
-            })
-            .await?;
-        assert_eq!(read.thread.daybreak_enabled, daybreak_enabled);
-        let completed = app
-            .start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id: started.thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "start this task".to_owned(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            })
-            .await?;
-        assert_eq!(completed.turn.status, TurnStatus::Completed);
-        threads.push((started.thread.id, daybreak_enabled));
-    }
-    app.shutdown_gracefully().await?;
+                    input: vec![UserInput::Text {
+                        text: "start this task".to_owned(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            assert_eq!(completed.turn.status, TurnStatus::Completed);
+            threads.push((started.thread.id, daybreak_enabled));
+        }
+        app.shutdown_gracefully().await?;
 
-    let mut restarted = start_chatgpt_app(home.path(), &server).await?;
-    for (thread_id, daybreak_enabled) in threads {
-        let read: ThreadReadResponse = restarted
-            .request(|request_id| ClientRequest::ThreadRead {
-                request_id,
-                params: ThreadReadParams {
-                    thread_id: thread_id.clone(),
-                    include_turns: false,
-                },
-            })
-            .await?;
-        assert_eq!(
-            (read.thread.id, read.thread.daybreak_enabled),
-            (thread_id, daybreak_enabled)
-        );
-    }
-    Ok(())
+        let mut restarted = start_chatgpt_app(home.path(), &server).await?;
+        for (thread_id, daybreak_enabled) in threads {
+            let read: ThreadReadResponse = restarted
+                .request(|request_id| ClientRequest::ThreadRead {
+                    request_id,
+                    params: ThreadReadParams {
+                        thread_id: thread_id.clone(),
+                        include_turns: false,
+                    },
+                })
+                .await?;
+            assert_eq!(
+                (read.thread.id, read.thread.daybreak_enabled),
+                (thread_id, daybreak_enabled)
+            );
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -140,119 +146,36 @@ async fn thread_start_rejects_daybreak_for_ephemeral_threads() -> Result<()> {
 async fn turn_start_forwards_explicit_cyber_access_program() -> Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let programs = [
-        None,
-        Some(CyberAccessProgram::DaybreakBlue),
-        Some(CyberAccessProgram::DaybreakRed),
-        None,
-        Some(CyberAccessProgram::Standard),
-        None,
-    ];
-    let requests = responses::mount_sse_sequence(
-        &server,
-        programs
-            .iter()
-            .enumerate()
-            .map(|(index, _)| {
-                responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))])
-            })
-            .collect(),
-    )
-    .await;
-    let home = TempDir::new()?;
-    let mut app = start_chatgpt_app(home.path(), &server).await?;
-    let thread = app
-        .start_thread(ThreadStartParams {
-            daybreak_enabled: Some(true),
-            ..Default::default()
-        })
-        .await?
-        .thread;
-    for program in programs {
-        let completed = app
-            .start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id: thread.id.clone(),
-                cyber_access_program: program,
-                input: vec![UserInput::Text {
-                    text: "hello".to_owned(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            })
-            .await?;
-        assert_eq!(completed.turn.status, TurnStatus::Completed);
-    }
-    let requests = requests.requests();
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.body_json().get("access_programs").cloned())
-            .collect::<Vec<_>>(),
-        [
+    mock_server::run(&[&server], async {
+        let programs = [
             None,
-            Some(json!({"cyber": "daybreak_blue"})),
-            Some(json!({"cyber": "daybreak_red"})),
+            Some(CyberAccessProgram::DaybreakBlue),
+            Some(CyberAccessProgram::DaybreakRed),
             None,
-            Some(json!({"cyber": "standard"})),
+            Some(CyberAccessProgram::Standard),
             None,
-        ]
-    );
-    Ok(())
-}
-
-#[tokio::test]
-async fn api_key_cyber_access_program_requires_only_forwarding_feature() -> Result<()> {
-    core_test_support::skip_if_no_network!(Ok(()));
-    let server = responses::start_mock_server().await;
-    let expected_programs = [
-        None,
-        None,
-        None,
-        Some(json!({"cyber": "daybreak_blue"})),
-        Some(json!({"cyber": "daybreak_red"})),
-        Some(json!({"cyber": "standard"})),
-        None,
-        Some(json!({"cyber": "daybreak_blue"})),
-        Some(json!({"cyber": "daybreak_red"})),
-        Some(json!({"cyber": "standard"})),
-    ];
-    let requests = responses::mount_sse_sequence(
-        &server,
-        expected_programs
-            .iter()
-            .enumerate()
-            .map(|(index, _)| responses::sse_completed(&format!("resp-{index}")))
-            .collect(),
-    )
-    .await;
-    let home = TempDir::new()?;
-    let mut app = start_api_key_app(home.path(), &server).await?;
-    set_api_key_cyber_access_programs(&mut app, /*enabled*/ true).await?;
-    for (forwarding_enabled, discovery_enabled) in
-        [(false, false), (false, true), (true, false), (true, true)]
-    {
+        ];
+        let requests = responses::mount_sse_sequence(
+            &server,
+            programs
+                .iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))])
+                })
+                .collect(),
+        )
+        .await;
+        let home = TempDir::new()?;
+        let mut app = start_chatgpt_app(home.path(), &server).await?;
         let thread = app
             .start_thread(ThreadStartParams {
-                config: Some(HashMap::from([
-                    (
-                        "features.api_key_cyber_access_programs".to_owned(),
-                        json!(forwarding_enabled),
-                    ),
-                    (
-                        "features.api_key_model_discovery".to_owned(),
-                        json!(discovery_enabled),
-                    ),
-                ])),
+                daybreak_enabled: Some(true),
                 ..Default::default()
             })
             .await?
             .thread;
-        for program in [
-            None,
-            Some(CyberAccessProgram::DaybreakBlue),
-            Some(CyberAccessProgram::DaybreakRed),
-            Some(CyberAccessProgram::Standard),
-        ] {
+        for program in programs {
             let completed = app
                 .start_turn_and_wait_for_completion(TurnStartParams {
                     thread_id: thread.id.clone(),
@@ -264,44 +187,133 @@ async fn api_key_cyber_access_program_requires_only_forwarding_feature() -> Resu
                     ..Default::default()
                 })
                 .await?;
-            if program.is_some() && !forwarding_enabled {
-                assert_eq!(completed.turn.status, TurnStatus::Failed);
-                assert_eq!(
-                    completed.turn.error,
-                    Some(TurnError {
-                        message: "Cyber access programs are disabled for this API-key session."
-                            .to_owned(),
-                        codex_error_info: Some(CodexErrorInfo::Other),
-                        additional_details: None,
-                        misalignment: None,
+            assert_eq!(completed.turn.status, TurnStatus::Completed);
+        }
+        let requests = requests.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.body_json().get("access_programs").cloned())
+                .collect::<Vec<_>>(),
+            [
+                None,
+                Some(json!({"cyber": "daybreak_blue"})),
+                Some(json!({"cyber": "daybreak_red"})),
+                None,
+                Some(json!({"cyber": "standard"})),
+                None,
+            ]
+        );
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn api_key_cyber_access_program_requires_only_forwarding_feature() -> Result<()> {
+    core_test_support::skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
+        let expected_programs = [
+            None,
+            None,
+            None,
+            Some(json!({"cyber": "daybreak_blue"})),
+            Some(json!({"cyber": "daybreak_red"})),
+            Some(json!({"cyber": "standard"})),
+            None,
+            Some(json!({"cyber": "daybreak_blue"})),
+            Some(json!({"cyber": "daybreak_red"})),
+            Some(json!({"cyber": "standard"})),
+        ];
+        let requests = responses::mount_sse_sequence(
+            &server,
+            expected_programs
+                .iter()
+                .enumerate()
+                .map(|(index, _)| responses::sse_completed(&format!("resp-{index}")))
+                .collect(),
+        )
+        .await;
+        let home = TempDir::new()?;
+        let mut app = start_api_key_app(home.path(), &server).await?;
+        set_api_key_cyber_access_programs(&mut app, /*enabled*/ true).await?;
+        for (forwarding_enabled, discovery_enabled) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let thread = app
+                .start_thread(ThreadStartParams {
+                    config: Some(HashMap::from([
+                        (
+                            "features.api_key_cyber_access_programs".to_owned(),
+                            json!(forwarding_enabled),
+                        ),
+                        (
+                            "features.api_key_model_discovery".to_owned(),
+                            json!(discovery_enabled),
+                        ),
+                    ])),
+                    ..Default::default()
+                })
+                .await?
+                .thread;
+            for program in [
+                None,
+                Some(CyberAccessProgram::DaybreakBlue),
+                Some(CyberAccessProgram::DaybreakRed),
+                Some(CyberAccessProgram::Standard),
+            ] {
+                let completed = app
+                    .start_turn_and_wait_for_completion(TurnStartParams {
+                        thread_id: thread.id.clone(),
+                        cyber_access_program: program,
+                        input: vec![UserInput::Text {
+                            text: "hello".to_owned(),
+                            text_elements: Vec::new(),
+                        }],
+                        ..Default::default()
                     })
-                );
-            } else {
-                assert_eq!(completed.turn.status, TurnStatus::Completed);
+                    .await?;
+                if program.is_some() && !forwarding_enabled {
+                    assert_eq!(completed.turn.status, TurnStatus::Failed);
+                    assert_eq!(
+                        completed.turn.error,
+                        Some(TurnError {
+                            message: "Cyber access programs are disabled for this API-key session."
+                                .to_owned(),
+                            codex_error_info: Some(CodexErrorInfo::Other),
+                            additional_details: None,
+                            misalignment: None,
+                        })
+                    );
+                } else {
+                    assert_eq!(completed.turn.status, TurnStatus::Completed);
+                }
             }
         }
-    }
-    assert_eq!(
-        requests
-            .requests()
-            .iter()
-            .map(|request| (
-                request.header("authorization"),
-                request.body_json()["model"].clone(),
-                request.body_json().get("access_programs").cloned(),
-            ))
-            .collect::<Vec<_>>(),
-        expected_programs
-            .into_iter()
-            .map(|program| (
-                Some("Bearer test-key".to_owned()),
-                json!("gpt-6-sol"),
-                program
-            ))
-            .collect::<Vec<_>>()
-    );
-    app.shutdown_gracefully().await?;
-    Ok(())
+        assert_eq!(
+            requests
+                .requests()
+                .iter()
+                .map(|request| (
+                    request.header("authorization"),
+                    request.body_json()["model"].clone(),
+                    request.body_json().get("access_programs").cloned(),
+                ))
+                .collect::<Vec<_>>(),
+            expected_programs
+                .into_iter()
+                .map(|program| (
+                    Some("Bearer test-key".to_owned()),
+                    json!("gpt-6-sol"),
+                    program
+                ))
+                .collect::<Vec<_>>()
+        );
+        app.shutdown_gracefully().await?;
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]
@@ -375,176 +387,181 @@ async fn api_key_cyber_access_program_server_rejection_does_not_fall_back() -> R
 async fn daybreak_thread_metadata_persists_independently_across_restart_and_fork() -> Result<()> {
     core_test_support::skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
-    let requests = responses::mount_sse_sequence(
-        &server,
-        (0..4)
-            .map(|index| responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))]))
-            .collect(),
-    )
-    .await;
-    let home = TempDir::new()?;
-    let mut app = start_chatgpt_app(home.path(), &server).await?;
-    let first = app
-        .start_thread(ThreadStartParams {
-            daybreak_enabled: Some(false),
-            ..Default::default()
-        })
-        .await?;
-    let second = app
-        .start_thread(ThreadStartParams {
-            daybreak_enabled: Some(true),
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(
-        (
-            first.thread.daybreak_enabled,
-            second.thread.daybreak_enabled
-        ),
-        (Some(false), Some(true))
-    );
-
-    for (thread_id, enabled) in [(&first.thread.id, true), (&second.thread.id, false)] {
-        let updated: ThreadMetadataUpdateResponse = app
-            .request(|request_id| ClientRequest::ThreadMetadataUpdate {
-                request_id,
-                params: ThreadMetadataUpdateParams {
-                    thread_id: thread_id.clone(),
-                    project_id: None,
-                    git_info: None,
-                    daybreak_enabled: Some(enabled),
-                    comms: None,
-                },
-            })
-            .await?;
-        assert_eq!(
-            (updated.thread.id, updated.thread.daybreak_enabled),
-            (thread_id.clone(), Some(enabled))
-        );
-    }
-    // Leave the second thread empty to exercise metadata durability without a rollout.
-    let completed = app
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: first.thread.id.clone(),
-            input: vec![UserInput::Text {
-                text: "start this task".to_owned(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    assert_eq!(completed.turn.status, TurnStatus::Completed);
-    assert_eq!(requests.requests().len(), 1);
-    app.shutdown_gracefully().await?;
-
-    let mut restarted = start_chatgpt_app(home.path(), &server).await?;
-    for (thread_id, enabled) in [(&first.thread.id, true), (&second.thread.id, false)] {
-        let read: ThreadReadResponse = restarted
-            .request(|request_id| ClientRequest::ThreadRead {
-                request_id,
-                params: ThreadReadParams {
-                    thread_id: thread_id.clone(),
-                    include_turns: false,
-                },
-            })
-            .await?;
-        assert_eq!(
-            (read.thread.id, read.thread.daybreak_enabled),
-            (thread_id.clone(), Some(enabled))
-        );
-    }
-    let resumed: ThreadResumeResponse = restarted
-        .request(|request_id| ClientRequest::ThreadResume {
-            request_id,
-            params: ThreadResumeParams {
-                thread_id: first.thread.id.clone(),
-                ..Default::default()
-            },
-        })
-        .await?;
-    assert_eq!(resumed.thread.daybreak_enabled, Some(true));
-    let forked: ThreadForkResponse = restarted
-        .request(|request_id| ClientRequest::ThreadFork {
-            request_id,
-            params: ThreadForkParams {
-                thread_id: first.thread.id.clone(),
-                ..Default::default()
-            },
-        })
-        .await?;
-    assert_eq!(forked.thread.daybreak_enabled, Some(true));
-    let updated: ThreadMetadataUpdateResponse = restarted
-        .request(|request_id| ClientRequest::ThreadMetadataUpdate {
-            request_id,
-            params: ThreadMetadataUpdateParams {
-                thread_id: first.thread.id.clone(),
-                project_id: None,
-                git_info: None,
+    mock_server::run(&[&server], async {
+        let requests = responses::mount_sse_sequence(
+            &server,
+            (0..4)
+                .map(|index| {
+                    responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))])
+                })
+                .collect(),
+        )
+        .await;
+        let home = TempDir::new()?;
+        let mut app = start_chatgpt_app(home.path(), &server).await?;
+        let first = app
+            .start_thread(ThreadStartParams {
                 daybreak_enabled: Some(false),
-                comms: None,
-            },
-        })
-        .await?;
-    assert_eq!(
-        (updated.thread.id, updated.thread.daybreak_enabled),
-        (first.thread.id.clone(), Some(false))
-    );
-    assert_eq!(requests.requests().len(), 1);
-    restarted.shutdown_gracefully().await?;
-
-    let mut restarted = start_chatgpt_app(home.path(), &server).await?;
-    for (thread_id, program, enabled) in [
-        (&forked.thread.id, Some(CyberAccessProgram::Standard), true),
-        (&forked.thread.id, None, true),
-        (&first.thread.id, None, false),
-    ] {
-        let resumed: ThreadResumeResponse = restarted
-            .request(|request_id| ClientRequest::ThreadResume {
-                request_id,
-                params: ThreadResumeParams {
-                    thread_id: thread_id.clone(),
-                    ..Default::default()
-                },
+                ..Default::default()
             })
             .await?;
-        assert_eq!(resumed.thread.daybreak_enabled, Some(enabled));
-        let completed = restarted
+        let second = app
+            .start_thread(ThreadStartParams {
+                daybreak_enabled: Some(true),
+                ..Default::default()
+            })
+            .await?;
+        assert_eq!(
+            (
+                first.thread.daybreak_enabled,
+                second.thread.daybreak_enabled
+            ),
+            (Some(false), Some(true))
+        );
+
+        for (thread_id, enabled) in [(&first.thread.id, true), (&second.thread.id, false)] {
+            let updated: ThreadMetadataUpdateResponse = app
+                .request(|request_id| ClientRequest::ThreadMetadataUpdate {
+                    request_id,
+                    params: ThreadMetadataUpdateParams {
+                        thread_id: thread_id.clone(),
+                        project_id: None,
+                        git_info: None,
+                        daybreak_enabled: Some(enabled),
+                        comms: None,
+                    },
+                })
+                .await?;
+            assert_eq!(
+                (updated.thread.id, updated.thread.daybreak_enabled),
+                (thread_id.clone(), Some(enabled))
+            );
+        }
+        // Leave the second thread empty to exercise metadata durability without a rollout.
+        let completed = app
             .start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id: thread_id.clone(),
-                cyber_access_program: program,
+                thread_id: first.thread.id.clone(),
                 input: vec![UserInput::Text {
-                    text: "hello".to_owned(),
+                    text: "start this task".to_owned(),
                     text_elements: Vec::new(),
                 }],
                 ..Default::default()
             })
             .await?;
         assert_eq!(completed.turn.status, TurnStatus::Completed);
+        assert_eq!(requests.requests().len(), 1);
+        app.shutdown_gracefully().await?;
+
+        let mut restarted = start_chatgpt_app(home.path(), &server).await?;
+        for (thread_id, enabled) in [(&first.thread.id, true), (&second.thread.id, false)] {
+            let read: ThreadReadResponse = restarted
+                .request(|request_id| ClientRequest::ThreadRead {
+                    request_id,
+                    params: ThreadReadParams {
+                        thread_id: thread_id.clone(),
+                        include_turns: false,
+                    },
+                })
+                .await?;
+            assert_eq!(
+                (read.thread.id, read.thread.daybreak_enabled),
+                (thread_id.clone(), Some(enabled))
+            );
+        }
         let resumed: ThreadResumeResponse = restarted
             .request(|request_id| ClientRequest::ThreadResume {
                 request_id,
                 params: ThreadResumeParams {
-                    thread_id: thread_id.clone(),
+                    thread_id: first.thread.id.clone(),
                     ..Default::default()
                 },
             })
             .await?;
-        assert_eq!(resumed.thread.daybreak_enabled, Some(enabled));
-    }
-    assert_eq!(
-        requests
-            .requests()
-            .iter()
-            .map(|request| request.body_json()["access_programs"].clone())
-            .collect::<Vec<_>>(),
-        [
-            json!(null),
-            json!({"cyber": "standard"}),
-            json!(null),
-            json!(null),
-        ]
-    );
-    Ok(())
+        assert_eq!(resumed.thread.daybreak_enabled, Some(true));
+        let forked: ThreadForkResponse = restarted
+            .request(|request_id| ClientRequest::ThreadFork {
+                request_id,
+                params: ThreadForkParams {
+                    thread_id: first.thread.id.clone(),
+                    ..Default::default()
+                },
+            })
+            .await?;
+        assert_eq!(forked.thread.daybreak_enabled, Some(true));
+        let updated: ThreadMetadataUpdateResponse = restarted
+            .request(|request_id| ClientRequest::ThreadMetadataUpdate {
+                request_id,
+                params: ThreadMetadataUpdateParams {
+                    thread_id: first.thread.id.clone(),
+                    project_id: None,
+                    git_info: None,
+                    daybreak_enabled: Some(false),
+                    comms: None,
+                },
+            })
+            .await?;
+        assert_eq!(
+            (updated.thread.id, updated.thread.daybreak_enabled),
+            (first.thread.id.clone(), Some(false))
+        );
+        assert_eq!(requests.requests().len(), 1);
+        restarted.shutdown_gracefully().await?;
+
+        let mut restarted = start_chatgpt_app(home.path(), &server).await?;
+        for (thread_id, program, enabled) in [
+            (&forked.thread.id, Some(CyberAccessProgram::Standard), true),
+            (&forked.thread.id, None, true),
+            (&first.thread.id, None, false),
+        ] {
+            let resumed: ThreadResumeResponse = restarted
+                .request(|request_id| ClientRequest::ThreadResume {
+                    request_id,
+                    params: ThreadResumeParams {
+                        thread_id: thread_id.clone(),
+                        ..Default::default()
+                    },
+                })
+                .await?;
+            assert_eq!(resumed.thread.daybreak_enabled, Some(enabled));
+            let completed = restarted
+                .start_turn_and_wait_for_completion(TurnStartParams {
+                    thread_id: thread_id.clone(),
+                    cyber_access_program: program,
+                    input: vec![UserInput::Text {
+                        text: "hello".to_owned(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            assert_eq!(completed.turn.status, TurnStatus::Completed);
+            let resumed: ThreadResumeResponse = restarted
+                .request(|request_id| ClientRequest::ThreadResume {
+                    request_id,
+                    params: ThreadResumeParams {
+                        thread_id: thread_id.clone(),
+                        ..Default::default()
+                    },
+                })
+                .await?;
+            assert_eq!(resumed.thread.daybreak_enabled, Some(enabled));
+        }
+        assert_eq!(
+            requests
+                .requests()
+                .iter()
+                .map(|request| request.body_json()["access_programs"].clone())
+                .collect::<Vec<_>>(),
+            [
+                json!(null),
+                json!({"cyber": "standard"}),
+                json!(null),
+                json!(null),
+            ]
+        );
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test]

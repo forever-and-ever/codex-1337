@@ -36,6 +36,7 @@ use core_test_support::apps_test_server::SEARCH_CALENDAR_NAMESPACE;
 use core_test_support::apps_test_server::recorded_apps_tool_call_by_call_id;
 use core_test_support::apps_test_server::recorded_apps_tool_calls;
 use core_test_support::apps_test_server::search_capable_apps_builder;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::wait_for_event;
@@ -155,6 +156,7 @@ async fn actual_turn_elicitation_analytics(scenario: Scenario) -> Result<()> {
         Scenario::DefaultAuth | Scenario::ModernAuth | Scenario::AuthMetadataRemoved
     );
     let server = responses::start_mock_server().await;
+    mock_server::run(&[&server], async {
     AppsTestServer::mount_searchable(&server).await?;
     Mock::given(method("POST"))
         .and(path("/codex/analytics-events/events"))
@@ -513,6 +515,8 @@ approvals_reviewer = "user"
     assert!(!target_payload.contains("https://chatgpt.com/apps/"));
 
     Ok(())
+    })
+    .await
 }
 
 #[derive(Clone, Copy)]

@@ -1,12 +1,14 @@
 //! Snapshots settlement records delivered to the model after code-mode execution.
 
 use super::*;
+use core_test_support::mock_server;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn code_mode_settled_helpers_report_successes_and_failures() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let test = test_codex()
         .with_model("gpt-6-astra")
         .with_config(|config| {
@@ -61,4 +63,6 @@ await stream_settled(new Map([["failed", Promise.reject("unavailable")], ["compl
         )
     );
     Ok(())
+    })
+    .await
 }

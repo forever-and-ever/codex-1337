@@ -28,6 +28,7 @@ use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
@@ -661,6 +662,7 @@ async fn exec_command_consumes_pushed_remote_process_events(
     );
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let tool_call = match scenario {
         _ if deny_read => ev_function_call(
             CALL_ID,
@@ -1285,4 +1287,6 @@ async fn exec_command_consumes_pushed_remote_process_events(
     }
 
     Ok(())
+    })
+    .await
 }

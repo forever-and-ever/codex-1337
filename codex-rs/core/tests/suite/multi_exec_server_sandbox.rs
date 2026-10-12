@@ -1,5 +1,6 @@
 use codex_core::TurnInputRequest;
 use codex_protocol::protocol::TurnEnvironmentRequests;
+use core_test_support::mock_server;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -113,6 +114,7 @@ async fn two_exec_servers_isolate_workspace_write_roots() -> Result<()> {
     let second_workspace = TempDir::new()?;
 
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex();
     let test = builder.build(&server).await?;
     let environment_manager = test.thread_manager.environment_manager();
@@ -265,4 +267,6 @@ async fn two_exec_servers_isolate_workspace_write_roots() -> Result<()> {
     assert!(!second_cross_write.exists());
 
     Ok(())
+    })
+    .await
 }

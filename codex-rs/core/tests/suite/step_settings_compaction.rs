@@ -2,6 +2,7 @@
 
 use super::*;
 use codex_history::RolloutItem;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 use test_case::test_case;
@@ -18,6 +19,7 @@ enum CompactionMode {
 async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut bodies = vec![
         paused_response("pause", "pause-call"),
         sse(vec![
@@ -150,4 +152,6 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         });
     assert_eq!(checkpoint, Some(Some(ReasoningSummary::None)));
     Ok(())
+    })
+    .await
 }

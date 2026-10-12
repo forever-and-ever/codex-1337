@@ -11,6 +11,7 @@ use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
+use core_test_support::mock_server;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::mount_sse_sequence;
@@ -41,6 +42,7 @@ async fn unreviewable_stdin_is_rejected_before_approval_or_execution(
     skip_if_no_network!(Ok(()));
     skip_if_sandbox!(Ok(()));
     let server = start_mock_server().await;
+    mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(|config| {
         config
             .features
@@ -125,4 +127,6 @@ async fn unreviewable_stdin_is_rejected_before_approval_or_execution(
     })
     .await;
     Ok(())
+    })
+    .await
 }

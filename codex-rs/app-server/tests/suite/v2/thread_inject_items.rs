@@ -31,6 +31,7 @@ use codex_rollout::InitialHistory;
 use codex_rollout::RolloutItem;
 use codex_state::StateRuntime;
 use codex_utils_absolute_path::test_support::PathExt;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::strip_response_item_id;
 use core_test_support::responses::strip_response_item_ids_from_json;
@@ -511,134 +512,138 @@ async fn thread_inject_items_cannot_forge_configuration_update_before_or_after_r
 #[tokio::test]
 async fn thread_inject_items_adds_raw_response_items_after_a_turn() -> Result<()> {
     let server = responses::start_mock_server().await;
-    let first_body = responses::sse(vec![
-        responses::ev_response_created("resp-1"),
-        responses::ev_assistant_message("msg-1", "First done"),
-        responses::ev_completed("resp-1"),
-    ]);
-    let second_body = responses::sse(vec![
-        responses::ev_response_created("resp-2"),
-        responses::ev_assistant_message("msg-2", "Second done"),
-        responses::ev_completed("resp-2"),
-    ]);
-    let response_mock = responses::mount_sse_sequence(&server, vec![first_body, second_body]).await;
+    mock_server::run(&[&server], async {
+        let first_body = responses::sse(vec![
+            responses::ev_response_created("resp-1"),
+            responses::ev_assistant_message("msg-1", "First done"),
+            responses::ev_completed("resp-1"),
+        ]);
+        let second_body = responses::sse(vec![
+            responses::ev_response_created("resp-2"),
+            responses::ev_assistant_message("msg-2", "Second done"),
+            responses::ev_completed("resp-2"),
+        ]);
+        let response_mock =
+            responses::mount_sse_sequence(&server, vec![first_body, second_body]).await;
 
-    let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+        let codex_home = TempDir::new()?;
+        MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
 
-    let mut mcp = TestAppServer::builder()
-        .with_codex_home(codex_home.path())
-        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
-        .await?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+            .await?;
 
-    let thread_req = mcp
-        .send_thread_start_request_with_auto_env(ThreadStartParams {
-            model: Some("mock-model".to_string()),
-            ..Default::default()
-        })
-        .await?;
-    let ThreadStartResponse { thread, .. } =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(thread_req)).await??;
+        let thread_req = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(thread_req)).await??;
 
-    let first_turn_req = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "First turn".to_string(),
-                text_elements: Vec::new(),
+        let first_turn_req = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "First turn".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(first_turn_req)).await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
+
+        let injected_item = ResponseItem::Message {
+            id: None,
+            role: "developer".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "Injected after first turn".to_string(),
             }],
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(first_turn_req)).await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+            phase: None,
+            internal_chat_message_metadata_passthrough: None,
+        };
+        let injected_value = serde_json::to_value(&injected_item)?;
 
-    let injected_item = ResponseItem::Message {
-        id: None,
-        role: "developer".to_string(),
-        content: vec![ContentItem::InputText {
-            text: "Injected after first turn".to_string(),
-        }],
-        phase: None,
-        internal_chat_message_metadata_passthrough: None,
-    };
-    let injected_value = serde_json::to_value(&injected_item)?;
+        let inject_req = mcp
+            .send_thread_inject_items_request(ThreadInjectItemsParams {
+                thread_id: thread.id.clone(),
+                items: vec![injected_value.clone()],
+            })
+            .await?;
+        let _response: ThreadInjectItemsResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(inject_req)).await??;
 
-    let inject_req = mcp
-        .send_thread_inject_items_request(ThreadInjectItemsParams {
-            thread_id: thread.id.clone(),
-            items: vec![injected_value.clone()],
-        })
-        .await?;
-    let _response: ThreadInjectItemsResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(inject_req)).await??;
+        let rollout_path = thread.path.as_ref().context("thread path missing")?;
+        let InitialHistory::Resumed(resumed_history) =
+            RolloutRecorder::get_rollout_history(rollout_path).await?
+        else {
+            panic!("expected resumed rollout history");
+        };
+        let persisted_developer_item = resumed_history
+            .history
+            .iter()
+            .find_map(|item| match item {
+                RolloutItem::ResponseItem(envelope)
+                    if strip_response_item_id(responses::strip_metadata(envelope.item.clone()))
+                        == injected_item =>
+                {
+                    Some(envelope)
+                }
+                _ => None,
+            })
+            .context("injected developer item should be persisted")?;
+        assert_eq!(persisted_developer_item.metadata, None);
 
-    let rollout_path = thread.path.as_ref().context("thread path missing")?;
-    let InitialHistory::Resumed(resumed_history) =
-        RolloutRecorder::get_rollout_history(rollout_path).await?
-    else {
-        panic!("expected resumed rollout history");
-    };
-    let persisted_developer_item = resumed_history
-        .history
-        .iter()
-        .find_map(|item| match item {
-            RolloutItem::ResponseItem(envelope)
-                if strip_response_item_id(responses::strip_metadata(envelope.item.clone()))
-                    == injected_item =>
-            {
-                Some(envelope)
-            }
-            _ => None,
-        })
-        .context("injected developer item should be persisted")?;
-    assert_eq!(persisted_developer_item.metadata, None);
+        let second_turn_req = mcp
+            .send_turn_start_request(TurnStartParams {
+                thread_id: thread.id.clone(),
+                client_user_message_id: None,
+                input: vec![V2UserInput::Text {
+                    text: "Second turn".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
+        let _: TurnStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(second_turn_req)).await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_notification_message("turn/completed"),
+        )
+        .await??;
 
-    let second_turn_req = mcp
-        .send_turn_start_request(TurnStartParams {
-            thread_id: thread.id.clone(),
-            client_user_message_id: None,
-            input: vec![V2UserInput::Text {
-                text: "Second turn".to_string(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
-    let _: TurnStartResponse =
-        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(second_turn_req)).await??;
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+        let requests = response_mock.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            !requests[0]
+                .input()
+                .into_iter()
+                .map(strip_response_item_ids_from_json)
+                .any(|item| item == injected_value),
+            "injected item should not be sent before it is injected"
+        );
+        assert!(
+            requests[1]
+                .input()
+                .into_iter()
+                .map(strip_response_item_ids_from_json)
+                .any(|item| item == injected_value),
+            "injected item should be sent after being injected into existing history"
+        );
 
-    let requests = response_mock.requests();
-    assert_eq!(requests.len(), 2);
-    assert!(
-        !requests[0]
-            .input()
-            .into_iter()
-            .map(strip_response_item_ids_from_json)
-            .any(|item| item == injected_value),
-        "injected item should not be sent before it is injected"
-    );
-    assert!(
-        requests[1]
-            .input()
-            .into_iter()
-            .map(strip_response_item_ids_from_json)
-            .any(|item| item == injected_value),
-        "injected item should be sent after being injected into existing history"
-    );
-
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 fn response_item_text_position(items: &[Value], needle: &str) -> Option<usize> {

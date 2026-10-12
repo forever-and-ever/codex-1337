@@ -29,6 +29,7 @@ use codex_core::config::ConfigBuilder;
 use codex_exec_server::EnvironmentManager;
 use codex_feedback::CodexFeedback;
 use codex_protocol::protocol::SessionSource;
+use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
@@ -263,40 +264,43 @@ base_url = "{}/v1"
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn local_config_changes_do_not_block_existing_threads() -> Result<()> {
     let provider = MockServer::start().await;
-    let home = TempDir::new()?;
-    MockResponsesConfig::new(&provider.uri()).write(home.path())?;
-    let mut server = TestAppServer::builder()
-        .with_codex_home(home.path())
-        .build_initialized()
-        .await?;
-    let started = server.start_thread(ThreadStartParams::default()).await?;
-    let requests = responses::mount_sse_sequence(
-        &provider,
-        vec![
-            responses::sse(vec![responses::ev_completed("first")]),
-            responses::sse(vec![responses::ev_completed("second")]),
-        ],
-    )
-    .await;
-    for local_settings in ["model_provider = 'openai'", "invalid toml !!!"] {
-        std::fs::write(home.path().join("config.toml"), local_settings)?;
-        let id = server
-            .send_turn_start_request(TurnStartParams {
-                thread_id: started.thread.id.clone(),
-                input: vec![UserInput::Text {
-                    text: "Continue on the original provider.".into(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            })
+    mock_server::run(&[&provider], async {
+        let home = TempDir::new()?;
+        MockResponsesConfig::new(&provider.uri()).write(home.path())?;
+        let mut server = TestAppServer::builder()
+            .with_codex_home(home.path())
+            .build_initialized()
             .await?;
-        let _: TurnStartResponse = server.read_response(id).await?;
-        server
-            .read_stream_until_notification_message("turn/completed")
-            .await?;
-    }
-    assert_eq!(requests.requests().len(), 2);
-    Ok(())
+        let started = server.start_thread(ThreadStartParams::default()).await?;
+        let requests = responses::mount_sse_sequence(
+            &provider,
+            vec![
+                responses::sse(vec![responses::ev_completed("first")]),
+                responses::sse(vec![responses::ev_completed("second")]),
+            ],
+        )
+        .await;
+        for local_settings in ["model_provider = 'openai'", "invalid toml !!!"] {
+            std::fs::write(home.path().join("config.toml"), local_settings)?;
+            let id = server
+                .send_turn_start_request(TurnStartParams {
+                    thread_id: started.thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "Continue on the original provider.".into(),
+                        text_elements: Vec::new(),
+                    }],
+                    ..Default::default()
+                })
+                .await?;
+            let _: TurnStartResponse = server.read_response(id).await?;
+            server
+                .read_stream_until_notification_message("turn/completed")
+                .await?;
+        }
+        assert_eq!(requests.requests().len(), 2);
+        Ok(())
+    })
+    .await
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
