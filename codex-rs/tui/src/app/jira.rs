@@ -383,7 +383,7 @@ impl App {
                                                 tui,
                                                 server,
                                                 id,
-                                                ThreadFarmMode::FullHistory,
+                                                ThreadFarmMode::Automatic,
                                                 crate::chatwidget::FarmSubmission::work_order(
                                                     text, name,
                                                 ),

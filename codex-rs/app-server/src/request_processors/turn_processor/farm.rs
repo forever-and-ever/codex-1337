@@ -34,7 +34,7 @@ impl TurnRequestProcessor {
         let farm_request_id = params.request_id.clone();
         let receipt = thread.farm(FarmRequest {
             request_id: params.request_id,
-            mode: match params.mode { ThreadFarmMode::FullHistory => FarmMode::FullHistory, ThreadFarmMode::Fresh => FarmMode::Fresh },
+            mode: match params.mode { ThreadFarmMode::Automatic => FarmMode::Automatic, ThreadFarmMode::FullHistory => FarmMode::FullHistory, ThreadFarmMode::Fresh => FarmMode::Fresh },
             input: params.input.into_iter().map(codex_app_server_protocol::UserInput::into_core).collect(),
             task_name: params.task_name,
         }).await.map_err(|error| match error {

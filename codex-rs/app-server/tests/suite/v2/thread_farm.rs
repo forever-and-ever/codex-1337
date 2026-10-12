@@ -30,6 +30,8 @@ use codex_login::AuthCredentialsStoreMode;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::MultiAgentVersion;
 use core_test_support::responses;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
@@ -37,11 +39,10 @@ use sha2::Digest;
 use sha2::Sha256;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio::sync::oneshot;
 use tokio::time::timeout;
 use wiremock::Mock;
 use wiremock::ResponseTemplate;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::body_string_contains;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 
@@ -57,6 +58,7 @@ enum ParentState {
 #[test_case::test_case(ThreadFarmMode::Fresh, ParentState::Active; "fresh_active")]
 #[test_case::test_case(ThreadFarmMode::Fresh, ParentState::Idle; "fresh_idle")]
 #[test_case::test_case(ThreadFarmMode::FullHistory, ParentState::Pristine; "full_pristine")]
+#[test_case::test_case(ThreadFarmMode::Automatic, ParentState::Idle; "automatic_provider_default")]
 #[tokio::test]
 async fn farm_spawns_and_replays_without_steering_parent(
     mode: ThreadFarmMode,
@@ -64,7 +66,39 @@ async fn farm_spawns_and_replays_without_steering_parent(
 ) -> Result<()> {
     const BACKGROUND: &str = "Unique parent background: the staging fleet is violet.";
     const TASK: &str = "Inspect only the delegated staging task.";
-    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let response = responses::sse(vec![
+        responses::ev_response_created("resp-1"),
+        responses::ev_assistant_message("msg-1", "Done"),
+        responses::ev_completed("resp-1"),
+    ]);
+    let (_parent_gate, parent_gate_rx) = oneshot::channel();
+    let (child_gate, child_gate_rx) = oneshot::channel();
+    let mut streams = Vec::new();
+    if !matches!(parent_state, ParentState::Pristine) {
+        streams.push(vec![StreamingSseChunk {
+            gate: None,
+            body: response.clone(),
+        }]);
+    }
+    if matches!(parent_state, ParentState::Active) {
+        streams.push(vec![StreamingSseChunk {
+            gate: Some(parent_gate_rx),
+            body: response.clone(),
+        }]);
+    }
+    streams.push(vec![StreamingSseChunk {
+        gate: Some(child_gate_rx),
+        body: response.clone(),
+    }]);
+    // Ordinary terminal mail can wake the parent; subsequent explicit work and
+    // the named-child replay case share the same finite mock response tail.
+    streams.extend((0..8).map(|_| {
+        vec![StreamingSseChunk {
+            gate: None,
+            body: response.clone(),
+        }]
+    }));
+    let (server, _) = start_streaming_sse_server(streams).await;
     let home = TempDir::new()?;
     // A pristine scoped parent initializes its account binding on first materialization.
     write_chatgpt_auth(
@@ -107,6 +141,18 @@ async fn farm_spawns_and_replays_without_steering_parent(
         std::fs::read_to_string(&config_path)?.parse()?;
     config_document["model_catalog_json"] =
         toml_edit::value(catalog_path.to_string_lossy().into_owned());
+    if mode == ThreadFarmMode::FullHistory && matches!(parent_state, ParentState::Idle) {
+        config_document["wrangler"]["farm"]["reasoning_effort"] = toml_edit::value("low");
+        config_document["wrangler"]["farm"]["providers"]["mock_provider"]["reasoning_effort"] =
+            toml_edit::value("high");
+    }
+    if mode == ThreadFarmMode::Automatic {
+        // The provider's model override wins while its absent effort inherits the
+        // global executor effort, not the default role's low effort.
+        config_document["wrangler"]["farm"]["model"] = toml_edit::value("unavailable-global-model");
+        config_document["wrangler"]["farm"]["providers"]["mock_provider"]["model"] =
+            toml_edit::value("farm-model");
+    }
     std::fs::write(config_path, config_document.to_string())?;
     let mut app = TestAppServer::builder()
         .with_codex_home(home.path())
@@ -126,23 +172,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         .await?;
     }
     let active_turn = if matches!(parent_state, ParentState::Active) {
-        // A slow parent inference must not become a spawn lock. The child uses its own model.
-        Mock::given(method("POST"))
-            .and(path("/v1/responses"))
-            .and(body_partial_json(json!({"model": "mock-model"})))
-            .and(body_string_contains("Parent pending work"))
-            .respond_with(
-                ResponseTemplate::new(/*s*/ 200)
-                    .set_delay(Duration::from_secs(/*secs*/ 30))
-                    .insert_header("content-type", "text/event-stream")
-                    .set_body_string(responses::sse(vec![responses::ev_completed(
-                        "parent-pending",
-                    )])),
-            )
-            .with_priority(1)
-            .up_to_n_times(1)
-            .mount(&server)
-            .await;
+        // A gated parent inference must not become a spawn lock.
         let started: TurnStartResponse = app
             .request(|request_id| ClientRequest::TurnStart {
                 request_id,
@@ -160,6 +190,16 @@ async fn farm_spawns_and_replays_without_steering_parent(
     } else {
         None
     };
+    let initial_parent_requests = match parent_state {
+        ParentState::Active => 2,
+        ParentState::Idle => 1,
+        ParentState::Pristine => 0,
+    };
+    timeout(
+        Duration::from_secs(10),
+        server.wait_for_request_count(initial_parent_requests),
+    )
+    .await?;
     let params = ThreadFarmParams {
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -190,6 +230,37 @@ async fn farm_spawns_and_replays_without_steering_parent(
     if params.task_name.is_some() {
         assert_eq!(receipt.agent_path, "/root/farm_impl_staging");
     }
+    timeout(
+        Duration::from_secs(10),
+        server.wait_for_request_count(initial_parent_requests + 1),
+    )
+    .await?;
+    let parent_before_completion: ThreadReadResponse = app
+        .request(|request_id| ClientRequest::ThreadRead {
+            request_id,
+            params: ThreadReadParams {
+                thread_id: parent.id.clone(),
+                include_turns: false,
+            },
+        })
+        .await?;
+    match parent_state {
+        ParentState::Active => assert!(matches!(
+            parent_before_completion.thread.status,
+            ThreadStatus::Active { .. }
+        )),
+        ParentState::Idle | ParentState::Pristine => {
+            assert_eq!(parent_before_completion.thread.status, ThreadStatus::Idle)
+        }
+    }
+    assert_eq!(
+        server.requests().await.len(),
+        initial_parent_requests + 1,
+        "farm submission itself cannot start a parent inference"
+    );
+    child_gate
+        .send(())
+        .expect("release child completion after independence check");
     let child: ThreadReadResponse = timeout(Duration::from_secs(/*secs*/ 10), async {
         loop {
             let read: ThreadReadResponse = app
@@ -209,32 +280,10 @@ async fn farm_spawns_and_replays_without_steering_parent(
     })
     .await??;
     assert_eq!(child.thread.parent_thread_id, Some(parent.id.clone()));
-    let parent_read: ThreadReadResponse = app
-        .request(|request_id| ClientRequest::ThreadRead {
-            request_id,
-            params: ThreadReadParams {
-                thread_id: parent.id.clone(),
-                include_turns: false,
-            },
-        })
-        .await?;
-    match parent_state {
-        ParentState::Active => assert!(matches!(
-            parent_read.thread.status,
-            ThreadStatus::Active { .. }
-        )),
-        ParentState::Idle | ParentState::Pristine => {
-            assert_eq!(parent_read.thread.status, ThreadStatus::Idle)
-        }
-    }
-    let requests = server
-        .received_requests()
-        .await
-        .expect("captured model requests");
+    let requests = server.requests().await;
     let bodies = requests
         .iter()
-        .filter(|request| request.url.path() == "/v1/responses")
-        .map(wiremock::Request::body_json::<Value>)
+        .map(|body| serde_json::from_slice::<Value>(body))
         .collect::<std::result::Result<Vec<_>, _>>()?;
     let children = bodies
         .iter()
@@ -256,7 +305,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
     );
     assert_eq!(
         input.contains(BACKGROUND),
-        mode == ThreadFarmMode::FullHistory && !matches!(parent_state, ParentState::Pristine)
+        mode != ThreadFarmMode::Fresh && !matches!(parent_state, ParentState::Pristine)
     );
     assert_eq!(
         input.matches(TASK).count(),
@@ -267,20 +316,20 @@ async fn farm_spawns_and_replays_without_steering_parent(
     if mode == ThreadFarmMode::Fresh {
         assert!(input.contains("Preserve the default role restriction."));
     }
-    assert_eq!(
-        bodies
-            .iter()
-            .filter(|body| body["model"] == "mock-model")
-            .count(),
-        if matches!(parent_state, ParentState::Active) {
-            2
-        } else if matches!(parent_state, ParentState::Idle) {
-            1
-        } else {
-            0
-        },
-        "child completion does not wake the parent"
-    );
+    // Family mailbox delivery wakes idle recipients even for terminal result
+    // messages carrying trigger_turn=false. Only genuine child mail may cause
+    // extra parent inference; the gated assertion above isolates the submission.
+    for body in bodies
+        .iter()
+        .filter(|body| body["model"] == "mock-model")
+        .skip(initial_parent_requests)
+    {
+        let input = body["input"].to_string();
+        assert!(
+            input.contains("FINAL_ANSWER") && input.contains(&receipt.agent_path),
+            "only child terminal mail may wake the parent: {input}"
+        );
+    }
     if let Some(turn_id) = active_turn {
         let _: TurnInterruptResponse = app
             .request(|request_id| ClientRequest::TurnInterrupt {
@@ -386,11 +435,14 @@ async fn farm_spawns_and_replays_without_steering_parent(
         )
     );
     app.shutdown_gracefully().await?;
+    server.shutdown().await;
     Ok(())
 }
 
+#[test_case::test_case(ThreadFarmMode::FullHistory; "explicit_history_rejects")]
+#[test_case::test_case(ThreadFarmMode::Automatic; "automatic_global_fallback_is_fresh")]
 #[tokio::test]
-async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
+async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode) -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).enable_feature(Feature::MultiAgentV2)
@@ -416,32 +468,91 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
         .build_initialized()
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
-    let params = ThreadFarmParams {
+    const BACKGROUND: &str = "Private inherited parent context must not cross providers.";
+    app.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: parent.id.clone(),
+        input: vec![UserInput::Text {
+            text: BACKGROUND.to_owned(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    })
+    .await?;
+    let mut params = ThreadFarmParams {
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
-        mode: ThreadFarmMode::FullHistory,
+        mode,
         task_name: None,
         input: vec![UserInput::Text {
             text: "Inspect staging".to_owned(),
             text_elements: Vec::new(),
         }],
     };
-    let id = app
-        .send_request("thread/farm", Some(serde_json::to_value(&params)?))
-        .await?;
-    let error = app
-        .read_stream_until_error_message(RequestId::Integer(id))
-        .await?;
-    assert!(
-        error
-            .error
-            .message
-            .contains("retain the parent model provider")
-    );
-    assert_eq!(
-        error.error.data,
-        Some(json!({"farmOutcome": "rejected", "requestId": params.request_id}))
-    );
+    if mode == ThreadFarmMode::FullHistory {
+        let id = app
+            .send_request("thread/farm", Some(serde_json::to_value(&params)?))
+            .await?;
+        let error = app
+            .read_stream_until_error_message(RequestId::Integer(id))
+            .await?;
+        assert!(
+            error
+                .error
+                .message
+                .contains("retain the parent model provider")
+        );
+        assert_eq!(
+            error.error.data,
+            Some(json!({"farmOutcome": "rejected", "requestId": params.request_id}))
+        );
+    } else {
+        // A provider absent from the farming overrides still routes the global
+        // executor safely, without inheriting provider-bound parent history.
+        let receipt: ThreadFarmResponse = app
+            .request(|request_id| ClientRequest::ThreadFarm {
+                request_id,
+                params: params.clone(),
+            })
+            .await?;
+        let replay: ThreadFarmResponse = app
+            .request(|request_id| ClientRequest::ThreadFarm {
+                request_id,
+                params: params.clone(),
+            })
+            .await?;
+        assert_eq!(replay, receipt);
+        timeout(Duration::from_secs(10), async {
+            loop {
+                let child: ThreadReadResponse = app
+                    .request(|request_id| ClientRequest::ThreadRead {
+                        request_id,
+                        params: ThreadReadParams {
+                            thread_id: receipt.child_thread_id.clone(),
+                            include_turns: false,
+                        },
+                    })
+                    .await?;
+                if child.thread.status == ThreadStatus::Idle {
+                    break Ok::<_, anyhow::Error>(());
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await??;
+        let requests = server.received_requests().await.expect("requests");
+        let children = requests
+            .iter()
+            .filter(|request| request.url.path() == "/v1/responses")
+            .map(wiremock::Request::body_json::<Value>)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let children = children
+            .iter()
+            .filter(|body| body["model"] == "farm-model")
+            .collect::<Vec<_>>();
+        assert_eq!(children.len(), 1, "automatic replay cannot spawn twice");
+        assert!(!children[0]["input"].to_string().contains(BACKGROUND));
+        params.request_id = uuid::Uuid::new_v4().to_string();
+    }
     let db =
         codex_state::StateRuntime::init(config.sqlite.clone(), config.model_provider_id.clone())
             .await?;
@@ -456,7 +567,13 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
             .await
             .expect("requests")
             .iter()
-            .all(|request| request.url.path() != "/v1/responses")
+            .filter(|request| request.url.path() == "/v1/responses")
+            .filter(
+                |request| request.body_json::<Value>().expect("response request")["model"]
+                    == "farm-model"
+            )
+            .count()
+            == usize::from(mode == ThreadFarmMode::Automatic)
     );
     // Simulate interruption immediately after durable claim. Reconciliation is not
     // permission to start a fresh child, even if current executor validation differs.
@@ -469,7 +586,11 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
     let payload_sha256 = format!(
         "{:x}",
         Sha256::digest(serde_json::to_vec(&(
-            codex_core::FarmMode::FullHistory,
+            match mode {
+                ThreadFarmMode::FullHistory => codex_core::FarmMode::FullHistory,
+                ThreadFarmMode::Automatic => codex_core::FarmMode::Automatic,
+                ThreadFarmMode::Fresh => unreachable!("test covers automatic and explicit history"),
+            },
             core_input
         ))?)
     );
@@ -480,6 +601,12 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
     )
     .await?;
     db.close().await;
+    // Replay must use the original requested mode before looking at today's
+    // routing defaults; an uncertain claim is never permission to resend.
+    let config_path = home.path().join("config.toml");
+    let mut changed: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
+    changed["wrangler"]["farm"]["model"] = toml_edit::value("unavailable-after-claim");
+    std::fs::write(config_path, changed.to_string())?;
     app.shutdown_gracefully().await?;
     let mut restarted = TestAppServer::builder()
         .with_codex_home(home.path())
@@ -513,7 +640,13 @@ async fn farm_provider_lock_rejects_before_claiming_request() -> Result<()> {
             .await
             .expect("requests")
             .iter()
-            .all(|request| request.url.path() != "/v1/responses")
+            .filter(|request| request.url.path() == "/v1/responses")
+            .filter(
+                |request| request.body_json::<Value>().expect("response request")["model"]
+                    == "farm-model"
+            )
+            .count()
+            == usize::from(mode == ThreadFarmMode::Automatic)
     );
     restarted.shutdown_gracefully().await?;
     Ok(())

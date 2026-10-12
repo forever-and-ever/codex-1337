@@ -5690,6 +5690,7 @@ class ThreadExtra(BaseModel):
 
 
 class ThreadFarmMode(Enum):
+    automatic = "automatic"
     full_history = "fullHistory"
     fresh = "fresh"
 
