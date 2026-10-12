@@ -18,6 +18,7 @@ use tokio::sync::watch;
 use super::context::FunctionToolOutput;
 use super::context::ToolInvocation;
 use super::registry::CoreToolRuntime;
+use super::registry::ToolRegistry;
 use super::router::ToolCall;
 
 type Verdict = Result<(), String>;
@@ -245,6 +246,15 @@ impl Prerequisite {
 
 pub(crate) fn is_fence(name: &ToolName) -> bool {
     name.is_default_namespace() && name.name == "fence"
+}
+
+pub(super) fn reject_external(registry: &mut ToolRegistry, name: &ToolName) -> bool {
+    if !is_fence(name) {
+        return false;
+    }
+    tracing::warn!(tool_name = %name, "skipping external tool with reserved control identity");
+    registry.record_collision(name.clone());
+    true
 }
 
 pub(crate) fn is_coordinator(name: &ToolName) -> bool {

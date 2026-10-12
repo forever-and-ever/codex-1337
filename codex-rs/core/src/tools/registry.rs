@@ -393,6 +393,9 @@ impl ToolRegistry {
         if !self.tool_policy.allows(&tool_name) {
             return false;
         }
+        if super::fence::reject_external(self, &tool_name) {
+            return false;
+        }
         if tool_name.is_default_namespace()
             && matches!(tool_name.name.as_str(), "exec_command" | "shell_command")
         {

@@ -309,11 +309,10 @@ fn registry_preserves_external_winners_and_trusted_synthetic_order() {
 }
 
 #[test]
-fn reserved_command_tools_reject_external_runtimes_without_a_builtin() {
+fn reserved_tools_reject_external_runtimes_without_a_builtin() {
     let handler = |tool_name| Arc::new(TestHandler { tool_name }) as Arc<dyn CoreToolRuntime>;
-    let mut registry = ToolRegistry::default();
-
-    for reserved_name in ["exec_command", "shell_command"] {
+    for reserved_name in ["exec_command", "shell_command", "fence"] {
+        let mut registry = ToolRegistry::default();
         let tool_name = codex_tools::ToolName::plain(reserved_name);
         let namespaced_tool_name = codex_tools::ToolName::namespaced("client", reserved_name);
 
@@ -328,8 +327,19 @@ fn reserved_command_tools_reject_external_runtimes_without_a_builtin() {
                 reserved_name,
             )))
         );
+        assert!(
+            !registry.register_external(handler(codex_tools::ToolName::namespaced(
+                "",
+                reserved_name,
+            )))
+        );
         assert!(registry.tool(&tool_name).is_none());
-        assert_eq!(registry.first_collision(), None);
+        let canonical_name = tool_name.with_default_namespace();
+        // Fence admission is name-based, so its identity stays reserved without a handler.
+        assert_eq!(
+            registry.first_collision(),
+            (reserved_name == "fence").then_some(&canonical_name)
+        );
 
         let namespaced_handler = handler(namespaced_tool_name.clone());
         assert!(registry.register_external(Arc::clone(&namespaced_handler)));
@@ -342,19 +352,21 @@ fn reserved_command_tools_reject_external_runtimes_without_a_builtin() {
 }
 
 #[test]
-fn registry_records_reserved_exec_command_when_a_matching_tool_exists() {
-    let tool_name = codex_tools::ToolName::plain("exec_command");
-    let trusted = Arc::new(TestHandler {
-        tool_name: tool_name.clone(),
-    }) as Arc<dyn CoreToolRuntime>;
-    let external = Arc::new(TestHandler {
-        tool_name: tool_name.clone(),
-    });
-    let mut registry = ToolRegistry::from_tools([trusted]);
+fn registry_records_reserved_tools_when_a_matching_tool_exists() {
+    for reserved_name in ["exec_command", "shell_command", "fence"] {
+        let tool_name = codex_tools::ToolName::plain(reserved_name);
+        let trusted = Arc::new(TestHandler {
+            tool_name: tool_name.clone(),
+        }) as Arc<dyn CoreToolRuntime>;
+        let external = Arc::new(TestHandler {
+            tool_name: tool_name.clone(),
+        });
+        let mut registry = ToolRegistry::from_tools([trusted]);
 
-    assert!(!registry.register_external(external));
-    let canonical_tool_name = tool_name.with_default_namespace();
-    assert_eq!(registry.first_collision(), Some(&canonical_tool_name));
+        assert!(!registry.register_external(external));
+        let canonical_tool_name = tool_name.with_default_namespace();
+        assert_eq!(registry.first_collision(), Some(&canonical_tool_name));
+    }
 }
 
 #[test]
