@@ -156,11 +156,13 @@ impl ChatWidget {
                             &notification.item_id,
                         ))
                 {
+                    self.transcript.streaming_agent_item = Some(notification.item_id);
                     self.on_agent_message_delta(notification.delta);
                 }
             }
             ServerNotification::PlanDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
+                self.transcript.streaming_plan_item = Some(notification.item_id);
                 self.on_plan_delta(notification.delta);
             }
             ServerNotification::ReasoningSummaryTextDelta(notification) => {

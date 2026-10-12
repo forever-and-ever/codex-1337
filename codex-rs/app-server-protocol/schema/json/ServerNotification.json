@@ -6716,6 +6716,26 @@
           "properties": {
             "method": {
               "enum": [
+                "item/streamDiscarded"
+              ],
+              "title": "Item/streamDiscardedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/StreamItemsDiscardedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Item/streamDiscardedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "item/started"
               ],
               "title": "Item/startedNotificationMethod",
@@ -8012,6 +8032,28 @@
         "remainingPercent",
         "resetsAt",
         "used"
+      ],
+      "type": "object"
+    },
+    "StreamItemsDiscardedNotification": {
+      "properties": {
+        "itemIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "itemIds",
+        "threadId",
+        "turnId"
       ],
       "type": "object"
     },
@@ -12242,6 +12284,26 @@
         "params"
       ],
       "title": "Turn/plan/updatedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "item/streamDiscarded"
+          ],
+          "title": "Item/streamDiscardedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/StreamItemsDiscardedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Item/streamDiscardedNotification",
       "type": "object"
     },
     {

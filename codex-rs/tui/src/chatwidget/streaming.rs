@@ -139,11 +139,10 @@ impl ChatWidget {
                 self.note_stream_consolidation_queued();
                 self.app_event_tx.send(AppEvent::ConsolidateAgentMessage {
                     source,
-                    item_id: controller.item_id.clone().or_else(|| {
-                        completed_message
-                            .and(self.transcript.last_completed_agent_message.as_ref())
-                            .map(|(_, id)| id.clone())
-                    }),
+                    item_id: completed_message
+                        .and(self.transcript.last_completed_agent_message.as_ref())
+                        .map(|(_, id)| id.clone())
+                        .or_else(|| controller.item_id.clone()),
                     copy_source,
                     cwd: self.config.cwd.to_path_buf(),
                     inline_visualization_context,
@@ -403,6 +402,7 @@ impl ChatWidget {
         turn_id: &str,
         from_replay: bool,
     ) {
+        self.transcript.streaming_agent_item = Some(item.id.clone());
         if !from_replay && let Some(questions) = &item.questions {
             self.add_async_questions(&item.id, questions);
         }
@@ -600,6 +600,9 @@ impl ChatWidget {
             controller.timestamp = timestamp;
             controller.item_id = self.transcript.streaming_agent_item.clone();
             self.stream_controller = Some(controller);
+        }
+        if let Some(controller) = self.stream_controller.as_mut() {
+            controller.item_id = self.transcript.streaming_agent_item.clone();
         }
         let changed = self
             .stream_controller

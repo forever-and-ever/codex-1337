@@ -39,6 +39,15 @@ impl ReasoningReplay {
 
     pub(super) fn before_event(&mut self, event: &ThreadBufferedEvent, chat: &mut ChatWidget) {
         if self.started.as_ref().is_some_and(|started| {
+            matches!(event, ThreadBufferedEvent::Notification(notification)
+                if matches!(notification.as_ref(), ServerNotification::StreamItemsDiscarded(discarded)
+                    if discarded.turn_id == started.turn_id
+                        && discarded.item_ids.iter().any(|id| id == started.item.id())))
+        }) {
+            self.started = None;
+            self.parts = None;
+        }
+        if self.started.as_ref().is_some_and(|started| {
             matches!(event, ThreadBufferedEvent::Notification(notification) if match notification.as_ref() {
                 ServerNotification::ItemStarted(item) => {
                     item.turn_id == started.turn_id && item.item.id() == started.item.id()

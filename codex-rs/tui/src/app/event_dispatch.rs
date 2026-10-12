@@ -64,6 +64,7 @@ impl App {
                     | AppEvent::SelectTranscriptCopy { .. }
                     | AppEvent::TranscriptCopyClosed
                     | AppEvent::InsertHistoryCell(_)
+                    | AppEvent::DiscardStreamItems(_)
                     | AppEvent::CodeModeTranscript { .. }
                     | AppEvent::CodeModeProjection { .. }
                     | AppEvent::RecordToolOutputTokens { .. }

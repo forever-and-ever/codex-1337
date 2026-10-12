@@ -437,6 +437,7 @@ impl AgentMessageCell {
             lines: plain_hyperlink_lines(lines),
             is_first_line,
             timestamp: None,
+            item_id: None,
         }
     }
 

@@ -249,6 +249,22 @@ impl ThreadEventStore {
             {
                 self.latest_turn_id = Some(n.turn_id.clone());
             }
+            ServerNotification::StreamItemsDiscarded(discarded) => {
+                if self.active_reasoning_item.as_ref().is_some_and(|started| {
+                    started.turn_id == discarded.turn_id
+                        && discarded.item_ids.iter().any(|id| id == started.item.id())
+                }) {
+                    self.active_reasoning_item = None;
+                }
+                for turn in self
+                    .turns
+                    .iter_mut()
+                    .filter(|turn| turn.id == discarded.turn_id)
+                {
+                    turn.items
+                        .retain(|item| !discarded.item_ids.iter().any(|id| id == item.id()));
+                }
+            }
             ServerNotification::ThreadClosed(_) => {
                 self.active_turn_id = None;
                 self.active_reasoning_item = None;

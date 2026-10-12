@@ -1754,7 +1754,7 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
                 thread_id: "thread-1".into(),
                 turn_id: "turn-1".into(),
                 item_id: "failed-item".into(),
-                delta: "Unfinished old prefix.\\n".into(),
+                delta: "Unfinished old prefix.\n".into(),
             },
         ),
         None,

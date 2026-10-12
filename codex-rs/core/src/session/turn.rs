@@ -2258,6 +2258,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<RealtimeEventTex
         | EventMsg::GuardianAssessment(_)
         | EventMsg::DeprecationNotice(_)
         | EventMsg::StreamError(_)
+        | EventMsg::StreamItemsDiscarded(_)
         | EventMsg::TurnDiff(_)
         | EventMsg::RealtimeConversationListVoicesResponse(_)
         | EventMsg::PlanUpdate(_)
@@ -2689,7 +2690,8 @@ async fn try_run_sampling_request(
         )
         .instrument(trace_span!("stream_request"))
         .or_cancel(&cancellation_token)
-        .await??;
+        .await
+        .map_err(CodexErr::from)??;
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted.into());
     }
@@ -3064,8 +3066,11 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::ModelsEtag(etag) => {
                 // Update internal state with latest models etag
-                sess.request_models_manager(&turn_context.config)
-                    .await?
+                let manager = match sess.request_models_manager(&turn_context.config).await {
+                    Ok(manager) => manager,
+                    Err(error) => break Err(error),
+                };
+                manager
                     .refresh_if_new_etag(etag, turn_context.config.http_client_factory())
                     .await;
             }

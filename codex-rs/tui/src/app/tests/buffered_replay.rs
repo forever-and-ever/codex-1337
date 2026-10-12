@@ -35,12 +35,13 @@ fn completed(thread: &str) -> ServerNotification {
 
 #[tokio::test]
 async fn refreshed_active_reasoning_accepts_later_deltas_and_complete_summary() {
-    for (refresh, refreshed_item_is_partial, capacity, voice_handoff) in [
-        (true, false, 1, false),
-        (true, true, 1, false),
-        (false, false, 8, false),
-        (false, false, 1, false),
-        (true, false, 1, true),
+    for (refresh, refreshed_item_is_partial, capacity, voice_handoff, discard) in [
+        (true, false, 1, false, false),
+        (true, true, 1, false, false),
+        (false, false, 8, false, false),
+        (false, false, 1, false, false),
+        (true, false, 1, true, false),
+        (true, true, 1, false, true),
     ] {
         let (mut app, mut events, _ops) = make_test_app_with_channels().await;
         let thread_id = ThreadId::new();
@@ -124,7 +125,16 @@ async fn refreshed_active_reasoning_accepts_later_deltas_and_complete_summary() 
             /*replay_kind*/ None,
         );
         assert!(render_bottom_popup(&app.chat_widget, /*width*/ 80).contains("Final paragraph"));
-        let completed = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        let completed = if discard {
+            ServerNotification::StreamItemsDiscarded(
+                codex_app_server_protocol::StreamItemsDiscardedNotification {
+                    thread_id: thread_id.to_string(),
+                    turn_id: "reasoning-turn".into(),
+                    item_ids: vec!["reasoning".into()],
+                },
+            )
+        } else {
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
                 thread_id: thread_id.to_string(),
                 turn_id: "reasoning-turn".into(),
                 item: ThreadItem::Reasoning {
@@ -136,7 +146,8 @@ async fn refreshed_active_reasoning_accepts_later_deltas_and_complete_summary() 
                     content: Vec::new(),
                 },
                 completed_at_ms: 0,
-            });
+            })
+        };
         let store = &app.thread_event_channels[&thread_id].store;
         store.lock().await.push_notification_ref(&completed);
         assert!(
@@ -172,6 +183,20 @@ async fn refreshed_active_reasoning_accepts_later_deltas_and_complete_summary() 
                 _ => None,
             })
             .collect::<String>();
+        if discard {
+            assert!(transcript.is_empty());
+            let snapshot = store.lock().await.snapshot();
+            assert!(
+                snapshot
+                    .turns
+                    .iter()
+                    .flat_map(|turn| &turn.items)
+                    .all(|item| item.id() != "reasoning")
+            );
+            app.replay_thread_snapshot(snapshot, false);
+            assert!(!render_bottom_popup(&app.chat_widget, 80).contains("Final paragraph"));
+            continue;
+        }
         insta::allow_duplicates! {
             insta::assert_snapshot!(transcript, @"
             • Original analysis paragraph

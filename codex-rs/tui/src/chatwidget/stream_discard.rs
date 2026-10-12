@@ -17,6 +17,8 @@ impl ChatWidget {
             self.reasoning_buffer.clear();
             self.reasoning_summary_parts.clear();
             self.reasoning_header = None;
+            self.status_state.retry_status_header =
+                Some(status_state::StatusIndicatorState::working().header);
             self.status_state.reasoning_item_id = None;
             self.status_state.reasoning_resume_turn_id = None;
             self.status_state.reasoning_recovered_after_refresh = false;

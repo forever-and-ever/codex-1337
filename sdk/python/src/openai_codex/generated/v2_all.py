@@ -5355,6 +5355,15 @@ class SpendControlLimitSnapshot(BaseModel):
     used: str
 
 
+class StreamItemsDiscardedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    item_ids: Annotated[list[str], Field(alias="itemIds")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class StrictReviewRequiredNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10564,6 +10573,23 @@ class TurnDiffUpdatedServerNotification(BaseModel):
     params: TurnDiffUpdatedNotification
 
 
+class ItemStreamDiscardedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["item/streamDiscarded"], Field(title="Item/streamDiscardedNotificationMethod")
+    ]
+    params: StreamItemsDiscardedNotification
+
+
 class AutoApprovalReviewStrictReviewRequiredServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -14220,6 +14246,7 @@ class ServerNotification(
         | HookCompletedServerNotification
         | TurnDiffUpdatedServerNotification
         | TurnPlanUpdatedServerNotification
+        | ItemStreamDiscardedServerNotification
         | ItemStartedServerNotification
         | ItemAutoApprovalReviewStartedServerNotification
         | ItemAutoApprovalReviewCompletedServerNotification
@@ -14317,6 +14344,7 @@ class ServerNotification(
         | HookCompletedServerNotification
         | TurnDiffUpdatedServerNotification
         | TurnPlanUpdatedServerNotification
+        | ItemStreamDiscardedServerNotification
         | ItemStartedServerNotification
         | ItemAutoApprovalReviewStartedServerNotification
         | ItemAutoApprovalReviewCompletedServerNotification

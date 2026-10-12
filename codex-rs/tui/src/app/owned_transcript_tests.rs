@@ -198,6 +198,12 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     assert_eq!(after, before);
     // Abandoning one stream may span unrelated completed output. Splicing must
     // retain those cells and the scrolled reader, not truncate the transcript tip.
+    app.transcript_view.jump_to_entry(&app.transcript_cells, 0);
+    app.transcript_view
+        .render(area, &mut before, &app.transcript_cells);
+    app.transcript_view.scroll(&app.transcript_cells, 3);
+    app.transcript_view
+        .render(area, &mut before, &app.transcript_cells);
     let completed = app.transcript_cells[0].clone();
     let mut failed = history_cell::AgentMessageCell::new(vec!["failed prefix".into()], true);
     failed.item_id = Some("failed-agent".into());

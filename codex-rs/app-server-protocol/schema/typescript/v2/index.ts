@@ -507,6 +507,7 @@ export type { SkillsListResponse } from "./SkillsListResponse";
 export type { SortDirection } from "./SortDirection";
 export type { SpendControlLimitSnapshot } from "./SpendControlLimitSnapshot";
 export type { StepAdmissionItem } from "./StepAdmissionItem";
+export type { StreamItemsDiscardedNotification } from "./StreamItemsDiscardedNotification";
 export type { StrictReviewRequiredNotification } from "./StrictReviewRequiredNotification";
 export type { SubAgentActivityKind } from "./SubAgentActivityKind";
 export type { SubagentMigration } from "./SubagentMigration";
