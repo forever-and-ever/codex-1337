@@ -216,7 +216,7 @@ impl HistoryCell for UserHistoryCell {
             return Vec::new();
         }
 
-        let mut lines = vec![HyperlinkLine::new(Line::from("").style(style))];
+        let mut lines = Vec::new();
 
         if !wrapped_images.is_empty() {
             lines.extend(prefix_hyperlink_lines(
@@ -241,12 +241,11 @@ impl HistoryCell for UserHistoryCell {
             ));
         }
 
-        lines.push(HyperlinkLine::new(Line::from("").style(style)));
         for source in lines.iter_mut().filter_map(|line| line.source.as_mut()) {
             source.right_reserve = 1;
             source.copy_as_prose = true;
         }
-        lines
+        message_band(lines, style)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -472,7 +471,7 @@ impl HistoryCell for AgentMessageCell {
                     .subsequent_indent(subsequent_indent),
             ));
         }
-        response_band(wrapped)
+        message_band(wrapped, history_response_style())
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -587,9 +586,8 @@ fn normalize_whitespace_only_hyperlink_lines(mut lines: Vec<HyperlinkLine>) -> V
     lines
 }
 
-/// Lay a model message on the model's fill. A row that brings its own background keeps it.
-fn response_band(mut lines: Vec<HyperlinkLine>) -> Vec<HyperlinkLine> {
-    let band = history_response_style();
+/// Both speakers share a compact band. A row that brings its own background keeps it.
+fn message_band(mut lines: Vec<HyperlinkLine>, band: Style) -> Vec<HyperlinkLine> {
     for line in &mut lines {
         line.line.style = band.patch(line.line.style);
         if let Some(source) = &mut line.source {
@@ -611,11 +609,14 @@ impl AgentMarkdownCell {
             let Some(wrap_width) =
                 crate::width::usable_content_width_u16(width, initial_prefix.width() as u16)
             else {
-                return response_band(prefix_hyperlink_lines(
-                    vec![HyperlinkLine::new(Line::default())],
-                    initial_prefix,
-                    subsequent_prefix,
-                ));
+                return message_band(
+                    prefix_hyperlink_lines(
+                        vec![HyperlinkLine::new(Line::default())],
+                        initial_prefix,
+                        subsequent_prefix,
+                    ),
+                    history_response_style(),
+                );
             };
 
             // Reserve the marker; transcript geometry has already excluded the clock gutter.
@@ -633,9 +634,14 @@ impl AgentMarkdownCell {
             } else {
                 lines
             };
-            response_band(normalize_whitespace_only_hyperlink_lines(
-                prefix_hyperlink_lines(lines, initial_prefix, subsequent_prefix),
-            ))
+            message_band(
+                normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
+                    lines,
+                    initial_prefix,
+                    subsequent_prefix,
+                )),
+                history_response_style(),
+            )
         };
 
         if let Some(rendered_lines) = &self.rendered_lines {
@@ -722,13 +728,14 @@ impl HistoryCell for StreamingAgentTailCell {
     fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
         // Tail lines are already rendered at the controller's current stream width.
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
-        response_band(normalize_whitespace_only_hyperlink_lines(
-            prefix_hyperlink_lines(
+        message_band(
+            normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
                 self.lines.clone(),
                 agent_prefix(self.is_first_line),
                 agent_prefix(/*first*/ false),
-            ),
-        ))
+            )),
+            history_response_style(),
+        )
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
