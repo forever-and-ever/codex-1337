@@ -99,9 +99,9 @@ impl ChatWidget {
                 self.app_event_tx.send(AppEvent::FollowTranscript);
                 let should_submit_now = self.is_session_configured()
                     && !self.is_plan_streaming_in_tui()
-                    && !self.input_queue.submissions_paused()
+                    && !self.input_queue_frontend.submissions_paused()
                     && !self.input_queue.rate_limit_recovery_pending
-                    && (!self.input_queue.user_turn_pending_start
+                    && (!self.input_queue.turn.is_pending()
                         || self.turn_lifecycle.agent_turn_running);
                 if should_submit_now {
                     if self.only_user_shell_commands_running()
@@ -157,12 +157,12 @@ impl ChatWidget {
 
     pub(super) fn defer_input_until_settings_applied(&mut self) {
         if !self.bottom_pane.no_modal_or_popup_active() {
-            self.input_queue.suppress_queue_autosend = true;
+            self.input_queue_frontend.suppress_queue_autosend = true;
         }
     }
 
     pub(super) fn on_modal_or_popup_closed(&mut self) {
-        if self.input_queue.suppress_queue_autosend {
+        if self.input_queue_frontend.suppress_queue_autosend {
             self.app_event_tx.send(AppEvent::SettingsSelectionClosed);
         } else {
             self.maybe_send_next_queued_input();
@@ -209,7 +209,7 @@ impl ChatWidget {
         }
         let should_run_now = self.is_session_configured()
             && !self.is_user_turn_pending_or_running()
-            && !self.input_queue.submissions_paused()
+            && !self.input_queue_frontend.submissions_paused()
             && !self.input_queue.rate_limit_recovery_pending;
         if action != QueuedInputAction::ParseSlash {
             self.empty_state_animation.borrow_mut().dismiss();
@@ -248,10 +248,8 @@ impl ChatWidget {
                     delivery: MessageDelivery::Unsent,
                     pending_pastes,
                     source,
+                    history_record: UserMessageHistoryRecord::UserMessageText,
                 });
-            self.input_queue
-                .queued_user_message_history_records
-                .push_back(UserMessageHistoryRecord::UserMessageText);
             self.refresh_pending_input_preview();
             if model_prompt && !should_run_now {
                 self.bottom_pane.clear_pending_questions();
@@ -277,7 +275,7 @@ impl ChatWidget {
         if !self.is_session_configured()
             || self.fork_in_progress
             || self.has_misalignment_policy_violation()
-            || self.input_queue.submissions_paused()
+            || self.input_queue_frontend.submissions_paused()
             || self.input_queue.rate_limit_recovery_pending
             || self.input_queue.recovered_queue
             || self.input_queue.has_unconfirmed_messages()
@@ -376,7 +374,7 @@ impl ChatWidget {
 
     pub(crate) fn is_user_turn_pending_or_running(&self) -> bool {
         self.pending_image_submission.is_some()
-            || self.input_queue.user_turn_pending_start
+            || self.input_queue.turn.is_pending()
             || self.turn_lifecycle.agent_turn_running
             || self.review.is_review_mode
             || (self.bottom_pane.is_task_running() && self.mcp_startup_status.is_none())
@@ -394,7 +392,7 @@ impl ChatWidget {
     /// Rebuild and update the bottom-pane pending-input preview.
     pub(super) fn refresh_pending_input_preview(&mut self) {
         let has_queued = self.has_queued_follow_up_messages()
-            || !self.input_queue.server_messages.is_empty()
+            || !self.input_queue_frontend.server_messages.is_empty()
             || self.has_waiting_submission();
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.has_queued_messages = has_queued;

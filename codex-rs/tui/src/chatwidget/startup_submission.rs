@@ -34,14 +34,15 @@ impl ChatWidget {
             && std::mem::take(pending_submission)
             && !destination_has_content
         {
-            self.input_queue.startup_submission = Some(self.bottom_pane.composer_draft_snapshot());
+            self.input_queue_frontend.startup_submission =
+                Some(self.bottom_pane.composer_draft_snapshot());
             self.bottom_pane.set_footer_hint_override(Some(vec![
                 ("Waiting for startup".into(), String::new()),
                 ("esc".into(), "cancel".into()),
             ]));
         }
         if pending_draft.is_none()
-            && self.input_queue.startup_submission.is_some()
+            && self.input_queue_frontend.startup_submission.is_some()
             && !self.startup_submission_has_protected_input()
         {
             self.request_draft_session();
@@ -57,7 +58,7 @@ impl ChatWidget {
             || self.startup_submission_has_protected_input()
             || self.is_plan_streaming_in_tui()
             || self.is_user_turn_pending_or_running()
-            || self.input_queue.submissions_paused()
+            || self.input_queue_frontend.submissions_paused()
             || self.input_queue.rate_limit_recovery_pending
             || self.input_queue.recovered_queue
             || self.input_queue.has_unconfirmed_messages()
@@ -70,7 +71,7 @@ impl ChatWidget {
         {
             return;
         }
-        let Some(confirmed) = self.input_queue.startup_submission.take() else {
+        let Some(confirmed) = self.input_queue_frontend.startup_submission.take() else {
             crate::startup_recovery::clear();
             return;
         };
@@ -92,14 +93,19 @@ impl ChatWidget {
 
     /// Cancel only the intent; the editor keeps the complete draft for editing or recovery.
     pub(crate) fn cancel_startup_submission(&mut self) {
-        if self.input_queue.startup_submission.take().is_some() {
+        if self
+            .input_queue_frontend
+            .startup_submission
+            .take()
+            .is_some()
+        {
             self.bottom_pane.set_footer_hint_override(/*items*/ None);
             self.refresh_startup_recovery();
         }
     }
 
     pub(crate) fn handle_startup_submission_key(&mut self, key: KeyEvent) -> bool {
-        if self.input_queue.startup_submission.is_none()
+        if self.input_queue_frontend.startup_submission.is_none()
             || self.startup_submission_has_protected_input()
             || !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
         {

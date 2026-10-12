@@ -16,10 +16,7 @@ pub(crate) enum KeyEventAction {
 
 impl ChatWidget {
     pub(crate) fn pending_steer_client_id(&self) -> Option<&str> {
-        self.input_queue
-            .pending_steer
-            .as_ref()
-            .map(|steer| steer.client_id.as_str())
+        self.input_queue.pending_steer.client_id()
     }
 
     pub(crate) fn end_composer_drag(&mut self) {
@@ -124,7 +121,9 @@ impl ChatWidget {
             && !self.should_handle_vim_insert_escape(key_event)
             && self.pending_image_submission.is_some()
         {
-            self.input_queue.submit_pending_steer_after_interrupt = false;
+            self.input_queue
+                .pending_steer
+                .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
             if self.is_cancellable_work_active() {
                 self.requeue_image_submission();
                 self.input_queue.recovered_queue = true;
@@ -244,11 +243,15 @@ impl ChatWidget {
             && self.bottom_pane.no_modal_or_popup_active()
             && !self.should_handle_vim_insert_escape(key_event)
         {
-            self.input_queue.submit_pending_steer_after_interrupt = true;
+            self.input_queue
+                .pending_steer
+                .set_interrupt(input_queue::SteerInterrupt::SubmitAsTurn);
             if self.submit_op(AppCommand::interrupt()) {
                 self.pause_active_goal_for_interrupt();
             } else {
-                self.input_queue.submit_pending_steer_after_interrupt = false;
+                self.input_queue
+                    .pending_steer
+                    .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
             }
             return KeyEventAction::None;
         }
@@ -564,7 +567,9 @@ impl ChatWidget {
                 }
             }
             if should_pause_active_goal {
-                self.input_queue.submit_pending_steer_after_interrupt = false;
+                self.input_queue
+                    .pending_steer
+                    .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
                 self.pause_active_goal_for_interrupt();
             }
             if modal_or_popup_active && self.bottom_pane.no_modal_or_popup_active() {
@@ -573,7 +578,9 @@ impl ChatWidget {
             return;
         }
 
-        self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.input_queue
+            .pending_steer
+            .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
         if self
             .bottom_pane
             .selected_index_for_active_view(crate::app::AGENTS_OVERVIEW_VIEW_ID)

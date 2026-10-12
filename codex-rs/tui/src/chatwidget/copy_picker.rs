@@ -14,7 +14,7 @@ impl ChatWidget {
             let guard = Arc::new(crate::copy_input_guard::CopyInputGuard(
                 self.app_event_tx.clone(),
             ));
-            self.input_queue.transcript_copy = Arc::downgrade(&guard);
+            self.input_queue_frontend.transcript_copy = Arc::downgrade(&guard);
             self.app_event_tx
                 .send(AppEvent::SelectTranscriptCopy { guard });
             return;

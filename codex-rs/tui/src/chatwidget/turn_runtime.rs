@@ -78,7 +78,7 @@ impl ChatWidget {
         self.bottom_pane.dismiss_composer_sparkle();
         self.current_work_status = None;
         self.clear_context_compaction();
-        self.input_queue.user_turn_pending_start = false;
+        self.input_queue.turn.started();
         self.reset_safety_buffering_for_turn_start();
         self.turn_lifecycle.start(Instant::now());
         self.transcript.reset_turn_flags();
@@ -124,7 +124,9 @@ impl ChatWidget {
         if self.status_state.reasoning_resume_turn_id.is_some() {
             self.on_agent_reasoning_final();
         }
-        self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.input_queue
+            .pending_steer
+            .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
         self.current_work_status = None;
         let sanitized_last_agent_message = last_agent_message.as_deref().map(|message| {
             parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown
@@ -175,7 +177,7 @@ impl ChatWidget {
         self.status_state.reasoning_item_id = None;
         self.status_state.reasoning_resume_turn_id = None;
         self.reasoning_header = None;
-        self.input_queue.user_turn_pending_start = false;
+        self.input_queue.turn.started();
         self.clear_active_hook_cell();
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
@@ -337,7 +339,7 @@ impl ChatWidget {
         // event arrived before cancellation.
         self.clear_active_hook_cell();
         // Reset running state and clear streaming buffers.
-        self.input_queue.user_turn_pending_start = false;
+        self.input_queue.turn = input_queue::UserTurnInput::Idle;
         self.clear_guardian_review_status();
         self.turn_lifecycle.finish();
         self.update_task_running_state();
@@ -350,7 +352,6 @@ impl ChatWidget {
         self.plan_stream_controller = None;
         self.request_pending_usage_output_insertion_after_stream_shutdown();
         self.status_state.pending_status_indicator_restore = false;
-        self.safety_buffering_prompt = None;
         self.request_status_line_branch_refresh();
         self.request_status_line_git_summary_refresh();
         self.refresh_thread_usage_after_turn();
@@ -358,7 +359,9 @@ impl ChatWidget {
     }
 
     pub(super) fn on_server_overloaded_error(&mut self, message: String) {
-        self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.input_queue
+            .pending_steer
+            .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
         self.finalize_turn();
 
         let message = if message.trim().is_empty() {
@@ -373,7 +376,9 @@ impl ChatWidget {
     }
 
     fn on_error(&mut self, message: String) {
-        self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.input_queue
+            .pending_steer
+            .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
         self.flush_answer_stream_with_separator();
         self.finalize_turn();
         self.add_to_history(history_cell::new_error_event(message));
@@ -388,7 +393,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_turn_start_rejection(&mut self, message: String) -> bool {
-        if !self.input_queue.user_turn_pending_start {
+        if !self.input_queue.turn.is_pending() {
             return false;
         }
         self.on_error(message);
@@ -404,7 +409,9 @@ impl ChatWidget {
             self.daybreak_enabled && can_enable_daybreak,
             can_enable_daybreak,
         );
-        self.input_queue.submit_pending_steer_after_interrupt = false;
+        self.input_queue
+            .pending_steer
+            .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
         self.finalize_turn();
         self.add_to_history(history_cell::new_cyber_policy_error_event(notice));
         if notice == crate::daybreak::Notice::Disabled
@@ -528,7 +535,9 @@ impl ChatWidget {
                         .is_some_and(is_safety_access_block_message)
             })
         {
-            self.input_queue.submit_pending_steer_after_interrupt = false;
+            self.input_queue
+                .pending_steer
+                .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
             self.finalize_turn();
             self.add_to_history(history_cell::new_safety_access_block_event());
             self.request_redraw();

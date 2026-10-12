@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::collections::VecDeque;
 use std::ops::Deref;
 use std::path::PathBuf;
 
@@ -83,6 +82,7 @@ pub(super) struct QueuedUserMessage {
     pub(super) delivery: MessageDelivery,
     pub(super) pending_pastes: Vec<(String, String)>,
     pub(super) source: UserMessageSource,
+    pub(super) history_record: UserMessageHistoryRecord,
 }
 
 impl QueuedUserMessage {
@@ -93,6 +93,7 @@ impl QueuedUserMessage {
             delivery: MessageDelivery::Unsent,
             pending_pastes: Vec::new(),
             source: UserMessageSource::Prompt,
+            history_record: UserMessageHistoryRecord::UserMessageText,
         }
     }
 
@@ -150,22 +151,10 @@ pub(crate) struct ThreadInputState {
     pub(crate) pending_thread_settings:
         Option<codex_app_server_protocol::ThreadSettingsUpdatedNotification>,
     pub(super) composer: Option<ThreadComposerState>,
-    pub(super) safety_buffering_prompt: Option<UserMessage>,
-    pub(super) safety_buffering_source: UserMessageSource,
-    pub(crate) pending_steer: Option<PendingSteer>,
-    pub(super) rejected_steers_queue: VecDeque<UserMessage>,
-    pub(super) rejected_steer_sources: VecDeque<UserMessageSource>,
-    pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
-    pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
-    pub(super) queued_user_message_history_records: VecDeque<UserMessageHistoryRecord>,
-    pub(crate) recovered_queue: bool,
+    pub(crate) input_queue: super::input_queue::InputQueueState,
     /// Reconcile delivery after transport recovery, not after a fork or ordinary thread switch.
     #[serde(default)]
     pub(crate) reconnect_pending: bool,
-    pub(super) user_turn_pending_start: bool,
-    pub(super) submit_pending_steer_after_interrupt: bool,
-    #[serde(default)]
-    pub(super) pending_user_message_client_id: Option<String>,
     pub(super) current_collaboration_mode: CollaborationMode,
     pub(super) active_collaboration_mask: Option<CollaborationModeMask>,
     pub(super) plan_mode_reasoning_effort: Option<ReasoningEffortConfig>,
@@ -912,8 +901,6 @@ impl ChatWidget {
 
 impl ThreadInputState {
     pub(crate) fn has_unconfirmed_messages(&self) -> bool {
-        self.queued_user_messages
-            .iter()
-            .any(|message| matches!(message.delivery, MessageDelivery::Unconfirmed(_)))
+        self.input_queue.has_unconfirmed_messages()
     }
 }

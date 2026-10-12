@@ -504,13 +504,7 @@ impl App {
                         .into_iter()
                         .chain(self.agents_overview.input_states.get_mut(&thread_id))
                     {
-                        if input
-                            .pending_steer
-                            .as_ref()
-                            .is_some_and(|pending| pending.client_id == *client_id)
-                        {
-                            input.pending_steer.take();
-                        }
+                        input.input_queue.discard_pending_steer(client_id);
                     }
                 }
                 let background_voice = self.background_voice.as_ref().is_some_and(|owner| {

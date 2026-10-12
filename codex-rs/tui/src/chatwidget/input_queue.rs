@@ -1,8 +1,9 @@
-//! Queued user input and pending-steer state for `ChatWidget`.
+//! Conversation-owned queued input and its submission transitions.
 //!
-//! This module keeps the mutable input queues together so `ChatWidget` can
-//! apply UI/protocol effects around a focused reducer-style state bag.
+//! Active and parked threads carry this same value. Editor resources, startup
+//! handoff and immutable server projections belong to the live frontend.
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use super::MessageDelivery;
@@ -22,53 +23,249 @@ pub(super) struct PendingInputPreview {
 }
 
 #[derive(Debug, Default)]
-pub(super) struct InputQueueState {
-    /// The visible draft confirmed during startup, awaiting the protected-input handoff.
+pub(super) struct InputQueueFrontend {
     pub(super) startup_submission: Option<crate::bottom_pane::ComposerDraftSnapshot>,
-    /// User inputs queued while a turn is in progress.
-    pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
-    /// A read-only projection of the durable queue; never drained by local autosend.
     pub(super) server_messages: Vec<codex_app_server_protocol::QueuedSubmission>,
-    pub(super) server_queue_busy: bool,
-    /// History records for queued user messages. Slash commands such as `/goal`
-    /// can render history that differs from the text submitted to core, so this
-    /// stays in lockstep with `queued_user_messages`, with missing entries
-    /// treated as user-message text.
-    pub(super) queued_user_message_history_records: VecDeque<UserMessageHistoryRecord>,
-    /// A user turn has been submitted to core, but `TurnStarted` has not arrived yet.
-    pub(super) user_turn_pending_start: bool,
-    pub(super) pending_user_message_client_id: Option<String>,
-    /// User messages that tried to steer a non-regular turn and must be retried first.
-    pub(super) rejected_steers_queue: VecDeque<UserMessage>,
-    /// The origin of each rejected steer, kept in lockstep with its message.
-    pub(super) rejected_steer_sources: VecDeque<UserMessageSource>,
-    /// History records for rejected steers. Slash commands such as `/goal` can
-    /// render history that differs from the text submitted to core, so this stays
-    /// in lockstep with `rejected_steers_queue`, with missing entries treated as
-    /// user-message text.
-    pub(super) rejected_steer_history_records: VecDeque<UserMessageHistoryRecord>,
-    /// The steer submitted to core but not yet committed into history.
-    pub(super) pending_steer: Option<PendingSteer>,
-    /// Optimistic replacement state retained until app-server adjudicates whether
-    /// the previous steer still exists at the model-input boundary.
-    pub(super) pending_steer_replacement: Option<PendingSteerReplacement>,
-    /// When set, the next interrupt should resubmit the pending steer as one
-    /// fresh user turn instead of restoring it into the composer.
-    pub(super) submit_pending_steer_after_interrupt: bool,
+    pub(super) server_previews: Vec<String>,
     pub(super) suppress_queue_autosend: bool,
     pub(super) transcript_copy: std::sync::Weak<crate::copy_input_guard::CopyInputGuard>,
-    /// Hold submissions while a usage failure or backend-directed model fallback is resolved.
-    pub(super) rate_limit_recovery_pending: bool,
-    /// Pause for user recovery (for example an image or permission failure), independent of delivery.
-    pub(super) recovered_queue: bool,
 }
 
-impl InputQueueState {
+impl InputQueueFrontend {
     pub(super) fn submissions_paused(&self) -> bool {
         self.suppress_queue_autosend || self.transcript_copy.strong_count() > 0
     }
 
-    pub(super) fn has_unconfirmed_messages(&self) -> bool {
+    pub(super) fn clear(&mut self) {
+        self.startup_submission = None;
+        self.server_messages.clear();
+        self.server_previews.clear();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SubmittedUserInput {
+    pub(super) client_id: String,
+    pub(super) message: UserMessage,
+    pub(super) history: UserMessageHistoryRecord,
+    pub(super) source: UserMessageSource,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) enum PendingTurnStart {
+    Operation,
+    PreparedRetry {
+        message: UserMessage,
+        source: UserMessageSource,
+    },
+    Submitted(SubmittedUserInput),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) enum UserTurnInput {
+    #[default]
+    Idle,
+    AwaitingStart(PendingTurnStart),
+    Started(SubmittedUserInput),
+    RetainedRetry {
+        message: UserMessage,
+        source: UserMessageSource,
+    },
+}
+
+impl UserTurnInput {
+    pub(super) fn is_pending(&self) -> bool {
+        matches!(self, Self::AwaitingStart(_))
+    }
+
+    pub(super) fn submitted(&self) -> Option<&SubmittedUserInput> {
+        match self {
+            Self::AwaitingStart(PendingTurnStart::Submitted(input)) | Self::Started(input) => {
+                Some(input)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn prompt(&self) -> Option<&UserMessage> {
+        match self {
+            Self::AwaitingStart(PendingTurnStart::PreparedRetry { message, .. })
+            | Self::RetainedRetry { message, .. } => Some(message),
+            _ => self.submitted().map(|input| &input.message),
+        }
+    }
+
+    pub(super) fn started(&mut self) {
+        *self = match std::mem::take(self) {
+            Self::AwaitingStart(PendingTurnStart::Submitted(input)) | Self::Started(input) => {
+                Self::Started(input)
+            }
+            Self::AwaitingStart(PendingTurnStart::PreparedRetry { message, source })
+            | Self::RetainedRetry { message, source } => Self::RetainedRetry { message, source },
+            _ => Self::Idle,
+        };
+    }
+
+    pub(super) fn into_queued(self, uncertain: bool) -> Option<QueuedUserMessage> {
+        match self {
+            Self::AwaitingStart(PendingTurnStart::Submitted(input)) => Some(QueuedUserMessage {
+                delivery: if uncertain {
+                    MessageDelivery::Unconfirmed(Some(input.client_id))
+                } else {
+                    MessageDelivery::Unsent
+                },
+                source: input.source,
+                history_record: input.history,
+                ..QueuedUserMessage::from(input.message)
+            }),
+            Self::AwaitingStart(PendingTurnStart::PreparedRetry { message, source }) => {
+                Some(QueuedUserMessage {
+                    delivery: if uncertain {
+                        MessageDelivery::Unconfirmed(None)
+                    } else {
+                        MessageDelivery::Unsent
+                    },
+                    source,
+                    ..QueuedUserMessage::from(message)
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(super) enum SteerInterrupt {
+    #[default]
+    RestoreDraft,
+    SubmitAsTurn,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) enum SteerInput {
+    #[default]
+    Idle,
+    Pending {
+        steer: PendingSteer,
+        interrupt: SteerInterrupt,
+    },
+    Replacing {
+        replacement: PendingSteerReplacement,
+        interrupt: SteerInterrupt,
+    },
+}
+
+impl SteerInput {
+    pub(super) fn as_ref(&self) -> Option<Cow<'_, PendingSteer>> {
+        match self {
+            Self::Idle => None,
+            Self::Pending { steer, .. } => Some(Cow::Borrowed(steer)),
+            Self::Replacing { replacement, .. } => Some(Cow::Owned(
+                replacement.previous.append(&replacement.appended),
+            )),
+        }
+    }
+
+    pub(crate) fn client_id(&self) -> Option<&str> {
+        match self {
+            Self::Idle => None,
+            Self::Pending { steer, .. } => Some(&steer.client_id),
+            Self::Replacing { replacement, .. } => Some(&replacement.previous.client_id),
+        }
+    }
+
+    pub(super) fn is_some(&self) -> bool {
+        !matches!(self, Self::Idle)
+    }
+    pub(super) fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+    pub(super) fn take(&mut self) -> Option<PendingSteer> {
+        std::mem::take(self).as_ref().map(Cow::into_owned)
+    }
+    pub(super) fn set(&mut self, steer: Option<PendingSteer>) {
+        let interrupt = self.interrupt();
+        *self = steer.map_or(Self::Idle, |steer| Self::Pending { steer, interrupt });
+    }
+    pub(super) fn replacement(&self) -> Option<&PendingSteerReplacement> {
+        match self {
+            Self::Replacing { replacement, .. } => Some(replacement),
+            _ => None,
+        }
+    }
+    pub(super) fn replace(&mut self, replacement: PendingSteerReplacement) {
+        let interrupt = self.interrupt();
+        *self = Self::Replacing {
+            replacement,
+            interrupt,
+        };
+    }
+    pub(super) fn interrupt(&self) -> SteerInterrupt {
+        match self {
+            Self::Idle => SteerInterrupt::RestoreDraft,
+            Self::Pending { interrupt, .. } | Self::Replacing { interrupt, .. } => *interrupt,
+        }
+    }
+    pub(super) fn set_interrupt(&mut self, value: SteerInterrupt) {
+        match self {
+            Self::Idle => {}
+            Self::Pending { interrupt, .. } | Self::Replacing { interrupt, .. } => {
+                *interrupt = value
+            }
+        }
+    }
+    pub(super) fn finish_replacement(&mut self, replaced: bool) -> bool {
+        if !matches!(self, Self::Replacing { .. }) {
+            return false;
+        }
+        let Self::Replacing {
+            replacement,
+            interrupt,
+        } = std::mem::take(self)
+        else {
+            return false;
+        };
+        let steer = if replaced {
+            replacement.previous.append(&replacement.appended)
+        } else {
+            replacement.appended
+        };
+        *self = Self::Pending { steer, interrupt };
+        true
+    }
+    pub(super) fn abort_replacement(&mut self) -> Option<PendingSteer> {
+        if !matches!(self, Self::Replacing { .. }) {
+            return None;
+        }
+        let Self::Replacing {
+            replacement,
+            interrupt,
+        } = std::mem::take(self)
+        else {
+            unreachable!()
+        };
+        *self = Self::Pending {
+            steer: replacement.previous,
+            interrupt,
+        };
+        Some(replacement.appended)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct InputQueueState {
+    pub(super) queued_user_messages: VecDeque<QueuedUserMessage>,
+    pub(super) rejected_steers_queue: VecDeque<QueuedUserMessage>,
+    pub(super) turn: UserTurnInput,
+    pub(super) pending_steer: SteerInput,
+    pub(super) rate_limit_recovery_pending: bool,
+    pub(crate) recovered_queue: bool,
+}
+
+impl InputQueueState {
+    pub(crate) fn has_unconfirmed_messages(&self) -> bool {
         self.queued_user_messages
             .iter()
             .any(|message| matches!(message.delivery, MessageDelivery::Unconfirmed(_)))
@@ -79,115 +276,36 @@ impl InputQueueState {
     }
 
     pub(super) fn clear(&mut self) {
-        self.startup_submission = None;
-        self.recovered_queue = false;
-        self.queued_user_messages.clear();
-        self.server_messages.clear();
-        self.server_queue_busy = false;
-        self.queued_user_message_history_records.clear();
-        self.user_turn_pending_start = false;
-        self.pending_user_message_client_id = None;
-        self.rejected_steers_queue.clear();
-        self.rejected_steer_sources.clear();
-        self.rejected_steer_history_records.clear();
-        self.pending_steer = None;
-        self.pending_steer_replacement = None;
-        self.submit_pending_steer_after_interrupt = false;
-        self.rate_limit_recovery_pending = false;
+        *self = Self::default();
     }
 
     pub(super) fn preview(&self) -> PendingInputPreview {
-        let queued_messages = self
-            .queued_user_messages
-            .iter()
-            .enumerate()
-            .map(|(idx, message)| {
-                user_message_preview_text(
-                    message,
-                    self.queued_user_message_history_records.get(idx),
-                )
-            })
-            .collect();
-        let pending_steer = self.pending_steer.as_ref().map(|steer| {
-            user_message_preview_text(&steer.user_message, Some(&steer.history_record))
-        });
-        let rejected_steers = self
-            .rejected_steers_queue
-            .iter()
-            .enumerate()
-            .map(|(idx, message)| {
-                user_message_preview_text(message, self.rejected_steer_history_records.get(idx))
-            })
-            .collect();
-
         PendingInputPreview {
-            queued_messages,
-            pending_steer,
-            rejected_steers,
+            queued_messages: self
+                .queued_user_messages
+                .iter()
+                .map(|message| user_message_preview_text(message, Some(&message.history_record)))
+                .collect(),
+            pending_steer: self.pending_steer.as_ref().map(|steer| {
+                user_message_preview_text(&steer.user_message, Some(&steer.history_record))
+            }),
+            rejected_steers: self
+                .rejected_steers_queue
+                .iter()
+                .map(|message| user_message_preview_text(message, Some(&message.history_record)))
+                .collect(),
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn preview_keeps_queue_categories_separate() {
-        let mut state = InputQueueState::default();
-        state
-            .queued_user_messages
-            .push_back(UserMessage::from("queued").into());
-        state
-            .rejected_steers_queue
-            .push_back(UserMessage::from("rejected"));
-        state.pending_steer = Some(PendingSteer {
-            client_id: "pending-id".to_string(),
-            items: vec![codex_app_server_protocol::UserInput::Text {
-                text: "pending".to_string(),
-                text_elements: Vec::new(),
-            }],
-            user_message: UserMessage::from("pending"),
-            history_record: UserMessageHistoryRecord::UserMessageText,
-            source: UserMessageSource::Prompt,
-            compare_key: crate::chatwidget::user_messages::PendingSteerCompareKey {
-                message: "pending".to_string(),
-                image_count: 0,
-            },
-        });
-
-        assert_eq!(
-            state.preview(),
-            PendingInputPreview {
-                queued_messages: vec!["queued".to_string()],
-                pending_steer: Some("pending".to_string()),
-                rejected_steers: vec!["rejected".to_string()],
-            }
-        );
+    pub(crate) fn pending_steer_client_id(&self) -> Option<&str> {
+        self.pending_steer.client_id()
     }
 
-    #[test]
-    fn clear_resets_all_input_queues() {
-        let mut state = InputQueueState::default();
-        state
-            .queued_user_messages
-            .push_back(UserMessage::from("queued").into());
-        state
-            .rejected_steers_queue
-            .push_back(UserMessage::from("rejected"));
-        state.user_turn_pending_start = true;
-        state.submit_pending_steer_after_interrupt = true;
-
-        state.clear();
-
-        assert!(state.queued_user_messages.is_empty());
-        assert!(state.queued_user_message_history_records.is_empty());
-        assert!(!state.user_turn_pending_start);
-        assert!(state.rejected_steers_queue.is_empty());
-        assert!(state.rejected_steer_history_records.is_empty());
-        assert!(state.pending_steer.is_none());
-        assert!(!state.submit_pending_steer_after_interrupt);
+    pub(crate) fn discard_pending_steer(&mut self, client_id: &str) -> bool {
+        if self.pending_steer.client_id() != Some(client_id) {
+            return false;
+        }
+        self.pending_steer.set(None);
+        true
     }
 }

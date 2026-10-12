@@ -156,12 +156,10 @@ impl ChatWidget {
             && (self.turn_lifecycle.agent_turn_running
                 || self.review.is_review_mode
                 || (self.bottom_pane.is_task_running()
-                    && (self.mcp_startup_status.is_none()
-                        || self.input_queue.user_turn_pending_start))))
+                    && (self.mcp_startup_status.is_none() || self.input_queue.turn.is_pending()))))
             || (matches!(cmd, SlashCommand::Resume | SlashCommand::Cd)
-                && (self.input_queue.user_turn_pending_start
-                    || self.turn_lifecycle.agent_turn_running))
-            || (cmd == SlashCommand::Export && self.input_queue.suppress_queue_autosend)
+                && (self.input_queue.turn.is_pending() || self.turn_lifecycle.agent_turn_running))
+            || (cmd == SlashCommand::Export && self.input_queue_frontend.suppress_queue_autosend)
             || (cmd == SlashCommand::Review
                 && source == SlashCommandDispatchSource::Live
                 && (self.is_user_turn_pending_or_running()
@@ -369,7 +367,9 @@ impl ChatWidget {
                     StatusDetailsCapitalization::Preserve,
                     STATUS_DETAILS_DEFAULT_MAX_LINES,
                 );
-                self.input_queue.user_turn_pending_start = true;
+                self.input_queue.turn = input_queue::UserTurnInput::AwaitingStart(
+                    input_queue::PendingTurnStart::Operation,
+                );
                 self.app_event_tx.compact();
             }
             SlashCommand::Warm => self.toggle_warming(),

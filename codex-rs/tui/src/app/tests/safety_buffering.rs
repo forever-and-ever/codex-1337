@@ -259,10 +259,18 @@ stream_max_retries = 0
         unreachable!("user turn");
     };
     let expected_client_id = client_user_message_id.clone();
-    let pending_input = app.chat_widget.capture_thread_input_state();
     app.submit_thread_op(&mut app_server, thread_id, steer)
         .await?;
     app.settle_turn_submissions(&mut app_server).await?;
+    let appended = "appended instructions";
+    let merged_steer = format!("{COMMITTED_STEER}\n{appended}");
+    submit_prompt(&mut app, appended);
+    let replacement = next_user_turn_event(&mut app_event_rx);
+    let pending_input = app.chat_widget.capture_thread_input_state();
+    app.submit_thread_op(&mut app_server, thread_id, replacement)
+        .await?;
+    // Park before consuming the replacement receipt: its previous/appended payloads
+    // must travel with the queue, not disappear with the visible widget.
     let other_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             app.config.codex_home.as_path(),
@@ -310,6 +318,28 @@ stream_max_retries = 0
             .capacity = 0;
     }
     assert_eq!(app.current_displayed_thread_id(), Some(other_id));
+    let parked = if via_overview {
+        app.agents_overview.input_states.get(&thread_id).cloned()
+    } else {
+        app.thread_event_channels[&thread_id]
+            .store
+            .lock()
+            .await
+            .input_state
+            .clone()
+    };
+    assert_eq!(parked, pending_input);
+    app.settle_turn_submissions(&mut app_server).await?;
+    let pending_input = if via_overview {
+        app.agents_overview.input_states.get(&thread_id).cloned()
+    } else {
+        app.thread_event_channels[&thread_id]
+            .store
+            .lock()
+            .await
+            .input_state
+            .clone()
+    };
     let mut release_response = Some(release_response);
     loop {
         let event = tokio::time::timeout(
@@ -323,8 +353,11 @@ stream_max_retries = 0
             && let ThreadItem::UserMessage {
                 content, client_id, ..
             } = &item.item
-            && ChatWidget::user_message_display_from_inputs(content).message == COMMITTED_STEER
-        {
+            && [COMMITTED_STEER, merged_steer.as_str()].contains(
+                &ChatWidget::user_message_display_from_inputs(content)
+                    .message
+                    .as_str(),
+            ) {
             Some(client_id.clone().expect("receipt echoes the submission ID"))
         } else {
             None
@@ -412,7 +445,8 @@ stream_max_retries = 0
     let source = app_server
         .thread_read(thread_id, /*include_turns*/ true)
         .await?;
-    assert_eq!(user_message_count(&source, COMMITTED_STEER), 2);
+    assert_eq!(user_message_count(&source, COMMITTED_STEER), 1);
+    assert_eq!(user_message_count(&source, &merged_steer), 1);
     let _ = release_steered_response.send(());
     app_server.shutdown().await?;
     server.shutdown().await;

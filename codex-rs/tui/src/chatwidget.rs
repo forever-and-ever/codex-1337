@@ -711,8 +711,7 @@ pub(crate) struct ChatWidget {
     suppress_initial_user_message_submit: bool,
     input_queue: InputQueueState,
     submission_preview: crate::app::turn_submissions::SubmissionPreview,
-    safety_buffering_prompt: Option<UserMessage>,
-    safety_buffering_source: UserMessageSource,
+    input_queue_frontend: input_queue::InputQueueFrontend,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.
     chat_keymap: ChatKeymap,
     permission_shortcut_pending: bool,
@@ -1354,7 +1353,6 @@ impl ChatWidget {
             })
         {
             if let Some(pending) = self.input_queue.pending_steer.take() {
-                self.input_queue.pending_steer_replacement = None;
                 self.refresh_pending_input_preview();
                 let pending_display =
                     user_message_display_for_history(pending.user_message, &pending.history_record);
@@ -1905,7 +1903,8 @@ impl ChatWidget {
                 | AppCommand::RunUserShellCommand { .. }
         ) {
             self.transcript.last_status_copy_targets = None;
-            self.input_queue.user_turn_pending_start = true;
+            self.input_queue.turn =
+                input_queue::UserTurnInput::AwaitingStart(input_queue::PendingTurnStart::Operation);
         }
         if matches!(op, AppCommand::Interrupt) && self.turn_lifecycle.agent_turn_running {
             if let Some(controller) = self.stream_controller.as_mut() {

@@ -158,6 +158,7 @@ impl ChatWidget {
                 queue_index,
                 QueuedUserMessage {
                     source,
+                    history_record,
                     ..QueuedUserMessage::new(
                         user_message,
                         match shell_escape_policy {
@@ -167,9 +168,6 @@ impl ChatWidget {
                     )
                 },
             );
-            self.input_queue
-                .queued_user_message_history_records
-                .insert(queue_index, history_record);
             self.refresh_pending_input_preview();
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
@@ -186,11 +184,9 @@ impl ChatWidget {
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source,
+                    history_record,
                     ..QueuedUserMessage::from(user_message)
                 });
-            self.input_queue
-                .queued_user_message_history_records
-                .push_front(history_record);
             self.refresh_pending_input_preview();
             if model_prompt {
                 self.bottom_pane.clear_pending_questions();
@@ -462,7 +458,7 @@ impl ChatWidget {
             Some((
                 previous.append(appended),
                 PendingSteerReplacement {
-                    previous: previous.clone(),
+                    previous: previous.into_owned(),
                     appended: appended.clone(),
                 },
             ))
@@ -526,8 +522,14 @@ impl ChatWidget {
         self.dismiss_backend_banner_for_new_turn();
         self.note_realtime_typed_input(&submitted_message.text);
         if render_in_history {
-            self.input_queue.user_turn_pending_start = true;
-            self.input_queue.pending_user_message_client_id = Some(client_user_message_id.clone());
+            self.input_queue.turn = input_queue::UserTurnInput::AwaitingStart(
+                input_queue::PendingTurnStart::Submitted(input_queue::SubmittedUserInput {
+                    client_id: client_user_message_id.clone(),
+                    message: submitted_message.clone(),
+                    history: history_record.clone(),
+                    source,
+                }),
+            );
         }
 
         // Persist the submitted text to cross-session message history. Mentions are encoded into
@@ -569,19 +571,16 @@ impl ChatWidget {
         }
 
         if pending_steer.is_some() {
-            if let Some((aggregate, replacement)) = local_pending_steer_replacement {
-                self.input_queue.pending_steer = Some(aggregate);
-                self.input_queue.pending_steer_replacement = Some(replacement);
+            if let Some((_, replacement)) = local_pending_steer_replacement {
+                self.input_queue.pending_steer.replace(replacement);
             } else {
-                self.input_queue.pending_steer = pending_steer;
+                self.input_queue.pending_steer.set(pending_steer);
             }
             self.transcript.saw_plan_item_this_turn = false;
             self.refresh_pending_input_preview();
         }
 
         if render_in_history {
-            self.safety_buffering_prompt = Some(submitted_message.clone());
-            self.safety_buffering_source = source;
             if !render_before_submit {
                 self.on_user_message_display(user_message_display_for_history(
                     submitted_message,

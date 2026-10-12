@@ -76,8 +76,8 @@ impl ChatWidget {
             && session.daybreak_enabled
             && !matches!(display, SessionConfiguredDisplay::SideConversation);
         self.session_draft = None;
-        self.input_queue.server_messages.clear();
-        self.input_queue.server_queue_busy = false;
+        self.input_queue_frontend.server_messages.clear();
+        self.input_queue_frontend.server_previews.clear();
         self.app_event_tx
             .send(AppEvent::Queue(crate::app::QueueEvent::Refresh(
                 session.thread_id,
@@ -329,6 +329,7 @@ impl ChatWidget {
     ) {
         self.current_rollout_path = rollout_path;
         self.input_queue.clear();
+        self.input_queue_frontend.clear();
         self.reset_realtime_conversation();
         // Finish any output not yet drained from the old runtime without live completion actions.
         self.on_task_complete(

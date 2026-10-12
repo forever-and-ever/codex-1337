@@ -114,7 +114,7 @@ async fn startup_submission_edit_or_disconnect_cancels_without_losing_draft() {
                 "confirmed draft edited"
             }
         );
-        assert!(chat.input_queue.startup_submission.is_none());
+        assert!(chat.input_queue_frontend.startup_submission.is_none());
         assert_no_submit_op(&mut op_rx);
     }
 }
@@ -151,14 +151,24 @@ async fn voice_shortcut_cancels_startup_submission_before_app_dispatch() -> colo
         .set_composer_text(String::new(), Vec::new(), Vec::new());
     app.chat_widget
         .restore_startup_input_when_ready(&mut draft, &mut true);
-    assert!(app.chat_widget.input_queue.startup_submission.is_some());
+    assert!(
+        app.chat_widget
+            .input_queue_frontend
+            .startup_submission
+            .is_some()
+    );
     app.handle_tui_event(
         &mut tui,
         &mut server,
         crate::tui::TuiEvent::Key(KeyCode::F(8).into()),
     )
     .await?;
-    assert!(app.chat_widget.input_queue.startup_submission.is_none());
+    assert!(
+        app.chat_widget
+            .input_queue_frontend
+            .startup_submission
+            .is_none()
+    );
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "confirmed draft"

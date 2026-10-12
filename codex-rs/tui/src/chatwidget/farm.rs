@@ -47,8 +47,8 @@ impl FarmSubmission {
 
 impl ThreadInputState {
     pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
-        if draft.origin == FarmDraftOrigin::Composer
-            && self.composer.as_ref() == Some(&draft.composer)
+        if let Some(composer) = self.composer.as_mut()
+            && draft.clear_unchanged(composer)
         {
             self.composer = None;
         }
@@ -90,9 +90,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn clear_farm_draft(&mut self, draft: &FarmDraft) {
-        if draft.origin == FarmDraftOrigin::Composer && self.farm_draft().composer == draft.composer
-        {
-            self.restore_composer_state(ThreadComposerState::default());
+        let mut composer = self.farm_draft().composer;
+        if draft.clear_unchanged(&mut composer) {
+            self.restore_composer_state(composer);
         }
         self.request_redraw();
     }
@@ -259,5 +259,15 @@ impl ChatWidget {
             ..Default::default()
         });
         self.request_redraw();
+    }
+}
+
+impl FarmDraft {
+    fn clear_unchanged(&self, composer: &mut ThreadComposerState) -> bool {
+        if self.origin != FarmDraftOrigin::Composer || *composer != self.composer {
+            return false;
+        }
+        *composer = ThreadComposerState::default();
+        true
     }
 }

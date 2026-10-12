@@ -582,7 +582,7 @@ impl ChatWidget {
                     {
                         self.last_non_retry_error = None;
                         if replay_kind.is_none() {
-                            if !self.input_queue.user_turn_pending_start {
+                            if !self.input_queue.turn.is_pending() {
                                 self.update_task_running_state();
                             }
                             self.maybe_send_next_queued_input();

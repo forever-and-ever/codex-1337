@@ -23,7 +23,8 @@ impl ChatWidget {
                 self.user_message_from_submission(format!("/{}", command.command()), Vec::new());
             self.restore_user_message_to_composer(message);
         }
-        self.input_queue.startup_submission = Some(self.bottom_pane.composer_draft_snapshot());
+        self.input_queue_frontend.startup_submission =
+            Some(self.bottom_pane.composer_draft_snapshot());
         self.request_draft_session();
         true
     }

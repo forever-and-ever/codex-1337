@@ -22,22 +22,22 @@ impl ChatWidget {
                 .is_none_or(|q| q.unanswered_count() == 0)
             && !self.input_queue.has_queued_follow_up_messages()
             && self.input_queue.pending_steer.is_none()
-            && self.input_queue.pending_steer_replacement.is_none()
+            && self.input_queue.pending_steer.replacement().is_none()
             && !self.input_queue.rate_limit_recovery_pending
-            && !self.input_queue.submit_pending_steer_after_interrupt
+            && self.input_queue.pending_steer.interrupt()
+                != input_queue::SteerInterrupt::SubmitAsTurn
     }
 }
 
 impl ThreadInputState {
     pub(crate) fn has_unsent_input(&self) -> bool {
         self.composer.is_some()
-            || self.questions.as_ref().is_some_and(|q| q.unanswered_count() != 0)
-            || self.pending_steer.is_some()
-            || !self.rejected_steers_queue.is_empty()
-            || !self.queued_user_messages.is_empty()
-            // safety_buffering_prompt also retains already accepted input after
-            // completion; only an unacknowledged submission is irreplaceable.
-            || self.user_turn_pending_start
-            || self.submit_pending_steer_after_interrupt
+            || self
+                .questions
+                .as_ref()
+                .is_some_and(|q| q.unanswered_count() != 0)
+            || self.input_queue.pending_steer.is_some()
+            || self.input_queue.has_queued_follow_up_messages()
+            || self.input_queue.turn.is_pending()
     }
 }

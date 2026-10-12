@@ -31,7 +31,7 @@ async fn accepted_question_answer_uses_existing_delivery_and_keeps_main_draft() 
         chat.thread_id = Some(ThreadId::new());
         chat.bottom_pane
             .set_composer_text("main draft".into(), Vec::new(), Vec::new());
-        chat.input_queue.suppress_queue_autosend = queued;
+        chat.input_queue_frontend.suppress_queue_autosend = queued;
         chat.add_async_questions("message", &questions());
         chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
         chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
@@ -291,14 +291,14 @@ async fn queued_prompt_clears_questions_arriving_after_enqueue_when_it_starts() 
 async fn queued_question_answer_preserves_other_questions_on_delivery() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
-    chat.input_queue.suppress_queue_autosend = true;
+    chat.input_queue_frontend.suppress_queue_autosend = true;
     chat.add_async_questions("old", &questions());
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
     chat.bottom_pane.handle_paste("answer".into());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_eq!(question_count(&chat), 1);
 
-    chat.input_queue.suppress_queue_autosend = false;
+    chat.input_queue_frontend.suppress_queue_autosend = false;
     assert!(chat.maybe_send_next_queued_input());
     assert_answer(op_rx.try_recv().unwrap(), "> Which way?\n\nanswer");
     assert_eq!(question_count(&chat), 1);
@@ -349,7 +349,7 @@ async fn slash_and_mode_prompts_clear_unanswered_questions_after_delivery() {
     assert_answer(op_rx.try_recv().unwrap(), "New plan");
     assert_eq!(question_count(&chat), 0);
 
-    chat.input_queue.user_turn_pending_start = false;
+    chat.input_queue.turn.started();
     chat.add_async_questions("next", &questions());
     let mode = collaboration_modes::default_mask(chat.model_catalog.as_ref()).unwrap();
     chat.submit_user_message_with_mode("Implement".to_string(), mode);
@@ -1109,7 +1109,7 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
             render_bottom_popup(&chat, /*width*/ 80)
         );
         chat.thread_id = Some(ThreadId::new());
-        chat.input_queue.suppress_queue_autosend = true;
+        chat.input_queue_frontend.suppress_queue_autosend = true;
         chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
         assert_eq!(question_count(&chat), 0);
         // Removing the first question must not renumber the surviving question's identity.

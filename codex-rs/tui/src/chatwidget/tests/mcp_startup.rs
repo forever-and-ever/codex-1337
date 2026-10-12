@@ -279,7 +279,7 @@ async fn review_during_mcp_startup_preserves_draft_when_foreground_work_is_pendi
             match activity {
                 "turn" => handle_turn_started(&mut chat, "turn-1"),
                 "review" => chat.review.is_review_mode = true,
-                "pending" => chat.input_queue.user_turn_pending_start = true,
+                "pending" => chat.input_queue.turn.is_pending() = true,
                 "images" => chat.prepare_image_submission(
                     "image prompt".into(),
                     UserMessageHistoryRecord::UserMessageText,
@@ -342,7 +342,7 @@ async fn pending_mcp_startup_does_not_block_queued_follow_up() {
 
     chat.finish_mcp_startup(Vec::new(), Vec::new());
 
-    assert!(chat.input_queue.user_turn_pending_start);
+    assert!(chat.input_queue.turn.is_pending());
 }
 
 #[tokio::test]

@@ -1817,7 +1817,9 @@ impl App {
             .input_state
             .as_ref()
             .is_some_and(|input| {
-                input.recovered_queue || input.reconnect_pending || input.has_unconfirmed_messages()
+                input.input_queue.recovered_queue
+                    || input.reconnect_pending
+                    || input.has_unconfirmed_messages()
             })
             .then(|| snapshot.input_state.take())
             .flatten();

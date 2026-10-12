@@ -103,11 +103,9 @@ impl ChatWidget {
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source: pending.source,
+                    history_record: pending.history_record,
                     ..QueuedUserMessage::new(pending.message, QueuedInputAction::Literal)
                 });
-            self.input_queue
-                .queued_user_message_history_records
-                .push_front(pending.history_record);
             self.refresh_pending_input_preview();
             self.request_redraw();
         }

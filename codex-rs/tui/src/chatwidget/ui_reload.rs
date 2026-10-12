@@ -9,11 +9,12 @@ impl ChatWidget {
             && self.session_draft != Some(SessionDraft::Starting)
             && self.external_editor_state == ExternalEditorState::Closed
             && self.pending_image_submission.is_none()
-            && self.input_queue.pending_steer_replacement.is_none()
+            && self.input_queue.pending_steer.replacement().is_none()
             && !self.input_queue.rate_limit_recovery_pending
-            && self.input_queue.startup_submission.is_none()
-            && !self.input_queue.user_turn_pending_start
-            && !self.input_queue.submit_pending_steer_after_interrupt
+            && self.input_queue_frontend.startup_submission.is_none()
+            && !self.input_queue.turn.is_pending()
+            && self.input_queue.pending_steer.interrupt()
+                != input_queue::SteerInterrupt::SubmitAsTurn
             && !self.may_receive_realtime_transcripts()
             && !self.realtime_retry_cleanup_pending()
     }

@@ -88,8 +88,12 @@ impl ChatWidget {
     pub(crate) fn prepare_safety_buffered_retry_submission(&mut self, prompt: UserMessage) {
         self.last_rendered_user_message_display = None;
         self.finalize_turn();
-        self.safety_buffering_prompt = Some(prompt);
-        self.input_queue.user_turn_pending_start = true;
+        self.input_queue.turn = input_queue::UserTurnInput::AwaitingStart(
+            input_queue::PendingTurnStart::PreparedRetry {
+                message: prompt,
+                source: UserMessageSource::Prompt,
+            },
+        );
     }
 
     pub(crate) fn commit_safety_buffered_retry_submission(&mut self, display: UserMessageDisplay) {
@@ -97,7 +101,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn cancel_safety_buffered_retry_submission(&mut self) {
-        self.input_queue.user_turn_pending_start = false;
+        self.input_queue.turn = input_queue::UserTurnInput::Idle;
         self.clear_safety_buffering();
     }
 
@@ -150,7 +154,7 @@ impl ChatWidget {
                 .map(|(_, turn)| turn.clone())
         };
         let thread_id = self.thread_id;
-        let retry_prompt = self.safety_buffering_prompt.clone();
+        let retry_prompt = self.input_queue.turn.prompt().cloned();
         let can_offer_retry = faster_model.is_some()
             && retry_turn.is_some()
             && retry_prompt.is_some()

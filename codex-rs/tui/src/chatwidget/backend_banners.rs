@@ -216,19 +216,11 @@ impl ChatWidget {
         if !self.waiting_for_luna_reserve() {
             return false;
         }
-        if self.input_queue.user_turn_pending_start
-            && let Some(prompt) = self.safety_buffering_prompt.take()
+        if self.input_queue.turn.is_pending()
+            && let Some(message) = std::mem::take(&mut self.input_queue.turn).into_queued(false)
         {
             self.finalize_turn();
-            self.input_queue
-                .queued_user_messages
-                .push_front(QueuedUserMessage {
-                    source: self.safety_buffering_source,
-                    ..QueuedUserMessage::from(prompt)
-                });
-            self.input_queue
-                .queued_user_message_history_records
-                .push_front(super::UserMessageHistoryRecord::UserMessageText);
+            self.input_queue.queued_user_messages.push_front(message);
             self.refresh_pending_input_preview();
             return true;
         }

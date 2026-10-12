@@ -604,21 +604,21 @@ async fn queued_inline_rename_does_not_drain_again_before_turn_started() {
         vec!["second after rename"]
     );
     let input_state = chat.capture_thread_input_state().unwrap();
-    assert!(input_state.user_turn_pending_start);
+    assert!(input_state.input_queue.turn.is_pending());
     chat.restore_thread_input_state(
         /*input_state*/ None,
         ThreadInputStateRestoreMode {
             preserve_in_flight_turn: true,
         },
     );
-    assert!(!chat.input_queue.user_turn_pending_start);
+    assert!(!chat.input_queue.turn.is_pending());
     chat.restore_thread_input_state(
         Some(input_state),
         ThreadInputStateRestoreMode {
             preserve_in_flight_turn: true,
         },
     );
-    assert!(chat.input_queue.user_turn_pending_start);
+    assert!(chat.input_queue.turn.is_pending());
     assert_eq!(
         chat.queued_user_message_texts(),
         vec!["second after rename"]
@@ -3331,9 +3331,9 @@ async fn slash_cd_rejects_pending_input_and_unsupported_session_ownership() {
         let (queued, steer) = (UserMessage::from("q").into(), pending_steer("s"));
         match state {
             "active" => chat.bottom_pane.set_task_running(/*running*/ true),
-            "pending" => chat.input_queue.user_turn_pending_start = true,
+            "pending" => chat.input_queue.turn.is_pending() = true,
             "queued" => chat.input_queue.queued_user_messages.push_back(queued),
-            "steer" => chat.input_queue.pending_steer = Some(steer),
+            "steer" => chat.input_queue.pending_steer.set(Some(steer)),
             "side" => chat.set_side_conversation_active(/*active*/ true),
             "owned" => chat.set_parent_owned_thread(),
             "ephemeral" => chat.config.ephemeral = true,

@@ -36,15 +36,14 @@ mod tests;
 
 impl ChatWidget {
     pub(crate) fn update_server_queue(&mut self, items: Vec<QueuedSubmission>, busy: bool) {
-        self.input_queue.server_messages = items;
-        self.input_queue.server_queue_busy = busy;
+        self.input_queue_frontend.server_previews = server_queue_previews(&items, busy);
+        self.input_queue_frontend.server_messages = items;
         self.refresh_pending_input_preview();
     }
 
     pub(crate) fn finish_server_queue_removal(&mut self, id: &str, result: &Result<bool, String>) {
-        self.input_queue.server_queue_busy = false;
         if result.is_ok() {
-            self.input_queue
+            self.input_queue_frontend
                 .server_messages
                 .retain(|item| item.id != id);
         }
@@ -54,36 +53,13 @@ impl ChatWidget {
                 /*hint*/ None,
             );
         }
+        self.input_queue_frontend.server_previews =
+            server_queue_previews(&self.input_queue_frontend.server_messages, false);
         self.refresh_pending_input_preview();
     }
 
     pub(super) fn server_queue_previews(&self) -> impl Iterator<Item = String> + '_ {
-        self.input_queue.server_messages.iter().map(|item| {
-            let text = queued_message_text(item).unwrap_or_else(|| "[queued attachment]".into());
-            let sender = item
-                .tool_output
-                .as_ref()
-                .and_then(|output| {
-                    crate::dynamic_tools::DelegatedMessage::from_tool_output(
-                        &output.name,
-                        output.namespace.as_deref(),
-                        &output.output,
-                    )
-                })
-                .map(|message| {
-                    message
-                        .source_thread_name
-                        .unwrap_or(message.source_thread_id)
-                });
-            let text =
-                sender.map_or_else(|| text.clone(), |sender| format!("From {sender}: {text}"));
-            let text = history_cell::sanitize_user_text(text.into()).into_owned();
-            if self.input_queue.server_queue_busy {
-                format!("Updating… {text}")
-            } else {
-                text
-            }
-        })
+        self.input_queue_frontend.server_previews.iter().cloned()
     }
 
     pub(super) fn handle_queued_message_key(&mut self, key: KeyEvent) -> bool {
@@ -114,16 +90,13 @@ impl ChatWidget {
         if self.edit_waiting_submission(action) {
             return true;
         }
-        let Some(item) = self.input_queue.server_messages.last().cloned() else {
+        let Some(item) = self.input_queue_frontend.server_messages.last().cloned() else {
             if self.explain_sending_submission() {
                 return true;
             }
             // Image preparation retains its attachments in the draft when cancelled.
             return self.cancel_image_submission();
         };
-        if self.input_queue.server_queue_busy {
-            return true;
-        }
         if action == PendingSteerCancelAction::Edit && queued_message_text(&item).is_none() {
             self.add_warning_message(
                 "This queued attachment cannot be edited here; it can still be cancelled.".into(),
@@ -131,8 +104,6 @@ impl ChatWidget {
             return true;
         }
         if let Some(thread_id) = self.thread_id() {
-            self.input_queue.server_queue_busy = true;
-            self.refresh_pending_input_preview();
             self.app_event_tx.send(AppEvent::Queue(QueueEvent::Remove {
                 thread_id,
                 item,
@@ -140,5 +111,45 @@ impl ChatWidget {
             }));
         }
         true
+    }
+}
+
+pub(crate) fn server_queue_previews(items: &[QueuedSubmission], busy: bool) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| {
+            let text = queued_message_text(item).unwrap_or_else(|| "[queued attachment]".into());
+            let sender = item
+                .tool_output
+                .as_ref()
+                .and_then(|output| {
+                    crate::dynamic_tools::DelegatedMessage::from_tool_output(
+                        &output.name,
+                        output.namespace.as_deref(),
+                        &output.output,
+                    )
+                })
+                .map(|message| {
+                    message
+                        .source_thread_name
+                        .unwrap_or(message.source_thread_id)
+                });
+            let text =
+                sender.map_or_else(|| text.clone(), |sender| format!("From {sender}: {text}"));
+            let text = history_cell::sanitize_user_text(text.into()).into_owned();
+            if busy {
+                format!("Updating… {text}")
+            } else {
+                text
+            }
+        })
+        .collect()
+}
+
+impl ChatWidget {
+    pub(crate) fn project_server_queue_mutation(&mut self, busy: bool) {
+        self.input_queue_frontend.server_previews =
+            server_queue_previews(&self.input_queue_frontend.server_messages, busy);
+        self.refresh_pending_input_preview();
     }
 }

@@ -99,9 +99,46 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     )
     .await?;
     while events.try_recv().is_ok() {}
+    let rich_inputs = |text: &str| {
+        vec![
+            codex_app_server_protocol::UserInput::Text {
+                text: text.into(),
+                text_elements: vec![
+                    codex_protocol::user_input::TextElement::new(
+                        codex_protocol::user_input::ByteRange {
+                            start: 0,
+                            end: text.len(),
+                        },
+                        None,
+                    )
+                    .into(),
+                ],
+            },
+            codex_app_server_protocol::UserInput::LocalImage {
+                path: "queue-image.png".into(),
+                detail: None,
+            },
+            codex_app_server_protocol::UserInput::Image {
+                image: codex_app_server_protocol::ImageReference::Inline {
+                    url: "data:image/png;base64,cXVldWU=".into(),
+                },
+                detail: None,
+            },
+        ]
+    };
+    let recovered_message = |app: &mut App| {
+        let input = serde_json::to_value(app.chat_widget.capture_thread_input_state()).unwrap();
+        serde_json::from_value::<UserMessage>(input["composer"].clone()).unwrap()
+    };
+    let rich_prompt = ChatWidget::submission_draft_from_inputs(
+        "fixture".into(),
+        &rich_inputs("stalled ordinary prompt"),
+    )
+    .message;
+    app.chat_widget.snapshot_local_images = false;
     let first = app
         .chat_widget
-        .submit_user_message_as_plain_user_turn(UserMessage::from("stalled ordinary prompt"))
+        .submit_user_message_as_plain_user_turn(rich_prompt.clone())
         .expect("submit ordinary prompt");
     // This failed against the synchronous routing: no subsequent App event could be serviced.
     tokio::time::timeout(
@@ -223,6 +260,9 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         )
         .await?;
         assert_eq!(app.chat_widget.composer_text_with_pending(), expected);
+        if expected == "stalled ordinary prompt" {
+            assert_eq!(recovered_message(&mut app), rich_prompt);
+        }
     }
     assert_eq!(recorded_params(&requests, "turn/start").len(), 1);
     assert!(recorded_params(&requests, "turn/steer").is_empty());
@@ -231,15 +271,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // A reconnect retires the original thread's lane even after its widget was replaced.
     app.chat_widget.apply_external_edit("original draft".into());
     for text in ["disconnected send", "queued after disconnect"] {
-        app.enqueue_subagent_turn(
-            &server,
-            thread_id,
-            None,
-            vec![codex_app_server_protocol::UserInput::Text {
-                text: text.into(),
-                text_elements: Vec::new(),
-            }],
-        );
+        app.enqueue_subagent_turn(&server, thread_id, None, rich_inputs(text));
     }
     tokio::time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/start").len() < 2 {
@@ -301,6 +333,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         )
         .await?;
         assert_eq!(app.chat_widget.composer_text_with_pending(), expected);
+        let rich =
+            ChatWidget::submission_draft_from_inputs("fixture".into(), &rich_inputs(expected))
+                .message;
+        assert_eq!(recovered_message(&mut app), rich);
     }
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     server.shutdown().await?;

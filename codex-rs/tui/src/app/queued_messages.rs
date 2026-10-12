@@ -147,6 +147,9 @@ impl App {
                 self.queued_messages
                     .mutations
                     .insert(thread_id, QueueMutation { item, action });
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.chat_widget.project_server_queue_mutation(true);
+                }
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
                 tokio::spawn(async move {

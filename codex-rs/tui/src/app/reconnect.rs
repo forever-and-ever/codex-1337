@@ -296,7 +296,9 @@ impl App {
         let restoring_draft = self.chat_widget.session_draft.is_some();
         self.handle_submission_event(super::turn_submissions::SubmissionEvent::Retire)
             .await;
-        for (thread_id, item) in self.queued_messages.retire() {
+        let queued_edits = self.queued_messages.retire();
+        self.chat_widget.project_server_queue_mutation(false);
+        for (thread_id, item) in queued_edits {
             self.restore_queued_edit(thread_id, item).await;
         }
         let mut input = self.chat_widget.capture_thread_input_state();

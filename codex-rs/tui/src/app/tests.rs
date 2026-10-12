@@ -1657,11 +1657,10 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
         .capture_thread_input_state()
         .expect("expected queued follow-up state");
     let client_id = input_state
-        .pending_steer
-        .as_ref()
+        .input_queue
+        .pending_steer_client_id()
         .unwrap()
-        .client_id
-        .clone();
+        .to_owned();
     input_state.reconnect_pending = true;
 
     let (chat_widget, _app_event_tx, _rx, mut new_op_rx) =

@@ -225,6 +225,7 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
                 !app.chat_widget
                     .capture_thread_input_state()
                     .unwrap()
+                    .input_queue
                     .recovered_queue
             );
         }

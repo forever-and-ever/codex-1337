@@ -248,7 +248,9 @@ async fn question_turn_end_recovers_after_interruption_restores_queued_input() {
         chat.input_queue
             .queued_user_messages
             .push_back(UserMessage::from("queued prompt").into());
-        chat.input_queue.pending_steer = Some(pending_steer("pending steer"));
+        chat.input_queue
+            .pending_steer
+            .set(Some(pending_steer("pending steer")));
         handle_turn_interrupted(&mut chat, "turn");
         if !matches!(main_input, MainInput::BufferedTyping) {
             assert_eq!(chat.bottom_pane.composer_text(), "earlier prompt");

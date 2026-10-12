@@ -30,6 +30,7 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
     // Removal must be acknowledged before the incoming message becomes a draft.
     assert_eq!(chat.composer_text_with_pending(), "unfinished prompt");
+    // The widget emits intents; App's mutation owner admits only one operation.
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
     let actions = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
@@ -43,7 +44,10 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         .collect::<Vec<_>>();
     assert_eq!(
         actions,
-        vec![(thread_id, item.id.clone(), PendingSteerCancelAction::Edit)]
+        vec![
+            (thread_id, item.id.clone(), PendingSteerCancelAction::Edit),
+            (thread_id, item.id.clone(), PendingSteerCancelAction::Remove),
+        ]
     );
     chat.finish_server_queue_removal(&item.id, &Ok(true));
     chat.restore_user_message_to_composer(UserMessage::from(queued_message_text(&item).unwrap()));
@@ -51,5 +55,5 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         chat.composer_text_with_pending(),
         "Check the service after your current turn.\nunfinished prompt"
     );
-    assert!(chat.input_queue.server_messages.is_empty());
+    assert!(chat.input_queue_frontend.server_messages.is_empty());
 }

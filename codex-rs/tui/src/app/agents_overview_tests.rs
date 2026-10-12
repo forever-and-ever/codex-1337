@@ -2690,7 +2690,7 @@ async fn resume_picker_round_trip_preserves_each_threads_input() -> Result<()> {
                 .apply_external_edit(format!("Draft for {}", target.thread_id));
             let mut input_state = app.chat_widget.capture_thread_input_state().unwrap();
             // Recovered follow-ups stay paused until the user explicitly submits them.
-            input_state.recovered_queue = true;
+            input_state.input_queue.recovered_queue = true;
             app.chat_widget.restore_thread_input_state(
                 Some(input_state),
                 crate::chatwidget::ThreadInputStateRestoreMode {

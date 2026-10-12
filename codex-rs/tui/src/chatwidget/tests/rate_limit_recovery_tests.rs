@@ -51,7 +51,7 @@ async fn rate_limit_recovery_preserves_settings_hold_and_clears_on_account_chang
     chat.queue_user_message(UserMessage::from("queued follow-up"));
     chat.finish_rate_limit_recovery();
     assert_no_submit_op(&mut ops);
-    assert!(chat.input_queue.suppress_queue_autosend);
+    assert!(chat.input_queue_frontend.suppress_queue_autosend);
     assert!(!chat.input_queue.rate_limit_recovery_pending);
 
     chat.on_rate_limit_error(RateLimitErrorKind::UsageLimit, "Usage exhausted".into());

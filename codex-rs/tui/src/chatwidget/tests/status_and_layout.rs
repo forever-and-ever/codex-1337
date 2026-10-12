@@ -2544,7 +2544,7 @@ async fn final_answer_completion_restores_status_indicator_for_pending_steer() {
     );
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    assert_eq!(chat.input_queue.pending_steer.iter().count(), 1);
+    assert!(chat.input_queue.pending_steer.is_some());
     let items = match next_submit_op(&mut op_rx) {
         Op::UserTurn { items, .. } => items,
         other => panic!("expected Op::UserTurn, got {other:?}"),

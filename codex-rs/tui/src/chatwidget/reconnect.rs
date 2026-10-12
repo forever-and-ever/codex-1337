@@ -24,7 +24,7 @@ impl ChatWidget {
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.delivery_enabled = false;
         }
-        self.input_queue.suppress_queue_autosend = true;
+        self.input_queue_frontend.suppress_queue_autosend = true;
         self.set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         if let Some(message) = self.initial_user_message.take() {
             self.restore_user_message_to_composer(message);
@@ -51,26 +51,13 @@ impl ChatWidget {
             // Navigation can continue an unresolved recovery while new steers are in flight.
             input.reconnect_pending |= input.has_unconfirmed_messages();
             // Pending compact/review requests have no message receipt to reconcile.
-            input.recovered_queue |=
-                input.user_turn_pending_start && input.safety_buffering_prompt.is_none();
-            // Only an exact submission ID confirms receipt; missing or legacy history
-            // must never cause us to retry an already submitted message automatically.
-            if input.user_turn_pending_start
-                && let Some(prompt) = input.safety_buffering_prompt.take()
+            input.input_queue.recovered_queue |= input.input_queue.turn.is_pending()
+                && (input.input_queue.turn.prompt().is_none() || !input.reconnect_pending);
+            if input.input_queue.turn.is_pending()
+                && let Some(message) =
+                    std::mem::take(&mut input.input_queue.turn).into_queued(input.reconnect_pending)
             {
-                input.queued_user_messages.push_front(QueuedUserMessage {
-                    source: input.safety_buffering_source,
-                    delivery: if input.reconnect_pending {
-                        MessageDelivery::Unconfirmed(input.pending_user_message_client_id.take())
-                    } else {
-                        MessageDelivery::Unsent
-                    },
-                    ..QueuedUserMessage::from(prompt)
-                });
-                input
-                    .queued_user_message_history_records
-                    .push_front(UserMessageHistoryRecord::UserMessageText);
-                input.recovered_queue |= !input.reconnect_pending;
+                input.input_queue.queued_user_messages.push_front(message);
             }
             input.current_collaboration_mode = self.current_collaboration_mode.clone();
             // Keep the local selection for older servers. Replay reapplies a supplied mode.
@@ -110,18 +97,9 @@ impl ChatWidget {
     }
 
     pub(super) fn reconcile_recovered_messages(&mut self, confirmed_message_ids: &[String]) {
-        let mut index = 0;
         self.input_queue.queued_user_messages.retain(|message| {
-            let confirmed = matches!(&message.delivery,
-                MessageDelivery::Unconfirmed(Some(id)) if confirmed_message_ids.contains(id));
-            if confirmed {
-                self.input_queue
-                    .queued_user_message_history_records
-                    .remove(index);
-            } else {
-                index += 1;
-            }
-            !confirmed
+            !matches!(&message.delivery,
+        MessageDelivery::Unconfirmed(Some(id)) if confirmed_message_ids.contains(id))
         });
         self.refresh_pending_input_preview();
     }
@@ -130,28 +108,15 @@ impl ChatWidget {
         if let Some(questions) = &mut self.bottom_pane.questions {
             questions.delivery_enabled = false;
         }
-        self.turn_lifecycle
-            .restore_running(/*running*/ false, Instant::now());
-        // Cached activity must not keep recovery commands blocked on an unavailable thread.
+        self.turn_lifecycle.restore_running(false, Instant::now());
         self.review.is_review_mode = false;
         self.mcp_startup_status = None;
-        if self.input_queue.user_turn_pending_start
-            && let Some(prompt) = self.safety_buffering_prompt.take()
+        if self.input_queue.turn.is_pending()
+            && let Some(message) = std::mem::take(&mut self.input_queue.turn).into_queued(true)
         {
-            self.input_queue
-                .queued_user_messages
-                .push_front(QueuedUserMessage {
-                    source: self.safety_buffering_source,
-                    delivery: MessageDelivery::Unconfirmed(
-                        self.input_queue.pending_user_message_client_id.clone(),
-                    ),
-                    ..QueuedUserMessage::from(prompt)
-                });
-            self.input_queue
-                .queued_user_message_history_records
-                .push_front(UserMessageHistoryRecord::UserMessageText);
+            self.input_queue.queued_user_messages.push_front(message);
         }
-        self.input_queue.user_turn_pending_start = false;
+        self.input_queue.turn = input_queue::UserTurnInput::Idle;
         self.input_queue.recovered_queue = true;
         self.update_task_running_state();
         self.refresh_pending_input_preview();
