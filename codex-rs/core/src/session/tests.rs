@@ -1207,7 +1207,7 @@ async fn refresh_runtime_config_refreshes_hooks() -> anyhow::Result<()> {
         let identity = NormalizedHookIdentity {
             event_name: "session_start",
             group: codex_config::MatcherGroup {
-                matcher: None,
+                selector: None,
                 hooks: vec![codex_config::HookHandlerConfig::Command {
                     command: "python3 /tmp/user.py".to_string(),
                     command_windows: None,

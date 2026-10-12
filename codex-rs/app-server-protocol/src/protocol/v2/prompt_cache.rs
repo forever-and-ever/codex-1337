@@ -19,6 +19,7 @@ pub enum PromptCacheEstimate {
     },
     /// Not confidently warm, including absent evidence or unestablished retention.
     /// This is not a claim that the provider evicted its cache.
+    #[serde(alias = "unknown")]
     Cold,
 }
 

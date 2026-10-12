@@ -222,6 +222,8 @@ async fn to_extension_call<'a>(
 
 #[cfg(test)]
 mod tests {
+    use codex_tools::ToolName;
+
     use std::sync::Arc;
 
     use codex_extension_items::ExtensionItem;
