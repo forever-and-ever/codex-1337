@@ -612,7 +612,14 @@ async fn native_regular_replay_profiles(
                 }
             })
             .collect::<Vec<_>>();
-        assert_eq!(discarded.len(), retried_ids.len());
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(
+            discarded.len(),
+            retried_ids.len(),
+            "native retry lifecycle: terminal={:?}, provider POSTs={}",
+            observed.last(),
+            requests.len(),
+        );
         for ((position, ids), attempt) in discarded.iter().zip(&retried_ids) {
             let expected = vec![format!("{attempt}_0"), format!("{attempt}_1")];
             assert_eq!(
@@ -652,7 +659,6 @@ async fn native_regular_replay_profiles(
             unreachable!("loop stops at turn completion");
         };
         assert_eq!(completed.error.is_none(), expected_success);
-        let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), expected_requests);
         let bodies = requests
             .iter()
