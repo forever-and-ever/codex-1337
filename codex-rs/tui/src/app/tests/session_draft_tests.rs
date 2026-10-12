@@ -162,6 +162,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         app.restore_parked_session_draft(&mut tui, &mut server)
             .await?
     );
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert_eq!(
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
