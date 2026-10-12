@@ -89,9 +89,24 @@ impl CompactionContinuation {
                         });
                     }
                 }
-                ResponseItem::FunctionCall { call_id, .. }
-                | ResponseItem::CustomToolCall { call_id, .. } => {
-                    calls.insert(call_id.as_str(), item);
+                ResponseItem::FunctionCall {
+                    call_id,
+                    name,
+                    namespace,
+                    arguments: input,
+                    ..
+                }
+                | ResponseItem::CustomToolCall {
+                    call_id,
+                    name,
+                    namespace,
+                    input,
+                    ..
+                } => {
+                    calls.insert(
+                        call_id.as_str(),
+                        (ToolName::new(namespace.clone(), name.clone()), input),
+                    );
                 }
                 ResponseItem::FunctionCallOutput {
                     call_id: Some(call_id),
@@ -101,23 +116,8 @@ impl CompactionContinuation {
                 | ResponseItem::CustomToolCallOutput {
                     call_id, output, ..
                 } => {
-                    let Some(call) = calls.remove(call_id.as_str()) else {
+                    let Some((tool, input)) = calls.remove(call_id.as_str()) else {
                         continue;
-                    };
-                    let (name, namespace, input) = match call {
-                        ResponseItem::FunctionCall {
-                            name,
-                            namespace,
-                            arguments,
-                            ..
-                        } => (name, namespace, arguments),
-                        ResponseItem::CustomToolCall {
-                            name,
-                            namespace,
-                            input,
-                            ..
-                        } => (name, namespace, input),
-                        _ => unreachable!("only textual tool invocations enter the receipt map"),
                     };
                     let Some(text) = output.text_content() else {
                         continue;
@@ -128,7 +128,7 @@ impl CompactionContinuation {
                     }
                     continuation.push(Observation::ToolReceipt {
                         call_id: call_id.clone(),
-                        tool: ToolName::new(namespace.clone(), name.clone()),
+                        tool,
                         input: input.clone(),
                         output: text.to_owned(),
                         success: output.success,
@@ -140,6 +140,10 @@ impl CompactionContinuation {
         continuation
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "host-authenticated continuation corruption must fail rather than silently erase handling evidence"
+    )]
     fn read(item: &ResponseItem) -> Option<Self> {
         let ResponseItem::Message {
             role,
@@ -203,6 +207,10 @@ impl CompactionContinuation {
         (!self.0.is_empty()).then(|| ContextualUserFragment::into(self))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "closed textual observations cannot fail JSON serialization"
+    )]
     fn record(&self) -> String {
         serde_json::to_string(&self.0).expect("continuation observations serialize")
     }
@@ -233,6 +241,10 @@ impl ContextualUserFragment for CompactionContinuation {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "UTF-8 strings cannot fail JSON serialization"
+)]
 fn complete_text(content: &[ContentItem]) -> Option<String> {
     let mut text = String::new();
     for item in content {
