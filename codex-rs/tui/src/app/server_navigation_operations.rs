@@ -192,12 +192,18 @@ impl App {
     }
 
     #[cfg(test)]
-    pub(in crate::app) fn pending_navigation_order(&self) -> Option<(u64, u64)> {
+    pub(in crate::app) fn pending_navigation_admission(&self) -> Option<(u64, u64, bool)> {
         self.server_operations
             .navigation
             .current
             .as_ref()
-            .map(|operation| (operation.order, operation.epoch))
+            .map(|operation| {
+                (
+                    operation.order,
+                    operation.epoch,
+                    matches!(operation.state, LaneState::Queued),
+                )
+            })
     }
 
     fn recovery_draft(message: UserMessage) -> SubmissionDraft {

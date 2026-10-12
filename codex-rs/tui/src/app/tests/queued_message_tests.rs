@@ -738,8 +738,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     };
     app.select_agent_thread(&mut tui, &mut server, acquisition_x)
         .await?;
-    let (order, epoch) = app
-        .pending_navigation_order()
+    let (order, epoch, _) = app
+        .pending_navigation_admission()
         .expect("admitted acquisition");
     assert!(order > epoch);
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -787,6 +787,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     app.select_agent_thread(&mut tui, &mut server, acquisition_x)
         .await?;
+    let (order, epoch, queued) = app
+        .pending_navigation_admission()
+        .expect("same-target successor remains admitted");
+    assert!(order > epoch);
+    assert!(
+        queued,
+        "retired same-target acquisition must fence dispatch, not merely await worker polling"
+    );
     assert_eq!(resumes_for(acquisition_x), 1);
     assert_eq!(
         recorded_params(&requests, "thread/read")
