@@ -692,6 +692,7 @@ mod tests {
     use codex_config::WindowsRequirementsToml;
     use codex_config::sandbox_mode_requirement_for_permission_profile;
     use codex_config::types::FeedbackConfigToml;
+    use codex_protocol::HookSelector;
     use codex_protocol::config_types::ApprovalsReviewer;
     use codex_protocol::config_types::WebSearchMode;
     use codex_protocol::models::PermissionProfile;
@@ -1387,7 +1388,10 @@ approval_policy = "never"
                     windows_managed_dir: Some(std::path::PathBuf::from(r"C:\enterprise\hooks")),
                     hooks: HookEventsToml {
                         pre_tool_use: vec![MatcherGroup {
-                            matcher: Some("^Bash$".to_string()),
+                            selector: Some(HookSelector::Tool {
+                                namespace: Some("^functions$".to_string()),
+                                name: Some("^exec_command$".to_string()),
+                            }),
                             hooks: vec![HookHandlerConfig::Command {
                                 command: "python3 /enterprise/hooks/pre.py".to_string(),
                                 command_windows: None,

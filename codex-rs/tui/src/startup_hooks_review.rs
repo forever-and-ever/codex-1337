@@ -340,6 +340,7 @@ mod tests {
     use codex_app_server_protocol::HookSource;
     use codex_app_server_protocol::HookTrustStatus;
     use codex_app_server_protocol::HooksListEntry;
+    use codex_protocol::HookSelector;
     use crossterm::event::KeyCode;
     use crossterm::event::KeyEvent;
     use crossterm::event::KeyModifiers;
@@ -358,7 +359,10 @@ mod tests {
                 r#async: false,
             },
             is_managed: false,
-            matcher: Some("Bash".to_string()),
+            selector: Some(HookSelector::Tool {
+                namespace: Some("^functions$".to_string()),
+                name: Some("^exec_command$".to_string()),
+            }),
             timeout_sec: 30,
             status_message: None,
             additional_context_limit: None,

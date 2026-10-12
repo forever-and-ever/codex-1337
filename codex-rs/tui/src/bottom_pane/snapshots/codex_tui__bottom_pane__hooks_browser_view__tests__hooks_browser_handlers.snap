@@ -10,7 +10,8 @@ expression: "render_lines(&view, 112)"
   [ ]  2  Unnamed hook                                                                                          
                                                                                                                 
   Event     PreToolUse                                                                                          
-  Matcher   Bash                                                                                                
+  Tool namespace ^functions$                                                                                    
+  Tool name ^exec_command$                                                                                      
   Source    Plugin - superpowers@openai-curated                                                                 
   Command   ${CODEX_PLUGIN_ROOT}/hooks/pre-tool-use-check.sh                                                    
   Mode      Sync                                                                                                

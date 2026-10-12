@@ -56,7 +56,6 @@ fn first_screen_respects_available_space_without_a_replay_hitbox() {
     }
 }
 
-
 #[test]
 fn loop_closes_and_light_themes_preserve_coverage() {
     let mut renderer = Renderer::default();
