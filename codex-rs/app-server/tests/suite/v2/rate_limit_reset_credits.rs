@@ -40,6 +40,7 @@ async fn consume_rate_limit_reset_credit_requires_chatgpt_auth() -> Result<()> {
     let consume_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                confirmation: None,
                 new_thread: None,
                 thread_id: None,
                 idempotency_key: "request-1".to_string(),
@@ -51,16 +52,26 @@ async fn consume_rate_limit_reset_credit_requires_chatgpt_auth() -> Result<()> {
     assert_eq!(consume_error.error.code, INVALID_REQUEST_ERROR_CODE);
     assert_eq!(
         consume_error.error.message,
-        "codex account authentication required for rate limit reset credits"
+        "Reset confirmation required; read account/rateLimits/read and reconfirm before spending a reset credit."
     );
 
     login_with_api_key(&mut mcp, "sk-test-key").await?;
-    let consume_id = send_consume_reset_credit(&mut mcp, "request-2").await?;
+    let consume_id = mcp
+        .send_consume_account_rate_limit_reset_credit_request(
+            ConsumeAccountRateLimitResetCreditParams {
+                new_thread: None,
+                thread_id: None,
+                idempotency_key: "request-2".into(),
+                credit_id: None,
+                confirmation: None,
+            },
+        )
+        .await?;
     let consume_error = read_error_response(&mut mcp, consume_id).await?;
     assert_eq!(consume_error.error.code, INVALID_REQUEST_ERROR_CODE);
     assert_eq!(
         consume_error.error.message,
-        "chatgpt authentication required for rate limit reset credits"
+        "Reset confirmation required; read account/rateLimits/read and reconfirm before spending a reset credit."
     );
     Ok(())
 }
@@ -140,9 +151,11 @@ async fn consume_account_rate_limit_reset_credit_forwards_selected_credit_id() -
         .await;
 
     let mut mcp = initialized_app_server(codex_home.path()).await?;
+    let confirmation = reset_credit_confirmation(&mut mcp).await?;
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                confirmation: Some(confirmation),
                 new_thread: None,
                 thread_id: None,
                 idempotency_key: "request-selected".to_string(),
@@ -172,6 +185,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_idempotency_key()
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                confirmation: None,
                 new_thread: None,
                 thread_id: None,
                 idempotency_key: String::new(),
@@ -194,6 +208,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_credit_id() -> Re
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                confirmation: None,
                 new_thread: None,
                 thread_id: None,
                 idempotency_key: "request-1".to_string(),
@@ -293,6 +308,22 @@ async fn consume_timeout_releases_account_auth_queue() -> Result<()> {
     Ok(())
 }
 
+async fn reset_credit_confirmation(
+    mcp: &mut TestAppServer,
+) -> Result<codex_app_server_protocol::ResetCreditConfirmation> {
+    let request = mcp
+        .send_request(
+            "account/rateLimits/read",
+            Some(json!({"excludeResetCreditDetails": true})),
+        )
+        .await?;
+    let response: codex_app_server_protocol::GetAccountRateLimitsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request)).await??;
+    response
+        .reset_credit_confirmation
+        .ok_or_else(|| anyhow::anyhow!("missing reset confirmation"))
+}
+
 async fn chatgpt_test_context() -> Result<(TempDir, MockServer)> {
     let codex_home = TempDir::new()?;
     write_chatgpt_auth(
@@ -304,6 +335,17 @@ async fn chatgpt_test_context() -> Result<(TempDir, MockServer)> {
     )?;
     let server = MockServer::start().await;
     write_chatgpt_base_url(codex_home.path(), &server.uri())?;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/usage"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "plan_type": "pro", "rate_limit_reset_credits": {"available_count": 1},
+            "rate_limit": {"allowed": true, "limit_reached": false, "primary_window": {
+                "used_percent": 100, "limit_window_seconds": 18000, "reset_after_seconds": 1800,
+                "reset_at": 2000000000
+            }}
+        })))
+        .mount(&server)
+        .await;
     Ok((codex_home, server))
 }
 
@@ -325,8 +367,10 @@ async fn consume_reset_credit(
 }
 
 async fn send_consume_reset_credit(mcp: &mut TestAppServer, idempotency_key: &str) -> Result<i64> {
+    let confirmation = reset_credit_confirmation(mcp).await?;
     mcp.send_consume_account_rate_limit_reset_credit_request(
         ConsumeAccountRateLimitResetCreditParams {
+            confirmation: Some(confirmation),
             new_thread: None,
             thread_id: None,
             idempotency_key: idempotency_key.to_string(),

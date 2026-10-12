@@ -1719,6 +1719,7 @@ impl App {
                                     "account/rateLimits/read response did not include rateLimitResetCredits"
                                         .to_string()
                                 }),
+                                response.reset_credit_confirmation,
                             );
                         }
                     }
@@ -1764,6 +1765,7 @@ impl App {
                                 request_id,
                                 Vec::new(),
                                 Err(err),
+                                None,
                             );
                         }
                     }
@@ -1804,6 +1806,7 @@ impl App {
             }
             AppEvent::OpenRateLimitResetConfirmation {
                 picker_request_id,
+                confirmation,
                 confirmation_gate,
                 credit_id,
                 reset_title,
@@ -1812,6 +1815,7 @@ impl App {
             } => {
                 self.chat_widget.show_rate_limit_reset_confirmation(
                     picker_request_id,
+                    confirmation,
                     confirmation_gate,
                     credit_id,
                     reset_title,
@@ -1820,6 +1824,7 @@ impl App {
                 );
             }
             AppEvent::ConsumeRateLimitResetCredit {
+                confirmation,
                 idempotency_key,
                 credit_id,
             } => {
@@ -1830,6 +1835,7 @@ impl App {
                     self.consume_rate_limit_reset_credit(
                         app_server,
                         request_id,
+                        confirmation,
                         idempotency_key,
                         credit_id,
                     );
@@ -1837,6 +1843,7 @@ impl App {
             }
             AppEvent::RateLimitResetCreditConsumed {
                 request_id,
+                confirmation,
                 idempotency_key,
                 credit_id,
                 result,
@@ -1848,6 +1855,7 @@ impl App {
                 }
                 if self.chat_widget.finish_rate_limit_reset_consume(
                     request_id,
+                    confirmation,
                     idempotency_key,
                     credit_id,
                     result,

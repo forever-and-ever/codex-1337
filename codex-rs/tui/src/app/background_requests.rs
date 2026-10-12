@@ -191,15 +191,23 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         request_id: u64,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         idempotency_key: String,
         credit_id: Option<String>,
     ) {
-        let thread_id = self.current_displayed_thread_id();
+        let (thread_id, new_thread) = match &confirmation.scope {
+            codex_app_server_protocol::ResetCreditScope::Global => (None, None),
+            codex_app_server_protocol::ResetCreditScope::Thread { thread_id } => {
+                (Some(thread_id.clone()), None)
+            }
+            codex_app_server_protocol::ResetCreditScope::NewThread { params } => {
+                (None, Some(params.clone()))
+            }
+        };
         let params = ConsumeAccountRateLimitResetCreditParams {
-            thread_id: thread_id.map(|id| id.to_string()),
-            new_thread: thread_id
-                .is_none()
-                .then(|| app_server.new_thread_account_params(&self.config)),
+            thread_id,
+            new_thread,
+            confirmation: Some(confirmation.clone()),
             idempotency_key: idempotency_key.clone(),
             credit_id: credit_id.clone(),
         };
@@ -215,6 +223,7 @@ impl App {
             .and_then(|result| result.map_err(|err| err.to_string()));
             app_event_tx.send(AppEvent::RateLimitResetCreditConsumed {
                 request_id,
+                confirmation,
                 idempotency_key,
                 credit_id,
                 result,

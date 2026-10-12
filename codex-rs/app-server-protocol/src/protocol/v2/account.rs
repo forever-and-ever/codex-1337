@@ -355,6 +355,28 @@ pub struct AccountQuotaWindow {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(export_to = "v2/")]
+pub enum ResetCreditScope {
+    Global,
+    Thread { thread_id: String },
+    NewThread { params: NewThreadAccountParams },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ResetCreditConfirmation {
+    /// Opaque server-issued binding to the payer observed during this usage read.
+    pub token: String,
+    pub scope: ResetCreditScope,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsResponse {
@@ -371,6 +393,8 @@ pub struct GetAccountRateLimitsResponse {
     /// Optional backend-owned banner from the same usage read. Its nested keys retain the
     /// backend's snake_case contract; an absent banner leaves the client's existing UI unchanged.
     pub rate_limit_upsell: Option<serde_json::Value>,
+    /// Confirmation required to spend this read's payer's reset credits.
+    pub reset_credit_confirmation: Option<ResetCreditConfirmation>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -443,6 +467,9 @@ pub struct ConsumeAccountRateLimitResetCreditParams {
     /// available credit.
     #[ts(optional = nullable)]
     pub credit_id: Option<String>,
+    /// Reuse the usage read's binding for confirmation and every retry.
+    #[ts(optional = nullable)]
+    pub confirmation: Option<ResetCreditConfirmation>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

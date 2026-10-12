@@ -2680,6 +2680,7 @@ mod tests {
     #[test]
     fn app_server_rate_limit_snapshots_deduplicates_top_level_limit_from_map() {
         let response = GetAccountRateLimitsResponse {
+            reset_credit_confirmation: None,
             ordinary_usage_allowed: None,
             account_id: None,
             rate_limit_upsell: None,
