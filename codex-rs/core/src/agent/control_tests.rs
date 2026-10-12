@@ -99,6 +99,11 @@ use codex_thread_store::LocalThreadStoreConfig;
 use codex_thread_store::PersistContext;
 use codex_thread_store::ThreadStore;
 use codex_utils_path_uri::PathUri;
+use core_test_support::responses::ev_assistant_message;
+use core_test_support::responses::ev_completed;
+use core_test_support::responses::sse;
+use core_test_support::responses::sse_response;
+use core_test_support::responses::start_mock_server;
 use core_test_support::responses::strip_response_item_ids;
 use pretty_assertions::assert_eq;
 use std::future::Future;
@@ -111,6 +116,10 @@ use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use toml::Value as TomlValue;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 impl LocalAgentControl {
     /// Create a child fixture through the production spawn entry point.
@@ -938,18 +947,49 @@ async fn send_input_submits_user_message() {
     wait_for_recorded_user_message(thread.as_ref(), "hello from tests").await;
 }
 
+async fn mail_family_harness() -> (MockServer, AgentControlHarness) {
+    let server = start_mock_server().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(sse_response(sse(vec![
+            ev_assistant_message("family-message", "done"),
+            ev_completed("family-response"),
+        ])))
+        .mount(&server)
+        .await;
+    let (home, mut config) = test_config().await;
+    let _ = config.features.enable(Feature::MultiAgentV2);
+    config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
+    (
+        server,
+        AgentControlHarness::new_with_config(home, config).await,
+    )
+}
+
 #[tokio::test]
 async fn send_inter_agent_communication_without_turn_preserves_message_attribution() {
-    let harness = AgentControlHarness::new().await;
-    let (thread_id, thread) = harness.start_thread().await;
-    harness
-        .control
-        .runtime
-        .registry
-        .register_root_thread(thread_id);
+    let (_server, harness) = mail_family_harness().await;
+    let (root_thread_id, root_thread) = harness.start_thread().await;
+    let control = root_thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(root_thread.session.session_id());
+    let child =
+        spawn_v2_reload_test_child(&control, harness.config.clone(), &root_thread, "worker").await;
+    let thread_id = child.thread_id;
+    let thread = harness
+        .manager
+        .get_thread(thread_id)
+        .await
+        .expect("child thread");
+    assert!(Arc::ptr_eq(
+        &control.runtime.registry,
+        &thread.session.services.local_agent_runtime.registry
+    ));
     let mut communication = InterAgentCommunication::new(
         AgentPath::root(),
-        AgentPath::try_from("/root/worker").expect("agent path"),
+        child.metadata.agent_path.expect("registered child path"),
         Vec::new(),
         "hello from tests".to_string(),
         /*trigger_turn*/ false,
@@ -973,8 +1013,8 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         .thread_queue()
         .accept_agent_mail(
             &older_id,
-            thread_id,
-            thread_id,
+            root_thread_id,
+            root_thread_id,
             thread_id,
             "older origin",
             &"a".repeat(64),
@@ -984,12 +1024,11 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         .unwrap();
     older.id = Some(older_id);
 
-    let submission_id = harness
-        .control
+    let submission_id = control
         .send_inter_agent_communication(
             thread_id,
             communication.clone(),
-            AgentCommunicationContext::new(AgentCommunicationKind::Message, thread_id),
+            AgentCommunicationContext::new(AgentCommunicationKind::Message, root_thread_id),
             Default::default(),
         )
         .await
@@ -4535,33 +4574,44 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
 
 #[tokio::test]
 async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
-    let harness = AgentControlHarness::new().await;
+    let (_server, harness) = mail_family_harness().await;
     let (_root_thread_id, root_thread) = harness.start_thread().await;
-    let (worker_thread_id, _worker_thread) = harness.start_thread().await;
-    let mut tester_config = harness.config.clone();
-    let _ = tester_config.features.enable(Feature::MultiAgentV2);
-    let tester_thread_id = harness
+    let control = root_thread
+        .session
+        .services
+        .local_agent_runtime
+        .control(root_thread.session.session_id());
+    let worker =
+        spawn_v2_reload_test_child(&control, harness.config.clone(), &root_thread, "worker_a")
+            .await;
+    let worker_thread_id = worker.thread_id;
+    let worker_thread = harness
         .manager
-        .start_thread(StartThreadOptions::new(tester_config.clone()))
+        .get_thread(worker_thread_id)
         .await
-        .expect("tester thread should start")
-        .thread_id;
+        .expect("worker thread");
+    let tester =
+        spawn_v2_reload_test_child(&control, harness.config.clone(), &worker_thread, "tester")
+            .await;
+    let tester_thread_id = tester.thread_id;
     let tester_thread = harness
         .manager
         .get_thread(tester_thread_id)
         .await
-        .expect("tester thread should exist");
-    let worker_path = AgentPath::root().join("worker_a").expect("worker path");
-    let tester_path = worker_path.join("tester").expect("tester path");
-    harness.control.maybe_start_completion_watcher(
+        .expect("tester thread");
+    let worker_path = worker.metadata.agent_path.expect("registered worker path");
+    let tester_path = tester.metadata.agent_path.expect("registered tester path");
+    assert!(Arc::ptr_eq(
+        &control.runtime.registry,
+        &tester_thread.session.services.local_agent_runtime.registry
+    ));
+    assert_eq!(
+        tester_thread.session_source.parent_thread_id(),
+        Some(worker_thread_id)
+    );
+    control.maybe_start_completion_watcher(
         tester_thread_id,
-        Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id: worker_thread_id,
-            depth: 2,
-            agent_path: Some(tester_path.clone()),
-            agent_nickname: None,
-            agent_role: Some("explorer".to_string()),
-        })),
+        Some(tester_thread.session_source.clone()),
         tester_path.to_string(),
         Some(tester_path.clone()),
     );
