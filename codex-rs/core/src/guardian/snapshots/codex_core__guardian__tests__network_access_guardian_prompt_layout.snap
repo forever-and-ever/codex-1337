@@ -45,7 +45,10 @@ Network access JSON:
     "cwd": "/repo",
     "justification": "Fetch the release metadata.",
     "sandboxPermissions": "use_default",
-    "toolName": "shell"
+    "toolName": {
+      "name": "shell",
+      "namespace": null
+    }
   }
 }
 >>> APPROVAL REQUEST END

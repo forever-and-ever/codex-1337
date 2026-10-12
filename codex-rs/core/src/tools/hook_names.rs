@@ -5,6 +5,8 @@
 //! concepts together prevents handlers from accidentally serializing a
 //! compatibility alias, such as `Write`, as the stable hook payload name.
 
+use codex_tools::ToolName;
+
 /// Identifies a tool in hook payloads and hook matcher selection.
 ///
 /// `name` is the canonical value serialized into hook stdin. Matcher aliases are
@@ -17,6 +19,17 @@ pub(crate) struct HookToolName {
 }
 
 impl HookToolName {
+    /// Preserves lossy hook payload/matcher compatibility, not dispatch or wire identity.
+    pub(crate) fn from_tool_name(tool_name: &ToolName) -> Self {
+        let name = match tool_name.namespace.as_deref() {
+            Some(namespace) if !tool_name.is_default_namespace() => {
+                format!("{namespace}{}", tool_name.name)
+            }
+            _ => tool_name.name.clone(),
+        };
+        Self::new(name)
+    }
+
     /// Builds a hook tool name with no matcher aliases.
     pub(crate) fn new(name: impl Into<String>) -> Self {
         Self {

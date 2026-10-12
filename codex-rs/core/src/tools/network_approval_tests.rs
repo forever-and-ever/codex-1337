@@ -627,7 +627,7 @@ async fn register_call_with_default_shell_trigger(
             tool_name: ToolName::plain("exec_command"),
             trigger: GuardianNetworkAccessTrigger {
                 call_id: "call-1".to_string(),
-                tool_name: "exec_command".to_string(),
+                tool_name: ToolName::plain("exec_command"),
                 command: vec!["curl".to_string(), "https://example.com".to_string()],
                 cwd: PathUri::from_abs_path(&test_path_buf("/tmp").abs()),
                 sandbox_permissions: SandboxPermissions::UseDefault,
@@ -651,7 +651,7 @@ async fn active_call_preserves_triggering_command_context() {
     let tool_name = ToolName::namespaced("mcp__example", "exec_command");
     let expected = GuardianNetworkAccessTrigger {
         call_id: "call-1".to_string(),
-        tool_name: tool_name.to_string(),
+        tool_name: tool_name.clone(),
         command: vec!["curl".to_string(), "https://example.com".to_string()],
         cwd: PathUri::parse("file:///C:/repo").expect("valid Windows path URI"),
         sandbox_permissions: SandboxPermissions::UseDefault,

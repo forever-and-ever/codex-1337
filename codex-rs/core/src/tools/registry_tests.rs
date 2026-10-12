@@ -460,6 +460,19 @@ async fn readiness_selects_exact_tool_with_registry_owned_exposure() {
 async fn function_tools_expose_default_hook_payloads_and_rewrites() -> anyhow::Result<()> {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let tool_name = codex_tools::ToolName::namespaced("functions.", "echo");
+    // Hooks keep their existing selector spelling even when it conflates addresses.
+    assert_eq!(
+        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("a", "bc")),
+        HookToolName::new("abc"),
+    );
+    assert_eq!(
+        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("ab", "c")),
+        HookToolName::new("abc"),
+    );
+    assert_eq!(
+        HookToolName::from_tool_name(&codex_tools::ToolName::namespaced("functions", "echo")),
+        HookToolName::new("echo"),
+    );
     let handler = TestHandler {
         tool_name: tool_name.clone(),
     };

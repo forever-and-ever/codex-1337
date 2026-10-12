@@ -17,7 +17,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::control_tool_analytics::ControlToolCallGuard;
-use crate::tools::flat_tool_name;
 use crate::tools::handlers::multi_agents_spec::MULTI_AGENT_V1_NAMESPACE;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::notify_tool_finish;
@@ -165,7 +164,7 @@ pub(crate) trait CoreToolRuntime: ToolExecutor<ToolInvocation> {
         let arguments = serde_json::to_string(&updated_input).map_err(|err| {
             FunctionCallError::RespondToModel(format!(
                 "failed to serialize rewritten {} arguments: {err}",
-                flat_tool_name(&invocation.tool_name)
+                invocation.tool_name
             ))
         })?;
         Ok(ToolInvocation {
@@ -855,7 +854,7 @@ fn function_hook_tool_name(invocation: &ToolInvocation) -> HookToolName {
         return HookToolName::spawn_agent();
     }
 
-    HookToolName::new(flat_tool_name(&invocation.tool_name).into_owned())
+    HookToolName::from_tool_name(&invocation.tool_name)
 }
 
 fn function_hook_tool_input(arguments: &str) -> Value {

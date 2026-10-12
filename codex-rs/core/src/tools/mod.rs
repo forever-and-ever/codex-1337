@@ -25,40 +25,18 @@ mod tool_namespaces_info;
 mod user_messaging;
 pub(crate) use user_messaging::record_confirmed_code_mode_send;
 
-use std::borrow::Cow;
-
 use crate::session::turn_context::TurnContext;
 pub(crate) use approvals::ApprovalContext;
 use codex_features::Feature;
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ToolMode;
-use codex_tools::ToolName;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::formatted_truncate_text;
 use codex_utils_output_truncation::truncate_text;
 pub(crate) use executed_tool_calls::ExecutedToolCalls;
 pub(crate) use multi_agent_tool::MULTI_AGENT_V2_NAMESPACE_DESCRIPTION;
 pub use router::ToolRouter;
-
-/// Legacy boundaries such as hook payloads, telemetry tags, and Responses tool
-/// names still require a single flattened string. Keep comparisons and sorting
-/// on `ToolName` itself; use this only when crossing those boundaries.
-pub(crate) fn flat_tool_name(tool_name: &ToolName) -> Cow<'_, str> {
-    if tool_name.is_default_namespace() {
-        return Cow::Borrowed(tool_name.name.as_str());
-    }
-
-    match tool_name.namespace.as_deref() {
-        Some(namespace) => {
-            let mut name = String::with_capacity(namespace.len() + tool_name.name.len());
-            name.push_str(namespace);
-            name.push_str(&tool_name.name);
-            Cow::Owned(name)
-        }
-        None => Cow::Borrowed(tool_name.name.as_str()),
-    }
-}
 
 pub(crate) fn tool_user_shell_type(
     user_shell: &crate::shell::Shell,

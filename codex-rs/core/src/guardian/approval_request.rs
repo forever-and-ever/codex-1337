@@ -7,6 +7,7 @@ use codex_protocol::approvals::GuardianCommandSource;
 use codex_protocol::approvals::NetworkApprovalProtocol;
 use codex_protocol::models::AdditionalPermissionProfile;
 use codex_protocol::request_permissions::RequestPermissionProfile;
+use codex_tools::ToolName;
 #[cfg(unix)]
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
@@ -108,7 +109,7 @@ impl GuardianApprovalRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GuardianNetworkAccessTrigger {
     pub(crate) call_id: String,
-    pub(crate) tool_name: String,
+    pub(crate) tool_name: ToolName,
     pub(crate) command: Vec<String>,
     pub(crate) cwd: PathUri,
     pub(crate) sandbox_permissions: crate::sandboxing::SandboxPermissions,

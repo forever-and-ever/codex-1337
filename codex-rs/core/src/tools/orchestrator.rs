@@ -10,7 +10,6 @@ use crate::config::NetworkProxySpec;
 use crate::guardian::GuardianReviewContext;
 use crate::network_policy_decision::network_approval_context_from_payload;
 use crate::tools::approvals::ApprovalContext;
-use crate::tools::flat_tool_name;
 use crate::tools::network_approval::ActiveNetworkApproval;
 use crate::tools::network_approval::DeferredNetworkApproval;
 use crate::tools::network_approval::NetworkApprovalSpec;
@@ -134,7 +133,7 @@ impl ToolOrchestrator {
         let turn_ctx = tool_ctx.step_context.turn.as_ref();
         let approval_policy = tool_ctx.step_context.settings.approval_policy();
         let otel = turn_ctx.session_telemetry.clone();
-        let otel_tn = flat_tool_name(&tool_ctx.tool_name).into_owned();
+        let otel_tn = tool_ctx.tool_name.to_string();
         let otel_ci = &tool_ctx.call_id;
         let strict_auto_review = turn_ctx.strict_auto_review_enabled();
         // 1) Approval

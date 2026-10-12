@@ -51,6 +51,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::TurnCompleteEvent;
+use codex_tools::ToolName;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
@@ -1356,7 +1357,7 @@ fn guardian_approval_request_to_json_renders_network_access_trigger() -> serde_j
         port: 443,
         trigger: Some(GuardianNetworkAccessTrigger {
             call_id: "call-1".to_string(),
-            tool_name: "shell".to_string(),
+            tool_name: ToolName::namespaced("a", "bc"),
             command: vec!["curl".to_string(), "https://example.com".to_string()],
             cwd,
             sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
@@ -1377,13 +1378,33 @@ fn guardian_approval_request_to_json_renders_network_access_trigger() -> serde_j
             "port": 443,
             "trigger": {
                 "callId": "call-1",
-                "toolName": "shell",
+                "toolName": {"name": "bc", "namespace": "a"},
                 "command": ["curl", "https://example.com"],
                 "cwd": "C:\\repo",
                 "sandboxPermissions": "use_default",
                 "justification": "Fetch the release metadata.",
             },
         })
+    );
+
+    // Concatenating namespace and name would conflate these distinct addresses.
+    let mut other = action.clone();
+    let GuardianApprovalRequest::NetworkAccess {
+        trigger: Some(trigger),
+        ..
+    } = &mut other
+    else {
+        panic!("network access should retain its trigger");
+    };
+    trigger.tool_name = ToolName::namespaced("ab", "c");
+    let other_json = guardian_approval_request_to_json(&other)?;
+    assert_eq!(
+        other_json["trigger"]["toolName"],
+        serde_json::json!({"name": "c", "namespace": "ab"})
+    );
+    assert_ne!(
+        guardian_approval_request_to_json(&action)?["trigger"]["toolName"],
+        other_json["trigger"]["toolName"]
     );
 
     Ok(())
@@ -1408,7 +1429,7 @@ async fn build_guardian_prompt_items_explains_network_access_review_scope() -> a
             port: 443,
             trigger: Some(GuardianNetworkAccessTrigger {
                 call_id: "call-1".to_string(),
-                tool_name: "shell".to_string(),
+                tool_name: ToolName::plain("shell"),
                 command: vec!["curl".to_string(), "https://example.com".to_string()],
                 cwd,
                 sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,
@@ -1641,7 +1662,7 @@ fn guardian_request_target_item_id_omits_network_access_trigger_call_id() {
         port: 443,
         trigger: Some(GuardianNetworkAccessTrigger {
             call_id: "call-1".to_string(),
-            tool_name: "shell".to_string(),
+            tool_name: ToolName::plain("shell"),
             command: vec!["curl".to_string(), "https://example.com".to_string()],
             cwd: PathUri::from_abs_path(&test_path_buf("/repo").abs()),
             sandbox_permissions: crate::sandboxing::SandboxPermissions::UseDefault,

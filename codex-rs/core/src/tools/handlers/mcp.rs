@@ -15,7 +15,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
-use crate::tools::flat_tool_name;
 use crate::tools::hook_names::HookToolName;
 use crate::tools::lifecycle::notify_tool_start;
 use crate::tools::registry::CoreToolRuntime;
@@ -546,7 +545,7 @@ fn build_mcp_search_text(info: &ToolInfo) -> String {
         .unwrap_or_default();
     schema_properties.sort();
     let mut parts = vec![
-        flat_tool_name(&tool_name).into_owned(),
+        tool_name.to_string(),
         info.callable_name.clone(),
         info.tool.name.to_string(),
         info.server_name.clone(),

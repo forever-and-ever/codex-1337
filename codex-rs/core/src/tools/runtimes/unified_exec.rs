@@ -17,7 +17,6 @@ use crate::session::turn_context::TurnEnvironment;
 use crate::shell::ShellType;
 use crate::shell_snapshot::ShellSnapshotSandbox;
 use crate::shell_snapshot::snapshot_read_permissions;
-use crate::tools::flat_tool_name;
 use crate::tools::network_approval::NetworkApprovalSpec;
 use crate::tools::runtimes::RuntimePathPrepends;
 #[cfg(unix)]
@@ -246,7 +245,7 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecAttempt> for UnifiedExecRunt
             tool_name: ctx.tool_name.clone(),
             trigger: GuardianNetworkAccessTrigger {
                 call_id: ctx.call_id.clone(),
-                tool_name: flat_tool_name(&ctx.tool_name).into_owned(),
+                tool_name: ctx.tool_name.clone(),
                 command: req.command.clone(),
                 cwd: req.cwd.clone(),
                 sandbox_permissions: req.sandbox_permissions,
