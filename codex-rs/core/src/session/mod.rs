@@ -3798,13 +3798,11 @@ impl Session {
             if settings.selected().service_tier != service_tier {
                 let mut selected = settings.selected().clone();
                 selected.service_tier = service_tier;
-                let mut inherited_settings = ResolvedStepSettings::new(
+                let inherited_settings = ResolvedStepSettings::new(
                     Arc::new(selected),
                     Arc::clone(&settings.model_info),
                     &self.features,
                 );
-                inherited_settings.mcp_approvals_reviewer_override =
-                    settings.mcp_approvals_reviewer_override;
                 settings = Arc::new(inherited_settings);
             }
         }

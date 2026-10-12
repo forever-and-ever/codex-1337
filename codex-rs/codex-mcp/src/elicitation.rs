@@ -63,7 +63,8 @@ pub trait ElicitationReviewer: Send + Sync {
     ) -> BoxFuture<'static, Result<Option<ElicitationResponse>>>;
 }
 
-pub type ElicitationReviewerHandle = Arc<dyn ElicitationReviewer>;
+pub type ElicitationReviewerHandle =
+    Arc<dyn crate::elicitation_authority::IssuingElicitationReviewer>;
 
 /// Holds an owner-provided registration while an MCP elicitation is waiting for a response.
 #[derive(Clone)]
@@ -352,9 +353,18 @@ impl ElicitationRequestManager {
                     lifecycle,
                     ..
                 } = &authority;
-                let approval_policy = config.approval_policy.value();
-                let Some(permission_profile) = config.permission_profile_for_server(&server_name)
-                else {
+                let issued_authority = crate::elicitation_authority::resolve(
+                    reviewer.as_ref(),
+                    config,
+                    ElicitationReviewRequest {
+                        server_name: server_name.clone(),
+                        request_id: id.clone(),
+                        elicitation: elicitation.clone(),
+                    },
+                )
+                .await;
+                let approval_policy = issued_authority.approval_policy;
+                let Some(permission_profile) = issued_authority.permission_profile.as_ref() else {
                     return Ok(ElicitationResponse {
                         action: ElicitationAction::Decline,
                         content: None,

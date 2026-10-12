@@ -265,7 +265,7 @@ pub(crate) async fn handle_mcp_tool_call(
         &call_id,
         &invocation,
         metadata.clone(),
-        GuardianReviewContext::from(step_context),
+        Arc::clone(step_context),
     );
     notify_mcp_tool_call_started(
         sess.as_ref(),
@@ -1192,7 +1192,7 @@ impl McpToolApprovalPolicy {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct McpToolApprovalMetadata {
     annotations: Option<ToolAnnotations>,
     pub(crate) connector_id: Option<String>,
@@ -1213,7 +1213,7 @@ pub(crate) struct McpToolApprovalMetadata {
 pub(crate) struct McpToolApprovalContext {
     pub(crate) invocation: Option<McpInvocation>,
     pub(crate) metadata: McpToolApprovalMetadata,
-    pub(crate) review_context: GuardianReviewContext,
+    pub(crate) step_context: Arc<StepContext>,
 }
 
 impl Session {
@@ -1222,7 +1222,7 @@ impl Session {
         call_id: &str,
         invocation: &McpInvocation,
         metadata: McpToolApprovalMetadata,
-        review_context: GuardianReviewContext,
+        step_context: Arc<StepContext>,
     ) -> Arc<McpToolApprovalContext> {
         let key = (invocation.server.clone(), call_id.to_string());
         let metadata = Arc::new(McpToolApprovalContext {
@@ -1230,7 +1230,7 @@ impl Session {
                 || is_node_repl_backed_server(&invocation.server))
             .then(|| invocation.clone()),
             metadata,
-            review_context,
+            step_context,
         });
         let mut registry = self
             .mcp_tool_approval_metadata

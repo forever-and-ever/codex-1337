@@ -8603,26 +8603,28 @@ async fn refreshed_mcp_binding_captures_current_approval_authority() {
     );
 }
 
-#[test_case(false; "legacy thread reviewer")]
+#[test_case(false; "future thread reviewer")]
 #[test_case(true; "explicit live reviewer")]
 #[tokio::test]
-async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy(
-    live_update: bool,
-) {
+async fn mcp_elicitation_reviewer_keeps_issuing_step_authority(live_update: bool) {
     let guardian_server = start_mock_server().await;
-    mount_sse_once(
+    core_test_support::responses::mount_sse_sequence(
         &guardian_server,
-        sse(vec![
-            ev_response_created("guardian-review"),
-            ev_assistant_message("guardian-review", r#"{"outcome":"allow"}"#),
-            ev_completed("guardian-review"),
-        ]),
+        vec![
+            sse(vec![
+                ev_response_created("guardian-review"),
+                ev_assistant_message("guardian-review", r#"{"outcome":"allow"}"#),
+                ev_completed("guardian-review"),
+            ]);
+            3
+        ],
     )
     .await;
     let (session, old_turn, rx) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("Test API Key"),
         Vec::new(),
         |config| {
+            config.approvals_reviewer = ApprovalsReviewer::AutoReview;
             config.model_provider.base_url = Some(format!("{}/v1", guardian_server.uri()));
             config
                 .mcp_servers
@@ -8636,7 +8638,10 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
         },
     )
     .await;
-    assert_eq!(old_turn.config.approvals_reviewer, ApprovalsReviewer::User);
+    assert_eq!(
+        old_turn.config.approvals_reviewer,
+        ApprovalsReviewer::AutoReview
+    );
     let task = NeverEndingTask {
         kind: TaskKind::Regular,
         listen_to_cancellation_token: true,
@@ -8647,13 +8652,26 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
 
     session.mark_mcp_runtime_dirty();
     session.refresh_mcp_if_dirty().await;
+    let issued_step = session
+        .capture_step_context(Arc::clone(&old_turn), &CancellationToken::new())
+        .await
+        .expect("issuing step should capture its authority");
+    let approval_metadata = Arc::new(crate::mcp_tool_call::McpToolApprovalContext {
+        invocation: None,
+        metadata: crate::mcp_tool_call::McpToolApprovalMetadata::default(),
+        step_context: issued_step,
+    });
+    session.mcp_tool_approval_metadata.lock().unwrap().insert(
+        ("browser-use".to_string(), "issued-call".to_string()),
+        Arc::downgrade(&approval_metadata),
+    );
     if live_update {
         assert_eq!(
             session
                 .apply_turn_settings(
                     &old_turn.sub_id,
                     codex_protocol::protocol::TurnSettingsUpdate {
-                        approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                        approvals_reviewer: Some(ApprovalsReviewer::User),
                         ..Default::default()
                     },
                 )
@@ -8664,7 +8682,7 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
         session
             .update_settings(SessionSettingsUpdate {
                 step_settings: StepSettingsUpdate {
-                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    approvals_reviewer: Some(ApprovalsReviewer::User),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -8681,6 +8699,7 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
             rmcp::model::ElicitRequestParams::FormElicitationParams {
                 meta: Some(rmcp::model::RequestMetaObject::from(
                     serde_json::Map::from_iter([
+                        ("callId".to_string(), json!("issued-call")),
                         ("codex_approval_kind".to_string(), json!("mcp_tool_call")),
                         ("codex_request_type".to_string(), json!("approval_request")),
                         ("tool_name".to_string(), json!("access_browser_origin")),
@@ -8725,8 +8744,8 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
-            action: ElicitationAction::Decline,
-            content: None,
+            action: ElicitationAction::Accept,
+            content: Some(json!({})),
             meta: Some(json!({ "approvals_reviewer": "auto_review" })),
         })
     );
@@ -8746,19 +8765,31 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
             .await
             .expect("elicitation review should succeed"),
         Some(ElicitationResponse {
-            action: ElicitationAction::Decline,
-            content: None,
+            action: ElicitationAction::Accept,
+            content: Some(json!({})),
             meta: Some(json!({ "approvals_reviewer": "auto_review" })),
         })
     );
 
+    // Saved settings affect future turns, never an action already dispatched.
+    let issued_authority = session
+        .mcp_elicitation_reviewer()
+        .approval_authority(request.clone())
+        .await
+        .expect("issued authority");
+    assert_eq!(issued_authority.approval_policy, AskForApproval::OnRequest);
+    assert!(!matches!(
+        issued_authority.permission_profile,
+        Some(PermissionProfile::Disabled)
+    ));
+    drop(approval_metadata);
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
     let (next_turn, _) = session
         .new_turn_with_sub_id(
             "next-turn".to_string(),
             SessionSettingsUpdate {
                 step_settings: StepSettingsUpdate {
-                    approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
+                    approvals_reviewer: Some(ApprovalsReviewer::User),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -8767,6 +8798,8 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
         )
         .await
         .expect("next turn should start with the same reviewer");
+    assert_eq!(next_turn.approval_policy(), AskForApproval::Never);
+    assert_eq!(next_turn.config.approvals_reviewer, ApprovalsReviewer::User);
     session
         .spawn_task(Arc::clone(&next_turn), Vec::new(), task)
         .await;
