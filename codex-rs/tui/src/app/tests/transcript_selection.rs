@@ -14,7 +14,6 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     use crate::history_cell::CodeModeCell;
     use crate::history_cell::ComputerActivityCell;
     use crate::history_cell::McpInvocation;
-    use crate::history_cell::ToolOutputCell;
     use codex_app_server_protocol::CodeModeOwner;
     use codex_protocol::models::FunctionCallOutputBody;
     use std::time::Duration;
@@ -42,25 +41,67 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
         cell_id: None,
         started_at_ms: 0,
     };
-    let mut batch = CodeModeCell::owned(owner, /*animations_enabled*/ false);
-    for id in ["first", "second"] {
-        batch.admit_children(id.into(), vec![Arc::new(call(id, "tools"))]);
-        app.insert_history_cell(&mut tui, Box::new(batch.clone()));
-    }
-    batch.admit_children(
-        "batch".into(),
-        vec![Arc::new(
-            ToolOutputCell::from_output(
-                "batch",
-                Some("outer-exec"),
-                "exec",
-                /*namespace*/ None,
-                &FunctionCallOutputBody::Text("model-visible batch".into()),
+    let cwd = app.config.cwd.clone();
+    let mut reducers = crate::code_mode_transcript::Reducers::default();
+    let mut reduce = |item| {
+        let notification = codex_app_server_protocol::ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification {
+                thread_id: owner.thread_id.to_string(),
+                turn_id: String::new(),
+                item: ThreadItem::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+                    owner.clone(),
+                    Box::new(item),
+                )),
+                completed_at_ms: 0,
+            },
+        );
+        reducers
+            .admit(
+                owner.thread_id,
+                crate::code_mode_transcript::Admission::notification(
+                    &notification,
+                    crate::code_mode_transcript::Source::Live,
+                )
+                .unwrap()
+                .unwrap(),
+                &cwd,
+                /*animations*/ false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
             )
-            .unwrap(),
-        )],
-    );
-    app.insert_history_cell(&mut tui, Box::new(batch.clone()));
+            .unwrap()
+            .block
+    };
+    let item = |id: &str, status, result| ThreadItem::McpToolCall {
+        id: id.into(),
+        server: "tools".into(),
+        tool: "inspect".into(),
+        status,
+        arguments: json!({"path": "same"}),
+        app_context: None,
+        mcp_app_resource_uri: None,
+        mcp_app_ui: None,
+        plugin_id: None,
+        read_only_hint: None,
+        result,
+        error: None,
+        duration_ms: Some(1),
+    };
+    for id in ["first", "second"] {
+        let batch = reduce(item(
+            id,
+            codex_app_server_protocol::McpToolCallStatus::InProgress,
+            None,
+        ));
+        app.insert_retained_history_cell(&mut tui, batch);
+    }
+    let mut batch = reduce(ThreadItem::FunctionCallOutput {
+        id: "batch".into(),
+        call_id: Some("outer-exec".into()),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text("model-visible batch".into()),
+    });
+    app.insert_retained_history_cell(&mut tui, Arc::clone(&batch));
     app.flush_native_history(&mut tui);
     assert!(tui.pending_history_lines_for_test().is_empty());
     for _ in 0..2 {
@@ -106,19 +147,18 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     }
     let selected = render(&mut app);
     for id in ["second", "first"] {
-        let mut completed = call(id, "tools");
-        completed.complete(
-            Duration::from_millis(/*millis*/ 1),
-            Ok(codex_protocol::mcp::CallToolResult {
+        batch = reduce(item(
+            id,
+            codex_app_server_protocol::McpToolCallStatus::Completed,
+            Some(Box::new(codex_app_server_protocol::McpToolCallResult {
                 content: vec![json!({"type": "text", "text": "raw nested result"})],
                 structured_content: None,
-                is_error: Some(false),
                 meta: None,
-            }),
-        );
-        batch.admit_children(id.into(), vec![Arc::new(completed)]);
-        app.insert_history_cell(&mut tui, Box::new(batch.clone()));
+            })),
+        ));
+        app.insert_retained_history_cell(&mut tui, Arc::clone(&batch));
     }
+    let batch = batch.as_any().downcast_ref::<CodeModeCell>().unwrap();
     assert_eq!(app.transcript_cells.len(), 1);
     assert_eq!(
         app.transcript_cells[0].activity_ids(),
@@ -126,7 +166,7 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     );
     assert_eq!(
         batch
-            .members
+            .members()
             .iter()
             .flat_map(|cell| cell.activity_ids())
             .collect::<Vec<_>>(),
@@ -143,7 +183,7 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
     assert!(!retained_text.contains("Calling"));
     assert!(
         !batch
-            .members
+            .members()
             .iter()
             .filter_map(|cell| cell
                 .as_any()

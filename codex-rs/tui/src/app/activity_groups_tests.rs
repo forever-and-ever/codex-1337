@@ -259,7 +259,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .position(|cell| {
             cell.as_any()
                 .downcast_ref::<history_cell::CodeModeCell>()
-                .is_some_and(|block| block.exec_call_id == "exec-a")
+                .is_some_and(|block| block.exec_call_id() == "exec-a")
         })
         .unwrap();
     app.transcript_view
@@ -282,7 +282,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .find_map(|cell| {
             cell.as_any()
                 .downcast_ref::<history_cell::CodeModeCell>()
-                .filter(|cell| cell.owner.as_ref() == Some(&a))
+                .filter(|cell| cell.owner() == Some(&a))
         })
         .unwrap();
     assert!(background.terminal());
@@ -352,13 +352,13 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .find_map(|cell| {
             cell.as_any()
                 .downcast_ref::<history_cell::CodeModeCell>()
-                .filter(|block| block.exec_call_id == "exec-a")
+                .filter(|block| block.exec_call_id() == "exec-a")
         })
         .unwrap()
         .clone();
     assert!(!terminal.is_active());
     assert!(terminal.live_lines().is_empty());
-    let before_child = terminal.children.clone();
+    let before_child = terminal.members().to_vec();
     assert_eq!(
         app.transcript_view
             .activity_output_tokens(&terminal.activity_ids()),
@@ -382,20 +382,16 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .find_map(|cell| {
             cell.as_any()
                 .downcast_ref::<history_cell::CodeModeCell>()
-                .filter(|block| block.exec_call_id == "exec-a")
+                .filter(|block| block.exec_call_id() == "exec-a")
         })
         .unwrap();
-    assert_eq!(
-        after.child_versions.get("child-a"),
-        Some(&(Source::Live, true))
-    );
-    assert_eq!(before_child.len(), after.children.len());
+    assert!(!after.is_active());
+    assert_eq!(before_child.len(), after.members().len());
     assert!(
         before_child
             .iter()
-            .zip(&after.children)
-            .all(|((old_id, old), (new_id, new))| old_id == new_id
-                && old.iter().zip(new).all(|(old, new)| Arc::ptr_eq(old, new)))
+            .zip(after.members())
+            .all(|(old, new)| Arc::ptr_eq(old, new))
     );
 
     // Shared fork lineage preserves the origin descriptor, but banks belong to the receiving view.
@@ -507,8 +503,10 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     // both interactions must survive in detailed transcript history.
     let interactions = before_child
         .iter()
-        .filter(|(id, _)| id.starts_with("terminal-interaction:"))
-        .flat_map(|(_, cells)| cells)
+        .filter(|cell| {
+            cell.as_any()
+                .is::<history_cell::UnifiedExecInteractionCell>()
+        })
         .flat_map(|cell| cell.transcript_hyperlink_lines(90))
         .map(|line| line.line.to_string())
         .collect::<Vec<_>>()
@@ -532,6 +530,26 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         examples.push(format!("{heading}\n{lines}"));
     }
     insta::assert_snapshot!("scoped_code_mode_admission", examples.join("\n\n"));
+
+    // A raw execution ID is not ownership: legacy reconciliation must not absorb scoped rows.
+    let scoped: Arc<dyn HistoryCell> = Arc::new(terminal.clone());
+    let ThreadItem::CodeMode(fact) = code_mode(
+        "exec-a",
+        CodeModeEvent::Started {
+            call_id: "legacy-start".into(),
+            script: None,
+        },
+    ) else {
+        unreachable!();
+    };
+    let legacy_fact: Arc<dyn HistoryCell> = Arc::new(history_cell::CodeModeFactCell(fact, false));
+    let (range, replacements) =
+        history_cell::reconcile_code_mode(&[Arc::clone(&scoped)], &legacy_fact).unwrap();
+    assert_eq!(range, 0..1);
+    assert_eq!(replacements.len(), 2);
+    assert!(Arc::ptr_eq(&replacements[1], &scoped));
+    assert_eq!(replacements[0].activity_ids(), vec!["code-mode:exec-a"]);
+    assert!(replacements[0].raw_lines().is_empty());
 
     // Snapshot-native scopes normalize once; a live scope cannot borrow another routed thread.
     let started = ServerNotification::ItemStarted(ItemStartedNotification {

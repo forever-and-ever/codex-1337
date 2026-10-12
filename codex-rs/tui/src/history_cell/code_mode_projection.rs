@@ -2,6 +2,7 @@
 
 use super::CodeModeCell;
 use super::CodeModeFactCell;
+use super::LegacyCodeMode;
 use crate::history_cell::HistoryCell;
 use codex_app_server_protocol::CodeModeEvent;
 use std::collections::BTreeMap;
@@ -21,13 +22,16 @@ pub(crate) fn split_code_mode_members(
         cells
             .iter()
             .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
-            .filter(|block| block.owner.is_none()),
+            .filter_map(|block| match block {
+                CodeModeCell::Legacy(legacy) => Some(legacy),
+                CodeModeCell::Scoped(_) => None,
+            }),
         incoming,
     )
 }
 
 fn split_members<'a>(
-    blocks: impl Iterator<Item = &'a CodeModeCell> + Clone,
+    blocks: impl Iterator<Item = &'a LegacyCodeMode> + Clone,
     incoming: &Arc<dyn HistoryCell>,
 ) -> Option<Vec<Arc<dyn HistoryCell>>> {
     let ids = incoming.tool_call_ids();
@@ -112,10 +116,9 @@ pub(crate) fn reconcile_code_mode(
 ) -> Option<ProjectionChange> {
     let fact = incoming.as_any().downcast_ref::<CodeModeFactCell>();
     let owner = cells.iter().enumerate().find_map(|(index, cell)| {
-        let block = cell.as_any().downcast_ref::<CodeModeCell>()?;
-        if block.owner.is_some() {
+        let CodeModeCell::Legacy(block) = cell.as_any().downcast_ref::<CodeModeCell>()? else {
             return None;
-        }
+        };
         if fact.map_or_else(
             || block.owns(incoming.as_ref()),
             |fact| fact.0.exec_call_id == block.exec_call_id,
@@ -129,7 +132,7 @@ pub(crate) fn reconcile_code_mode(
         Some(owner) => owner,
         None => (
             cells.len(),
-            CodeModeCell::from_fact(fact?.0.clone(), fact?.1),
+            LegacyCodeMode::from_fact(fact?.0.clone(), fact?.1),
         ),
     };
     let mut reference = None;
@@ -164,7 +167,7 @@ pub(crate) fn reconcile_code_mode(
             block_position = retained.len();
             continue;
         }
-        if let Some(old) = cell.as_any().downcast_ref::<CodeModeCell>()
+        if let Some(CodeModeCell::Legacy(old)) = cell.as_any().downcast_ref::<CodeModeCell>()
             && old.exec_call_id == block.exec_call_id
         {
             for fact in &old.facts {
@@ -188,7 +191,7 @@ pub(crate) fn reconcile_code_mode(
             }
         }
     }
-    let block: Arc<dyn HistoryCell> = Arc::new(block);
+    let block: Arc<dyn HistoryCell> = Arc::new(CodeModeCell::Legacy(block));
     // A finished block keeps its place: its waits follow it, and its Feed Item heads them.
     retained.insert(block_position, block);
     if let Some(reference) = reference {
@@ -228,7 +231,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
         }
         return Some((0..cells.len(), normalized));
     }
-    let mut blocks: BTreeMap<String, (usize, CodeModeCell)> = BTreeMap::new();
+    let mut blocks: BTreeMap<String, (usize, LegacyCodeMode)> = BTreeMap::new();
     let mut references: BTreeMap<(String, String), (usize, Arc<dyn HistoryCell>)> = BTreeMap::new();
     let mut changed = false;
     for (index, cell) in cells.iter().enumerate() {
@@ -246,12 +249,9 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
                 references.insert(key, (index, Arc::clone(cell)));
             }
         }
-        let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() else {
+        let Some(CodeModeCell::Legacy(block)) = cell.as_any().downcast_ref::<CodeModeCell>() else {
             continue;
         };
-        if block.owner.is_some() {
-            continue;
-        }
         // A block reunites at its first piece: where it started, ahead of its waits.
         if let Some((_, retained)) = blocks.get_mut(&block.exec_call_id) {
             changed = true;
@@ -270,9 +270,9 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     let mut absorbed = HashSet::new();
     for (index, cell) in cells.iter().enumerate() {
         if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
-            if block.owner.is_some() {
+            let CodeModeCell::Legacy(block) = block else {
                 continue;
-            }
+            };
             let (_, retained) = blocks.get_mut(&block.exec_call_id)?;
             for member in &block.members {
                 retained.insert_member(Arc::clone(member));
@@ -301,13 +301,14 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
                 replacements.push(Arc::clone(reference));
             }
         } else if let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() {
-            if block.owner.is_some() {
+            let CodeModeCell::Legacy(block) = block else {
                 replacements.push(Arc::clone(cell));
                 continue;
-            }
+            };
             let (anchor, merged) = &blocks[&block.exec_call_id];
             if *anchor == index {
-                replacements.push(Arc::new(merged.clone()) as Arc<dyn HistoryCell>);
+                replacements
+                    .push(Arc::new(CodeModeCell::Legacy(merged.clone())) as Arc<dyn HistoryCell>);
             }
         } else if !absorbed.contains(&index) {
             replacements.push(Arc::clone(cell));

@@ -868,7 +868,7 @@ fn steps_of<'b>(cell: &dyn HistoryCell, bills: &'b StepBills) -> (Vec<&'b str>, 
     if let Some(block) = any.downcast_ref::<CodeModeCell>() {
         return (
             bills
-                .step_of_call(&block.exec_call_id)
+                .step_of_call(block.exec_call_id())
                 .into_iter()
                 .collect(),
             None,

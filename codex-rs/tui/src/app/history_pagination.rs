@@ -283,7 +283,7 @@ impl App {
                         || cell
                             .as_any()
                             .downcast_ref::<history_cell::CodeModeCell>()
-                            .is_some_and(|block| block.owner.is_some())
+                            .is_some_and(|block| block.owner().is_some())
                     {
                         self.admit_code_mode_page_cell(tui, cell, &mut cells);
                     } else {

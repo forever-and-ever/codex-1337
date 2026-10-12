@@ -9,6 +9,7 @@ use super::output_provenance::OutputMode;
 use super::output_provenance::OutputProvenance;
 use super::output_provenance::client_notice;
 use super::output_provenance::mark_lines;
+use crate::code_mode_transcript::ScopedCodeMode;
 use crate::exec_cell::ExecCell;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
@@ -23,7 +24,6 @@ use codex_app_server_protocol::CodeModeOwner;
 use codex_app_server_protocol::CodeModeStatus;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
@@ -138,114 +138,39 @@ impl HistoryCell for CodeModeFactCell {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct CodeModeCell {
-    pub(crate) exec_call_id: String,
-    facts: Vec<CodeModeItem>,
-    pub(crate) members: Vec<Arc<dyn HistoryCell>>,
-    start_time: Instant,
-    animations_enabled: bool,
-    pub(crate) owner: Option<CodeModeOwner>,
-    live: bool,
-    pub(crate) children: Vec<(String, Vec<Arc<dyn HistoryCell>>)>,
-    pub(crate) child_versions: HashMap<String, (crate::code_mode_transcript::Source, bool)>,
-    pub(crate) pending_children: HashMap<String, codex_app_server_protocol::ThreadItem>,
+pub(crate) enum CodeModeCell {
+    Legacy(LegacyCodeMode),
+    Scoped(ScopedCodeMode),
 }
 
-impl CodeModeCell {
-    pub(crate) fn is_active(&self) -> bool {
-        (self.live && self.status().is_none()) || self.has_live_command()
-    }
+#[derive(Debug, Clone)]
+pub(crate) struct LegacyCodeMode {
+    exec_call_id: String,
+    facts: Vec<CodeModeItem>,
+    members: Vec<Arc<dyn HistoryCell>>,
+    start_time: Instant,
+    animations_enabled: bool,
+}
 
-    fn has_live_command(&self) -> bool {
-        self.pending_children.iter().any(|(id, item)| {
-            matches!(
-                item,
-                codex_app_server_protocol::ThreadItem::CommandExecution { .. }
-            ) && self.child_versions.get(id)
-                == Some(&(crate::code_mode_transcript::Source::Live, false))
-        })
+pub(crate) fn insert_fact(facts: &mut Vec<CodeModeItem>, fact: CodeModeItem) {
+    if !facts.iter().any(|old| old.id == fact.id) {
+        facts.push(fact);
     }
+}
 
-    /// The block's Greek name, stable across redraw, replay and process restarts.
-    pub(crate) fn tetrad(&self) -> String {
-        self.owner
-            .as_ref()
-            .map_or_else(|| label(&self.exec_call_id), owner_label)
-    }
+fn call_ids<'a>(exec_call_id: &'a str, facts: &'a [CodeModeItem]) -> HashSet<&'a str> {
+    std::iter::once(exec_call_id)
+        .chain(facts.iter().filter_map(|fact| match &fact.event {
+            CodeModeEvent::Started { call_id, .. }
+            | CodeModeEvent::ToolCall { call_id }
+            | CodeModeEvent::WaitStarted { call_id, .. }
+            | CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
+            CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
+        }))
+        .collect()
+}
 
-    pub(crate) fn live_lines(&self) -> Vec<Line<'static>> {
-        if !self.is_active() {
-            return Vec::new();
-        }
-        let waits = self.waits();
-        let marker = activity_indicator(
-            Some(self.start_time),
-            MotionMode::from_animations_enabled(self.animations_enabled),
-            ReducedMotionIndicator::StaticBullet,
-        )
-        .unwrap_or_else(|| "•".dim());
-        let mut lines = Vec::new();
-        if !waits.iter().any(|(_, target)| target.is_some()) || !self.pending_children.is_empty() {
-            lines.push(Line::from(vec![
-                marker.clone(),
-                " ".into(),
-                "Running".bold(),
-                format!(" ({})", self.tetrad()).dim(),
-            ]));
-        }
-        for member in &self.members {
-            if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
-                for call in exec.iter_calls().filter(|call| call.duration.is_none()) {
-                    let command = crate::exec_command::strip_bash_lc_and_escape(&call.command);
-                    let first = command.lines().next().unwrap_or_default().to_string();
-                    lines.push(Line::from(vec!["  ".into(), first.into()]));
-                }
-            } else if member.transcript_animation_tick().is_some()
-                && let Some(line) = member.display_lines(u16::MAX).into_iter().next()
-            {
-                let mut spans = vec!["  ".into()];
-                spans.extend(line.spans);
-                lines.push(Line::from(spans));
-            }
-        }
-        for (_, target) in waits {
-            let mut spans = vec![
-                marker.clone(),
-                " ".into(),
-                "Waiting for ".bold(),
-                target.map_or_else(|| self.tetrad(), owner_label).into(),
-            ];
-            if target.is_some() {
-                spans.push(format!(" ({})", self.tetrad()).dim());
-            }
-            lines.push(Line::from(spans));
-        }
-        lines
-    }
-
-    fn waits(&self) -> Vec<(&str, Option<&CodeModeOwner>)> {
-        // A wait invocation is one-shot; completion wins even when older pages arrive last.
-        let completed = self
-            .facts
-            .iter()
-            .filter_map(|fact| match &fact.event {
-                CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        self.facts
-            .iter()
-            .filter_map(|fact| match &fact.event {
-                CodeModeEvent::WaitStarted { call_id, target }
-                    if !completed.contains(call_id.as_str()) =>
-                {
-                    Some((call_id.as_str(), target.as_ref()))
-                }
-                _ => None,
-            })
-            .collect()
-    }
-
+impl LegacyCodeMode {
     fn from_fact(fact: CodeModeItem, animations_enabled: bool) -> Self {
         Self {
             exec_call_id: fact.exec_call_id.clone(),
@@ -253,147 +178,14 @@ impl CodeModeCell {
             members: Vec::new(),
             start_time: Instant::now(),
             animations_enabled,
-            owner: None,
-            live: true,
-            children: Vec::new(),
-            child_versions: HashMap::new(),
-            pending_children: HashMap::new(),
         }
-    }
-
-    pub(crate) fn owned(owner: CodeModeOwner, animations_enabled: bool) -> Self {
-        Self {
-            exec_call_id: owner.exec_call_id.clone(),
-            facts: Vec::new(),
-            members: Vec::new(),
-            start_time: Instant::now(),
-            animations_enabled,
-            owner: Some(owner),
-            live: false,
-            children: Vec::new(),
-            child_versions: HashMap::new(),
-            pending_children: HashMap::new(),
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn terminal(&self) -> bool {
-        self.status().is_some()
-    }
-
-    pub(crate) fn identity(&self) -> String {
-        self.owner.as_ref().map_or_else(
-            || format!("code-mode:{}", self.exec_call_id),
-            |owner| format!("code-mode:{}:{}", owner.thread_id, owner.exec_call_id),
-        )
-    }
-
-    pub(crate) fn admit_fact(&mut self, fact: CodeModeItem, live: bool) {
-        if live && matches!(fact.event, CodeModeEvent::Started { .. }) {
-            self.live = true;
-        }
-        self.insert_fact(fact);
-    }
-
-    /// The exec input as the model wrote it, when the record kept it.
-    pub(crate) fn script(&self) -> Option<&str> {
-        self.facts.iter().find_map(|fact| match &fact.event {
-            CodeModeEvent::Started { script, .. } => script.as_deref(),
-            _ => None,
-        })
-    }
-
-    /// The fold that shows the script above the block's calls.
-    pub(crate) fn script_fold(&self) -> String {
-        format!("{}:js", self.identity())
-    }
-
-    /// The script as rows nested under the block's title, highlighted and marked as the
-    /// client's view of it rather than captured output.
-    pub(crate) fn script_lines(&self) -> Option<Vec<HyperlinkLine>> {
-        let script = self.script()?.trim_end_matches(['\r', '\n']);
-        let mut lines = plain_hyperlink_lines(crate::render::highlight::highlight_code_to_lines(
-            script,
-            "javascript",
-        ));
-        mark_lines(&mut lines, OutputProvenance::Client);
-        Some(prefix_hyperlink_lines(
-            lines,
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-        ))
-    }
-
-    pub(crate) fn admit_children(&mut self, id: String, cells: Vec<Arc<dyn HistoryCell>>) {
-        if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
-            *rows = cells;
-        } else {
-            self.children.push((id, cells));
-        }
-        self.refresh_children();
-    }
-
-    pub(crate) fn hydrate(&mut self, older: &Self) {
-        for fact in &older.facts {
-            self.insert_fact(fact.clone());
-        }
-        let newer = std::mem::take(&mut self.children);
-        self.children = older.children.clone();
-        for (id, cells) in newer {
-            if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
-                *rows = cells;
-            } else {
-                self.children.push((id, cells));
-            }
-        }
-        self.refresh_children();
-        for (id, version) in &older.child_versions {
-            self.child_versions.entry(id.clone()).or_insert(*version);
-        }
-        for (id, item) in &older.pending_children {
-            if self
-                .child_versions
-                .get(id)
-                .is_some_and(|(_, terminal)| !terminal)
-            {
-                self.pending_children
-                    .entry(id.clone())
-                    .or_insert_with(|| item.clone());
-            }
-        }
-        self.facts.sort_by_key(|fact| fact.created_at);
-    }
-
-    fn refresh_children(&mut self) {
-        self.members = self
-            .children
-            .iter()
-            .flat_map(|(_, rows)| rows.iter().cloned())
-            .collect();
-        self.members
-            .sort_by_key(|cell| cell.as_any().is::<ToolOutputCell>());
-    }
-
-    fn status(&self) -> Option<(CodeModeStatus, i64)> {
-        self.facts.iter().find_map(|fact| match fact.event {
-            CodeModeEvent::Finished { status } => Some((status, fact.created_at)),
-            _ => None,
-        })
     }
 
     fn calls(&self) -> HashSet<&str> {
-        std::iter::once(self.exec_call_id.as_str())
-            .chain(self.facts.iter().filter_map(|fact| match &fact.event {
-                CodeModeEvent::Started { call_id, .. }
-                | CodeModeEvent::ToolCall { call_id }
-                | CodeModeEvent::WaitStarted { call_id, .. }
-                | CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
-                CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
-            }))
-            .collect()
+        call_ids(&self.exec_call_id, &self.facts)
     }
 
-    pub(crate) fn owns(&self, cell: &dyn HistoryCell) -> bool {
+    fn owns(&self, cell: &dyn HistoryCell) -> bool {
         let ids = cell.tool_call_ids();
         !ids.is_empty() && ids.iter().all(|id| self.calls().contains(id))
     }
@@ -433,20 +225,221 @@ impl CodeModeCell {
     }
 
     fn insert_fact(&mut self, fact: CodeModeItem) {
-        if !self.facts.iter().any(|old| old.id == fact.id) {
-            self.facts.push(fact);
+        insert_fact(&mut self.facts, fact);
+    }
+}
+
+impl CodeModeCell {
+    #[cfg(test)]
+    pub(crate) fn owned(owner: CodeModeOwner, animations_enabled: bool) -> Self {
+        Self::Scoped(ScopedCodeMode::new(owner, animations_enabled))
+    }
+
+    pub(crate) fn owner(&self) -> Option<&CodeModeOwner> {
+        self.scoped().map(ScopedCodeMode::owner)
+    }
+
+    pub(crate) fn scoped(&self) -> Option<&ScopedCodeMode> {
+        match self {
+            Self::Legacy(_) => None,
+            Self::Scoped(scoped) => Some(scoped),
         }
+    }
+
+    pub(crate) fn members(&self) -> &[Arc<dyn HistoryCell>] {
+        match self {
+            Self::Legacy(legacy) => &legacy.members,
+            Self::Scoped(scoped) => scoped.members(),
+        }
+    }
+
+    fn facts(&self) -> &[CodeModeItem] {
+        match self {
+            Self::Legacy(legacy) => &legacy.facts,
+            Self::Scoped(scoped) => scoped.facts(),
+        }
+    }
+
+    pub(crate) fn exec_call_id(&self) -> &str {
+        match self {
+            Self::Legacy(legacy) => &legacy.exec_call_id,
+            Self::Scoped(scoped) => &scoped.owner().exec_call_id,
+        }
+    }
+
+    fn start_time(&self) -> Instant {
+        match self {
+            Self::Legacy(legacy) => legacy.start_time,
+            Self::Scoped(scoped) => scoped.start_time(),
+        }
+    }
+
+    fn animations_enabled(&self) -> bool {
+        match self {
+            Self::Legacy(legacy) => legacy.animations_enabled,
+            Self::Scoped(scoped) => scoped.animations_enabled(),
+        }
+    }
+
+    fn live(&self) -> bool {
+        match self {
+            Self::Legacy(_) => true,
+            Self::Scoped(scoped) => scoped.live(),
+        }
+    }
+
+    fn has_pending_children(&self) -> bool {
+        self.scoped()
+            .is_some_and(ScopedCodeMode::has_pending_children)
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        (self.live() && self.status().is_none())
+            || self.scoped().is_some_and(ScopedCodeMode::has_live_command)
+    }
+
+    pub(crate) fn tetrad(&self) -> String {
+        self.owner()
+            .map_or_else(|| label(self.exec_call_id()), owner_label)
+    }
+
+    pub(crate) fn live_lines(&self) -> Vec<Line<'static>> {
+        if !self.is_active() {
+            return Vec::new();
+        }
+        let waits = self.waits();
+        let marker = activity_indicator(
+            Some(self.start_time()),
+            MotionMode::from_animations_enabled(self.animations_enabled()),
+            ReducedMotionIndicator::StaticBullet,
+        )
+        .unwrap_or_else(|| "•".dim());
+        let mut lines = Vec::new();
+        if !waits.iter().any(|(_, target)| target.is_some()) || self.has_pending_children() {
+            lines.push(Line::from(vec![
+                marker.clone(),
+                " ".into(),
+                "Running".bold(),
+                format!(" ({})", self.tetrad()).dim(),
+            ]));
+        }
+        for member in self.members() {
+            if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
+                for call in exec.iter_calls().filter(|call| call.duration.is_none()) {
+                    let command = crate::exec_command::strip_bash_lc_and_escape(&call.command);
+                    let first = command.lines().next().unwrap_or_default().to_string();
+                    lines.push(Line::from(vec!["  ".into(), first.into()]));
+                }
+            } else if member.transcript_animation_tick().is_some()
+                && let Some(line) = member.display_lines(u16::MAX).into_iter().next()
+            {
+                let mut spans = vec!["  ".into()];
+                spans.extend(line.spans);
+                lines.push(Line::from(spans));
+            }
+        }
+        for (_, target) in waits {
+            let mut spans = vec![
+                marker.clone(),
+                " ".into(),
+                "Waiting for ".bold(),
+                target.map_or_else(|| self.tetrad(), owner_label).into(),
+            ];
+            if target.is_some() {
+                spans.push(format!(" ({})", self.tetrad()).dim());
+            }
+            lines.push(Line::from(spans));
+        }
+        lines
+    }
+
+    fn waits(&self) -> Vec<(&str, Option<&CodeModeOwner>)> {
+        // A wait invocation is one-shot; completion wins even when older pages arrive last.
+        let completed = self
+            .facts()
+            .iter()
+            .filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
+        self.facts()
+            .iter()
+            .filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitStarted { call_id, target }
+                    if !completed.contains(call_id.as_str()) =>
+                {
+                    Some((call_id.as_str(), target.as_ref()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub(crate) fn terminal(&self) -> bool {
+        self.status().is_some()
+    }
+
+    pub(crate) fn identity(&self) -> String {
+        self.owner().map_or_else(
+            || format!("code-mode:{}", self.exec_call_id()),
+            |owner| format!("code-mode:{}:{}", owner.thread_id, owner.exec_call_id),
+        )
+    }
+
+    pub(crate) fn script(&self) -> Option<&str> {
+        self.facts().iter().find_map(|fact| match &fact.event {
+            CodeModeEvent::Started { script, .. } => script.as_deref(),
+            _ => None,
+        })
+    }
+
+    /// The fold that shows the script above the block's calls.
+    pub(crate) fn script_fold(&self) -> String {
+        format!("{}:js", self.identity())
+    }
+
+    /// The script as rows nested under the block's title, highlighted and marked as the
+    /// client's view of it rather than captured output.
+    pub(crate) fn script_lines(&self) -> Option<Vec<HyperlinkLine>> {
+        let script = self.script()?.trim_end_matches(['\r', '\n']);
+        let mut lines = plain_hyperlink_lines(crate::render::highlight::highlight_code_to_lines(
+            script,
+            "javascript",
+        ));
+        mark_lines(&mut lines, OutputProvenance::Client);
+        Some(prefix_hyperlink_lines(
+            lines,
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+            crate::transcript_geometry::CHILD_PREFIX.into(),
+        ))
+    }
+
+    fn status(&self) -> Option<(CodeModeStatus, i64)> {
+        self.facts().iter().find_map(|fact| match fact.event {
+            CodeModeEvent::Finished { status } => Some((status, fact.created_at)),
+            _ => None,
+        })
+    }
+
+    fn calls(&self) -> HashSet<&str> {
+        call_ids(self.exec_call_id(), self.facts())
+    }
+
+    pub(crate) fn owns(&self, cell: &dyn HistoryCell) -> bool {
+        let ids = cell.tool_call_ids();
+        !ids.is_empty() && ids.iter().all(|id| self.calls().contains(id))
     }
 
     fn event_time(&self) -> Option<i64> {
         let started = self
-            .facts
+            .facts()
             .iter()
             .find(|fact| matches!(fact.event, CodeModeEvent::Started { .. }));
         self.status()
             .map(|(_, timestamp)| timestamp)
             .or_else(|| started.map(|fact| fact.created_at))
-            .or_else(|| self.owner.as_ref().map(|owner| owner.started_at_ms / 1_000))
+            .or_else(|| self.owner().map(|owner| owner.started_at_ms / 1_000))
     }
 
     fn header(&self) -> Option<Line<'static>> {
@@ -456,10 +449,10 @@ impl CodeModeCell {
             Some((CodeModeStatus::Completed, _)) => ("•".green().bold(), "Called"),
             Some((CodeModeStatus::Failed, _)) => ("•".red().bold(), "Failed"),
             Some((CodeModeStatus::Interrupted, _)) => ("•".red().bold(), "Interrupted"),
-            None if self.live => (
+            None if self.live() => (
                 activity_indicator(
-                    Some(self.start_time),
-                    MotionMode::from_animations_enabled(self.animations_enabled),
+                    Some(self.start_time()),
+                    MotionMode::from_animations_enabled(self.animations_enabled()),
                     ReducedMotionIndicator::StaticBullet,
                 )
                 .unwrap_or_else(|| "•".dim()),
@@ -485,7 +478,7 @@ impl CodeModeCell {
         let mut controls = Vec::new();
         let block_expanded = expanded.contains(&self.identity());
         let nested_width = width.saturating_sub(crate::transcript_geometry::CHILD_INDENT);
-        for member in &self.members {
+        for member in self.members() {
             if !block_expanded && member.as_any().is::<ToolOutputCell>() {
                 continue;
             }
@@ -526,7 +519,7 @@ impl CodeModeCell {
         if block_expanded
             && self.status().is_some()
             && !self
-                .members
+                .members()
                 .iter()
                 .any(|member| member.as_any().is::<ToolOutputCell>())
         {
@@ -546,13 +539,13 @@ impl HistoryCell for CodeModeCell {
         HistoryTimestamp::from_millis(self.event_time()?.saturating_mul(1_000))
     }
     fn has_formatted_output(&self) -> bool {
-        self.members
+        self.members()
             .iter()
             .any(|member| member.has_formatted_output())
     }
     fn transcript_animation_tick(&self) -> Option<u64> {
-        (self.animations_enabled && self.is_active())
-            .then(|| (self.start_time.elapsed().as_millis() / 50) as u64)
+        (self.animations_enabled() && self.is_active())
+            .then(|| (self.start_time().elapsed().as_millis() / 50) as u64)
     }
     fn activity_header(&self) -> Option<ActivityHeader> {
         self.header().as_ref().map(ActivityHeader::at_end)
@@ -561,7 +554,7 @@ impl HistoryCell for CodeModeCell {
     fn activity_ids(&self) -> Vec<String> {
         std::iter::once(self.identity())
             .chain(
-                self.members
+                self.members()
                     .iter()
                     .filter(|cell| cell.as_any().is::<ToolOutputCell>())
                     .flat_map(|cell| cell.activity_ids()),
@@ -576,7 +569,7 @@ impl HistoryCell for CodeModeCell {
     fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
         for member in self
-            .members
+            .members()
             .iter()
             .filter(|member| !member.as_any().is::<ToolOutputCell>())
         {
@@ -593,7 +586,7 @@ impl HistoryCell for CodeModeCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
-        for member in &self.members {
+        for member in self.members() {
             lines.extend(prefix_hyperlink_lines(
                 member.nested_detail_lines(
                     width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
@@ -604,7 +597,7 @@ impl HistoryCell for CodeModeCell {
         }
         if self.status().is_some()
             && !self
-                .members
+                .members()
                 .iter()
                 .any(|member| member.as_any().is::<ToolOutputCell>())
         {
@@ -637,7 +630,7 @@ impl HistoryCell for CodeModeCell {
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
-        self.members
+        self.members()
             .iter()
             .any(|cell| {
                 cell.has_nested_details(
@@ -648,7 +641,7 @@ impl HistoryCell for CodeModeCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.members
+        self.members()
             .iter()
             .flat_map(|cell| cell.raw_lines())
             .collect()

@@ -5,7 +5,10 @@ use crate::history_cell::CodeModeCell;
 use crate::history_cell::CodeModeFactCell;
 use crate::history_cell::CodeModeWaitCell;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::ToolOutputCell;
+use crate::history_cell::insert_code_mode_fact;
 use codex_app_server_protocol::CodeModeEvent;
+use codex_app_server_protocol::CodeModeItem;
 use codex_app_server_protocol::CodeModeOwned;
 use codex_app_server_protocol::CodeModeOwner;
 use codex_app_server_protocol::ItemCompletedNotification;
@@ -17,6 +20,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Source {
@@ -30,7 +34,6 @@ pub(crate) enum AdmissionFault {
     IneligibleNotification,
     ConflictingThread,
     UnownedHydration,
-    MissingDescriptor,
     ConflictingHydration,
     ConflictingExecutionDescriptor,
     UnvalidatedNotification,
@@ -44,7 +47,6 @@ impl Display for AdmissionFault {
             Self::IneligibleNotification => "ineligible Code Mode notification",
             Self::ConflictingThread => "conflicting Code Mode thread",
             Self::UnownedHydration => "unowned Code Mode hydration",
-            Self::MissingDescriptor => "missing Code Mode descriptor",
             Self::ConflictingHydration => "conflicting Code Mode hydration",
             Self::ConflictingExecutionDescriptor => "conflicting Code Mode execution descriptor",
             Self::UnvalidatedNotification => "unvalidated Code Mode notification",
@@ -156,10 +158,48 @@ impl Admission {
 }
 
 #[derive(Default)]
-pub(crate) struct Reducers(HashMap<ThreadId, HashMap<(ThreadId, String), Block>>);
+pub(crate) struct Reducers(HashMap<ThreadId, HashMap<(ThreadId, String), ScopedCodeMode>>);
 
-struct Block {
-    cell: CodeModeCell,
+#[derive(Debug, Clone)]
+pub(crate) struct ScopedCodeMode {
+    owner: CodeModeOwner,
+    facts: Vec<CodeModeItem>,
+    live: bool,
+    children: Vec<(String, Vec<Arc<dyn HistoryCell>>)>,
+    revisions: HashMap<String, ChildRevision>,
+    rendered_members: Vec<Arc<dyn HistoryCell>>,
+    start_time: Instant,
+    animations_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+enum ChildRevision {
+    Pending {
+        source: Source,
+        item: Box<ThreadItem>,
+    },
+    Terminal {
+        source: Source,
+    },
+}
+
+impl ChildRevision {
+    fn source(&self) -> Source {
+        match self {
+            Self::Pending { source, .. } | Self::Terminal { source } => *source,
+        }
+    }
+
+    fn terminal(&self) -> bool {
+        matches!(self, Self::Terminal { .. })
+    }
+
+    fn pending(&self) -> Option<&ThreadItem> {
+        match self {
+            Self::Pending { item, .. } => Some(item),
+            Self::Terminal { .. } => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -182,7 +222,7 @@ impl Reducers {
         let retained = cells
             .iter()
             .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
-            .filter_map(|cell| cell.owner.as_ref())
+            .filter_map(CodeModeCell::owner)
             .map(|owner| (owner.thread_id, owner.exec_call_id.clone()))
             .collect::<std::collections::HashSet<_>>();
         self.0.retain(|_, bank| {
@@ -196,23 +236,15 @@ impl Reducers {
         display: ThreadId,
         incoming: &CodeModeCell,
     ) -> Result<Arc<dyn HistoryCell>, AdmissionFault> {
-        let owner = incoming
-            .owner
-            .as_ref()
-            .ok_or(AdmissionFault::UnownedHydration)?;
+        let incoming = incoming.scoped().ok_or(AdmissionFault::UnownedHydration)?;
+        let owner = &incoming.owner;
         let block = self
             .0
             .entry(display)
             .or_default()
             .entry((owner.thread_id, owner.exec_call_id.clone()))
-            .or_insert_with(|| Block {
-                cell: incoming.clone(),
-            });
-        let retained = block
-            .cell
-            .owner
-            .as_mut()
-            .ok_or(AdmissionFault::MissingDescriptor)?;
+            .or_insert_with(|| incoming.clone());
+        let retained = &mut block.owner;
         if retained.started_at_ms != owner.started_at_ms
             || retained
                 .cell_id
@@ -225,8 +257,8 @@ impl Reducers {
         if retained.cell_id.is_none() {
             retained.cell_id = owner.cell_id.clone();
         }
-        block.cell.hydrate(incoming);
-        Ok(Arc::new(block.cell.clone()))
+        block.hydrate(incoming);
+        Ok(Arc::new(CodeModeCell::Scoped(block.clone())))
     }
 
     pub(crate) fn admit(
@@ -247,14 +279,8 @@ impl Reducers {
             .entry(display)
             .or_default()
             .entry((owner.thread_id, owner.exec_call_id.clone()))
-            .or_insert_with(|| Block {
-                cell: CodeModeCell::owned(owner.clone(), animations),
-            });
-        let descriptor = block
-            .cell
-            .owner
-            .as_mut()
-            .ok_or(AdmissionFault::MissingDescriptor)?;
+            .or_insert_with(|| ScopedCodeMode::new(owner.clone(), animations));
+        let descriptor = &mut block.owner;
         if descriptor.started_at_ms != owner.started_at_ms
             || descriptor
                 .cell_id
@@ -267,7 +293,7 @@ impl Reducers {
         if descriptor.cell_id.is_none() {
             descriptor.cell_id = owner.cell_id;
         }
-        let active_before = block.cell.is_active();
+        let active_before = block.is_active();
         let mut wait = None;
         let mut tokens = None;
         match notification {
@@ -285,8 +311,11 @@ impl Reducers {
                 )?;
             }
             ServerNotification::CommandExecutionOutputDelta(delta) => {
-                if let Some(item @ ThreadItem::CommandExecution { .. }) =
-                    block.cell.pending_children.get_mut(&delta.item_id)
+                if let Some(ChildRevision::Pending {
+                    source: previous,
+                    item,
+                }) = block.revisions.get_mut(&delta.item_id)
+                    && let item @ ThreadItem::CommandExecution { .. } = item.as_mut()
                 {
                     if let ThreadItem::CommandExecution {
                         aggregated_output, ..
@@ -303,16 +332,16 @@ impl Reducers {
                         source,
                         metadata,
                     );
-                    block
-                        .cell
-                        .child_versions
-                        .insert(id.clone(), (source, false));
-                    block.cell.admit_children(id, cells);
+                    *previous = source;
+                    block.admit_children(id, cells);
                 }
             }
             ServerNotification::FileChangePatchUpdated(updated) => {
-                if let Some(item @ ThreadItem::FileChange { .. }) =
-                    block.cell.pending_children.get_mut(&updated.item_id)
+                if let Some(ChildRevision::Pending {
+                    source: previous,
+                    item,
+                }) = block.revisions.get_mut(&updated.item_id)
+                    && let item @ ThreadItem::FileChange { .. } = item.as_mut()
                 {
                     if let ThreadItem::FileChange { changes, .. } = item {
                         *changes = updated.changes;
@@ -324,18 +353,15 @@ impl Reducers {
                         source,
                         metadata,
                     );
-                    block
-                        .cell
-                        .child_versions
-                        .insert(id.clone(), (source, false));
-                    block.cell.admit_children(id, cells);
+                    *previous = source;
+                    block.admit_children(id, cells);
                 }
             }
             ServerNotification::TerminalInteraction(interaction) => {
                 let command = block
-                    .cell
-                    .pending_children
+                    .revisions
                     .values()
+                    .filter_map(ChildRevision::pending)
                     .find_map(|item| match item {
                         ThreadItem::CommandExecution {
                             command,
@@ -349,12 +375,12 @@ impl Reducers {
                         _ => None,
                     });
                 if !interaction.stdin.is_empty() || command.is_some() {
-                    block.cell.admit_children(
+                    block.admit_children(
                         // Replay starts with a fresh reducer; page hydration preserves child IDs.
                         format!(
                             "terminal-interaction:{}:{}",
                             interaction.item_id,
-                            block.cell.children.len()
+                            block.children.len()
                         ),
                         vec![Arc::new(crate::history_cell::new_unified_exec_interaction(
                             command,
@@ -370,15 +396,118 @@ impl Reducers {
             _ => return Err(AdmissionFault::UnvalidatedNotification),
         }
         Ok(Projection {
-            opens_live: !active_before && block.cell.is_active(),
-            block: Arc::new(block.cell.clone()),
+            opens_live: !active_before && block.is_active(),
+            block: Arc::new(CodeModeCell::Scoped(block.clone())),
             wait,
             tokens,
         })
     }
 }
 
-impl Block {
+impl ScopedCodeMode {
+    pub(crate) fn new(owner: CodeModeOwner, animations_enabled: bool) -> Self {
+        Self {
+            owner,
+            facts: Vec::new(),
+            live: false,
+            children: Vec::new(),
+            revisions: HashMap::new(),
+            rendered_members: Vec::new(),
+            start_time: Instant::now(),
+            animations_enabled,
+        }
+    }
+
+    pub(crate) fn owner(&self) -> &CodeModeOwner {
+        &self.owner
+    }
+
+    pub(crate) fn facts(&self) -> &[CodeModeItem] {
+        &self.facts
+    }
+
+    pub(crate) fn members(&self) -> &[Arc<dyn HistoryCell>] {
+        &self.rendered_members
+    }
+
+    pub(crate) fn start_time(&self) -> Instant {
+        self.start_time
+    }
+
+    pub(crate) fn animations_enabled(&self) -> bool {
+        self.animations_enabled
+    }
+
+    pub(crate) fn live(&self) -> bool {
+        self.live
+    }
+
+    pub(crate) fn has_pending_children(&self) -> bool {
+        self.revisions.values().any(|revision| !revision.terminal())
+    }
+
+    pub(crate) fn has_live_command(&self) -> bool {
+        self.revisions.values().any(|revision| {
+            matches!(
+                revision,
+                ChildRevision::Pending {
+                    source: Source::Live,
+                    item,
+                } if matches!(item.as_ref(), ThreadItem::CommandExecution { .. })
+            )
+        })
+    }
+
+    fn is_active(&self) -> bool {
+        (self.live
+            && !self
+                .facts
+                .iter()
+                .any(|fact| matches!(fact.event, CodeModeEvent::Finished { .. })))
+            || self.has_live_command()
+    }
+
+    fn admit_children(&mut self, id: String, cells: Vec<Arc<dyn HistoryCell>>) {
+        if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
+            *rows = cells;
+        } else {
+            self.children.push((id, cells));
+        }
+        self.refresh_children();
+    }
+
+    fn hydrate(&mut self, older: &Self) {
+        for fact in &older.facts {
+            insert_code_mode_fact(&mut self.facts, fact.clone());
+        }
+        let newer = std::mem::take(&mut self.children);
+        self.children = older.children.clone();
+        for (id, cells) in newer {
+            if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
+                *rows = cells;
+            } else {
+                self.children.push((id, cells));
+            }
+        }
+        self.refresh_children();
+        for (id, revision) in &older.revisions {
+            self.revisions
+                .entry(id.clone())
+                .or_insert_with(|| revision.clone());
+        }
+        self.facts.sort_by_key(|fact| fact.created_at);
+    }
+
+    fn refresh_children(&mut self) {
+        self.rendered_members = self
+            .children
+            .iter()
+            .flat_map(|(_, rows)| rows.iter().cloned())
+            .collect();
+        self.rendered_members
+            .sort_by_key(|cell| cell.as_any().is::<ToolOutputCell>());
+    }
+
     fn item(
         &mut self,
         item: ThreadItem,
@@ -391,11 +520,7 @@ impl Block {
         match item {
             ThreadItem::CodeModeOwned(_) => return Err(AdmissionFault::NestedItem),
             ThreadItem::CodeMode(fact) => {
-                let owner = self
-                    .cell
-                    .owner
-                    .as_ref()
-                    .ok_or(AdmissionFault::MissingDescriptor)?;
+                let owner = &self.owner;
                 if fact.exec_call_id != owner.exec_call_id
                     || fact
                         .cell_id
@@ -415,7 +540,10 @@ impl Block {
                         owner.clone(),
                     )));
                 }
-                self.cell.admit_fact(fact, source == Source::Live);
+                if source == Source::Live && matches!(fact.event, CodeModeEvent::Started { .. }) {
+                    self.live = true;
+                }
+                insert_code_mode_fact(&mut self.facts, fact);
             }
             ThreadItem::ToolOutputTokens {
                 id,
@@ -436,7 +564,7 @@ impl Block {
                     model: old_model,
                     reasoning_effort: old_effort,
                     ..
-                }) = self.cell.pending_children.get(&id)
+                }) = self.revisions.get(&id).and_then(ChildRevision::pending)
                     && let ThreadItem::CollabAgentToolCall {
                         prompt,
                         model,
@@ -470,28 +598,26 @@ impl Block {
                         ..
                     }
                 );
-                if self
-                    .cell
-                    .child_versions
-                    .get(&id)
-                    .is_some_and(|(previous, terminal)| {
-                        (*terminal && pending)
-                            || (*previous == Source::Live
-                                && source == Source::Historical
-                                && (*terminal || pending))
-                    })
-                {
+                if self.revisions.get(&id).is_some_and(|previous| {
+                    (previous.terminal() && pending)
+                        || (previous.source() == Source::Live
+                            && source == Source::Historical
+                            && (previous.terminal() || pending))
+                }) {
                     return Ok(());
                 }
-                self.cell
-                    .child_versions
-                    .insert(id.clone(), (source, !pending));
-                if pending {
-                    self.cell.pending_children.insert(id.clone(), item.clone());
-                } else {
-                    self.cell.pending_children.remove(&id);
-                }
-                self.cell.admit_children(
+                self.revisions.insert(
+                    id.clone(),
+                    if pending {
+                        ChildRevision::Pending {
+                            source,
+                            item: Box::new(item.clone()),
+                        }
+                    } else {
+                        ChildRevision::Terminal { source }
+                    },
+                );
+                self.admit_children(
                     id,
                     crate::thread_transcript::scoped_item_cells(item, cwd, source, metadata),
                 );

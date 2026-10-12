@@ -215,7 +215,8 @@ fn append_thread_items(
                             .downcast_ref::<crate::history_cell::CodeModeCell>()
                             .is_some_and(|block| {
                                 incoming.is_some_and(|incoming| {
-                                    block.identity() == incoming.identity() && block.owner.is_some()
+                                    block.identity() == incoming.identity()
+                                        && block.owner().is_some()
                                 })
                             })
                     }) {

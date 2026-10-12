@@ -46,59 +46,66 @@ fn message(id: &str, text: &str) -> Arc<dyn HistoryCell> {
 
 /// A finished Code Mode block that kept its script, with the one call the script made.
 fn script_block(exec: &str) -> Arc<dyn HistoryCell> {
-    let fact = |suffix: &str, event| CodeModeItem {
-        id: format!("code-mode:{exec}:{suffix}"),
-        cell_id: None,
-        exec_call_id: exec.into(),
-        created_at: CLOCK_MS / 1_000,
-        event,
-    };
-    let mut block = CodeModeCell::owned(
-        CodeModeOwner {
-            thread_id: ThreadId::from_u128(/*value*/ 7),
-            exec_call_id: exec.into(),
+    let fact = |suffix: &str, event| {
+        ThreadItem::CodeMode(CodeModeItem {
+            id: format!("code-mode:{exec}:{suffix}"),
             cell_id: None,
-            started_at_ms: CLOCK_MS,
-        },
-        /*animations_enabled*/ false,
-    );
-    block.admit_fact(
-        fact(
-            "start",
-            CodeModeEvent::Started {
-                call_id: exec.into(),
-                script: Some(
-                    "const status = await tools.exec_command({ cmd: \"git status\" });\ntext(status.output);\n"
-                        .into(),
+            exec_call_id: exec.into(),
+            created_at: CLOCK_MS / 1_000,
+            event,
+        })
+    };
+    let owner = CodeModeOwner {
+        thread_id: ThreadId::from_u128(/*value*/ 7),
+        exec_call_id: exec.into(),
+        cell_id: None,
+        started_at_ms: CLOCK_MS,
+    };
+    let cwd = codex_utils_absolute_path::AbsolutePathBuf::current_dir().unwrap();
+    let mut reducers = crate::code_mode_transcript::Reducers::default();
+    let mut reduce = |item| {
+        reducers
+            .admit(
+                owner.thread_id,
+                crate::code_mode_transcript::Admission::item(
+                    codex_app_server_protocol::CodeModeOwned::new(owner.clone(), Box::new(item)),
+                    String::new(),
                 ),
-            },
+                &cwd,
+                /*animations*/ false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap()
+            .block
+    };
+    reduce(fact("start", CodeModeEvent::Started {
+        call_id: exec.into(),
+        script: Some(
+            "const status = await tools.exec_command({ cmd: \"git status\" });\ntext(status.output);\n".into(),
         ),
-        /*live*/ false,
-    );
-    let mut status = new_active_exec_command(
-        "call-status".into(),
-        ["git", "status"].map(String::from).to_vec(),
-        Vec::new(),
-        CommandExecutionSource::Agent,
-        /*interaction_input*/ None,
-        /*animations_enabled*/ false,
-    );
-    status.complete_call(
-        "call-status",
-        CommandOutput::new(/*exit_code*/ 0, "clean\n".into()),
-        std::time::Duration::ZERO,
-    );
-    block.admit_children("call-status".into(), vec![Arc::new(status)]);
-    block.admit_fact(
-        fact(
-            "end",
-            CodeModeEvent::Finished {
-                status: CodeModeStatus::Completed,
-            },
-        ),
-        /*live*/ false,
-    );
-    Arc::new(block)
+    }));
+    reduce(ThreadItem::CommandExecution {
+        sandbox_type: None,
+        model_context: None,
+        id: "call-status".into(),
+        plugin_id: None,
+        script_path: None,
+        command: "git status".into(),
+        cwd: cwd.clone().into(),
+        process_id: None,
+        source: CommandExecutionSource::Agent,
+        status: codex_app_server_protocol::CommandExecutionStatus::Completed,
+        command_actions: Vec::new(),
+        aggregated_output: Some("clean\n".into()),
+        exit_code: Some(0),
+        duration_ms: Some(0),
+    });
+    reduce(fact(
+        "end",
+        CodeModeEvent::Finished {
+            status: CodeModeStatus::Completed,
+        },
+    ))
 }
 
 fn step(

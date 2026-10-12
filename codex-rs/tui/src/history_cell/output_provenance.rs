@@ -161,10 +161,10 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
     let any = cell.as_any();
     let members = any
         .downcast_ref::<super::CodeModeCell>()
-        .map(|group| &group.members)
+        .map(|group| group.members())
         .or_else(|| {
             any.downcast_ref::<super::ToolOutputGroup>()
-                .map(|group| &group.members)
+                .map(|group| group.members.as_slice())
         });
     if let Some(members) = members {
         return members

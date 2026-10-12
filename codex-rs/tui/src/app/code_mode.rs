@@ -115,7 +115,7 @@ impl App {
         let display = self
             .chat_widget
             .thread_id()
-            .or_else(|| block.owner.as_ref().map(|owner| owner.thread_id));
+            .or_else(|| block.owner().map(|owner| owner.thread_id));
         let Some(display) = display else {
             return;
         };

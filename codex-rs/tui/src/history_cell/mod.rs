@@ -20,6 +20,7 @@ pub(crate) use code_mode::CodeModeCell;
 pub(crate) use code_mode::CodeModeFactCell;
 pub(crate) use code_mode::CodeModeWaitCell;
 pub(crate) use code_mode::ProjectionChange;
+pub(crate) use code_mode::insert_fact as insert_code_mode_fact;
 pub(crate) use code_mode::reconcile_code_mode;
 pub(crate) use code_mode::reunite_code_mode;
 pub(crate) use code_mode::split_code_mode_members;

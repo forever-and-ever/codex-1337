@@ -64,7 +64,7 @@ impl App {
         if cell
             .as_any()
             .downcast_ref::<history_cell::CodeModeCell>()
-            .is_some_and(|block| block.owner.is_some())
+            .is_some_and(|block| block.owner().is_some())
         {
             self.insert_code_mode_cell(tui, cell);
             return;
