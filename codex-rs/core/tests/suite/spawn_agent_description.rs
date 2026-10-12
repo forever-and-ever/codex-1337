@@ -173,46 +173,63 @@ pub(super) async fn model_catalog_refresh_requests(
     mount_models_once(
         &server,
         ModelsResponse {
-            models: vec![
-                test_model_info(
-                    "visible-model",
-                    "Visible Model",
-                    "Fast and capable",
-                    ModelVisibility::List,
-                    ReasoningEffort::Medium,
-                    vec![
-                        ReasoningEffortPreset {
+            // A large escaped description cannot evict the sixth model's selector.
+            models: (0..5)
+                .map(|index| {
+                    test_model_info(
+                        &format!("extra-model-{index}"),
+                        "Extra model",
+                        &"<&>".repeat(100),
+                        ModelVisibility::List,
+                        ReasoningEffort::Low,
+                        vec![ReasoningEffortPreset {
                             effort: ReasoningEffort::Low,
                             description: "Quick scan".to_string(),
-                        },
-                        ReasoningEffortPreset {
-                            effort: ReasoningEffort::Medium,
-                            description: "Balanced".to_string(),
-                        },
-                        ReasoningEffortPreset {
-                            effort: ReasoningEffort::High,
-                            description: "Deep dive".to_string(),
-                        },
-                    ],
-                    vec![ModelServiceTier {
-                        id: "priority".to_string(),
-                        name: "Fast".to_string(),
-                        description: "1.5x speed, increased usage".to_string(),
-                    }],
-                ),
-                test_model_info(
-                    "hidden-model",
-                    "Hidden Model",
-                    "Should not be shown",
-                    ModelVisibility::Hide,
-                    ReasoningEffort::Low,
-                    vec![ReasoningEffortPreset {
-                        effort: ReasoningEffort::Low,
-                        description: "Not visible".to_string(),
-                    }],
-                    Vec::new(),
-                ),
-            ],
+                        }],
+                        Vec::new(),
+                    )
+                })
+                .chain(vec![
+                    test_model_info(
+                        "visible-model",
+                        "Visible Model",
+                        "Fast and capable",
+                        ModelVisibility::List,
+                        ReasoningEffort::Medium,
+                        vec![
+                            ReasoningEffortPreset {
+                                effort: ReasoningEffort::Low,
+                                description: "Quick scan".to_string(),
+                            },
+                            ReasoningEffortPreset {
+                                effort: ReasoningEffort::Medium,
+                                description: "Balanced".to_string(),
+                            },
+                            ReasoningEffortPreset {
+                                effort: ReasoningEffort::High,
+                                description: "Deep dive".to_string(),
+                            },
+                        ],
+                        vec![ModelServiceTier {
+                            id: "priority".to_string(),
+                            name: "Fast".to_string(),
+                            description: "1.5x speed, increased usage".to_string(),
+                        }],
+                    ),
+                    test_model_info(
+                        "hidden-model",
+                        "Hidden Model",
+                        "Should not be shown",
+                        ModelVisibility::Hide,
+                        ReasoningEffort::Low,
+                        vec![ReasoningEffortPreset {
+                            effort: ReasoningEffort::Low,
+                            description: "Not visible".to_string(),
+                        }],
+                        Vec::new(),
+                    ),
+                ])
+                .collect(),
         },
     )
     .await;
@@ -267,6 +284,12 @@ pub(super) async fn model_catalog_refresh_requests(
     } else {
         &description
     };
+    for index in 0..5 {
+        assert!(
+            listing.contains(&format!("- `extra-model-{index}`")),
+            "every visible selector must survive prose budgeting: {listing:?}"
+        );
+    }
 
     assert!(
         listing.contains("- `visible-model`: Fast and capable"),

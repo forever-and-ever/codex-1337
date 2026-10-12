@@ -21,8 +21,6 @@ use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 
-pub(crate) const MAX_SPAWN_AGENT_MODEL_OVERRIDES: usize = 5;
-
 pub(crate) fn model_supports_multi_agent_backend(
     model: &ModelPreset,
     multi_agent_version: MultiAgentVersion,

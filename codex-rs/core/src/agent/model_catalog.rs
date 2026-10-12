@@ -1,6 +1,5 @@
 //! Resolves fresh-child models against configured providers without replaying parent history.
 
-use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
 use crate::agent::child_config::model_supports_multi_agent_backend;
 use crate::agent::control::ProviderAccountSelection;
 use crate::codex_thread::CodexThread;
@@ -196,8 +195,7 @@ pub(crate) fn advertised_agent_models(
     catalogs: &[ProviderModels],
     version: MultiAgentVersion,
 ) -> Vec<ModelPreset> {
-    // Count the full selectable catalog, not just the abbreviated advertised list:
-    // a hidden or omitted alternative still makes a bare selector ambiguous.
+    // Hidden alternatives remain routable and still make bare selectors ambiguous.
     let mut occurrences = HashMap::new();
     for model in catalogs.iter().flat_map(|catalog| &catalog.models) {
         if model_supports_multi_agent_backend(model, version) {
@@ -205,41 +203,53 @@ pub(crate) fn advertised_agent_models(
         }
     }
     let occurrences = &occurrences;
-    let mut providers = catalogs
+    catalogs
         .iter()
-        .map(|catalog| {
-            catalog
-                .models
-                .iter()
-                .filter(move |model| {
-                    model.show_in_picker && model_supports_multi_agent_backend(model, version)
-                })
-                .map(move |model| {
-                    let mut model = model.clone();
-                    if occurrences[model.model.as_str()] > 1 {
-                        model.model = format!("{}/{}", catalog.provider_id, model.model);
-                    }
-                    model
-                })
-        })
-        .collect::<Vec<_>>();
-    // Round-robin keeps a provider's catalog from hiding every other backend.
-    let mut models = Vec::new();
-    while models.len() < MAX_SPAWN_AGENT_MODEL_OVERRIDES {
-        let before = models.len();
-        for provider in &mut providers {
-            if let Some(model) = provider.next() {
-                models.push(model);
-                if models.len() == MAX_SPAWN_AGENT_MODEL_OVERRIDES {
-                    break;
+        .flat_map(|catalog| {
+            catalog.models.iter().filter_map(move |model| {
+                if !model.show_in_picker || !model_supports_multi_agent_backend(model, version) {
+                    return None;
                 }
+                let mut model = model.clone();
+                if occurrences[model.model.as_str()] > 1 {
+                    model.model = format!("{}/{}", catalog.provider_id, model.model);
+                }
+                Some(model)
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn describe_agent_model(model: &ModelPreset, description: &str) -> String {
+    let mut line = format!("- `{}`", model.model);
+    if !description.is_empty() {
+        line.push_str(": ");
+        line.push_str(description);
+    }
+    if !model.supported_reasoning_efforts.is_empty() {
+        line.push_str(" Reasoning efforts: ");
+        for (index, preset) in model.supported_reasoning_efforts.iter().enumerate() {
+            if index > 0 {
+                line.push_str(", ");
+            }
+            line.push_str(preset.effort.as_str());
+            if preset.effort == model.default_reasoning_effort {
+                line.push_str(" (default)");
             }
         }
-        if models.len() == before {
-            break;
-        }
+        line.push('.');
     }
-    models
+    if !model.service_tiers.is_empty() {
+        line.push_str(" Service tiers: ");
+        for (index, tier) in model.service_tiers.iter().enumerate() {
+            if index > 0 {
+                line.push_str(", ");
+            }
+            line.push_str(tier.id.as_str());
+        }
+        line.push('.');
+    }
+    line
 }
 
 #[cfg(test)]

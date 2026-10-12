@@ -1,24 +1,24 @@
 //! Keeps spawn model choices in append-only context instead of the tool schema.
-//! Snapshots compare the bounded text actually shown to the model; catalog refreshes
-//! never rewrite earlier messages, and missing retained context gets a fresh catalog.
+//! Selectors and capabilities are complete; only descriptive prose is budgeted.
+//! Catalog refreshes never rewrite earlier messages, and missing retained context
+//! gets a fresh catalog.
 
 use super::PreviousSectionState;
 use super::SectionTransition;
 use super::WorldStateHash;
 use super::WorldStateSection;
 use super::WorldStateUpdate;
-use crate::agent::child_config::MAX_SPAWN_AGENT_MODEL_OVERRIDES;
 use crate::agent::child_config::model_supports_multi_agent_backend;
+use crate::agent::model_catalog::describe_agent_model;
 use crate::context::ContextualUserFragment;
 use crate::context::environment_context::push_xml_escaped_text;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::protocol::MultiAgentVersion;
 
-// Includes XML escaping and markers; at most 1,000 tokens even with byte fallback.
-const MAX_RENDERED_BYTES: usize = 1_000;
+// Soft rendered budget: identities and capabilities must survive even if they exceed it.
+const RENDERED_BYTES_BUDGET: usize = 1_000;
 const MAX_DESCRIPTION_CHARS: usize = 250;
-const OMITTED_NOTICE: &str = "Additional model choices omitted.\n";
 
 /// The current model choices, or an empty catalog to invalidate a retained listing.
 #[derive(Clone, Default)]
@@ -28,58 +28,48 @@ pub(crate) struct ModelCatalogState {
 
 impl ModelCatalogState {
     pub(crate) fn new(models: &[ModelPreset], multi_agent_version: MultiAgentVersion) -> Self {
-        let mut catalog = String::new();
         let mut models = models
             .iter()
             .filter(|model| model.show_in_picker)
             .filter(|model| model_supports_multi_agent_backend(model, multi_agent_version))
-            .take(MAX_SPAWN_AGENT_MODEL_OVERRIDES)
             .collect::<Vec<_>>();
-        // Stabilize the selected choices independently of their picker ordering.
         models.sort_by(|left, right| left.model.cmp(&right.model));
         if models.is_empty() {
-            catalog.push_str("No picker-visible model overrides are currently loaded.\n");
+            return Self {
+                catalog: "No picker-visible model overrides are currently loaded.\n".to_string(),
+            };
         }
+        let compact = models
+            .iter()
+            .map(|model| {
+                let mut escaped = String::new();
+                push_xml_escaped_text(&mut escaped, &describe_agent_model(model, ""));
+                escaped
+            })
+            .collect::<Vec<_>>();
         let (open, close) = Self::type_markers();
-        let body_budget = MAX_RENDERED_BYTES - open.len() - close.len() - 2;
-        for model in models {
-            let mut line = format!("- `{}`: ", model.model);
-            line.extend(model.description.chars().take(MAX_DESCRIPTION_CHARS));
+        let mandatory_bytes =
+            open.len() + close.len() + 2 + compact.iter().map(|line| line.len() + 1).sum::<usize>();
+        let mut prose_budget = RENDERED_BYTES_BUDGET.saturating_sub(mandatory_bytes);
+        let mut catalog = String::new();
+        for (model, compact) in models.into_iter().zip(compact) {
+            let mut description = model
+                .description
+                .chars()
+                .take(MAX_DESCRIPTION_CHARS)
+                .collect::<String>();
             if model.description.chars().count() > MAX_DESCRIPTION_CHARS {
-                line.push('…');
+                description.push('…');
             }
-            if !model.supported_reasoning_efforts.is_empty() {
-                line.push_str(" Reasoning efforts: ");
-                for (index, preset) in model.supported_reasoning_efforts.iter().enumerate() {
-                    if index > 0 {
-                        line.push_str(", ");
-                    }
-                    line.push_str(preset.effort.as_str());
-                    if preset.effort == model.default_reasoning_effort {
-                        line.push_str(" (default)");
-                    }
-                }
-                line.push('.');
+            let mut detailed = String::new();
+            push_xml_escaped_text(&mut detailed, &describe_agent_model(model, &description));
+            let prose_bytes = detailed.len() - compact.len();
+            if prose_bytes <= prose_budget {
+                catalog.push_str(&detailed);
+                prose_budget -= prose_bytes;
+            } else {
+                catalog.push_str(&compact);
             }
-            if !model.service_tiers.is_empty() {
-                line.push_str(" Service tiers: ");
-                for (index, tier) in model.service_tiers.iter().enumerate() {
-                    if index > 0 {
-                        line.push_str(", ");
-                    }
-                    line.push_str(tier.id.as_str());
-                }
-                line.push('.');
-            }
-            let mut escaped = String::new();
-            push_xml_escaped_text(&mut escaped, &line);
-            if catalog.len() + escaped.len() + 1 + OMITTED_NOTICE.len() > body_budget {
-                // Keep identifiers and capability lists intact instead of advertising
-                // a truncated model ID, reasoning effort, or service tier.
-                catalog.push_str(OMITTED_NOTICE);
-                break;
-            }
-            catalog.push_str(&escaped);
             catalog.push('\n');
         }
         Self { catalog }

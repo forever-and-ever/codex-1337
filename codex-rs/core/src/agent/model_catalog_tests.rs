@@ -68,7 +68,15 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
             .and(path("/models"))
             .respond_with(
                 ResponseTemplate::new(/*s*/ 200).set_body_json(ModelsResponse {
-                    models: vec![openai],
+                    models: (0..2)
+                        .map(|index| {
+                            let mut extra = openai.clone();
+                            extra.slug = format!("gpt-extra-{index}");
+                            extra.display_name = extra.slug.clone();
+                            extra
+                        })
+                        .chain(std::iter::once(openai.clone()))
+                        .collect(),
                 }),
             )
             .expect(1..)
@@ -103,7 +111,15 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         supports_structured_outputs: false,
     });
     let native_catalog = ModelsResponse {
-        models: vec![model],
+        models: (0..2)
+            .map(|index| {
+                let mut extra = model.clone();
+                extra.slug = format!("claude-extra-{index}");
+                extra.display_name = extra.slug.clone();
+                extra
+            })
+            .chain(std::iter::once(model.clone()))
+            .collect(),
     };
     let (session, turn, _rx) = make_session_and_context_with_auth_config_home_and_rx(
         CodexAuth::from_api_key("test-key"),
@@ -181,6 +197,9 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         .agent_model_catalogs(&turn.config, RefreshStrategy::OnlineIfUncached)
         .await;
     let advertised = advertised_agent_models(&catalog, MultiAgentVersion::V2);
+    // The cross-provider child is sixth in either direction, beyond the old
+    // advertising cutoff, even though this same catalog accepts its selector.
+    assert_eq!(advertised.len(), 6);
     for selector in ["gpt-test-child", "claude-test-child"] {
         assert!(advertised.iter().any(|model| model.model == selector));
     }
@@ -261,13 +280,14 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     let qualified = format!("{}/{}", catalog[0].provider_id, collision.model);
     let unique = catalog[1].models[0].model.clone();
     catalog[1].models.push(collision);
-    assert_eq!(
-        advertised_agent_models(&catalog, MultiAgentVersion::V2)
-            .into_iter()
-            .map(|model| model.model)
-            .collect::<Vec<_>>(),
-        vec![qualified, unique],
-    );
+    let selectors = advertised_agent_models(&catalog, MultiAgentVersion::V2)
+        .into_iter()
+        .map(|model| model.model)
+        .collect::<Vec<_>>();
+    assert_eq!(selectors.len(), 6);
+    assert!(selectors.contains(&qualified));
+    assert!(selectors.contains(&unique));
+    assert!(!selectors.contains(&catalog[0].models[0].model));
 }
 
 #[tokio::test]
