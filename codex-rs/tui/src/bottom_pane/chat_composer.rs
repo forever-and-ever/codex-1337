@@ -6457,8 +6457,8 @@ mod tests {
 
     /// Behavior: `?` toggles the shortcut overlay only when the composer is otherwise empty. After
     /// any typing has occurred, `?` should be inserted as a literal character.
-    #[test]
-    fn question_mark_only_toggles_on_first_char() {
+    #[tokio::test(start_paused = true)]
+    async fn question_mark_only_toggles_on_first_char() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -6483,7 +6483,9 @@ mod tests {
         let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         assert_eq!(composer.footer.mode, FooterMode::ComposerEmpty);
 
-        type_chars_humanlike(&mut composer, &['h']);
+        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        tokio::time::advance(ChatComposer::recommended_paste_flush_delay()).await;
+        let _ = composer.flush_paste_burst_if_due();
         assert_eq!(composer.draft.textarea.text(), "h");
         assert_eq!(composer.footer_mode(), FooterMode::ComposerHasDraft);
 
@@ -6491,7 +6493,7 @@ mod tests {
             composer.handle_key_event(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         assert_eq!(result, InputResult::None);
         assert!(needs_redraw, "typing should still mark the view dirty");
-        let _ = flush_after_paste_burst(&mut composer);
+        let _ = flush_after_paste_burst(&mut composer).await;
         assert_eq!(composer.draft.textarea.text(), "h?");
         assert_eq!(composer.footer.mode, FooterMode::ComposerEmpty);
         assert_eq!(composer.footer_mode(), FooterMode::ComposerHasDraft);
@@ -6523,8 +6525,8 @@ mod tests {
 
     /// Behavior: while a paste-like burst is being captured, `?` must not toggle the shortcut
     /// overlay; it should be treated as part of the pasted content.
-    #[test]
-    fn question_mark_does_not_toggle_during_paste_burst() {
+    #[tokio::test(start_paused = true)]
+    async fn question_mark_does_not_toggle_during_paste_burst() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -6539,11 +6541,11 @@ mod tests {
             /*disable_paste_burst*/ false,
         );
 
-        // Force an active paste burst so this test doesn't depend on tight timing.
+        // Paused Tokio time keeps this burst active even if the test is descheduled.
         composer
             .draft
             .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
+            .begin_with_retro_grabbed(String::new(), tokio::time::Instant::now().into_std());
 
         for ch in ['h', 'i', '?', 't', 'h', 'e', 'r', 'e'] {
             let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
@@ -6551,7 +6553,7 @@ mod tests {
         assert!(composer.is_in_paste_burst());
         assert_eq!(composer.draft.textarea.text(), "");
 
-        let _ = flush_after_paste_burst(&mut composer);
+        let _ = flush_after_paste_burst(&mut composer).await;
 
         assert_eq!(composer.draft.textarea.text(), "hi?there");
         assert_ne!(composer.footer.mode, FooterMode::ShortcutOverlay);
@@ -8449,81 +8451,9 @@ mod tests {
         assert!(!composer.is_in_paste_burst());
     }
 
-    /// Behavior: while we're capturing a paste-like burst, Enter should be treated as a newline
-    /// within the burst (not as "submit"), and the whole payload should flush as one paste.
-    #[test]
-    fn non_ascii_burst_buffers_enter_and_flushes_multiline() {
-        use crossterm::event::KeyCode;
-        use crossterm::event::KeyEvent;
-        use crossterm::event::KeyModifiers;
-
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer
-            .draft
-            .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
-
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::NONE));
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('好'), KeyModifiers::NONE));
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
-
-        assert!(composer.draft.textarea.text().is_empty());
-        let _ = flush_after_paste_burst(&mut composer);
-        assert_eq!(composer.draft.textarea.text(), "你好\nhi");
-    }
-
-    /// Behavior: a paste-like burst may include a full-width/ideographic space (U+3000). It should
-    /// still be captured as a single paste payload and preserve the exact Unicode content.
-    #[test]
-    fn non_ascii_burst_preserves_ideographic_space_and_ascii() {
-        use crossterm::event::KeyCode;
-        use crossterm::event::KeyEvent;
-        use crossterm::event::KeyModifiers;
-
-        let (tx, _rx) = unbounded_channel::<AppEvent>();
-        let sender = AppEventSender::new(tx);
-        let mut composer = ChatComposer::new(
-            /*has_input_focus*/ true,
-            sender,
-            /*enhanced_keys_supported*/ false,
-            "Ask Codex to do anything".to_string(),
-            /*disable_paste_burst*/ false,
-        );
-
-        composer
-            .draft
-            .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
-
-        for ch in ['你', '　', '好'] {
-            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
-        let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        for ch in ['h', 'i'] {
-            let _ = composer.handle_key_event(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
-        }
-
-        assert!(composer.draft.textarea.text().is_empty());
-        let _ = flush_after_paste_burst(&mut composer);
-        assert_eq!(composer.draft.textarea.text(), "你　好\nhi");
-    }
-
-    /// Behavior: a large multi-line payload containing both non-ASCII and ASCII (e.g. "UTF-8",
-    /// "Unicode") should be captured as a single paste-like burst, and Enter key events should
-    /// become `\n` within the buffered content.
-    #[test]
-    fn non_ascii_burst_buffers_large_multiline_mixed_ascii_and_unicode() {
+    /// Burst input preserves mixed Unicode, ideographic spaces, and newlines until idle flush.
+    #[tokio::test(start_paused = true)]
+    async fn non_ascii_burst_buffers_large_multiline_mixed_ascii_and_unicode() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -8532,7 +8462,7 @@ mod tests {
 日月盈昃 辰宿列张\n\
 寒来暑往 秋收冬藏\n\
 \n\
-你好世界 编码测试\n\
+你　好世界 编码测试\n\
 汉字处理 UTF-8\n\
 终端显示 正确无误\n\
 \n\
@@ -8550,11 +8480,11 @@ mod tests {
             /*disable_paste_burst*/ false,
         );
 
-        // Force an active burst so the test doesn't depend on timing heuristics.
+        // Paused Tokio time keeps this burst active even if the test is descheduled.
         composer
             .draft
             .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
+            .begin_with_retro_grabbed(String::new(), tokio::time::Instant::now().into_std());
 
         for ch in LARGE_MIXED_PAYLOAD.chars() {
             let code = if ch == '\n' {
@@ -8566,7 +8496,7 @@ mod tests {
         }
 
         assert!(composer.draft.textarea.text().is_empty());
-        let _ = flush_after_paste_burst(&mut composer);
+        let _ = flush_after_paste_burst(&mut composer).await;
         assert_eq!(composer.draft.textarea.text(), LARGE_MIXED_PAYLOAD);
     }
 
@@ -8666,8 +8596,8 @@ mod tests {
 
     /// Behavior: even if Enter suppression would normally be active for a burst, Enter should
     /// still dispatch a built-in slash command when the first line begins with `/`.
-    #[test]
-    fn slash_context_enter_ignores_paste_burst_enter_suppression() {
+    #[tokio::test(start_paused = true)]
+    async fn slash_context_enter_ignores_paste_burst_enter_suppression() {
         use crate::slash_command::SlashCommand;
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
@@ -8688,7 +8618,7 @@ mod tests {
         composer
             .draft
             .paste_burst
-            .begin_with_retro_grabbed(String::new(), Instant::now());
+            .begin_with_retro_grabbed(String::new(), tokio::time::Instant::now().into_std());
 
         let (result, _) =
             composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -9224,8 +9154,8 @@ mod tests {
         );
     }
 
-    fn flush_after_paste_burst(composer: &mut ChatComposer) -> bool {
-        std::thread::sleep(PasteBurst::recommended_active_flush_delay());
+    async fn flush_after_paste_burst(composer: &mut ChatComposer) -> bool {
+        tokio::time::advance(PasteBurst::recommended_active_flush_delay()).await;
         composer.flush_paste_burst_if_due()
     }
 
@@ -11726,8 +11656,8 @@ mod tests {
 
     /// Behavior: the first fast ASCII character is held briefly to avoid flicker; if no burst
     /// follows, it should eventually flush as normal typed input (not as a paste).
-    #[test]
-    fn pending_first_ascii_char_flushes_as_typed() {
+    #[tokio::test(start_paused = true)]
+    async fn pending_first_ascii_char_flushes_as_typed() {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
@@ -11746,7 +11676,7 @@ mod tests {
         assert!(composer.is_in_paste_burst());
         assert!(composer.draft.textarea.text().is_empty());
 
-        std::thread::sleep(ChatComposer::recommended_paste_flush_delay());
+        tokio::time::advance(ChatComposer::recommended_paste_flush_delay()).await;
         let flushed = composer.flush_paste_burst_if_due();
         assert!(flushed, "expected pending first char to flush");
         assert_eq!(composer.draft.textarea.text(), "h");
