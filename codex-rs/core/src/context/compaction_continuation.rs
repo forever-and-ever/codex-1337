@@ -3,6 +3,7 @@
 
 use super::ContextualUserFragment;
 use super::UserGoalUpdate;
+use super::is_user_authorization_message;
 use crate::event_mapping::parse_turn_item;
 use codex_protocol::ResponseItemId;
 use codex_protocol::ToolName;
@@ -66,10 +67,8 @@ impl CompactionContinuation {
                 });
                 continue;
             }
-            if let ResponseItem::Message {
-                id, role, content, ..
-            } = item
-                && role == "user"
+            if let ResponseItem::Message { id, content, .. } = item
+                && is_user_authorization_message(item)
                 && matches!(parse_turn_item(item), Some(TurnItem::UserMessage(_)))
             {
                 continuation.push(Observation::UserRequest {

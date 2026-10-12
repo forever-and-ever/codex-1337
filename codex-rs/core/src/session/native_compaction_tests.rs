@@ -85,13 +85,23 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
         .await
         .unwrap();
     let installed = session.clone_history().await;
+    // Refreshed context receives fresh IDs; the concurrent tail keeps its exact identities.
     assert_eq!(
-        installed.raw_items().cloned().collect::<Vec<_>>(),
-        replacement
-            .iter()
-            .map(|item| item.item.clone())
-            .chain(tail.iter().map(|item| item.item.clone()))
-            .collect::<Vec<_>>()
+        installed.annotated_items().len(),
+        replacement.len() + tail.len()
+    );
+    assert_eq!(
+        &installed.annotated_items()[replacement.len()..],
+        tail.as_slice()
+    );
+    let ResponseItem::Message { content, .. } =
+        &installed.annotated_items()[replacement.len() - 1].item
+    else {
+        panic!("installed continuation message")
+    };
+    assert_eq!(
+        crate::content_items_to_text(content).as_deref(),
+        Some(text.as_str())
     );
     assert_eq!(
         installed.raw_items().next(),
