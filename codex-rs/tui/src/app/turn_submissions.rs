@@ -493,11 +493,11 @@ impl ServerOperations {
             return ThreadSubmissionPreview::Idle;
         };
         let active = if *queued {
-            ThreadSubmissionPreviewEntry::Cancellation {
+            SubmissionPreviewEntry::Cancellation {
                 text: "Waiting for earlier work",
             }
         } else if *uncertain {
-            ThreadSubmissionPreviewEntry::Cancellation {
+            SubmissionPreviewEntry::Cancellation {
                 text: "Operation outcome unknown; no retry sent",
             }
         } else {
