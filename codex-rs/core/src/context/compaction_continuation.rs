@@ -5,7 +5,6 @@ use super::ContextualUserFragment;
 use super::UserGoalUpdate;
 use super::is_user_authorization_message;
 use crate::event_mapping::parse_turn_item;
-use codex_protocol::ResponseItemId;
 use codex_protocol::ToolName;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
@@ -26,14 +25,12 @@ const REMINDER: &str = "Compaction is not new user input. Preserve standing cons
 #[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
 enum Observation {
     UserRequest {
-        id: Option<ResponseItemId>,
         text: Option<String>,
     },
     UserGoal {
         text: String,
     },
     AssistantReport {
-        id: Option<ResponseItemId>,
         text: String,
     },
     ToolReceipt {
@@ -67,25 +64,19 @@ impl CompactionContinuation {
                 });
                 continue;
             }
-            if let ResponseItem::Message { id, content, .. } = item
+            if let ResponseItem::Message { content, .. } = item
                 && is_user_authorization_message(item)
                 && matches!(parse_turn_item(item), Some(TurnItem::UserMessage(_)))
             {
                 continuation.push(Observation::UserRequest {
-                    id: id.clone(),
                     text: complete_text(content),
                 });
                 continue;
             }
             match item {
-                ResponseItem::Message {
-                    id, role, content, ..
-                } if role == "assistant" => {
+                ResponseItem::Message { role, content, .. } if role == "assistant" => {
                     if let Some(text) = complete_text(content) {
-                        continuation.push(Observation::AssistantReport {
-                            id: id.clone(),
-                            text,
-                        });
+                        continuation.push(Observation::AssistantReport { text });
                     }
                 }
                 ResponseItem::FunctionCall {
