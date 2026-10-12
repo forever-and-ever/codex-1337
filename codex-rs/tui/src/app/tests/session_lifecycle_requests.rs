@@ -262,6 +262,10 @@ pub(super) enum HistoryCapabilities {
     VoiceCatalogCustom,
     VoiceCatalogUnavailable,
     TurnSubmissionStalls,
+    HistoryPageFails {
+        method: &'static str,
+        request: usize,
+    },
 }
 
 /// Returns and resets `(thread/loaded/list, thread/read)` request counts.
@@ -484,7 +488,12 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             id: request_id,
                             result: serde_json::json!({}),
                         })
-                    } else if (matches!(
+                    } else if matches!(history_capabilities,
+                        HistoryCapabilities::HistoryPageFails { method, request: attempt }
+                            if request.method == method
+                                && request_sink.lock().expect("request recorder lock")
+                                    .iter().filter(|recorded| recorded.method == method).count() == attempt)
+                        || (matches!(
                         history_capabilities,
                         HistoryCapabilities::ItemsListFails
                             | HistoryCapabilities::ItemsAndSummaryTurnsFail
@@ -1725,8 +1734,8 @@ async fn remote_legacy_history_fork_avoids_unsupported_fields() -> Result<()> {
 }
 
 #[tokio::test]
-async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()> {
-    let (app, _codex_home) = Box::pin(make_history_test_app()).await?;
+async fn paginated_resume_and_fork_survive_post_response_hydration_failure() -> Result<()> {
+    let (mut app, _codex_home) = Box::pin(make_history_test_app()).await?;
     let parent_thread_id = create_history_rollout(
         &app.config,
         ThreadHistoryMode::Paginated,
@@ -1760,6 +1769,174 @@ async fn paginated_fork_survives_post_response_hydration_failure() -> Result<()>
 
     app_server.shutdown().await?;
     proxy.await??;
+
+    // Resume has already acquired the server conversation before display history fails.
+    // Neither an unreadable page nor its retry may undo attachment or lose its frontier.
+    let path = rollout_path(
+        app.config.codex_home.as_path(),
+        "2026-01-02T00-00-00",
+        &parent_thread_id.to_string(),
+    );
+    let mut records = std::fs::read_to_string(&path)?
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()?;
+    for turn in 0..6 {
+        let turn_id = format!("history-turn-{turn}");
+        let events = std::iter::once(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_attribution: None,
+            turn_id: turn_id.clone(),
+            root_turn_id: None,
+            trace_id: None,
+            started_at: None,
+            model_context_window: None,
+            collaboration_mode_kind: Default::default(),
+        }))
+        .chain((0..20).map(|item| {
+            EventMsg::ItemCompleted(ItemCompletedEvent {
+                thread_id: parent_thread_id,
+                turn_id: turn_id.clone(),
+                item: TurnItem::AgentMessage(AgentMessageItem {
+                    id: format!("history-item-{turn}-{item}"),
+                    content: vec![AgentMessageContent::Text {
+                        text: format!("saved output {turn}-{item}"),
+                    }],
+                    phase: None,
+                    memory_citation: None,
+                    delivery: None,
+                    questions: None,
+                }),
+                started_at_ms: None,
+                completed_at_ms: 0,
+            })
+        }));
+        for event in events {
+            records.push(serde_json::json!({
+                "timestamp": "2026-01-02T00:00:00Z",
+                "ordinal": records.len(),
+                "type": "event_msg",
+                "payload": event,
+            }));
+        }
+    }
+    let contents = records
+        .into_iter()
+        .map(|record| record.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(path, format!("{contents}\n"))?;
+    app.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Terminal;
+    app.local_settings.tui.terminal_resize_reflow_max_rows = None;
+
+    for (method, attempt, retained_items) in [
+        ("thread/turns/list", 1, 0),
+        ("thread/items/list", 1, 0),
+        ("thread/items/list", 2, 100),
+        ("thread/turns/list", 2, 100),
+    ] {
+        let (mut app_server, requests, proxy) = start_recording_app_server_with_history(
+            &app.config,
+            HistoryCapabilities::HistoryPageFails {
+                method,
+                request: attempt,
+            },
+            /*blocked_thread_list*/ None,
+            /*failed_thread_name*/ None,
+            crate::app_server_session::ThreadParamsMode::Embedded,
+            LoaderOverrides::default(),
+        )
+        .await?;
+        let resumed = Box::pin(app_server.resume_thread(
+            &app.local_settings,
+            app.config.clone(),
+            parent_thread_id,
+            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+        ))
+        .await?;
+        assert_eq!(resumed.session.thread_id, parent_thread_id);
+        let notice = resumed
+            .history_notice
+            .as_ref()
+            .expect("partial history notice");
+        assert!(notice.contains("Conversation history is incomplete"));
+        assert!(notice.contains("failed to load a bounded thread"));
+        assert!(notice.contains("saved history unavailable"), "{notice}");
+        assert_eq!(
+            resumed
+                .turns
+                .iter()
+                .map(|turn| turn.items.len())
+                .sum::<usize>(),
+            retained_items
+        );
+        assert!(app_server.has_older_history(parent_thread_id));
+        let mut retained_turns = resumed.turns.clone();
+
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        app.app_event_tx = AppEventSender::new(tx);
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        Box::pin(app.replace_chat_widget_with_app_server_thread(
+            &mut tui,
+            resumed,
+            ThreadAttachPresentation::SessionLineage,
+            /*initial_user_message*/ None,
+        ))
+        .await?;
+        assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
+        assert!(!app.chat_widget.is_external_writer_view());
+        let messages = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::InsertHistoryCell(cell) => {
+                    Some(lines_to_single_string(&cell.display_lines(300)))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(messages.contains("Conversation history is incomplete"));
+        assert!(messages.contains("saved history unavailable"));
+        while let Some(cursor) = app_server.begin_older_history_page(parent_thread_id) {
+            let page = app_server
+                .thread_items_page(parent_thread_id, None, Some(cursor.clone()), 100)
+                .await?;
+            app_server
+                .apply_older_history_page(parent_thread_id, &cursor, page, &mut retained_turns)
+                .await?;
+        }
+        let item_ids = retained_turns
+            .iter()
+            .flat_map(|turn| &turn.items)
+            .map(|item| item.id())
+            .collect::<Vec<_>>();
+        assert!(item_ids.len() >= 120);
+        assert_eq!(
+            item_ids
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            item_ids.len()
+        );
+
+        assert!(recorded_params(&requests, "turn/start").is_empty());
+        assert!(
+            recorded_params(&requests, "thread/read")
+                .iter()
+                .all(|params| params["includeTurns"] != true)
+        );
+
+        assert!(
+            Box::pin(app_server.resume_thread(
+                &app.local_settings,
+                app.config.clone(),
+                ThreadId::new(),
+                crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            ))
+            .await
+            .is_err()
+        );
+        app_server.shutdown().await?;
+        proxy.await??;
+    }
     Ok(())
 }
 

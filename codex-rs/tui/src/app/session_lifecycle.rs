@@ -689,7 +689,7 @@ impl App {
             return Ok(());
         };
 
-        let session_verified = self
+        let session_verification = self
             .refresh_snapshot_session_if_needed(
                 app_server,
                 thread_id,
@@ -697,6 +697,7 @@ impl App {
                 &mut snapshot,
             )
             .await;
+        let session_verified = session_verification.is_ok();
         if !is_replay_only
             && !self.side_threads.contains_key(&thread_id)
             && snapshot.session.as_ref().is_some_and(|session| {
@@ -754,6 +755,9 @@ impl App {
         self.schedule_recap_check(thread_id, now);
 
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        if let Ok(Some(notice)) = session_verification {
+            self.chat_widget.add_info_message(notice, /*hint*/ None);
+        }
         if is_replay_only
             && self
                 .thread_event_channels
@@ -1314,6 +1318,9 @@ impl App {
             presentation,
         )
         .await?;
+        if let Some(notice) = started.history_notice {
+            self.chat_widget.add_info_message(notice, /*hint*/ None);
+        }
         Ok(())
     }
 

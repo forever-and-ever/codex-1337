@@ -101,6 +101,7 @@ impl AppServerSession {
                 session,
                 turns: thread.turns,
                 blocks_direct_input: false,
+                history_notice: None,
                 task_tools_available: self.client.supports_thread_coordination(),
             },
             history_notice,
@@ -227,15 +228,23 @@ impl AppServerSession {
                 ));
             }
         };
-        self.hydrate_initial_thread_history(
-            &mut response.thread,
-            response.turns_backwards_cursor.clone(),
-            response.items_backwards_cursor.clone(),
-            Some(&config),
-            Some(local_settings),
-            HistoryHydrationScope::Initial,
-        )
-        .await?;
+        let history = self
+            .hydrate_initial_thread_history(
+                &mut response.thread,
+                response.turns_backwards_cursor.clone(),
+                response.items_backwards_cursor.clone(),
+                Some(&config),
+                Some(local_settings),
+                HistoryHydrationScope::Initial,
+            )
+            .await;
+        let history_notice = match history {
+            Ok(()) => None,
+            Err(error) if response.thread.history_mode == ThreadHistoryMode::Paginated => {
+                Some(format!("Conversation history is incomplete: {error:#}"))
+            }
+            Err(error) => return Err(error),
+        };
         let fork_parent_title = self
             .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
             .await;
@@ -245,6 +254,7 @@ impl AppServerSession {
             self.thread_params_mode(),
         )
         .await?;
+        started.history_notice = history_notice;
         started.session.fork_parent_title = fork_parent_title;
         if self.task_tools_available(thread_id) {
             started.task_tools_available = true;
