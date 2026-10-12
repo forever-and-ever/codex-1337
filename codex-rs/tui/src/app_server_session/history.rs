@@ -1,5 +1,7 @@
 //! Bounded app-server transcript loading for resume, fork, and transcript views.
 
+use color_eyre::eyre::eyre;
+
 use std::collections::HashSet;
 
 use super::AppServerSession;
@@ -269,11 +271,6 @@ impl AppServerSession {
         state: &mut ThreadHistoryPagination,
         turns: &mut Vec<Turn>,
     ) -> Result<Vec<ThreadItem>> {
-        state.next_item_cursor = advancing_cursor(
-            state.next_item_cursor.as_deref(),
-            page.next_cursor,
-            &mut state.seen_item_cursors,
-        );
         let mut missing_turn_ids = page
             .data
             .iter()
@@ -283,8 +280,12 @@ impl AppServerSession {
         let mut items = Vec::new();
         for entry in page.data {
             while !turns.iter().any(|turn| turn.id == entry.turn_id) {
-                let Some(cursor) = state.next_turn_cursor.take() else {
-                    break;
+                let Some(cursor) = state.next_turn_cursor.clone() else {
+                    return Err(eyre!(
+                        "history item {} refers to missing turn {}",
+                        entry.item.id(),
+                        entry.turn_id
+                    ));
                 };
                 // Fetch only the remaining item-backed turns so metadata does not run ahead
                 // of this page. Empty turns between them may require another bounded request.
@@ -310,6 +311,13 @@ impl AppServerSession {
                 turn.items_view = TurnItemsView::Summary;
             }
         }
+        // Commit the item frontier only after every item has its turn metadata.
+        // A failed metadata request leaves this page retryable; retained items deduplicate.
+        state.next_item_cursor = advancing_cursor(
+            state.next_item_cursor.as_deref(),
+            page.next_cursor,
+            &mut state.seen_item_cursors,
+        );
         items.reverse();
         Ok(items)
     }
@@ -339,69 +347,76 @@ impl AppServerSession {
             return Ok(());
         }
 
-        let page = self
-            .thread_turns_page(thread_id, turn_cursor, INITIAL_HISTORY_TURN_LIMIT)
-            .await?;
-        thread.turns = page.data.into_iter().rev().collect();
         let mut state = ThreadHistoryPagination {
             history_mode: ThreadHistoryMode::Paginated,
-            next_turn_cursor: page.next_cursor,
+            next_turn_cursor: turn_cursor,
             next_item_cursor: item_cursor,
             ..ThreadHistoryPagination::default()
         };
-        let (width, height) = crossterm::terminal::size().unwrap_or(/*default*/ (80, 24));
-        let width = width.max(/*other*/ 1);
-        let budget = HistoryLoadBudget::new(scope, config, local_settings, height);
-        let mut scanned_items = 0;
-        let mut rendered_rows = 0;
-        while let Some(limit) = budget.next_page_size(rendered_rows, scanned_items) {
+        let result = async {
             let page = self
-                .thread_items_page(
+                .thread_turns_page(
                     thread_id,
-                    /*turn_id*/ None,
-                    state.next_item_cursor.clone(),
-                    limit,
+                    state.next_turn_cursor.clone(),
+                    INITIAL_HISTORY_TURN_LIMIT,
                 )
                 .await?;
-            if page.data.is_empty() {
-                state.next_item_cursor = None;
-                break;
+            thread.turns = page.data.into_iter().rev().collect();
+            state.next_turn_cursor = page.next_cursor;
+            let (width, height) = crossterm::terminal::size().unwrap_or(/*default*/ (80, 24));
+            let width = width.max(/*other*/ 1);
+            let budget = HistoryLoadBudget::new(scope, config, local_settings, height);
+            let mut scanned_items = 0;
+            let mut rendered_rows = 0;
+            while let Some(limit) = budget.next_page_size(rendered_rows, scanned_items) {
+                let page = self
+                    .thread_items_page(
+                        thread_id,
+                        /*turn_id*/ None,
+                        state.next_item_cursor.clone(),
+                        limit,
+                    )
+                    .await?;
+                let empty_page = page.data.is_empty();
+                scanned_items = scanned_items.saturating_add(page.data.len());
+                let items = self
+                    .merge_thread_item_page(thread_id, page, &mut state, &mut thread.turns)
+                    .await?;
+                // Finish the anchor turn so prompt editing can detect earlier steers,
+                // but do not scan history older than the displayed transcript.
+                if let HistoryHydrationScope::ThroughTurn(anchor) = scope
+                    && let Some(index) = thread.turns.iter().position(|turn| turn.id == anchor)
+                    && thread.turns[..index]
+                        .iter()
+                        .any(|turn| !turn.items.is_empty())
+                {
+                    break;
+                }
+                if let Some((config, local_settings)) = config.zip(local_settings) {
+                    rendered_rows = rendered_history_rows(
+                        thread_id,
+                        thread,
+                        items,
+                        config,
+                        local_settings,
+                        width,
+                        rendered_rows,
+                    );
+                } else {
+                    rendered_rows = rendered_rows.saturating_add(items.len());
+                }
+                if empty_page || state.next_item_cursor.is_none() {
+                    break;
+                }
             }
-            scanned_items = scanned_items.saturating_add(page.data.len());
-            let items = self
-                .merge_thread_item_page(thread_id, page, &mut state, &mut thread.turns)
-                .await?;
-            // Finish the anchor turn so prompt editing can detect earlier steers,
-            // but do not scan history older than the displayed transcript.
-            if let HistoryHydrationScope::ThroughTurn(anchor) = scope
-                && let Some(index) = thread.turns.iter().position(|turn| turn.id == anchor)
-                && thread.turns[..index]
-                    .iter()
-                    .any(|turn| !turn.items.is_empty())
-            {
-                break;
-            }
-            if let Some((config, local_settings)) = config.zip(local_settings) {
-                rendered_rows = rendered_history_rows(
-                    thread_id,
-                    thread,
-                    items,
-                    config,
-                    local_settings,
-                    width,
-                    rendered_rows,
-                );
-            } else {
-                rendered_rows = rendered_rows.saturating_add(items.len());
-            }
-            if state.next_item_cursor.is_none() {
-                break;
-            }
+            Ok(())
         }
+        .await;
+        // Attachment and later paging retain every successful page, even if the next one fails.
         if config.is_some() {
             self.history_pagination.insert(thread_id, state);
         }
-        Ok(())
+        result
     }
 }
 

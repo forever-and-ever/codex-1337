@@ -1567,9 +1567,9 @@ impl App {
         thread_id: ThreadId,
         is_replay_only: bool,
         snapshot: &mut ThreadEventSnapshot,
-    ) -> bool {
+    ) -> color_eyre::Result<Option<String>> {
         if !self.should_refresh_snapshot_session(thread_id, is_replay_only, snapshot) {
-            return true;
+            return Ok(None);
         }
 
         match app_server
@@ -1581,10 +1581,11 @@ impl App {
             )
             .await
         {
-            Ok(started) => {
+            Ok(mut started) => {
+                let notice = started.history_notice.take();
                 self.apply_refreshed_snapshot_thread(thread_id, started, snapshot)
                     .await;
-                true
+                Ok(notice)
             }
             Err(err) => {
                 tracing::warn!(
@@ -1592,7 +1593,7 @@ impl App {
                     error = %err,
                     "failed to refresh inferred thread session before replay"
                 );
-                false
+                Err(err)
             }
         }
     }

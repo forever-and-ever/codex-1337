@@ -1011,6 +1011,9 @@ See the Codex keymap documentation for supported actions and examples."
                 Ok(result) => result?,
                 Err(err) => return shutdown_on_startup_error(app_server, err).await,
             }
+            if let Some(notice) = started.history_notice {
+                app.chat_widget.add_info_message(notice, /*hint*/ None);
+            }
             if read_only_thread {
                 app.ensure_thread_channel(thread_id).mark_external_writer();
                 app.chat_widget.show_external_writer_thread();

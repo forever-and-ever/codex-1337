@@ -282,8 +282,11 @@ impl App {
         let Reconnected {
             mut session,
             bootstrap,
-            thread,
+            mut thread,
         } = connected;
+        let history_notice = thread
+            .as_mut()
+            .and_then(|started| started.history_notice.take());
         session.model_provider_override = self.harness_overrides.model_provider.clone();
         let selected = self
             .chat_widget
@@ -488,6 +491,9 @@ impl App {
             if restoring_draft {
                 self.chat_widget.restore_session_draft();
             }
+        }
+        if let Some(notice) = history_notice {
+            self.chat_widget.add_info_message(notice, /*hint*/ None);
         }
         // Discover tasks whose notifications were missed, without clearing retained rows.
         // A hidden overview performs this discovery when it is next opened.

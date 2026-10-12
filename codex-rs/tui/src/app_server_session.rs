@@ -380,6 +380,7 @@ pub(crate) struct AppServerStartedThread {
     pub(crate) blocks_direct_input: bool,
     pub(crate) can_accept_text_input: bool,
     pub(crate) task_tools_available: bool,
+    pub(crate) history_notice: Option<String>,
 }
 
 pub(crate) fn is_active_writer_error(err: &color_eyre::eyre::Report) -> bool {
@@ -2189,6 +2190,7 @@ async fn started_thread_from_start_response(
         turns: response.thread.turns,
         blocks_direct_input,
         can_accept_text_input,
+        history_notice: None,
         task_tools_available: false,
     })
 }
@@ -2212,6 +2214,7 @@ async fn started_thread_from_resume_response(
         turns: response.thread.turns,
         blocks_direct_input,
         can_accept_text_input,
+        history_notice: None,
         task_tools_available: false,
     })
 }
@@ -2237,6 +2240,7 @@ async fn started_thread_from_fork_response(
         turns: response.thread.turns,
         blocks_direct_input,
         can_accept_text_input,
+        history_notice: None,
         task_tools_available: false,
     })
 }
