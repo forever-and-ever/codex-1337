@@ -309,3 +309,5 @@ impl InputQueueState {
         true
     }
 }
+
+mod legacy;
