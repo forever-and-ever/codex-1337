@@ -473,12 +473,12 @@ impl ThreadComposerState {
             messages
                 .into_iter()
                 .map(|message| ChatWidget::composer_state_from_user_message(message, Vec::new()))
-                .chain(self.has_content().then_some(self)),
+                .chain(std::iter::once(self)),
         )
     }
 
     pub(super) fn merge(states: impl IntoIterator<Item = Self>) -> Self {
-        let mut states = states.into_iter();
+        let mut states = states.into_iter().filter(Self::has_content);
         let first = states.next().unwrap_or_default();
         let Some(second) = states.next() else {
             return first;

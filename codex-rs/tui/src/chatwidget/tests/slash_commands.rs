@@ -741,7 +741,7 @@ async fn goal_slash_command_with_extra_os_emits_set_goal_event() {
     chat.set_feature_enabled(Feature::Goals, /*enabled*/ true);
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
-    let command = "/goooooooooooal --tokens 98.5K improve benchmark coverage";
+    let command = "/goooooooooooal set --tokens 98.5K improve benchmark coverage";
 
     submit_composer_text(&mut chat, command);
     assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
