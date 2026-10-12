@@ -41,11 +41,6 @@ pub(super) enum FreshStage {
         ready: Box<FreshReady>,
         plan: detach::DetachPlan,
     },
-    Cleaning {
-        thread_id: ThreadId,
-        fences: Vec<ThreadId>,
-    },
-    Uncertain(Vec<ThreadId>),
     RestoreDraft(detach::DetachPlan),
 }
 
@@ -71,7 +66,6 @@ enum FreshOutcome {
     Started(PreparedSession),
     Named(Result<String, String>),
     Detached(detach::DetachReceipt),
-    Cleaned(Result<(), String>),
     Terminated,
 }
 
@@ -80,7 +74,6 @@ enum FreshEffect {
     Start(StartPreparation),
     Name { thread_id: ThreadId, name: String },
     Detach(detach::DetachPlan),
-    Cleanup(ThreadId),
 }
 
 impl FreshStage {
@@ -95,8 +88,6 @@ impl FreshStage {
                 ready.started.session.thread_id == id
                     || plan.targets.iter().any(|target| target.thread_id == id)
             }
-            Self::Cleaning { thread_id, fences } => *thread_id == id || fences.contains(&id),
-            Self::Uncertain(fences) => fences.contains(&id),
             Self::RestoreDraft(plan) => plan.targets.iter().any(|target| target.thread_id == id),
             _ => false,
         }
@@ -107,7 +98,7 @@ impl FreshStage {
             Self::Admitted(input) | Self::Defaults { input, .. } => input,
             Self::Starting(context) => &mut context.input,
             Self::Naming(ready) | Self::Detaching { ready, .. } => &mut ready.context.input,
-            Self::RestoreDraft(_) | Self::Cleaning { .. } | Self::Uncertain(_) => return None,
+            Self::RestoreDraft(_) => return None,
         };
         input.message.take().map(|message| LocalDraftRecovery {
             origin: input.origin.clone(),
@@ -257,18 +248,6 @@ impl App {
                             Err(_) => detach::DetachReceipt::BudgetExpired,
                         },
                     ),
-                    FreshEffect::Cleanup(thread_id) => FreshOutcome::Cleaned(
-                        tokio::time::timeout(
-                            ACK_TIMEOUT,
-                            detach::unsubscribe(&handle, id, thread_id),
-                        )
-                        .await
-                        .map_err(|_| {
-                            "Unsubscribe acknowledgement timed out; it may still complete"
-                                .to_string()
-                        })
-                        .and_then(|result| result.map_err(|error| error.to_string())),
-                    ),
                 }
             })
             .catch_unwind()
@@ -282,28 +261,6 @@ impl App {
                 receipt: NavigationReceipt::Fresh(FreshReceipt { handle, outcome }),
             }));
         })));
-    }
-
-    fn retain_fresh_uncertainty(
-        &mut self,
-        mut operation: PendingNavigation,
-        fences: Vec<ThreadId>,
-    ) {
-        operation.intent = NavigationIntent::Fresh(FreshStage::Uncertain(fences));
-        operation.state = LaneState::Uncertain;
-        self.server_operations.navigation.retired.push(operation);
-    }
-
-    fn cleanup_fresh_subscription(
-        &mut self,
-        mut operation: PendingNavigation,
-        handle: AppServerRequestHandle,
-        thread_id: ThreadId,
-        fences: Vec<ThreadId>,
-    ) {
-        operation.intent = NavigationIntent::Fresh(FreshStage::Cleaning { thread_id, fences });
-        self.spawn_fresh_effect(&mut operation, handle, FreshEffect::Cleanup(thread_id));
-        self.server_operations.navigation.retired.push(operation);
     }
 
     fn recover_fresh_input(&mut self, input: &mut FreshInput) {
@@ -379,7 +336,7 @@ impl App {
                 }
                 if same_epoch && !fences.is_empty() {
                     self.chat_widget.add_error_message("Draft restoration detachment was not confirmed. Close and reopen this TUI to resynchronize; no detach was retried.".into());
-                    self.retain_fresh_uncertainty(operation, fences);
+                    self.retain_navigation_uncertainty(operation, fences, false);
                 } else if matching {
                     self.commit_parked_session_draft(tui, server).await?;
                 }
@@ -455,7 +412,7 @@ impl App {
                             if same_epoch =>
                         {
                             self.chat_widget.add_error_message("New conversation acquisition outcome is unknown. No start was retried. Close and reopen this TUI to resynchronize; the earlier request may still complete.".into());
-                            self.retain_fresh_uncertainty(operation, Vec::new());
+                            self.retain_navigation_uncertainty(operation, Vec::new(), false);
                         }
                         _ => {}
                     }
@@ -482,11 +439,13 @@ impl App {
             (FreshStage::Naming(mut ready), FreshOutcome::Named(result)) => {
                 if !matching {
                     self.recover_fresh_input(&mut ready.context.input);
-                    self.cleanup_fresh_subscription(
+                    self.start_navigation_cleanup(
                         operation,
                         handle,
                         ready.started.session.thread_id,
                         Vec::new(),
+                        CleanupContinuation::Done,
+                        false,
                     );
                     return Ok(());
                 }
@@ -525,32 +484,17 @@ impl App {
                     if same_epoch && !fences.is_empty() {
                         self.chat_widget.add_error_message("Navigation detachment was not confirmed. The old conversation remains selected; close and reopen this TUI to resynchronize. No detach was retried.".into());
                     }
-                    self.cleanup_fresh_subscription(
+                    self.start_navigation_cleanup(
                         operation,
                         handle,
                         ready.started.session.thread_id,
                         if same_epoch { fences } else { Vec::new() },
+                        CleanupContinuation::Done,
+                        false,
                     );
                 } else {
                     self.commit_fresh_navigation(tui, server, operation, *ready)
                         .await?;
-                }
-            }
-            (
-                FreshStage::Cleaning {
-                    thread_id,
-                    mut fences,
-                },
-                FreshOutcome::Cleaned(result),
-            ) => {
-                if same_epoch {
-                    if let Err(error) = result {
-                        self.chat_widget.add_error_message(format!("Detaching superseded fresh conversation {thread_id} was not confirmed: {error}. Close and reopen this TUI to resynchronize; no retry was sent."));
-                        fences.push(thread_id);
-                    }
-                    if !fences.is_empty() {
-                        self.retain_fresh_uncertainty(operation, fences);
-                    }
                 }
             }
             (mut stage, FreshOutcome::Terminated) => {
@@ -559,20 +503,24 @@ impl App {
                 }
                 self.chat_widget.add_error_message("New conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 match stage {
-                    FreshStage::RestoreDraft(plan) if same_epoch => self.retain_fresh_uncertainty(
-                        operation,
-                        plan.targets.iter().map(|target| target.thread_id).collect(),
-                    ),
+                    FreshStage::RestoreDraft(plan) if same_epoch => self
+                        .retain_navigation_uncertainty(
+                            operation,
+                            plan.targets.iter().map(|target| target.thread_id).collect(),
+                            false,
+                        ),
                     FreshStage::Starting(_) if same_epoch => {
-                        self.retain_fresh_uncertainty(operation, Vec::new())
+                        self.retain_navigation_uncertainty(operation, Vec::new(), false)
                     }
-                    FreshStage::Naming(ready) => self.cleanup_fresh_subscription(
+                    FreshStage::Naming(ready) => self.start_navigation_cleanup(
                         operation,
                         handle,
                         ready.started.session.thread_id,
                         Vec::new(),
+                        CleanupContinuation::Done,
+                        false,
                     ),
-                    FreshStage::Detaching { ready, plan } => self.cleanup_fresh_subscription(
+                    FreshStage::Detaching { ready, plan } => self.start_navigation_cleanup(
                         operation,
                         handle,
                         ready.started.session.thread_id,
@@ -581,14 +529,9 @@ impl App {
                         } else {
                             Vec::new()
                         },
+                        CleanupContinuation::Done,
+                        false,
                     ),
-                    FreshStage::Cleaning {
-                        thread_id,
-                        mut fences,
-                    } if same_epoch => {
-                        fences.push(thread_id);
-                        self.retain_fresh_uncertainty(operation, fences);
-                    }
                     _ => {}
                 }
             }
@@ -647,11 +590,13 @@ impl App {
                 "Failed to attach to fresh app-server thread: {error}"
             ));
             if self.chat_widget.thread_id() != Some(thread_id) {
-                self.cleanup_fresh_subscription(
+                self.start_navigation_cleanup(
                     operation,
                     server.request_handle(),
                     thread_id,
                     Vec::new(),
+                    CleanupContinuation::Done,
+                    false,
                 );
             }
             return Ok(());

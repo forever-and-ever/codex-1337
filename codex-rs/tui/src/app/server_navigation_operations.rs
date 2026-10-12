@@ -4,12 +4,15 @@ use super::*;
 
 use futures::FutureExt;
 
+#[path = "server_navigation_cleanup.rs"]
+mod cleanup;
 #[path = "server_agent_discovery.rs"]
 mod discovery;
 #[path = "server_fresh_navigation.rs"]
 mod fresh;
 #[path = "server_thread_selection.rs"]
 mod selection;
+use cleanup::CleanupContinuation;
 
 use selection::SelectStage;
 pub(in crate::app) use selection::SelectionAfter;
@@ -39,6 +42,12 @@ enum NavigationIntent {
     PickerStarting,
     ClosePicker,
     Fresh(fresh::FreshStage),
+    Cleanup {
+        thread_id: ThreadId,
+        fences: Vec<ThreadId>,
+        next: CleanupContinuation,
+    },
+    Uncertain(Vec<ThreadId>),
 }
 
 struct PickerPreparation {
@@ -65,6 +74,7 @@ enum NavigationReceipt {
     Discovered(discovery::DiscoveryReceipt),
     Selected(selection::SelectionReceipt),
     Fresh(fresh::FreshReceipt),
+    Cleaned(Result<(), String>),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -97,6 +107,12 @@ impl NavigationOwner {
                 && match &operation.intent {
                     NavigationIntent::Select(stage) => stage.thread_id() == thread_id,
                     NavigationIntent::Fresh(stage) => stage.fences_thread(thread_id),
+                    NavigationIntent::Cleanup {
+                        thread_id: target,
+                        fences,
+                        ..
+                    } => *target == thread_id || fences.contains(&thread_id),
+                    NavigationIntent::Uncertain(fences) => fences.contains(&thread_id),
                     _ => false,
                 }
         })
@@ -410,6 +426,10 @@ impl App {
                 .map(|index| self.server_operations.navigation.retired.remove(index))
         };
         let Some(mut operation) = operation else {
+            assert!(
+                !matches!(completion.receipt, NavigationReceipt::Cleaned(_)),
+                "subscription cleanup lost its owner"
+            );
             // Only canceled read-only work can finish without a retained owner.
             assert!(
                 !matches!(&completion.receipt, NavigationReceipt::Fresh(receipt) if receipt.requires_owner()),
@@ -420,7 +440,6 @@ impl App {
                     &completion.receipt,
                     NavigationReceipt::Selected(
                         selection::SelectionReceipt::Resumed { .. }
-                            | selection::SelectionReceipt::Detached(_)
                             | selection::SelectionReceipt::SideDetached(_)
                     )
                 ),
@@ -438,6 +457,9 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Cleaned(result) => {
+                self.finish_navigation_cleanup(server, operation, matching, result)
+            }
             NavigationReceipt::Fresh(receipt) => {
                 self.finish_fresh_navigation(tui, server, operation, matching, receipt)
                     .await?;

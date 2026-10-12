@@ -21,20 +21,14 @@ pub(super) enum SelectStage {
         kind: SelectionKind,
     },
     Fallback(Box<SelectionContext>),
-    Cleanup {
-        thread_id: ThreadId,
-        next: CleanupContinuation,
-    },
-    Uncertain(ThreadId),
 }
 
 impl SelectStage {
     pub(super) fn thread_id(&self) -> ThreadId {
         match self {
-            Self::Liveness { thread_id, .. } | Self::Uncertain(thread_id) => *thread_id,
+            Self::Liveness { thread_id, .. } => *thread_id,
             Self::DiscardSide(plan) => plan.origin().expect("side cleanup has a target"),
             Self::Resume { context, .. } | Self::Fallback(context) => context.thread_id,
-            Self::Cleanup { thread_id, .. } => *thread_id,
         }
     }
 }
@@ -62,10 +56,6 @@ pub(super) enum SelectionKind {
     Attach,
     Refresh,
 }
-pub(super) enum CleanupContinuation {
-    Done,
-    Fallback(Box<SelectionContext>),
-}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReplayMode {
     Live,
@@ -89,7 +79,6 @@ pub(super) enum SelectionReceipt {
         handle: AppServerRequestHandle,
     },
     Fallback(PreparedHistory),
-    Detached(Result<(), SubmissionFailure>),
     SideDetached(super::super::detach::DetachReceipt),
     Terminated,
 }
@@ -112,10 +101,6 @@ enum SelectionEffect {
         handle: AppServerRequestHandle,
         config: Config,
         local_settings: LocalSettings,
-    },
-    Detach {
-        thread_id: ThreadId,
-        handle: AppServerRequestHandle,
     },
 }
 
@@ -197,17 +182,6 @@ impl App {
                         )
                         .await,
                     ),
-                    SelectionEffect::Detach { thread_id, handle } => {
-                        let result = tokio::time::timeout(
-                            super::super::worker::ACK_TIMEOUT,
-                            super::super::detach::unsubscribe(&handle, id, thread_id),
-                        )
-                        .await;
-                        SelectionReceipt::Detached(match result {
-                            Ok(result) => result.map_err(super::super::worker::classify_failure),
-                            Err(_) => Err(SubmissionFailure::TimedOut),
-                        })
-                    }
                 }
             })
             .catch_unwind()
@@ -264,7 +238,7 @@ impl App {
                     self.finish_detach_plan(&plan, receipt).await;
                     if unknown {
                         self.add_agents_overview_error(format!("Closing side conversation {thread_id} was not confirmed. Close and reopen this TUI to resynchronize; the earlier request may still complete."));
-                        self.retain_uncertain_selection(operation, thread_id, false);
+                        self.retain_navigation_uncertainty(operation, vec![thread_id], false);
                     }
                 }
             }
@@ -285,16 +259,17 @@ impl App {
                     if matches!(kind, SelectionKind::Attach)
                         && let SubscriptionCustody::Subscribed(thread_id) = custody
                     {
-                        self.start_selection_cleanup(
+                        self.start_navigation_cleanup(
                             operation,
-                            thread_id,
                             handle,
+                            thread_id,
+                            Vec::new(),
                             CleanupContinuation::Done,
                             false,
                         );
                     } else if same_epoch && let SubscriptionCustody::Uncertain(thread_id) = custody
                     {
-                        self.retain_uncertain_selection(operation, thread_id, false);
+                        self.retain_navigation_uncertainty(operation, vec![thread_id], false);
                     }
                     return Ok(());
                 }
@@ -322,16 +297,17 @@ impl App {
                     Err(error) => match custody {
                         SubscriptionCustody::Uncertain(thread_id) => {
                             self.add_agents_overview_error(format!("Conversation attachment outcome is unknown: {error}. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete."));
-                            self.retain_uncertain_selection(operation, thread_id, true);
+                            self.retain_navigation_uncertainty(operation, vec![thread_id], true);
                         }
                         SubscriptionCustody::Subscribed(thread_id)
                             if matches!(kind, SelectionKind::Attach) =>
                         {
-                            self.start_selection_cleanup(
+                            self.start_navigation_cleanup(
                                 operation,
-                                thread_id,
                                 handle,
-                                CleanupContinuation::Fallback(context),
+                                thread_id,
+                                Vec::new(),
+                                CleanupContinuation::SelectionFallback(context),
                                 true,
                             );
                         }
@@ -404,32 +380,16 @@ impl App {
                     }
                 }
             }
-            (SelectStage::Cleanup { thread_id, next }, SelectionReceipt::Detached(result)) => {
-                match result {
-                    Ok(()) => {
-                        if matching && let CleanupContinuation::Fallback(context) = next {
-                            self.start_selection_fallback(server, operation, context);
-                        }
-                    }
-                    Err(error) if same_epoch => {
-                        self.add_agents_overview_error(format!("Detaching superseded conversation {thread_id} was not confirmed: {error:?}. Close and reopen this TUI to resynchronize; no detach was retried."));
-                        self.retain_uncertain_selection(operation, thread_id, matching);
-                    }
-                    Err(_) => {}
-                }
-            }
             (stage, SelectionReceipt::Terminated) => {
                 let thread_id = stage.thread_id();
                 self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 if same_epoch
                     && matches!(
                         stage,
-                        SelectStage::Resume { .. }
-                            | SelectStage::Cleanup { .. }
-                            | SelectStage::DiscardSide(_)
+                        SelectStage::Resume { .. } | SelectStage::DiscardSide(_)
                     )
                 {
-                    self.retain_uncertain_selection(operation, thread_id, matching);
+                    self.retain_navigation_uncertainty(operation, vec![thread_id], matching);
                 }
             }
             _ => unreachable!("selection stage received a different family's receipt"),
@@ -537,7 +497,7 @@ impl App {
         Ok(())
     }
 
-    fn start_selection_fallback(
+    pub(super) fn start_selection_fallback(
         &mut self,
         server: &AppServerSession,
         mut operation: PendingNavigation,
@@ -555,41 +515,6 @@ impl App {
             },
         );
         self.server_operations.navigation.current = Some(operation);
-    }
-
-    fn start_selection_cleanup(
-        &mut self,
-        mut operation: PendingNavigation,
-        thread_id: ThreadId,
-        handle: AppServerRequestHandle,
-        next: CleanupContinuation,
-        matching: bool,
-    ) {
-        operation.intent = NavigationIntent::Select(SelectStage::Cleanup { thread_id, next });
-        self.spawn_selection_effect(
-            &mut operation,
-            SelectionEffect::Detach { thread_id, handle },
-        );
-        if matching {
-            self.server_operations.navigation.current = Some(operation);
-        } else {
-            self.server_operations.navigation.retired.push(operation);
-        }
-    }
-
-    fn retain_uncertain_selection(
-        &mut self,
-        mut operation: PendingNavigation,
-        thread_id: ThreadId,
-        matching: bool,
-    ) {
-        operation.intent = NavigationIntent::Select(SelectStage::Uncertain(thread_id));
-        operation.state = LaneState::Uncertain;
-        if matching {
-            self.server_operations.navigation.current = Some(operation);
-        } else {
-            self.server_operations.navigation.retired.push(operation);
-        }
     }
 
     async fn install_selected_snapshot(

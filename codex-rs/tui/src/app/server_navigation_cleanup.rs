@@ -1,0 +1,101 @@
+use super::*;
+use codex_app_server_client::AppServerRequestHandle;
+
+pub(super) enum CleanupContinuation {
+    Done,
+    SelectionFallback(Box<selection::SelectionContext>),
+}
+
+impl App {
+    pub(super) fn start_navigation_cleanup(
+        &mut self,
+        mut operation: PendingNavigation,
+        handle: AppServerRequestHandle,
+        thread_id: ThreadId,
+        fences: Vec<ThreadId>,
+        next: CleanupContinuation,
+        matching: bool,
+    ) {
+        operation.intent = NavigationIntent::Cleanup {
+            thread_id,
+            fences,
+            next,
+        };
+        let completions = self.server_operations.control_tx.clone();
+        let (id, order, epoch, generation) = (
+            operation.id,
+            operation.order,
+            operation.epoch,
+            operation.generation,
+        );
+        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
+            let result = std::panic::AssertUnwindSafe(async {
+                tokio::time::timeout(ACK_TIMEOUT, detach::unsubscribe(&handle, id, thread_id))
+                    .await
+                    .map_err(|_| {
+                        "Unsubscribe acknowledgement timed out; it may still complete".to_string()
+                    })
+                    .and_then(|result| result.map_err(|error| error.to_string()))
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| Err("Unsubscribe task terminated unexpectedly".into()));
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::Cleaned(result),
+            }));
+        })));
+        if matching {
+            self.server_operations.navigation.current = Some(operation);
+        } else {
+            self.server_operations.navigation.retired.push(operation);
+        }
+    }
+
+    pub(super) fn retain_navigation_uncertainty(
+        &mut self,
+        mut operation: PendingNavigation,
+        fences: Vec<ThreadId>,
+        matching: bool,
+    ) {
+        operation.intent = NavigationIntent::Uncertain(fences);
+        operation.state = LaneState::Uncertain;
+        if matching {
+            self.server_operations.navigation.current = Some(operation);
+        } else {
+            self.server_operations.navigation.retired.push(operation);
+        }
+    }
+
+    pub(super) fn finish_navigation_cleanup(
+        &mut self,
+        server: &AppServerSession,
+        mut operation: PendingNavigation,
+        matching: bool,
+        result: Result<(), String>,
+    ) {
+        let NavigationIntent::Cleanup {
+            thread_id,
+            mut fences,
+            next,
+        } = std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("cleanup receipt without subscription custody");
+        };
+        if operation.epoch != self.server_operations.epoch {
+            return;
+        }
+        if let Err(error) = result {
+            self.chat_widget.add_error_message(format!("Detaching superseded conversation {thread_id} was not confirmed: {error}. Close and reopen this TUI to resynchronize; no detach was retried."));
+            fences.push(thread_id);
+        }
+        if !fences.is_empty() {
+            self.retain_navigation_uncertainty(operation, fences, matching);
+        } else if matching && let CleanupContinuation::SelectionFallback(context) = next {
+            self.start_selection_fallback(server, operation, context);
+        }
+    }
+}
