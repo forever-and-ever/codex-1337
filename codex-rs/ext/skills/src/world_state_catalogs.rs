@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use codex_extension_api::ContextualUserFragment;
 use codex_extension_api::ExtensionEventSink;
 use codex_extension_api::ExtensionWarning;
 use codex_extension_api::SelectedPluginSnapshot;
@@ -24,6 +23,13 @@ use crate::render::render_prepared_skill_catalogs;
 use crate::render::skill_metadata_budget;
 use crate::render_observability::CatalogSurface;
 use crate::render_observability::record_catalog_render;
+use crate::roster::CLOUD_SKILLS_WORLD_STATE_ID;
+use crate::roster::CatalogRenderCallback;
+use crate::roster::Content;
+use crate::roster::Muster;
+use crate::roster::cloud_section;
+use crate::roster::executor_section;
+use crate::roster::host_section;
 use crate::sources::SkillProviders;
 use crate::state::EmittedCatalogBudgetWarnings;
 use crate::state::ExecutorSkillsStepState;
@@ -31,10 +37,6 @@ use crate::state::HostSkillsCatalogInWorldState;
 use crate::state::HostSkillsStepState;
 use crate::state::SkillsSessionState;
 use crate::state::SkillsThreadState;
-use crate::world_state::CatalogRenderCallback;
-use crate::world_state::cloud_skills_world_state_section;
-use crate::world_state::executor_skills_world_state_section;
-use crate::world_state::host_skills_world_state_section;
 
 // Start with one quarter reserved for filesystem skills, before their inventory is known.
 const FILESYSTEM_BUDGET_DIVISOR: usize = 4;
@@ -102,6 +104,7 @@ pub(crate) struct RenderedCatalogContribution {
     budget: SkillMetadataBudget,
     allocation: CatalogBudgetAllocation,
     rendered: Option<AvailableSkillsRender>,
+    muster: Muster,
 }
 
 pub(crate) struct CatalogContext<'a> {
@@ -299,7 +302,7 @@ impl<'a> CatalogContext<'a> {
         let mut allocation = self
             .input
             .previous_world_state
-            .and_then(|state| state.get(crate::world_state::CLOUD_SKILLS_WORLD_STATE_ID))
+            .and_then(|state| state.get(CLOUD_SKILLS_WORLD_STATE_ID))
             .and_then(|snapshot| snapshot.get("allocation"))
             .and_then(|value| serde_json::from_value::<CatalogBudgetAllocation>(value.clone()).ok())
             .filter(|previous| {
@@ -325,22 +328,48 @@ impl<'a> CatalogContext<'a> {
             (rendered, filesystem_budget) =
                 self.render_with_cloud_limit(&catalogs, &executor, allocation.cloud_limit);
         }
+        let [executor_muster, cloud_muster, host_muster] = [
+            executor.muster(),
+            PreparedSkillCatalog::new(
+                &catalogs.cloud.catalog,
+                SkillCatalogRenderPolicy::ExtensionCompatible,
+            )
+            .muster(),
+            PreparedSkillCatalog::new(
+                &catalogs.host.catalog,
+                SkillCatalogRenderPolicy::CoreCompatible,
+            )
+            .muster(),
+        ];
 
         [
-            (CatalogKind::Executor, catalogs.executor, rendered.executor),
-            (CatalogKind::Cloud, catalogs.cloud, rendered.cloud),
-            (CatalogKind::Host, catalogs.host, rendered.host),
+            (
+                CatalogKind::Executor,
+                catalogs.executor,
+                rendered.executor,
+                executor_muster,
+            ),
+            (
+                CatalogKind::Cloud,
+                catalogs.cloud,
+                rendered.cloud,
+                cloud_muster,
+            ),
+            (CatalogKind::Host, catalogs.host, rendered.host, host_muster),
         ]
-        .map(|(kind, catalog, rendered)| RenderedCatalogContribution {
-            kind,
-            status: catalog.status,
-            budget: match kind {
-                CatalogKind::Cloud => self.metadata_budget.with_limit(allocation.cloud_limit),
-                CatalogKind::Executor | CatalogKind::Host => filesystem_budget,
+        .map(
+            |(kind, catalog, rendered, muster)| RenderedCatalogContribution {
+                kind,
+                status: catalog.status,
+                budget: match kind {
+                    CatalogKind::Cloud => self.metadata_budget.with_limit(allocation.cloud_limit),
+                    CatalogKind::Executor | CatalogKind::Host => filesystem_budget,
+                },
+                allocation,
+                rendered,
+                muster,
             },
-            allocation,
-            rendered,
-        })
+        )
     }
 
     /// Propose a smaller cloud cap only when omitted filesystem entries can fit without
@@ -443,14 +472,13 @@ impl<'a> CatalogContext<'a> {
             budget,
             allocation,
             rendered,
+            muster,
         } = catalog;
         let report = rendered
             .as_ref()
             .map(|rendered| rendered.report.clone())
             .unwrap_or_default();
-        let body = rendered
-            .and_then(|rendered| rendered.into_fragment(self.include_usage))
-            .map(|fragment| fragment.body());
+        let content = Content::new(rendered, muster, self.include_usage);
         let include_instructions = self.config.include_instructions;
         let metrics = self.input.extension_metrics.clone();
         let warning_emitter = Arc::clone(&self.warning_emitter);
@@ -472,16 +500,9 @@ impl<'a> CatalogContext<'a> {
         });
 
         match kind {
-            CatalogKind::Executor => executor_skills_world_state_section(
-                body,
-                include_instructions,
-                self.input
-                    .previous_world_state
-                    .and_then(|state| state.get(crate::world_state::SKILLS_WORLD_STATE_ID)),
-                on_render,
-            ),
-            CatalogKind::Cloud => cloud_skills_world_state_section(
-                body,
+            CatalogKind::Executor => executor_section(content, include_instructions, on_render),
+            CatalogKind::Cloud => cloud_section(
+                content,
                 include_instructions,
                 status == CatalogStatus::Enabled,
                 allocation,
@@ -489,7 +510,7 @@ impl<'a> CatalogContext<'a> {
             ),
             CatalogKind::Host => {
                 self.input.turn_store.insert(HostSkillsCatalogInWorldState);
-                host_skills_world_state_section(body, include_instructions, &report, on_render)
+                host_section(content, include_instructions, &report, on_render)
             }
         }
     }

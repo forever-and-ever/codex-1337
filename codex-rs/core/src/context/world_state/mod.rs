@@ -490,13 +490,20 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        let section = if section.uses_instruction_amendments() {
-            instruction_diff::Entry::Instruction(
-                Box::new(ExtensionWorldStateSection(section)),
-                instruction_diff::Amendment::Semantic,
-            )
-        } else {
-            instruction_diff::Entry::Context(Box::new(ExtensionWorldStateSection(section)))
+        let section = match section.mode() {
+            codex_extension_api::WorldStateSectionMode::Instruction(current) => {
+                let current = current.clone().map(|fragment| WorldStateContextFragment {
+                    fragment,
+                    content_kind: ContentItemKind(format!("{id}.instructions")),
+                });
+                instruction_diff::Entry::Instruction(
+                    Box::new(ExtensionWorldStateSection(section)),
+                    instruction_diff::Amendment::Semantic(current),
+                )
+            }
+            codex_extension_api::WorldStateSectionMode::Context => {
+                instruction_diff::Entry::Context(Box::new(ExtensionWorldStateSection(section)))
+            }
         };
         if id == "host_skills"
             && let Some(index) = self.sections.get_index_of(PermissionsState::ID)

@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1658
+assertion_line: 1663
 expression: "context_snapshot::format_request_history_snapshot(\"Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.\",\n&mock.requests(),\n&ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Astra checks for Notes, refreshes its installed plugin without restarting, and uses the new skill and Code Mode MCP tool across turns.
@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=10add372b5a6b355):
-        - namespace/functions; hash=23dcd4f361a08c29
+00:additional_tools/developer (2; hash=b035cf1d60504144):
+        - namespace/functions; hash=893902d1a09bf38a
           - custom/exec
           - function/wait
           - custom/python
@@ -106,17 +106,17 @@ Settings:
 -- request 3 (turn) --
 09:message/assistant:
     The Notes tool is not installed yet.
-10:additional_tools/developer (1; hash=a07d655aba3b605f):
-        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=effe10d1a6040105
+10:additional_tools/developer (1; hash=a3f3d87c7d326ef4):
+        - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=5f8722a7951daa8e
           - custom/exec
 11:message/developer:
     <skills_instructions>
     ## Skills
-    A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list ...ed into an absolute path using the skill roots table. [hash=ca27c3957f42502b]
+    A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, descriptio...; expand the path's alias from the skill roots table. [hash=9b09cf46082eaea7]
     ### Skill roots
     - `r0` = `<PLUGINS_CACHE>/test`
     ### Available skills
-    - notes:summarize: Summarize team notes (file: r0/notes/local/skills/summarize/SKILL.md)
+    - notes:summarize: Summarize team notes (r0/notes/local/skills/summarize/SKILL.md)
     </skills_instructions>
 12:message/user:
     I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.

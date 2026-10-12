@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn; Before /compact) --
-00:additional_tools/developer (2; hash=10add372b5a6b355):
-        - namespace/functions; hash=23dcd4f361a08c29
+00:additional_tools/developer (2; hash=b035cf1d60504144):
+        - namespace/functions; hash=893902d1a09bf38a
           - custom/exec
           - function/wait
           - custom/python
@@ -106,8 +106,8 @@ Settings:
 ## Window 2 (after request 2: input diverged at item 07)
 Settings: unavailable (items only)
 -- request 3 (items; Stored replacement before next turn) --
-00:additional_tools/developer (2; hash=10add372b5a6b355):
-        - namespace/functions; hash=23dcd4f361a08c29
+00:additional_tools/developer (2; hash=b035cf1d60504144):
+        - namespace/functions; hash=893902d1a09bf38a
           - custom/exec
           - function/wait
           - custom/python
@@ -192,8 +192,8 @@ Settings: unavailable (items only)
 ## Window 3 (after request 3)
 Settings: same as window 1
 -- request 4 (turn; First turn after /compact) --
-00:additional_tools/developer (2; hash=10add372b5a6b355):
-        - namespace/functions; hash=23dcd4f361a08c29
+00:additional_tools/developer (2; hash=b035cf1d60504144):
+        - namespace/functions; hash=893902d1a09bf38a
           - custom/exec
           - function/wait
           - custom/python

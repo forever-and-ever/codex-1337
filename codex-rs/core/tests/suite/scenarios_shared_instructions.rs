@@ -2,7 +2,7 @@
 
 use super::super::agents_md::RecordingThreadInstructionsProvider;
 use super::super::agents_md::expected_provider_only_instruction_fragment;
-use super::super::agents_md::instruction_fragments;
+use super::super::agents_md::instruction_fragments as instruction_history;
 use super::super::agents_md::persisted_resume_history;
 use super::super::agents_md::submit_thread_turn;
 use super::*;
@@ -105,37 +105,32 @@ async fn running_descendants_refresh_only_shared_thread_instructions(shared: boo
     }));
     let previous_loads = previous_provider.load_count();
 
-    let replacement = format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{UPDATED}"
-    );
-    let updates = [
-        (Some(INITIAL), INITIAL),
-        (Some(UPDATED), replacement.as_str()),
-        (
-            None,
-            "The previously provided AGENTS.md instructions no longer apply.",
-        ),
-        (None, ""),
-    ];
+    let updates = [(Some(INITIAL), 0), (Some(UPDATED), 1), (None, 2), (None, 2)];
     let loads_before = provider.load_count();
     let mut request_history = Vec::new();
     // Both descendants stayed alive across the restart and must switch without another root turn.
     for descendant in descendants {
-        let mut expected = Vec::new();
-        for (contents, appended_fragment) in updates {
+        for (contents, change_count) in updates {
             provider.set_instructions(contents.map(|text| Instructions {
                 text: text.to_owned(),
                 source: None,
             }));
             let response = mount_sse_once(&server, responses::sse_completed("child-step")).await;
             submit_thread_turn(&descendant, "continue with the current instructions").await?;
-            if expected.is_empty() || (shared && !appended_fragment.is_empty()) {
-                expected.push(expected_provider_only_instruction_fragment(
-                    appended_fragment,
-                ));
-            }
             let request = response.single_request();
-            assert_eq!(instruction_fragments(&request), expected);
+            assert_eq!(
+                instruction_fragments(&request),
+                vec![expected_provider_only_instruction_fragment(INITIAL)]
+            );
+            let changes = instruction_changes(&request);
+            assert_eq!(changes.len(), if shared { change_count } else { 0 });
+            if let Some(changed) = changes.first() {
+                assert!(changed.contains(&format!("-{INITIAL}\n+{UPDATED}")));
+            }
+            if let Some(removed) = changes.get(1) {
+                assert!(removed.contains(&format!("-{UPDATED}")));
+                assert!(removed.contains("/removed"));
+            }
             request_history.push(request);
         }
     }
@@ -260,10 +255,7 @@ async fn guardian_tracks_shared_instruction_updates_in_running_descendants() -> 
     assert_eq!(requests.len(), 9);
     let initial = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{INITIAL}\n</INSTRUCTIONS>");
     let updated = format!("# AGENTS.md instructions\n\n<INSTRUCTIONS>\n{UPDATED}\n</INSTRUCTIONS>");
-    let replacement = format!(
-        "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nThese AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{UPDATED}\n</INSTRUCTIONS>"
-    );
-    let cleared = "# AGENTS.md instructions\n\n<INSTRUCTIONS>\nThe previously provided AGENTS.md instructions no longer apply.\n</INSTRUCTIONS>".to_owned();
+
     assert_eq!(
         requests
             .iter()
@@ -272,15 +264,25 @@ async fn guardian_tracks_shared_instruction_updates_in_running_descendants() -> 
         vec![
             vec![initial.clone()],
             vec![initial.clone()],
-            vec![initial.clone(), replacement.clone()],
-            vec![initial.clone(), replacement.clone()],
+            vec![initial.clone()],
+            vec![initial.clone()],
             vec![updated],
-            vec![initial.clone(), replacement.clone(), cleared.clone()],
-            vec![initial.clone(), replacement.clone(), cleared.clone()],
+            vec![initial.clone()],
+            vec![initial.clone()],
             vec![],
-            vec![initial, replacement, cleared],
+            vec![initial],
         ],
     );
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| instruction_changes(request).len())
+            .collect::<Vec<_>>(),
+        vec![0, 0, 1, 1, 0, 2, 2, 0, 2],
+    );
+    let changes = instruction_changes(&requests[8]);
+    assert!(changes[0].contains(&format!("-{INITIAL}\n+{UPDATED}")));
+    assert!(changes[1].contains(&format!("-{UPDATED}")));
     let reviewers = [1, 4, 7].map(|index| {
         let metadata = requests[index].body_json()["client_metadata"].clone();
         assert_eq!(metadata["x-openai-subagent"], "guardian");
@@ -292,4 +294,19 @@ async fn guardian_tracks_shared_instruction_updates_in_running_descendants() -> 
     assert_ne!(reviewers[0], reviewers[1]);
     assert_ne!(reviewers[1], reviewers[2]);
     Ok(())
+}
+
+fn instruction_changes(request: &responses::ResponsesRequest) -> Vec<String> {
+    request
+        .message_input_texts("user")
+        .into_iter()
+        .filter(|text| text.starts_with("<instruction_diff>"))
+        .collect()
+}
+
+fn instruction_fragments(request: &responses::ResponsesRequest) -> Vec<String> {
+    instruction_history(request)
+        .into_iter()
+        .filter(|text| text.starts_with("# AGENTS.md instructions"))
+        .collect()
 }

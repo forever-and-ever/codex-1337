@@ -893,8 +893,13 @@ async fn astra_omits_disabled_executor_and_plugin_skills_from_model_context() ->
         .rev()
         .find(|text| text.contains("## Skills"))
         .expect("second step's skills section");
-    assert!(latest_skills.contains("next-helper"));
-    assert!(!latest_skills.contains("active-helper"));
+    // The environment change amends the first step's listing instead of replacing it.
+    let (listed, removed) = latest_skills
+        .split_once("### Removed skills\n")
+        .expect("second step's skills amendment");
+    assert!(listed.contains("### Added skills\n") && listed.contains("next-helper"));
+    assert!(!listed.contains("active-helper"));
+    assert!(removed.contains("active-helper"));
     let mut bodies = requests
         .iter()
         .map(core_test_support::responses::ResponsesRequest::body_json)

@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios.rs
-assertion_line: 1101
+assertion_line: 1106
 expression: history
 ---
 Scenario: Astra checks a Settings release using direct collaboration and Code Mode tools.
@@ -17,8 +17,8 @@ Settings:
   text: {"verbosity":"low"}
   tool_choice: "auto"
 -- request 1 (turn) --
-00:additional_tools/developer (2; hash=66d45851f0b8f4f9):
-        - namespace/functions; hash=632b9a8a648e2d99
+00:additional_tools/developer (2; hash=ec3a3f449f7754fe):
+        - namespace/functions; hash=89fa5da60bc20a6c
           - custom/exec
           - function/wait
           - custom/python

@@ -1,6 +1,6 @@
 ---
 source: core/tests/suite/scenarios_mcp_resource_messages.rs
-assertion_line: 156
+assertion_line: 160
 expression: "context_snapshot::format_request_history_snapshot(\"Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.\",\n&requests, &ContextSnapshotOptions::default().include_request_settings(),)"
 ---
 Scenario: Catalog resource descriptions and parameter guidance accompany discovery and reading through Code Mode.
@@ -16,8 +16,8 @@ Settings:
   stream: true
   text: {"verbosity":"low"}
   tool_choice: "auto"
-  tools (10; hash=75fa8fdc64482cb7):
-    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=471ab12bc304b48c
+  tools (10; hash=0a999370d0072770):
+    - custom/exec: Run JavaScript code to orchestrate/compose tool calls - Evaluates the provided JavaScript code in...; hash=84dd738fe2c2e571
     - function/wait: Waits on a yielded `exec` cell and returns new output or completion. - Use `wait` only after `exe...; args=[cell_id, max_tokens, terminate]; hash=0d6841040273c1cc
     - custom/python: Execute ordinary python source in a fresh python3 -u process, not a REPL or JavaScript. Supply so...; hash=fa80d4eff151e99a
     - custom/bash: Execute ordinary bash source in a fresh bash process, not a REPL or JavaScript. Supply source dir...; hash=e39c65dbec586069
@@ -99,9 +99,42 @@ Settings:
 05:message/user:
     List the available resources and templates, then read the example note.
 -- request 2 (turn) --
-06:custom_tool_call/exec:text(await tools.list_mcp_resources({"server":"resources"}));
+06:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
+    text(await tools.list_mcp_resources({"server":"resources"}));
+    text(describe_tool("list_mcp_resource_templates"));
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
+    text(describe_tool("read_mcp_resource"));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
 07:custom_tool_call_output:Script completed
     Output:
-     | {"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555]
+     | Catalog instructions for list_mcp_resources.
+
+    exec tool declaration:
+    ```ts
+    declare const tools: { list_mcp_resources(args: {
+      // Catalog cursor from the previous page.
+      cursor?: string;
+      // Catalog server for list_mcp_resources.
+      server?: string;
+    }): Promise<unknown>; };
+    ``` | {"server":"resources","resources":[{"server":"resources","uri":"memo://codex/example-note","name":"examp...ed for integration tests.","mimeType":"text/plain"}]} [hash=75d187638a7af2d4] | Catalog instructions for list_mcp_resource_templates.
+
+    exec tool declaration:
+    ```ts
+    declare const tools: { list_mcp_resource_templates(args: {
+      // Catalog cursor from the previous page.
+      cursor?: string;
+      // Catalog server for list_mcp_resource_templates.
+      server?: string;
+    }): Promise<unknown>; };
+    ``` | {"server":"resources","resourceTemplates":[{"server":"resources","uriTemplate":"memo://codex/{slug}","na... resources used in tests.","mimeType":"text/plain"}]} [hash=b1c7082eb114fc9b] | Catalog instructions for read_mcp_resource.
+
+    exec tool declaration:
+    ```ts
+    declare const tools: { read_mcp_resource(args: {
+      // Catalog server for read_mcp_resource.
+      server: string;
+      // Catalog URI returned by resource discovery.
+      uri: string;
+    }): Promise<unknown>; };
+    ``` | {"server":"resources","uri":"memo://codex/example-note","contents":[{"uri":"memo://codex/example-note","...mple MCP resource served by the rmcp test server."}]} [hash=45385fc57640b555]

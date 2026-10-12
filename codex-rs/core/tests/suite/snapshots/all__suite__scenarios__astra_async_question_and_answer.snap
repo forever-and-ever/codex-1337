@@ -7,8 +7,8 @@ Scenario: Astra uses the catalog question schema to ask who a launch update is f
 
 ## Window 1
 -- request 1 (request) --
-00:additional_tools/developer (2; hash=9d59384ff53e42c7):
-        - namespace/functions; hash=fd4cd3d0fbd42f5d
+00:additional_tools/developer (2; hash=bd663c936fd02a94):
+        - namespace/functions; hash=49e6e28730fe9420
           - custom/exec
           - function/wait
           - custom/python
@@ -46,7 +46,23 @@ Scenario: Astra uses the catalog question schema to ask who a launch update is f
 11:message/assistant:
     Here is the launch update for customers.
 12:message/developer:
-    <PERMISSIONS_INSTRUCTIONS>
+    <instruction_diff>
+    Apply this update to the previously supplied permissions instructions; unchanged instructions remain in force.
+    --- permissions/2418d9b66a97dd285dddf9a6cb5f036be2c038f1
+    +++ permissions/a1b8a4a13d60c79324289b623760bf4eb84842a1
+    @@ -1,8 +1,4 @@
+     <permissions instructions>
+    -Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-only`: The sa... permits reading files. Network access is restricted. [hash=97967fa3e5bd20df]
+    -# Escalation Requests
+    -
+    -Commands run in the sandbox unless an approved rule lets them run unrestricted. To run a command outsid... request it directly rather than asking in a message. [hash=5b143516131ded97]
+    -
+    -Escalate when the task requires it: to write outside the writable roots (for example, tests that write ...ous, but never circumvent approvals with other tools. [hash=9a25bdebe2d31782]
+    +Filesystem sandboxing defines which files can be read or written. `sandbox_mode` is `danger-full-access...ll commands are permitted. Network access is enabled. [hash=e4271d3231be6838]
+    +Approval policy is currently never. Do not provide the `sandbox_permissions` for any reason, commands will be rejected.
+     </permissions instructions>
+    \\ No newline at end of file
+    </instruction_diff>
 13:message/user:
     <ENVIRONMENT_CONTEXT>
 14:message/user:

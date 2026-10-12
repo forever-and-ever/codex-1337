@@ -1828,25 +1828,28 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         FullHistoryV2ModelSelection::MultiAgentModeTransitions
     ) {
         assert_eq!(
-            (
-                child_developer_messages
-                    .iter()
-                    .filter(|message| message.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
-                    .count(),
-                child_developer_messages
-                    .iter()
-                    .filter(|message| message.contains(FULL_HISTORY_EXPLICIT_POLICY))
-                    .count(),
-                child_developer_messages
-                    .iter()
-                    .filter(|message| message.contains(FULL_HISTORY_PROACTIVE_POLICY))
-                    .count(),
-                child_developer_messages
-                    .iter()
-                    .filter(|message| message.contains(FULL_HISTORY_SHARED_USAGE_HINT))
-                    .count(),
-            ),
-            (1, 1, 0, 1)
+            child_developer_messages
+                .iter()
+                .filter(|message| message.starts_with(MULTI_AGENT_MODE_OPEN_TAG))
+                .count(),
+            1,
+        );
+        let restoration = child_developer_messages
+            .iter()
+            .rfind(|message| {
+                message.starts_with("<instruction_diff>")
+                    && message.contains(FULL_HISTORY_EXPLICIT_POLICY)
+            })
+            .expect("full fork appends its explicit-policy restoration");
+        assert!(
+            restoration
+                .lines()
+                .any(|line| line.starts_with('-') && line.contains(FULL_HISTORY_PROACTIVE_POLICY))
+        );
+        assert!(
+            restoration
+                .lines()
+                .any(|line| line.starts_with('+') && line.contains(FULL_HISTORY_EXPLICIT_POLICY))
         );
     }
     if matches!(selection, FullHistoryV2ModelSelection::CurrentTimeReminders) {
@@ -3140,6 +3143,23 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
     })
     .await;
 
+    let requester_metadata = core_test_support::responses::received_responses_requests(&server)
+        .await
+        .into_iter()
+        .find_map(|request| {
+            let body = request.body_json();
+            (body["client_metadata"]["thread_id"] == json!(requester_thread_id)
+                && body["client_metadata"]["turn_id"] == json!(requester_turn_id))
+            .then(|| {
+                serde_json::from_str::<Value>(
+                    body["client_metadata"]["x-codex-turn-metadata"]
+                        .as_str()
+                        .expect("requester metadata"),
+                )
+                .expect("requester metadata JSON")
+            })
+        })
+        .expect("requester's initiating request");
     let mut worker_followup_turn_id = worker_followup_request
         .requests()
         .into_iter()
@@ -3154,7 +3174,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
                         .expect("worker turn metadata"),
                 )
                 .expect("worker turn metadata JSON");
-                assert_eq!(metadata["turn_trigger"], "composer");
+                assert_eq!(metadata["turn_trigger"], requester_metadata["turn_trigger"]);
                 body["client_metadata"]["turn_id"]
                     .as_str()
                     .expect("worker follow-up turn ID")

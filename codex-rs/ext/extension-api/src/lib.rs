@@ -102,6 +102,7 @@ pub use contributors::TurnStartPhase;
 pub use contributors::TurnStopInput;
 pub use contributors::WorldStateContributionInput;
 pub use contributors::WorldStateSectionContribution;
+pub use contributors::WorldStateSectionMode;
 pub use registry::ExtensionRegistry;
 pub use registry::ExtensionRegistryBuilder;
 pub use registry::empty_extension_registry;

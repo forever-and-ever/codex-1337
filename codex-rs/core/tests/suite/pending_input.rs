@@ -81,59 +81,6 @@ async fn idle_user_input_reaches_the_first_model_request_in_plan_mode() -> anyho
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn idle_response_items_include_pending_mailbox_in_first_request() -> anyhow::Result<()> {
-    let server = responses::start_mock_server().await;
-    let response = responses::mount_sse_once(
-        &server,
-        responses::sse(vec![
-            ev_response_created("idle-response-items"),
-            ev_completed("idle-response-items"),
-        ]),
-    )
-    .await;
-    let test = test_codex().build_with_auto_env(&server).await?;
-
-    submit_queue_only_agent_mail(test.codex.as_ref(), "pending mailbox input").await;
-    let submission = test
-        .codex
-        .start_turn_if_idle(TurnInputRequest::new(TurnInput::ResponseItem(
-            responses::user_message_item("automatic response item"),
-        )))
-        .await?;
-    let StartIfIdleSubmission::Started { turn_id, .. } = submission else {
-        panic!("automatic input should start a turn");
-    };
-    wait_for_turn_complete(test.codex.as_ref()).await;
-
-    let request = response.single_request();
-    let request_body = request.body_json();
-    responses::assert_root_turn(&request_body, Some(&turn_id))?;
-    responses::assert_parent_turn(&request_body, /*expected*/ None)?;
-    let user_messages = request.message_input_texts("user");
-    assert!(
-        user_messages
-            .iter()
-            .any(|message| message == "automatic response item")
-    );
-    assert!(
-        request
-            .inputs_of_type("agent_message")
-            .iter()
-            .any(|message| {
-                message["author"] == "/root/worker"
-                    && message["recipient"] == "/root"
-                    && message["content"].as_array().is_some_and(|content| {
-                        content.iter().any(|item| {
-                            item["type"] == "input_text" && item["text"] == "pending mailbox input"
-                        })
-                    })
-            })
-    );
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn standalone_tool_output_starts_instruction_turn() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
     let response = responses::mount_sse_once(
@@ -730,7 +677,10 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
     let test = test_codex()
         .with_model("gpt-5.4")
         .with_config(move |config| {
-            config.features.enable(Feature::MultiAgentV2).unwrap();
+            config
+                .features
+                .enable(Feature::MultiAgentV2)
+                .expect("enable V2 agents");
             config.multi_agent_v2.min_wait_timeout_ms = 0;
             config.multi_agent_v2.wait_agent_batch_window_ms = match wake {
                 WaitWake::Disabled => None,
@@ -757,7 +707,7 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
         .expect("released mail must not incur a second batching window");
     let requests = server.requests().await;
     assert_eq!(requests.len(), 2);
-    let second: Value = from_slice(&requests[1]).unwrap();
+    let second: Value = from_slice(&requests[1]).expect("second model request");
     let users = message_input_texts(&second, "user")
         .into_iter()
         .filter(|text| text == INITIAL_PROMPT || text == STEER_PROMPT)
@@ -769,7 +719,7 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
     assert_eq!(users, expected_users);
     let mail = second["input"]
         .as_array()
-        .unwrap()
+        .expect("request input")
         .iter()
         .filter(|item| item["type"] == "agent_message")
         .collect::<Vec<_>>();
@@ -777,9 +727,9 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
     if let Some(mail) = mail.first() {
         assert!(mail.to_string().contains("first child message"));
     }
-    let wait_output = function_call_output_text(&second, WAIT_CALL_ID).unwrap();
+    let wait_output = function_call_output_text(&second, WAIT_CALL_ID).expect("wait_agent output");
     assert_eq!(
-        serde_json::from_str::<Value>(wait_output).unwrap(),
+        serde_json::from_str::<Value>(wait_output).expect("wait_agent output JSON"),
         json!({
             "message": if matches!(wake, WaitWake::Steer) {
                 "Wait interrupted by new input."
@@ -1123,72 +1073,6 @@ async fn queued_inter_agent_mail_triggers_follow_up_after_commentary_message_ite
 
     let requests = server.requests().await;
     assert_two_responses_input_snapshot("pending_input_queued_mail_after_commentary", &requests);
-
-    server.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_inter_agent_mail_does_not_restart_after_final_answer() {
-    let first_chunks = vec![
-        chunk(ev_response_created("resp-1")),
-        chunk(ev_message_item_added("msg-1", "")),
-        chunk(ev_output_text_delta("first answer")),
-        chunk(json!({
-            "type": "response.output_item.done",
-            "item": {
-                "type": "message",
-                "role": "assistant",
-                "id": "msg-1",
-                "content": [{"type": "output_text", "text": "first answer"}],
-                "phase": "final_answer",
-            }
-        })),
-        chunk(ev_completed("resp-1")),
-    ];
-
-    let (server, _completions) = start_streaming_sse_server(vec![
-        first_chunks,
-        response_completed_chunks("unexpected-resp-2"),
-    ])
-    .await;
-    let test = build_codex(&server).await;
-    let codex = Arc::clone(&test.codex);
-
-    submit_queue_only_agent_mail(&codex, "queued child update").await;
-    submit_user_input(&codex, "first prompt").await;
-    wait_for_turn_complete(&codex).await;
-
-    let mut requests = server.requests().await;
-    assert_eq!(requests.len(), 1);
-    let request: Value = from_slice(&requests[0]).expect("parse request");
-    assert!(
-        request["input"]
-            .as_array()
-            .expect("request input")
-            .iter()
-            .all(|item| item.get("type").and_then(Value::as_str) != Some("agent_message"))
-    );
-
-    submit_user_input(&codex, "second prompt").await;
-    wait_for_turn_complete(&codex).await;
-
-    requests = server.requests().await;
-    assert_eq!(requests.len(), 2);
-    let request: Value = from_slice(&requests[1]).expect("parse request");
-    let input = request["input"].as_array().expect("request input");
-    let agent_message = input
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("agent_message"))
-        .expect("queued child update should be included in the next turn");
-    assert_eq!(
-        agent_message["content"],
-        json!([{"type": "input_text", "text": "queued child update"}])
-    );
-    let user_input = message_input_texts(&request, "user")
-        .into_iter()
-        .filter(|text| text == "second prompt")
-        .collect::<Vec<_>>();
-    assert_eq!(user_input, vec!["second prompt"]);
 
     server.shutdown().await;
 }

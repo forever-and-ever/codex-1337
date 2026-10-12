@@ -83,7 +83,7 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 mod presentation_dedup_tests;
 
 static NEXT_CODEX_HOME_ID: AtomicUsize = AtomicUsize::new(0);
-const SKILLS_INTRO_WITH_ABSOLUTE_PATHS: &str = "A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `executor package` locators are owned by their execution environment, `cloud package` locators are opaque package identifiers, and `custom resource` locators use their provider's access mechanism.";
+const SKILLS_INTRO_WITH_ABSOLUTE_PATHS: &str = "A skill is a `SKILL.md` source of instructions. Entries give each skill's name, description, and source locator: a plain path is a `file` on the host filesystem, an `executor package` is owned by its execution environment, a `cloud package` is an opaque package identifier, and a `custom resource` uses its provider's access mechanism.";
 const DEMO_SKILL_CONTENTS: &str =
     "---\nname: demo\ndescription: Demo skill.\n---\n# Demo\n\nUse the demo skill.\n";
 
@@ -104,6 +104,15 @@ fn world_state_section<'a>(
         .iter()
         .find(|section| section.id() == id)
         .unwrap_or_else(|| panic!("world-state section {id} should exist"))
+}
+
+/// The catalog a section shows a fresh context.
+fn fresh_catalog(sections: &[WorldStateSectionContribution], id: &str) -> String {
+    world_state_section(sections, id)
+        .render_diff(PreviousWorldStateSection::Absent)
+        .1
+        .map(|fragment| fragment.body().to_string())
+        .unwrap_or_default()
 }
 
 async fn skill_world_state_fragments(
@@ -247,7 +256,7 @@ async fn installed_extension_uses_host_service_snapshot() -> TestResult {
         .await;
 
     let expected_catalog = format!(
-        "{SKILLS_INSTRUCTIONS_OPEN_TAG}\n## Skills\n{SKILLS_INTRO_WITH_ABSOLUTE_PATHS}\n### Available skills\n- demo: Demo skill. (file: {skill_prompt_path})\n{SKILLS_INSTRUCTIONS_CLOSE_TAG}"
+        "{SKILLS_INSTRUCTIONS_OPEN_TAG}\n## Skills\n{SKILLS_INTRO_WITH_ABSOLUTE_PATHS}\n### Available skills\n- demo: Demo skill. ({skill_prompt_path})\n{SKILLS_INSTRUCTIONS_CLOSE_TAG}"
     );
     let expected_skill = format!(
         "<skill>\n<name>demo</name>\n<path>{skill_prompt_path}</path>\n{DEMO_SKILL_CONTENTS}\n</skill>"
@@ -620,7 +629,7 @@ async fn executor_cloud_and_host_share_catalog_world_state_flow() -> TestResult 
         ),
         (
             "host_skills",
-            "- host-skill: Fix lint errors. (file: /skills/host-skill/SKILL.md)",
+            "- host-skill: Fix lint errors. (/skills/host-skill/SKILL.md)",
         ),
     ] {
         let fragment = world_state_section(&sections, section_id)
@@ -954,16 +963,10 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     let (unavailable_snapshot, unavailable_fragment) =
         unavailable_sections[0].render_diff(PreviousWorldStateSection::Known(&available_snapshot));
     let unavailable_snapshot = unavailable_snapshot.unwrap();
-    assert_eq!(
-        unavailable_snapshot,
-        serde_json::json!({
-            "body": null,
-            "includeInstructions": true,
-            "lastAvailableFingerprint": blake3::hash(
-                available_snapshot["body"].as_str().ok_or("available catalog")?.as_bytes()
-            ).to_hex().to_string(),
-        }),
-    );
+    // Withdrawal keeps the listing it supersedes, so a return can refer back to it.
+    let mut withdrawn_snapshot = available_snapshot.clone();
+    withdrawn_snapshot["shown"]["state"] = "withdrawn".into();
+    assert_eq!(unavailable_snapshot, withdrawn_snapshot);
     let unavailable_fragment = unavailable_fragment.ok_or("removed skills should render")?;
     assert!(
         unavailable_fragment
@@ -997,10 +1000,6 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
     assert_eq!(
         restored_fragment.body(),
         "\n## Skills update\nThe previously listed selected-environment skills are available again.\n",
-    );
-    assert!(restored_sections[0].matches_retained_fragment("developer", available_fragment.body()));
-    assert!(
-        !restored_sections[0].matches_retained_fragment("developer", unavailable_fragment.body())
     );
     assert_eq!(
         restored_sections[0]
@@ -1085,16 +1084,10 @@ async fn selected_executor_catalog_follows_step_availability_and_reuses_its_cach
         "\n## Skills update\nSelected-environment skills are not listed automatically. Explicit skill mentions can still be resolved when available.\n",
         listing_disabled_fragment.body()
     );
-    let mut normalized_listing_disabled_snapshot = listing_disabled_snapshot.unwrap();
-    normalized_listing_disabled_snapshot
-        .as_object_mut()
-        .ok_or("skills snapshot should be an object")?
-        .remove("body");
+    let listing_disabled_snapshot = listing_disabled_snapshot.unwrap();
     assert!(
         listing_disabled_sections[0]
-            .render_diff(PreviousWorldStateSection::Known(
-                &normalized_listing_disabled_snapshot
-            ))
+            .render_diff(PreviousWorldStateSection::Known(&listing_disabled_snapshot))
             .1
             .is_none()
     );
@@ -1482,16 +1475,15 @@ async fn catalog_rebalances_only_to_avoid_omissions_and_retains_the_allocation()
                     .collect::<std::collections::BTreeMap<_, _>>();
                 let cloud = &rendered["cloud_skills"];
                 let cloud_snapshot = cloud.0.as_ref().expect("cloud snapshot");
-                let cloud_body = cloud_snapshot["body"].as_str().ok_or("cloud catalog")?;
+                let cloud_body = fresh_catalog(&sections, "cloud_skills");
+                let cloud_body = cloud_body.as_str();
                 match phase {
                     Phase::Initial => initial_cloud = Some(cloud_body.to_string()),
                     Phase::FirstReady => {
                         assert_eq!(initial_cloud.as_deref() != Some(cloud_body), rebalance);
                         accepted_cloud = Some(cloud_snapshot.clone());
-                        let executor = rendered["skills"].0.as_ref().expect("executor snapshot");
-                        let executor_body = executor["body"].as_str().ok_or("executor catalog")?;
                         assert_eq!(
-                            executor_body
+                            fresh_catalog(&sections, "skills")
                                 .lines()
                                 .filter(|line| line.starts_with("- executor-skill-"))
                                 .count()
@@ -1528,11 +1520,8 @@ async fn catalog_rebalances_only_to_avoid_omissions_and_retains_the_allocation()
                                 .count(),
                             15
                         );
-                        let executor = rendered["skills"].0.as_ref().expect("executor snapshot");
                         assert_eq!(
-                            executor["body"]
-                                .as_str()
-                                .ok_or("executor catalog")?
+                            fresh_catalog(&sections, "skills")
                                 .lines()
                                 .filter(|line| line.starts_with("- executor-skill-"))
                                 .count(),
@@ -2482,10 +2471,10 @@ async fn host_catalog_compacts_shared_paths_under_budget_pressure() -> TestResul
         catalog.contains(&format!("- `r0` = `{rendered_root}`")),
         "{catalog}"
     );
-    assert!(catalog.contains("(file: r0/skill-00/SKILL.md)"));
-    assert!(catalog.contains("(file: r0/skill-11/SKILL.md)"));
+    assert!(catalog.contains("(r0/skill-00/SKILL.md)"));
+    assert!(catalog.contains("(r0/skill-11/SKILL.md)"));
     #[cfg(unix)]
-    assert!(catalog.contains("(file: r0/linked-skill/SKILL.md)"));
+    assert!(catalog.contains("(r0/linked-skill/SKILL.md)"));
     assert!(!catalog.contains("additional skills omitted"));
 
     std::fs::remove_dir_all(test_root)?;

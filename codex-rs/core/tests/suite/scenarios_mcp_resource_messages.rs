@@ -97,7 +97,9 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
     events.extend(if tool_mode == ToolMode::CodeModeOnly {
         let script = calls
             .iter()
-            .map(|(name, arguments)| format!("text(await tools.{name}({arguments}));"))
+            .map(|(name, arguments)| {
+                format!("text(describe_tool(\"{name}\"));\ntext(await tools.{name}({arguments}));")
+            })
             .collect::<Vec<_>>()
             .join("\n");
         vec![responses::ev_custom_tool_call(
@@ -124,11 +126,13 @@ async fn mcp_resource_messages(tool_mode: ToolMode) -> Result<()> {
     let body = requests[0].body_json();
     for (name, message) in &messages {
         if tool_mode == ToolMode::CodeModeOnly {
-            assert!(
-                requests[0]
-                    .body_contains_text(message["description"].as_str().expect("description"))
-            );
-            assert!(requests[0].body_contains_text(&format!("Catalog server for {name}.")));
+            // The roster glosses each tool with its catalog description; the contract, with its
+            // catalog parameter guidance, arrives through `describe_tool`.
+            assert!(requests[0].body_contains_text(&format!(
+                "- {name}: {}",
+                message["description"].as_str().expect("description")
+            )));
+            assert!(requests[1].body_contains_text(&format!("Catalog server for {name}.")));
         } else {
             let tool = body["tools"]
                 .as_array()

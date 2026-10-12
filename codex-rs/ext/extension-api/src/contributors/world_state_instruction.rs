@@ -1,15 +1,25 @@
+use super::RenderedWorldStateFragment;
 use super::WorldStateSectionContribution;
 
+#[derive(Clone)]
+pub enum WorldStateSectionMode {
+    Context,
+    /// The complete current instructions, supplied without render side effects.
+    Instruction(Option<RenderedWorldStateFragment>),
+}
+
 impl WorldStateSectionContribution {
-    /// The absent-state render is this section's complete current instruction value.
-    /// Ordinary renders may provide semantic amendments. The harness owns retained
-    /// revision proofs and resolves those amendments before compaction.
-    pub fn with_instruction_amendments(mut self) -> Self {
-        self.instruction_amendments = true;
+    /// Ordinary renders provide semantic amendments. The harness owns retained
+    /// revision proofs and uses `current` to resolve amendments before compaction.
+    pub fn with_instruction_amendments(
+        mut self,
+        current: Option<RenderedWorldStateFragment>,
+    ) -> Self {
+        self.mode = WorldStateSectionMode::Instruction(current);
         self
     }
 
-    pub fn uses_instruction_amendments(&self) -> bool {
-        self.instruction_amendments
+    pub fn mode(&self) -> &WorldStateSectionMode {
+        &self.mode
     }
 }

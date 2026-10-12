@@ -191,9 +191,10 @@ async fn failed_global_read_keeps_instructions_until_recovery() -> Result<()> {
     write_global_file(&home, GLOBAL_AGENTS_FILENAME, NEW_GLOBAL_INSTRUCTIONS)?;
     test.submit_turn("load recovered instructions").await?;
     let initial = expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS);
-    let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
-    ));
+    let replacement = expected_instruction_amendment(
+        &initial,
+        &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
+    );
     assert_eq!(
         requests
             .requests()
@@ -254,11 +255,9 @@ async fn live_global_removal_preserves_repository_instructions(
         cwd,
         &format!("{GLOBAL_INSTRUCTIONS}\n\n{PROJECT_SEPARATOR}\n\n{PROJECT_INSTRUCTIONS}"),
     );
-    let replacement = expected_instruction_fragment(
-        cwd,
-        &format!(
-            "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{PROJECT_INSTRUCTIONS}"
-        ),
+    let replacement = expected_instruction_amendment(
+        &initial,
+        &expected_instruction_fragment(cwd, PROJECT_INSTRUCTIONS),
     );
     assert_eq!(
         requests
@@ -337,9 +336,10 @@ async fn global_instructions_refresh_after_a_tool_in_the_same_turn() -> Result<(
     })
     .await;
     let initial = expected_provider_only_instruction_fragment(GLOBAL_INSTRUCTIONS);
-    let replacement = expected_provider_only_instruction_fragment(&format!(
-        "These AGENTS.md instructions replace all previously provided AGENTS.md instructions.\n\n{NEW_GLOBAL_INSTRUCTIONS}"
-    ));
+    let replacement = expected_instruction_amendment(
+        &initial,
+        &expected_provider_only_instruction_fragment(NEW_GLOBAL_INSTRUCTIONS),
+    );
     assert_eq!(
         requests
             .requests()

@@ -1,5 +1,6 @@
 ---
 source: core/tests/suite/scenarios_shared_instructions.rs
+assertion_line: 148
 expression: "context_snapshot::format_request_history_snapshot(\"A host replaces the provider after the parent restarts, then updates and clears instructions for surviving children and grandchildren.\",\n&request_history, &ContextSnapshotOptions::default(),)"
 ---
 Scenario: A host replaces the provider after the parent restarts, then updates and clears instructions for surviving children and grandchildren.
@@ -62,22 +63,35 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
     continue with the current instructions
 -- request 2 (turn) --
 04:message/user:
-    # AGENTS.md instructions
+    <instruction_diff>
+    Apply this update to the previously supplied agents_md instructions; unchanged instructions remain in force.
+    --- agents_md/702544ebe5b86e4d96d38222796add3a010c7534
+    +++ agents_md/096d59fc102c09403078960d292c7a7db90b159c
+    @@ -1,5 +1,5 @@
+     # AGENTS.md instructions
 
-    <INSTRUCTIONS>
-    These AGENTS.md instructions replace all previously provided AGENTS.md instructions.
-
-    Never send email.
-    </INSTRUCTIONS>
+     <INSTRUCTIONS>
+    -Ask before sending email.
+    +Never send email.
+     </INSTRUCTIONS>
+    \\ No newline at end of file
+    </instruction_diff>
 05:message/user:
     continue with the current instructions
 -- request 3 (turn) --
 06:message/user:
-    # AGENTS.md instructions
-
-    <INSTRUCTIONS>
-    The previously provided AGENTS.md instructions no longer apply.
-    </INSTRUCTIONS>
+    <instruction_diff>
+    Apply this update to the previously supplied agents_md instructions; unchanged instructions remain in force.
+    --- agents_md/096d59fc102c09403078960d292c7a7db90b159c
+    +++ agents_md/removed
+    @@ -1,5 +0,0 @@
+    -# AGENTS.md instructions
+    -
+    -<INSTRUCTIONS>
+    -Never send email.
+    -</INSTRUCTIONS>
+    \\ No newline at end of file
+    </instruction_diff>
 07:message/user:
     continue with the current instructions
 -- request 4 (turn) --
@@ -139,22 +153,35 @@ Scenario: A host replaces the provider after the parent restarts, then updates a
     continue with the current instructions
 -- request 6 (turn) --
 04:message/user:
-    # AGENTS.md instructions
+    <instruction_diff>
+    Apply this update to the previously supplied agents_md instructions; unchanged instructions remain in force.
+    --- agents_md/702544ebe5b86e4d96d38222796add3a010c7534
+    +++ agents_md/096d59fc102c09403078960d292c7a7db90b159c
+    @@ -1,5 +1,5 @@
+     # AGENTS.md instructions
 
-    <INSTRUCTIONS>
-    These AGENTS.md instructions replace all previously provided AGENTS.md instructions.
-
-    Never send email.
-    </INSTRUCTIONS>
+     <INSTRUCTIONS>
+    -Ask before sending email.
+    +Never send email.
+     </INSTRUCTIONS>
+    \\ No newline at end of file
+    </instruction_diff>
 05:message/user:
     continue with the current instructions
 -- request 7 (turn) --
 06:message/user:
-    # AGENTS.md instructions
-
-    <INSTRUCTIONS>
-    The previously provided AGENTS.md instructions no longer apply.
-    </INSTRUCTIONS>
+    <instruction_diff>
+    Apply this update to the previously supplied agents_md instructions; unchanged instructions remain in force.
+    --- agents_md/096d59fc102c09403078960d292c7a7db90b159c
+    +++ agents_md/removed
+    @@ -1,5 +0,0 @@
+    -# AGENTS.md instructions
+    -
+    -<INSTRUCTIONS>
+    -Never send email.
+    -</INSTRUCTIONS>
+    \\ No newline at end of file
+    </instruction_diff>
 07:message/user:
     continue with the current instructions
 -- request 8 (turn) --

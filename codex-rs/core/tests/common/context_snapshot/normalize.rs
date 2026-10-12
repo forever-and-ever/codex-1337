@@ -356,10 +356,11 @@ fn normalize_skill_references(text: &str) -> String {
                 && let Some(path) = path.strip_suffix('`')
             {
                 format!("{before} = `{}`", normalize_skill_path(path))
-            } else if let Some((before, path)) = line.split_once("(file: ")
+            } else if line.starts_with("- ")
+                && let Some((before, path)) = line.rsplit_once(" (")
                 && let Some(path) = path.strip_suffix(')')
             {
-                format!("{before}(file: {})", normalize_skill_path(path))
+                format!("{before} ({})", normalize_skill_path(path))
             } else {
                 line.to_string()
             };

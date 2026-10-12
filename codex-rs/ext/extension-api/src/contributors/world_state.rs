@@ -93,7 +93,7 @@ pub struct WorldStateSectionContribution {
     render_diff: Arc<RenderDiff>,
     matches_legacy_fragment: Arc<LegacyFragmentMatcher>,
     matches_retained_fragment: Option<Arc<LegacyFragmentMatcher>>,
-    instruction_amendments: bool,
+    mode: instruction::WorldStateSectionMode,
 }
 
 impl WorldStateSectionContribution {
@@ -114,7 +114,7 @@ impl WorldStateSectionContribution {
             render_diff: Arc::new(render_diff),
             matches_legacy_fragment: Arc::new(|_, _| false),
             matches_retained_fragment: None,
-            instruction_amendments: false,
+            mode: instruction::WorldStateSectionMode::Context,
         }
     }
 
@@ -160,3 +160,5 @@ impl WorldStateSectionContribution {
             .is_some_and(|matcher| matcher(role, text))
     }
 }
+
+pub use instruction::WorldStateSectionMode;

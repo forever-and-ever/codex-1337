@@ -4,6 +4,7 @@ use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::image_preparation::unified_image_budget_enabled;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use crate::tools::code_mode::Disclosure;
 use crate::tools::code_mode::execute_spec::create_code_mode_tool;
 use crate::tools::effective_tool_mode;
 use crate::tools::handlers::ApplyPatchHandler;
@@ -896,7 +897,8 @@ fn register_code_mode_executors(
     let mut code_mode_tool_names = BTreeMap::new();
     let mut code_mode_nested_tool_specs = Vec::new();
     let mut exec_prompt_tool_specs = Vec::new();
-    let mut rostered_exec_prompt_tool_specs = Vec::new();
+    let mut glossed_exec_prompt_tool_specs = Vec::new();
+    let mut named_exec_prompt_tool_specs = Vec::new();
     let mut deferred_exec_prompt_tool_specs = Vec::new();
     let mut included_deferred_mcp_output_schema = false;
     let tool_search_enabled = model_info.supports_search_tool;
@@ -943,6 +945,7 @@ fn register_code_mode_executors(
         if !codex_code_mode::is_code_mode_nested_tool(&code_mode_name) {
             continue;
         }
+        let disclosure = Disclosure::of(tool, &tool_name, tool_mode, tool_search_enabled);
         match code_mode_tool_names.entry(codex_code_mode::normalize_code_mode_identifier(
             &code_mode_name,
         )) {
@@ -959,22 +962,19 @@ fn register_code_mode_executors(
             }
         }
 
-        if exposure == ToolExposure::Deferred && tool_search_enabled {
-            if cached_runtime.is_none() || !included_deferred_mcp_output_schema {
-                if cached_runtime.is_some() {
-                    included_deferred_mcp_output_schema = true;
+        // Rostered tools' contracts come from `describe_tool` on demand.
+        match disclosure {
+            Disclosure::Deferred => {
+                if cached_runtime.is_none() || !included_deferred_mcp_output_schema {
+                    if cached_runtime.is_some() {
+                        included_deferred_mcp_output_schema = true;
+                    }
+                    deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
                 }
-                deferred_exec_prompt_tool_specs.push(Arc::clone(&spec));
             }
-        } else if exposure == ToolExposure::Deferred
-            || (tool_mode == ToolMode::CodeModeOnly && tool.runtime.mcp_server_name().is_some())
-        {
-            // Without tool search, Code Mode is a deferred tool's only discovery surface; and
-            // Code Mode Only never declares an MCP tool. `exec`'s roster names both, and
-            // `describe_tool` supplies the contract on demand.
-            rostered_exec_prompt_tool_specs.push(Arc::clone(&spec));
-        } else {
-            exec_prompt_tool_specs.push(spec.as_ref().clone());
+            Disclosure::Glossed => glossed_exec_prompt_tool_specs.push(Arc::clone(&spec)),
+            Disclosure::Named => named_exec_prompt_tool_specs.push(Arc::clone(&spec)),
+            Disclosure::Declared => exec_prompt_tool_specs.push(spec.as_ref().clone()),
         }
         code_mode_nested_tool_specs.push((spec, cached_runtime));
     }
@@ -994,21 +994,23 @@ fn register_code_mode_executors(
         exec_prompt_tool_specs.iter(),
         code_mode_input_schema_max_bytes,
     );
-    let undeclared_tools = collect_code_mode_exec_prompt_tool_definitions(
-        rostered_exec_prompt_tool_specs.iter().map(Arc::as_ref),
-        code_mode_input_schema_max_bytes,
-    )
-    .into_iter()
-    .map(codex_code_mode::UndeclaredTool::Rostered)
-    .chain(
+    let undeclared = |specs: &[Arc<ToolSpec>]| {
         collect_code_mode_exec_prompt_tool_definitions(
-            deferred_exec_prompt_tool_specs.iter().map(Arc::as_ref),
+            specs.iter().map(Arc::as_ref),
             code_mode_input_schema_max_bytes,
         )
         .into_iter()
-        .map(codex_code_mode::UndeclaredTool::Deferred),
-    )
-    .collect::<Vec<_>>();
+    };
+    let undeclared_tools = undeclared(&glossed_exec_prompt_tool_specs)
+        .map(codex_code_mode::UndeclaredTool::Glossed)
+        .chain(
+            undeclared(&named_exec_prompt_tool_specs).map(codex_code_mode::UndeclaredTool::Named),
+        )
+        .chain(
+            undeclared(&deferred_exec_prompt_tool_specs)
+                .map(codex_code_mode::UndeclaredTool::Deferred),
+        )
+        .collect::<Vec<_>>();
     let model_messages = ResolvedModelMessages::from_model(model_info);
     if tool_mode == ToolMode::CodeModeOnly {
         indirect_prefixes.apply_exec_prompt(&mut enabled_tools, &mut namespace_descriptions);

@@ -215,7 +215,7 @@ async fn board_post_and_reads_reach_model_context_without_self_notices(
 #[test_case::test_case(false; "disk")]
 #[test_case::test_case(true; "in_memory")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn board_is_shared_with_children_and_skips_idle_notices(
+async fn board_shares_posts_with_children_and_preserves_storage_policy(
     in_memory: bool,
 ) -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
@@ -225,6 +225,23 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
         config.ephemeral = in_memory;
     });
     let root = builder.build_with_auto_env(&server).await?;
+    let root_id = root.session_configured.thread_id;
+    // Completion mail may wake the root between explicit board operations. It must not
+    // consume responses scripted for the child's tools or the next human request.
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/responses"))
+        .and(move |request: &wiremock::Request| {
+            let body = ResponsesRequest::from(request.clone()).body_json();
+            body["client_metadata"]["thread_id"] == json!(root_id)
+                && body["input"]
+                    .as_array()
+                    .and_then(|input| input.last())
+                    .is_some_and(|item| item["type"] == "agent_message")
+        })
+        .respond_with(responses::sse_response(done()))
+        .with_priority(1)
+        .mount(&server)
+        .await;
     responses::mount_sse_sequence(
         &server,
         vec![
@@ -289,10 +306,6 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
     let post: Value =
         serde_json::from_str(&output).with_context(|| format!("child post result: {output}"))?;
     assert_eq!(post["author"], "/root/worker");
-    assert!(matches!(
-        root.codex.agent_status().await,
-        codex_protocol::protocol::AgentStatus::Completed(_)
-    ));
     let read = responses::mount_sse_sequence(
         &server,
         vec![
@@ -306,11 +319,6 @@ async fn board_is_shared_with_children_and_skips_idle_notices(
     )
     .await;
     root.submit_turn("Read the worker's decision.").await?;
-    assert!(
-        read.requests()
-            .iter()
-            .all(|request| !request.body_contains_text("Message Type: CHANNEL_POST"))
-    );
     let output = read.requests()[1]
         .function_call_output_text("root-read")
         .expect("read result");

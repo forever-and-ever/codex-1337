@@ -104,6 +104,12 @@ fn assert_turn_id(body: &Value, key: &str, expected: Option<&str>) -> Result<()>
 #[derive(Debug, Clone)]
 pub struct ResponsesRequest(wiremock::Request);
 
+impl From<wiremock::Request> for ResponsesRequest {
+    fn from(request: wiremock::Request) -> Self {
+        Self(request)
+    }
+}
+
 pub async fn received_responses_requests(server: &MockServer) -> Vec<ResponsesRequest> {
     server
         .received_requests()

@@ -27,8 +27,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### mcp-roster
 
 - Telos: an MCP server costs each request a few roster lines instead of its schemas; declaring the depot's 114 tools cost about 56K Anthropic tokens per request.
-- Holds: in Code Mode Only, `exec`'s description declares no MCP tool; every MCP tool that tool search does not defer appears once in the brace-factored roster, which directs the model to `describe_tool` before first use; without tool search, deferred tools are rostered too; MCP server instructions reach the model only through `describe_tool`.
-- Owners: `codex-rs/code-mode-protocol/src/roster.rs` (`UndeclaredTool`, `render_roster`), `codex-rs/code-mode-protocol/src/description.rs` (`build_exec_tool_description`), `codex-rs/core/src/tools/spec_plan.rs` (`register_code_mode_executors`), `codex-rs/core/src/tools/code_mode/execute_spec.rs`.
+- Holds: in Code Mode Only, `exec`'s description declares no MCP tool; every MCP tool that tool search does not defer appears once in the brace-factored roster, which directs the model to `describe_tool` before first use; without tool search, deferred tools are rostered too; MCP server instructions reach the model only through `describe_tool`. Builtins use name-and-purpose glosses and on-demand contracts, except bootstrap `exec_command`, `apply_patch`, and `tool_search`. Disclosure never removes execution capability.
+- Owners: `codex-rs/code-mode-protocol/src/roster.rs` (`UndeclaredTool`, `render_roster`), `codex-rs/code-mode-protocol/src/description.rs` (`build_exec_tool_description`), `codex-rs/core/src/tools/spec_plan.rs` (`register_code_mode_executors`), `codex-rs/core/src/tools/code_mode/disclosure.rs`, `codex-rs/core/src/tools/code_mode/execute_spec.rs`.
 - Tripwire: absence of declarations: `roster_factors_shared_name_prefixes_and_omits_deferred_tools` (`codex-rs/code-mode-protocol/src/roster_tests.rs`), `code_mode_uses_the_first_normalized_tool_identity` (`codex-rs/core/src/tools/spec_plan_tests.rs`), `code_mode_excludes_mcp_servers_using_their_configured_identity` (`codex-rs/core/tests/suite/code_mode.rs`), connector cases in `codex-rs/core/tests/suite/app_tool_exposure.rs`. Description token budget and server-instruction routing: none.
 - Pressure: 0.162 rewrites the same builders: #51209 (ranked `tool_search` in Code Mode), #50562 (discovery guidance always present), #50536 (shared MCP types always present in Code Mode Only), #50687 (strict third-party deferral) edit `description.rs`, `spec_plan.rs` or `execute_spec.rs`.
 - Evidence: 9b8fa789f6.
@@ -81,7 +81,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### bare-model-slugs
 
 - Telos: agent model selectors cost and read as bare slugs.
-- Holds: `spawn_agent` advertises a model by its bare slug unless that slug occurs in more than one provider's multi-agent catalog, hidden entries included, and then as `provider/slug`.
+- Holds: `spawn_agent` advertises every selectable, backend-supported model by its bare slug unless that slug occurs in more than one provider's multi-agent catalog, hidden entries included, and then as `provider/slug`. Catalog budgets may shorten prose, never omit selectors or capabilities.
 - Owners: `codex-rs/core/src/agent/model_catalog.rs` (`advertised_agent_models`).
 - Tripwire: `fresh_child_routes_model_and_provider_but_history_forks_stay_locked` (`codex-rs/core/src/agent/model_catalog_tests.rs`).
 - Pressure: 0.162 #49560 adds an opt-in model catalog to the multi-agent context through `spec_plan.rs` and `world_state.rs`.
@@ -131,7 +131,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Holds: managed instructions retain their original authority and use literal unified diffs. The harness keeps canonical full values and requires complete, kind-aligned retained ancestry before suppressing a reinjection. Compaction receives a disposable view with current full instructions substituted for their older versions and amendments; conversation evidence and opaque provider checkpoints remain intact. Only successful compaction replaces live history and starts a new window. Model/capability changes, local tip repairs and unsupported incremental tool protocols retain their existing behavior; rollback has no special optimization.
 - Owners: `codex-rs/core/src/context/world_state/instruction_diff.rs`, `codex-rs/core/src/context/world_state/instruction_projection.rs`, `codex-rs/core/src/context_manager/instruction_projection.rs`, `codex-rs/core/src/context/base_instructions.rs`.
 - Tripwire: `render_diff_restores_the_typed_section_snapshot`, `catalog_collaboration_messages_refresh_without_mode_or_model_change`, `compaction_preserves_updated_summary`.
-- Pressure: instruction providers must expose a canonical full value; fragment provenance and authority must survive replay. Semantic amendments opt in through `WorldStateSectionContribution::with_instruction_amendments` and share the same retention and compaction machinery.
+- Pressure: instruction providers must expose a canonical full value without emission side effects; fragment provenance and authority must survive replay. Skills opt in through `WorldStateSectionContribution::with_instruction_amendments`: added/changed/removed summaries use unaliased paths and share the harness's retention and compaction machinery. Bounded catalogs relist rather than amend incomplete membership. Legacy revocations without a canonical predecessor retain explicit notices outside materialization. `production_turn_keeps_host_aliases_and_amends_catalog_changes` covers amendment materialization and cold replay.
 
 ### reminders-not-system
 

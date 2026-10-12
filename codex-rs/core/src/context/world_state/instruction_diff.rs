@@ -7,6 +7,7 @@ use super::ErasedWorldStateSection;
 use super::PreviousSectionState;
 use super::SectionTransition;
 use super::WorldState;
+use super::WorldStateContextFragment;
 use super::WorldStateHash;
 use super::WorldStateSection;
 use super::WorldStateSnapshot;
@@ -35,7 +36,7 @@ pub(super) enum Entry {
 
 pub(super) enum Amendment {
     Unified,
-    Semantic,
+    Semantic(Option<WorldStateContextFragment>),
 }
 
 impl Entry {
@@ -56,17 +57,42 @@ impl Entry {
         let Self::Instruction(section, amendment) = self else {
             return self.renderer().render_diff(previous);
         };
-        let (full_state, full) = section.render_diff(PreviousSectionState::Absent);
-        let Some(current) = canonical(&full) else {
-            // Stateful notices and native declarations are not replaceable instruction text.
-            return section.render_diff(previous);
-        };
         let prior = stored
             .and_then(|snapshot| revision(snapshot, id))
             .filter(|revision| revision.retained(retained));
-        let (state, semantic_updates) = match (amendment, prior.as_ref()) {
-            (Amendment::Semantic, Some(_)) => section.render_diff(previous),
-            _ => (full_state, Vec::new()),
+        let (current, state, rendered) = match amendment {
+            Amendment::Unified => {
+                let (state, full) = section.render_diff(PreviousSectionState::Absent);
+                let Some(current) = canonical(&full) else {
+                    // Native declarations are not replaceable instruction text.
+                    return section.render_diff(previous);
+                };
+                if prior.is_none()
+                    && current.is_none()
+                    && !matches!(previous, PreviousSectionState::Absent)
+                {
+                    // Legacy history has no canonical predecessor to revoke by diff.
+                    // Keep its explicit revocation outside materialization until a full
+                    // instruction value establishes ownership of the older fragments.
+                    return section.render_diff(previous);
+                }
+                (current, state, full)
+            }
+            Amendment::Semantic(current) => {
+                let previous = if prior.is_some() {
+                    previous
+                } else {
+                    PreviousSectionState::Absent
+                };
+                let (state, updates) = section.render_diff(previous);
+                (
+                    current
+                        .as_ref()
+                        .map(|fragment| Text::from_fragment(fragment)),
+                    state,
+                    updates,
+                )
+            }
         };
         let (mut revision, updates) = match prior {
             Some(prior) if prior.current == current => (prior, Vec::new()),
@@ -79,7 +105,7 @@ impl Entry {
                             current.as_ref(),
                         ))]
                     }
-                    Amendment::Semantic => semantic_updates,
+                    Amendment::Semantic(_) => rendered,
                 };
                 if updates.is_empty() {
                     // A semantic renderer may intentionally suppress a budget-only change.
@@ -103,7 +129,11 @@ impl Entry {
                         false
                     }
                 });
-                let updates = if already_present { Vec::new() } else { full };
+                let updates = if already_present {
+                    Vec::new()
+                } else {
+                    rendered
+                };
                 (revision, updates)
             }
         };

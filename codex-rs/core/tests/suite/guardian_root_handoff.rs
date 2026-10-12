@@ -22,6 +22,39 @@ async fn root_messages(thread: &CodexThread) -> Vec<GuardianRootMessage> {
         .collect()
 }
 
+async fn inject_root_items(
+    test: &TestCodex,
+    items: Vec<codex_protocol::models::ResponseItem>,
+) -> Result<()> {
+    let ids = items
+        .iter()
+        .map(|item| {
+            item.id()
+                .expect("fixture item identity")
+                .as_str()
+                .to_owned()
+        })
+        .collect::<Vec<_>>();
+    test.codex.inject_response_items(items).await?;
+    // Completion mail can have woken the root. In that case injection queues items;
+    // wait for their admission before sending the human answer that follows them.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let history = test.codex.conversation_history_snapshot().await;
+            if ids.iter().all(|id| {
+                history
+                    .items()
+                    .any(|item| item.id().is_some_and(|actual| actual.as_str() == id))
+            }) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    Ok(())
+}
+
 async fn handoff(
     test: &TestCodex,
     server: &wiremock::MockServer,
@@ -100,11 +133,13 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
         .with_priority(/*p*/ 20)
         .mount(&server)
         .await;
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(
+    inject_root_items(
+        &test,
+        vec![serde_json::from_value(
             ev_assistant_message("question", "Inspect the private deployment?")["item"].clone(),
-        )?])
-        .await?;
+        )?],
+    )
+    .await?;
     mount_sse_once_match(
         &server,
         move |request: &wiremock::Request| {
@@ -153,11 +188,13 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
         GuardianRootMessage::User("Inspect the deployment.".to_owned()),
     ];
     assert_eq!(root_messages(&leaf).await, expected);
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(
+    inject_root_items(
+        &test,
+        vec![serde_json::from_value(
             ev_assistant_message("metrics", "Inspect the metrics too?")["item"].clone(),
-        )?])
-        .await?;
+        )?],
+    )
+    .await?;
     handoff(
         &test,
         &server,
@@ -182,11 +219,13 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
     let mut beta_messages = root_messages(&beta).await;
 
     // Root-to-ancestor communication updates the descendant immediately, without a relay.
-    test.codex
-        .inject_response_items(vec![serde_json::from_value(
+    inject_root_items(
+        &test,
+        vec![serde_json::from_value(
             ev_assistant_message("private", "Keep the deployment private?")["item"].clone(),
-        )?])
-        .await?;
+        )?],
+    )
+    .await?;
     handoff(
         &test,
         &server,
@@ -209,7 +248,7 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
     assert_eq!(root_messages(&beta).await, beta_messages);
 
     // The latest window includes a cancellation before root communicates with this branch again.
-    test.codex.inject_response_items(vec![serde_json::from_value(json!({
+    inject_root_items(&test, vec![serde_json::from_value(json!({
         "type":"message", "id":"cancel", "role":"user", "content":[{"type":"input_text", "text":"Cancel the deployment."}]
     }))?]).await?;
     expected.push(GuardianRootMessage::User(
@@ -253,8 +292,14 @@ pub(crate) async fn handoff_scenario() -> Result<Vec<ResponsesRequest>> {
         json!({"target":"alpha", "message":"Check."}),
     )
     .await?;
-    wait_for_event(&alpha, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    ThreadIdle::wait(&alpha).await;
+    // A prior ordinary-mail turn can leave completion events queued on alpha.
+    // Synchronize with this reviewed action, not whichever completion arrives first.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while review.requests().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
     expected.push(GuardianRootMessage::User(
         "Check the deployment status.".to_owned(),
     ));

@@ -65,6 +65,7 @@ pub use world_state::PreviousWorldStateSection;
 pub use world_state::RenderedWorldStateFragment;
 pub use world_state::WorldStateContributionInput;
 pub use world_state::WorldStateSectionContribution;
+pub use world_state::WorldStateSectionMode;
 
 /// Boxed, sendable future returned by asynchronous extension contributors.
 pub type ExtensionFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

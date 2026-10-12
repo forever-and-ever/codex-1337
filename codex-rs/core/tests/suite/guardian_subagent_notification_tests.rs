@@ -140,6 +140,16 @@ async fn guardian_circuit_breaker_notifies_parent(action: CircuitBreakAction) ->
         .mount(&server)
         .await;
 
+    let continued = mount_sse_once_match(
+        &server,
+        move |request: &wiremock::Request| {
+            is_root(request)
+                && (action == CircuitBreakAction::Default
+                    || body_contains(request, "Agent interrupted by Guardian:"))
+        },
+        sse(vec![ev_completed("parent-continued")]),
+    )
+    .await;
     let mut created = test.thread_manager.subscribe_thread_created();
     test.submit_text_turn("Spawn a worker to run the checks.")
         .await?;
@@ -174,41 +184,15 @@ async fn guardian_circuit_breaker_notifies_parent(action: CircuitBreakAction) ->
         ),
     );
 
-    // Delivery is queued. If the parent samples before draining its mailbox,
-    // wait_agent must observe the notification before the next model request.
-    let _wait = if action == CircuitBreakAction::Strict {
-        Some(
-            mount_sse_once_match(
-                &server,
-                move |request: &wiremock::Request| {
-                    is_root(request) && !body_contains(request, "Agent interrupted by Guardian:")
-                },
-                sse(vec![
-                    ev_function_call_with_namespace(
-                        "wait-worker",
-                        MULTI_AGENT_V2_NAMESPACE,
-                        "wait_agent",
-                        "{}",
-                    ),
-                    ev_completed("parent-wait"),
-                ]),
-            )
-            .await,
-        )
+    if action == CircuitBreakAction::Strict {
+        // Install the response before the denial: ordinary mail wakes the parent itself.
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
     } else {
-        None
-    };
-    let continued = mount_sse_once_match(
-        &server,
-        move |request: &wiremock::Request| {
-            is_root(request)
-                && (action == CircuitBreakAction::Default
-                    || body_contains(request, "Agent interrupted by Guardian:"))
-        },
-        sse(vec![ev_completed("parent-continued")]),
-    )
-    .await;
-    test.submit_text_turn("Report the worker's status.").await?;
+        test.submit_text_turn("Report the worker's status.").await?;
+    }
     let continued_request = continued.single_request();
     let messages = continued_request.inputs_of_type("agent_message");
     let expected = if action == CircuitBreakAction::Strict {
