@@ -67,6 +67,7 @@ impl LocalAgentControl {
         // Serialize durable order with publication for this recipient. Recovery uses
         // the same gate before publishing older accepted messages.
         let _acceptance = thread.session.agent_mail.acceptance.lock().await;
+        let predecessors_published = thread.session.recover_accepted_agent_mail_locked().await?;
         let db = thread.session.state_db().ok_or_else(|| {
             CodexErr::Fatal(
                 "ordinary agent-mail acceptance requires the authoritative queue database".into(),
@@ -119,6 +120,11 @@ impl LocalAgentControl {
                 ));
             }
             AgentMailState::Pending(_) => {}
+        }
+        if !predecessors_published {
+            // An older row awaits an actor's batching decision before its orphaned
+            // successor can publish. Retain this acceptance behind that obligation.
+            return Ok(record.id.to_string());
         }
         communication.id = Some(record.id.clone());
         if !thread

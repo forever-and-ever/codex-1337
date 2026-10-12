@@ -24,6 +24,7 @@ enum MailProjection {
     Submitting,
     Projecting,
     Published,
+    Admitting,
 }
 
 pub(crate) fn is_accepted_agent_mail(communication: &InterAgentCommunication) -> bool {
@@ -44,12 +45,12 @@ pub(super) fn accepted_mail_submission_id(op: &codex_protocol::protocol::Op) -> 
     }
 }
 
-fn canonical_agent_mail(
-    history: &[RolloutItem],
+fn canonical_agent_mail<'a>(
+    history: &'a [RolloutItem],
     communication: &InterAgentCommunication,
-) -> CodexResult<bool> {
+) -> CodexResult<Option<&'a ResponseItemEnvelope>> {
     let Some(id) = communication.id.as_ref() else {
-        return Ok(false);
+        return Ok(None);
     };
     let expected = communication.to_model_input_item();
     let ResponseItem::AgentMessage {
@@ -72,13 +73,13 @@ fn canonical_agent_mail(
             author: saved_author, recipient: saved_recipient, content: saved_content, ..
         } if saved_author == author && saved_recipient == recipient && saved_content == content)
         {
-            return Ok(true);
+            return Ok(Some(item));
         }
         return Err(CodexErr::Fatal(format!(
             "canonical agent-mail identity {id} has conflicting attribution or content"
         )));
     }
-    Ok(false)
+    Ok(None)
 }
 
 impl Session {
@@ -152,11 +153,18 @@ impl Session {
     }
 
     pub(crate) async fn recover_accepted_agent_mail(self: &Arc<Self>) -> CodexResult<()> {
+        let acceptance = self.agent_mail.acceptance.lock().await;
+        self.recover_accepted_agent_mail_locked().await?;
+        drop(acceptance);
+        self.maybe_start_turn_for_pending_work().await;
+        Ok(())
+    }
+
+    pub(crate) async fn recover_accepted_agent_mail_locked(&self) -> CodexResult<bool> {
         let Some(db) = self.state_db() else {
             // No durable send can be accepted by this runtime.
-            return Ok(());
+            return Ok(true);
         };
-        let _acceptance = self.agent_mail.acceptance.lock().await;
         let mut pending = db
             .thread_queue()
             .pending_agent_mail(self.thread_id)
@@ -164,6 +172,8 @@ impl Session {
             .map_err(|error| {
                 CodexErr::Fatal(format!("cannot recover accepted agent mail: {error:#}"))
             })?;
+        let mut publication_blocked = false;
+        let mut admitting = std::collections::HashSet::new();
         {
             let active_turn = self.active_turn.lock().await;
             let mut received = self.agent_mail.received.lock().await;
@@ -176,14 +186,40 @@ impl Session {
             {
                 received.retain(|_, projection| !matches!(projection, MailProjection::Published));
             }
-            pending.retain(|mail| !received.contains_key(&mail.id));
+            let mut in_flight = false;
+            pending.retain(|mail| match received.get(&mail.id) {
+                Some(MailProjection::Submitting | MailProjection::Projecting) => {
+                    in_flight = true;
+                    false
+                }
+                Some(MailProjection::Published) => false,
+                Some(MailProjection::Admitting) => {
+                    // A cancelled admission must reconcile even with later queued mail.
+                    in_flight = true;
+                    admitting.insert(mail.id.clone());
+                    true
+                }
+                None if in_flight => {
+                    // Do not directly enqueue past an earlier actor submission whose
+                    // batching decision is not yet known. Fresh sends defer as well.
+                    publication_blocked = true;
+                    false
+                }
+                None => true,
+            });
         }
         if pending.is_empty() {
-            return Ok(());
+            return Ok(!publication_blocked);
         }
         let live_thread = self.live_thread().ok_or_else(|| {
             CodexErr::Fatal("accepted agent mail requires canonical recipient history".into())
         })?;
+        let _boundary = self
+            .code_mode_message_tasks
+            .communication_boundary
+            .acquire()
+            .await
+            .unwrap_or_else(|_| unreachable!("communication boundary remains open"));
         let history = live_thread.load_history(true).await.map_err(|error| {
             CodexErr::Fatal(format!(
                 "cannot reconcile accepted agent-mail history: {error}"
@@ -203,7 +239,9 @@ impl Session {
                     CodexErr::Fatal(format!("invalid accepted agent-mail payload: {error}"))
                 })?;
             communication.id = Some(record.id.clone());
-            if canonical_agent_mail(&history.items, &communication)? {
+            if let Some(envelope) = canonical_agent_mail(&history.items, &communication)? {
+                self.repair_agent_mail_context(envelope).await;
+                self.agent_mail.received.lock().await.remove(&record.id);
                 db.thread_queue()
                     .admit_agent_mail(self.thread_id, &record.id)
                     .await
@@ -214,18 +252,66 @@ impl Session {
                     })?;
                 continue;
             }
+            if admitting.contains(&record.id) && self.active_turn.lock().await.is_some() {
+                // Still owned by a live turn; do not publish a second projection.
+                publication_blocked = true;
+                continue;
+            }
             let mut received = self.agent_mail.received.lock().await;
+            if matches!(received.get(&record.id), Some(MailProjection::Admitting)) {
+                received.remove(&record.id);
+            }
             if !received.contains_key(&record.id) {
-                // A local restart ends all execution guards: count-drop releases old
-                // held mail. Recovery must not grant a new batching deadline.
+                // Reuse current execution state and any original held deadline.
+                // Restart has no ACTIVE guards; in-process retries obey normal batching.
+                let config = self.get_config().await;
+                let execution = *self
+                    .services
+                    .local_agent_runtime
+                    .active_subagents()
+                    .borrow();
                 self.input_queue
-                    .enqueue_mailbox_communication(communication, Default::default())
+                    .enqueue_batched_mailbox_communication(
+                        communication,
+                        Default::default(),
+                        config.multi_agent_v2.wait_agent_batch_window_ms,
+                        execution,
+                    )
                     .await;
                 received.insert(record.id, MailProjection::Published);
             }
         }
-        self.maybe_start_turn_for_pending_work().await;
-        Ok(())
+        Ok(!publication_blocked)
+    }
+
+    /// Canonical append can outlive its cancelled turn waiter. Replay the exact
+    /// envelope before acknowledging admission, without minting new provenance.
+    /// Caller owns the communication boundary; the state lock makes repair idempotent.
+    async fn repair_agent_mail_context(&self, envelope: &ResponseItemEnvelope) {
+        let mut state = self.state.lock().await;
+        if state
+            .history
+            .raw_items()
+            .any(|item| item.id() == envelope.id())
+        {
+            return;
+        }
+        state
+            .current_time_reminder
+            .note_recorded_items(std::slice::from_ref(&envelope.item));
+        // Only validated AgentMessage reaches this helper, never truncatable tool output.
+        state.history.replay_annotated_item(
+            envelope,
+            codex_utils_output_truncation::TruncationPolicy::Tokens(usize::MAX),
+        );
+    }
+
+    pub(crate) async fn agent_mail_admission_started(&self, id: &ResponseItemId) {
+        self.agent_mail
+            .received
+            .lock()
+            .await
+            .insert(id.clone(), MailProjection::Admitting);
     }
 
     pub(crate) async fn record_accepted_agent_mail(
@@ -238,6 +324,7 @@ impl Session {
             return Ok(false);
         }
         let id = communication.id.as_ref().expect("accepted mail has an ID");
+        self.agent_mail_admission_started(id).await;
         let result = self
             .commit_accepted_agent_mail(turn_context, model_info, communication)
             .await;
@@ -294,7 +381,8 @@ impl Session {
                 "cannot inspect canonical agent-mail admission: {error}"
             ))
         })?;
-        if canonical_agent_mail(&history.items, communication)? {
+        if let Some(envelope) = canonical_agent_mail(&history.items, communication)? {
+            self.repair_agent_mail_context(envelope).await;
             db.thread_queue()
                 .admit_agent_mail(self.thread_id, id)
                 .await

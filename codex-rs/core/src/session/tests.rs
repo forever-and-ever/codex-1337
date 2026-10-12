@@ -2059,7 +2059,9 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     let (mut session, turn_context, _rx) = make_session_and_context_with_auth_and_config_and_rx(
         CodexAuth::from_api_key("Test API Key"),
         Vec::new(),
-        |_| {},
+        |config| {
+            config.multi_agent_v2.wait_agent_batch_window_ms = std::num::NonZeroU64::new(60_000);
+        },
     )
     .await;
     let rollout_path =
@@ -2075,6 +2077,10 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         .expect("unique session")
         .services
         .state_db = Some(db.clone());
+    session
+        .services
+        .local_agent_runtime
+        .register_session_root(session.thread_id, None);
     let mut communication = InterAgentCommunication::new(
         AgentPath::root().join("worker").expect("worker path"),
         AgentPath::root(),
@@ -2158,14 +2164,29 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     spoofed.content = "different sender payload".into();
     assert!(session.receive_accepted_agent_mail(&spoofed).await.is_err());
 
-    // Deterministic cut: canonical append completed, but its inbox acknowledgment did not.
+    // Deterministic cut: the writer committed, but its turn waiter was cancelled
+    // before live insertion and inbox acknowledgment. Preserve the stored envelope,
+    // including input ordering and provenance, rather than preparing it again.
+    session.agent_mail_admission_started(&record.id).await;
+    let mut canonical = ResponseItemEnvelope::new(communication.to_model_input_item());
+    canonical.item.set_turn_id_if_missing(&turn_context.sub_id);
+    canonical.metadata = Some(CodexHarnessMetadata {
+        user_input_order: Some(37),
+        inherited_user_message: true,
+        ..Default::default()
+    });
     session
-        .record_inter_agent_communication(
-            &turn_context,
-            turn_context.model_info(),
-            communication.clone(),
-        )
-        .await;
+        .live_thread()
+        .unwrap()
+        .append_items(&[
+            RolloutItem::InterAgentCommunicationMetadata {
+                trigger_turn: false,
+            },
+            RolloutItem::ResponseItem(canonical.clone()),
+        ])
+        .await
+        .unwrap();
+    assert!(session.clone_history().await.raw_items().next().is_none());
     assert!(matches!(
         db.thread_queue()
             .agent_mail(session.thread_id, &record.id)
@@ -2175,10 +2196,33 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
             .state,
         codex_state::AgentMailState::Pending(_)
     ));
+    // Later queued input must not hide a cancelled admission from reconciliation.
+    let mut later = communication.clone();
+    later.id = None;
+    later.content = "later queued input".into();
+    session
+        .input_queue
+        .enqueue_mailbox_communication(later.clone(), Default::default())
+        .await;
+    let acceptance = session.agent_mail.acceptance.lock().await;
+    assert!(session.recover_accepted_agent_mail_locked().await.unwrap());
+    drop(acceptance);
+    assert_eq!(
+        session.clone_history().await.annotated_items(),
+        &[canonical.clone()]
+    );
+    let queued = session.input_queue.drain_mailbox().await;
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].communication, later);
     session
         .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
         .await
         .unwrap();
+    session.recover_accepted_agent_mail().await.unwrap();
+    assert_eq!(
+        session.clone_history().await.annotated_items(),
+        &[canonical.clone()]
+    );
     session
         .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
         .await
@@ -2198,6 +2242,95 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         .unwrap();
     assert_eq!(tombstone.id, record.id);
     assert_eq!(tombstone.state, codex_state::AgentMailState::Admitted);
+
+    // An older accepted row lost its local publication, a newer row is still
+    // in its actor submission, and a third row is orphaned behind that actor.
+    // Reconciliation must retain order without stealing the actor's batching
+    // decision or restarting the healthy held batch.
+    let control = session
+        .services
+        .local_agent_runtime
+        .control(session.session_id());
+    let source = SessionSource::SubAgent(SubAgentSource::Other("ordering witness".into()));
+    let first_active = control
+        .execution_guard(MultiAgentVersion::V2, &source)
+        .unwrap();
+    let second_active = control
+        .execution_guard(MultiAgentVersion::V2, &source)
+        .unwrap();
+    let mut ordered = Vec::new();
+    for content in ["older orphan", "newer actor submission", "later orphan"] {
+        let mut mail = communication.clone();
+        mail.id = None;
+        mail.content = content.into();
+        let id = ResponseItemId::new("amsg_mail");
+        db.thread_queue()
+            .accept_agent_mail(
+                &id,
+                session.thread_id,
+                sender,
+                session.thread_id,
+                content,
+                &digest,
+                &serde_json::to_string(&mail).unwrap(),
+            )
+            .await
+            .unwrap();
+        mail.id = Some(id);
+        ordered.push(mail);
+    }
+    assert!(
+        session
+            .reserve_agent_mail_submission(ordered[1].id.as_ref().unwrap())
+            .await
+    );
+    let acceptance = session.agent_mail.acceptance.lock().await;
+    assert!(!session.recover_accepted_agent_mail_locked().await.unwrap());
+    assert!(session.input_queue.has_held_mailbox_items().await);
+    assert!(!session.input_queue.has_pending_mailbox_items().await);
+    // A healthy held projection is not reclaimed on a subsequent pass.
+    assert!(!session.recover_accepted_agent_mail_locked().await.unwrap());
+    assert!(!session.input_queue.has_pending_mailbox_items().await);
+    assert!(
+        session
+            .receive_accepted_agent_mail(&ordered[1])
+            .await
+            .unwrap()
+    );
+    session
+        .input_queue
+        .enqueue_batched_mailbox_communication(
+            ordered[1].clone(),
+            Default::default(),
+            config.multi_agent_v2.wait_agent_batch_window_ms,
+            *session
+                .services
+                .local_agent_runtime
+                .active_subagents()
+                .borrow(),
+        )
+        .await;
+    session
+        .agent_mail_projection_published(ordered[1].id.as_ref())
+        .await;
+    assert!(session.recover_accepted_agent_mail_locked().await.unwrap());
+    assert!(session.input_queue.has_held_mailbox_items().await);
+    assert!(!session.input_queue.has_pending_mailbox_items().await);
+    drop(acceptance);
+    session.input_queue.release_mailbox_batch().await;
+    let drained = session.input_queue.drain_mailbox().await;
+    assert_eq!(
+        drained
+            .iter()
+            .map(|mail| &mail.communication)
+            .collect::<Vec<_>>(),
+        ordered.iter().collect::<Vec<_>>(),
+    );
+    drop((first_active, second_active));
+    db.thread_queue()
+        .cancel_agent_mail_recipients(&[session.thread_id])
+        .await
+        .unwrap();
 
     let live_history = session.clone_history().await;
     let live_items = raw_history_items(&live_history);
@@ -2234,7 +2367,10 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         make_session_and_context_with_auth_and_config_and_rx(
             CodexAuth::from_api_key("Test API Key"),
             Vec::new(),
-            |_| {},
+            |config| {
+                config.multi_agent_v2.wait_agent_batch_window_ms =
+                    std::num::NonZeroU64::new(60_000);
+            },
         )
         .await;
     resumed_session

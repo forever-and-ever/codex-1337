@@ -955,6 +955,35 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         /*trigger_turn*/ false,
     );
 
+    // Previous process/publication failed after acceptance. A fresh send must
+    // restore this older obligation before publishing itself, not wait for the
+    // periodic recovery worker to notice it.
+    thread
+        .session
+        .try_ensure_rollout_materialized(PersistContext::Standard)
+        .await
+        .unwrap();
+    let mut older = communication.clone();
+    older.content = "previously accepted ordinary mail".into();
+    let older_id = codex_protocol::ResponseItemId::new("amsg_mail");
+    thread
+        .session
+        .state_db()
+        .unwrap()
+        .thread_queue()
+        .accept_agent_mail(
+            &older_id,
+            thread_id,
+            thread_id,
+            thread_id,
+            "older origin",
+            &"a".repeat(64),
+            &serde_json::to_string(&older).unwrap(),
+        )
+        .await
+        .unwrap();
+    older.id = Some(older_id);
+
     let submission_id = harness
         .control
         .send_inter_agent_communication(
@@ -1001,6 +1030,15 @@ async fn send_inter_agent_communication_without_turn_preserves_message_attributi
         history.raw_items(),
         &communication
     ));
+    let older_position = history
+        .raw_items()
+        .position(|item| item.id() == older.id.as_ref())
+        .unwrap();
+    let fresh_position = history
+        .raw_items()
+        .position(|item| item.id() == communication.id.as_ref())
+        .unwrap();
+    assert!(older_position < fresh_position);
 }
 
 #[tokio::test]
