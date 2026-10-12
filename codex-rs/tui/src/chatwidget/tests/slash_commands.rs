@@ -68,7 +68,7 @@ fn queue_composer_text_with_tab(chat: &mut ChatWidget, text: &str) {
 
 fn queue_goal_with_large_paste(chat: &mut ChatWidget, paste: String) {
     chat.bottom_pane
-        .set_composer_text("/goal ".to_string(), Vec::new(), Vec::new());
+        .set_composer_text("/goal set ".to_string(), Vec::new(), Vec::new());
     chat.handle_paste(paste);
     chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 }
@@ -769,7 +769,7 @@ async fn goal_slash_command_uses_plain_text_for_mentions() {
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     chat.bottom_pane.set_composer_text_with_mention_bindings(
-        "/goal use $figma for the mockup".to_string(),
+        "/goal set use $figma for the mockup".to_string(),
         Vec::new(),
         Vec::new(),
         vec![MentionBinding {
@@ -798,7 +798,7 @@ async fn goal_slash_command_emits_attached_images() {
     let local_image = chat.config.codex_home.join("goal-local.png");
     std::fs::write(&local_image, b"png bytes").expect("write local image");
     let placeholder = "[Image #2]";
-    let command = format!("/goal literal {placeholder} describe {placeholder}");
+    let command = format!("/goal set literal {placeholder} describe {placeholder}");
     let placeholder_start = command.rfind(placeholder).expect("placeholder in command");
     chat.set_remote_image_urls(vec![remote_url.clone()]);
     chat.bottom_pane.set_composer_text(
@@ -816,6 +816,12 @@ async fn goal_slash_command_emits_attached_images() {
     assert_eq!(
         draft.objective,
         format!("literal {placeholder} describe {placeholder}")
+    );
+    let inserted_start = draft.objective.rfind(placeholder).expect("inserted image");
+    assert_eq!(draft.text_elements.len(), 1);
+    assert_eq!(
+        draft.text_elements[0].byte_range,
+        (inserted_start..inserted_start + placeholder.len()).into()
     );
     assert_eq!(draft.remote_image_urls, vec![remote_url]);
     assert_eq!(draft.local_images.len(), 1);
@@ -852,6 +858,66 @@ async fn bare_goal_slash_command_drains_pending_submission_state() {
 
 #[tokio::test]
 async fn goal_control_slash_commands_emit_goal_events() {
+    // A misspelled control used to become a replacement objective, including before startup.
+    for thread_id in [None, Some(ThreadId::new())] {
+        for args in [
+            "rsume",
+            "improve benchmark coverage",
+            "set",
+            "set \t\n",
+            "resume extra",
+            "edit extra",
+            "clear extra",
+            "pause extra",
+        ] {
+            let (mut chat, mut rx, mut op_rx) =
+                make_chatwidget_manual(/*model_override*/ None).await;
+            chat.set_feature_enabled(Feature::Goals, /*enabled*/ true);
+            chat.thread_id = thread_id;
+            let command = format!("/goal {args}");
+            chat.bottom_pane
+                .set_composer_text(command.clone(), Vec::new(), Vec::new());
+
+            chat.handle_key_event(KeyCode::Esc.into());
+            chat.handle_key_event(KeyCode::Enter.into());
+
+            let mut errors = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    AppEvent::FollowTranscript => {}
+                    AppEvent::InsertHistoryCell(cell) => {
+                        errors.push(lines_to_single_string(&cell.display_lines(200)));
+                    }
+                    event => panic!("invalid goal command emitted {event:?}"),
+                }
+            }
+            assert_eq!(errors.len(), 1, "{command}");
+            assert!(errors[0].contains("Usage: /goal"), "{}", errors[0]);
+            assert_eq!(chat.bottom_pane.composer_text(), command);
+            assert!(chat.input_queue.queued_user_messages.is_empty());
+            assert_no_submit_op(&mut op_rx);
+
+            let queued = QueuedUserMessage::new(
+                UserMessage::from(command.as_str()),
+                QueuedInputAction::ParseSlash,
+            );
+            chat.submit_queued_slash_prompt(queued);
+            let mut errors = Vec::new();
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    AppEvent::InsertHistoryCell(cell) => {
+                        errors.push(lines_to_single_string(&cell.display_lines(200)));
+                    }
+                    event => panic!("invalid queued goal command emitted {event:?}"),
+                }
+            }
+            assert_eq!(errors.len(), 1, "{command}");
+            assert!(errors[0].contains("Usage: /goal"), "{}", errors[0]);
+            assert_eq!(chat.bottom_pane.composer_text(), command);
+            assert_no_submit_op(&mut op_rx);
+        }
+    }
+
     let cases = [
         ("/goal clear", None),
         ("/goal pause", Some(AppThreadGoalStatus::Paused)),
@@ -914,7 +980,7 @@ async fn goal_control_slash_command_without_thread_shows_full_usage() {
     assert_eq!(cells.len(), 1, "expected goal usage message");
     insta::assert_snapshot!(
         lines_to_single_string(&cells[0]),
-        @"• Usage: /goal [<objective>|clear|edit|pause|resume] The session must start before you can change a goal."
+        @"• Usage: /goal [set <objective>|clear|edit|pause|resume] The session must start before you can change a goal."
     );
 }
 
@@ -944,7 +1010,7 @@ async fn goal_edit_slash_command_opens_goal_editor() {
 async fn queued_goal_slash_command_emits_set_goal_event_after_thread_starts() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::Goals, /*enabled*/ true);
-    let command = "/goal improve benchmark coverage";
+    let command = "/goal set improve benchmark coverage";
 
     submit_composer_text(&mut chat, command);
     assert_eq!(chat.input_queue.queued_user_messages.len(), 1);
@@ -1012,7 +1078,7 @@ async fn interrupt_disambiguates_same_sized_goal_pastes() {
 
     queue_goal_with_large_paste(&mut chat, first);
     chat.bottom_pane
-        .set_composer_text("/goal ".to_string(), Vec::new(), Vec::new());
+        .set_composer_text("/goal set ".to_string(), Vec::new(), Vec::new());
     chat.handle_paste(second.clone());
     chat.on_interrupted_turn(TurnAbortReason::Interrupted);
 
@@ -1029,7 +1095,7 @@ async fn interrupt_disambiguates_same_sized_goal_pastes() {
 async fn queued_goal_slash_command_preserves_current_draft_metadata() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::Goals, /*enabled*/ true);
-    let command = "/goal improve benchmark coverage";
+    let command = "/goal set improve benchmark coverage";
 
     submit_composer_text(&mut chat, command);
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
@@ -1067,7 +1133,7 @@ async fn queued_goal_slash_command_preserves_current_draft_metadata() {
 async fn restored_queued_goal_slash_command_emits_set_goal_event() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_feature_enabled(Feature::Goals, /*enabled*/ true);
-    let command = "/goal improve benchmark coverage";
+    let command = "/goal set improve benchmark coverage";
 
     submit_composer_text(&mut chat, command);
     let input_state = chat
@@ -1111,9 +1177,9 @@ fn merged_history_record_preserves_raw_text_and_rebased_elements() {
         (
             second,
             UserMessageHistoryRecord::Override(UserMessageHistoryOverride {
-                text: "/goal inspect [Image #1]".to_string(),
+                text: "/goal set inspect [Image #1]".to_string(),
                 text_elements: vec![TextElement::new(
-                    (14..24).into(),
+                    (18..28).into(),
                     Some("[Image #1]".to_string()),
                 )],
             }),
@@ -1123,10 +1189,10 @@ fn merged_history_record_preserves_raw_text_and_rebased_elements() {
     assert_eq!(
         history_record,
         UserMessageHistoryRecord::Override(UserMessageHistoryOverride {
-            text: "Ask $figma\n/goal inspect [Image #1]".to_string(),
+            text: "Ask $figma\n/goal set inspect [Image #1]".to_string(),
             text_elements: vec![
                 TextElement::new((4..10).into(), Some("$figma".to_string())),
-                TextElement::new((25..35).into(), Some("[Image #1]".to_string())),
+                TextElement::new((29..39).into(), Some("[Image #1]".to_string())),
             ],
         })
     );

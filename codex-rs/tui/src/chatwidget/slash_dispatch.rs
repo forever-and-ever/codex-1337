@@ -6,18 +6,17 @@
 //! slash-command recall follows the same submitted-input rule as ordinary text.
 
 use super::*;
+use super::goal_command::GOAL_USAGE_HINT;
 use crate::app::WindowsSandboxHost;
-use crate::app_event::ThreadGoalSetMode;
 use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::BuiltinCommandFlags;
 use crate::bottom_pane::slash_commands::ServiceTierCommand;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 use crate::goal_display::GOAL_USAGE;
-use crate::goal_files::GoalDraft;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SlashCommandDispatchSource {
+pub(super) enum SlashCommandDispatchSource {
     Live,
     Queued,
 }
@@ -35,7 +34,6 @@ struct PreparedSlashCommandArgs {
 const SIDE_STARTING_CONTEXT_LABEL: &str = "Side starting...";
 const SIDE_SLASH_COMMAND_UNAVAILABLE_HINT: &str =
     "Press Ctrl+C to return to the main thread first.";
-const GOAL_USAGE_HINT: &str = "Example: /goal improve benchmark coverage";
 const RAW_USAGE: &str = "Usage: /raw [on|off]";
 const USAGE_CHATGPT_LOGIN_REQUIRED: &str = "Sign in with ChatGPT to use /usage.";
 
@@ -87,6 +85,10 @@ impl ChatWidget {
         args: String,
         text_elements: Vec<TextElement>,
     ) {
+        // TELOS(explicit-command-verbs): a typo cannot start a draft session.
+        if cmd == SlashCommand::Goal && self.reject_invalid_goal_command(&args) {
+            return;
+        }
         if self.defer_draft_command(cmd) {
             return;
         }
@@ -790,7 +792,7 @@ impl ChatWidget {
         }
     }
 
-    fn clear_live_goal_submission(&mut self) {
+    pub(super) fn clear_live_goal_submission(&mut self) {
         self.bottom_pane
             .set_composer_text(String::new(), Vec::new(), Vec::new());
         self.bottom_pane.set_composer_pending_pastes(Vec::new());
@@ -1021,110 +1023,15 @@ impl ChatWidget {
                 }
             }
             SlashCommand::Goal if !trimmed.is_empty() => {
-                if !self.config.features.enabled(Feature::Goals) {
-                    if source == SlashCommandDispatchSource::Live {
-                        self.clear_live_goal_submission();
-                    }
-                    return;
-                }
-                enum GoalControlCommand {
-                    Clear,
-                    SetStatus(AppThreadGoalStatus),
-                }
-                let control_command = match trimmed.to_ascii_lowercase().as_str() {
-                    "clear" => Some(GoalControlCommand::Clear),
-                    "edit" => {
-                        self.app_event_tx.send(AppEvent::OpenThreadGoalEditor {
-                            thread_id: self.thread_id,
-                        });
-                        if source == SlashCommandDispatchSource::Live {
-                            self.clear_live_goal_submission();
-                        }
-                        return;
-                    }
-                    "pause" => Some(GoalControlCommand::SetStatus(AppThreadGoalStatus::Paused)),
-                    "resume" => Some(GoalControlCommand::SetStatus(AppThreadGoalStatus::Active)),
-                    _ => None,
-                };
-                if let Some(command) = control_command {
-                    let Some(thread_id) = self.thread_id else {
-                        self.add_info_message(
-                            GOAL_USAGE.to_string(),
-                            Some(
-                                "The session must start before you can change a goal.".to_string(),
-                            ),
-                        );
-                        if source == SlashCommandDispatchSource::Live {
-                            self.clear_live_goal_submission();
-                        }
-                        return;
-                    };
-                    match command {
-                        GoalControlCommand::Clear => {
-                            self.app_event_tx
-                                .send(AppEvent::ClearThreadGoal { thread_id });
-                        }
-                        GoalControlCommand::SetStatus(status) => {
-                            self.app_event_tx
-                                .send(AppEvent::SetThreadGoalStatus { thread_id, status });
-                        }
-                    }
-                    self.append_message_history_entry(format!("/goal {trimmed}"));
-                    if source == SlashCommandDispatchSource::Live {
-                        self.clear_live_goal_submission();
-                    }
-                    return;
-                }
-                let draft = GoalDraft {
-                    objective: args,
+                // TELOS(explicit-command-verbs): unknown verbs never become objectives.
+                self.dispatch_goal_command(
+                    args,
                     text_elements,
                     pending_pastes,
                     local_images,
                     remote_image_urls,
-                };
-                let Some(thread_id) = self.thread_id else {
-                    if source == SlashCommandDispatchSource::Live {
-                        const GOAL_PREFIX: &str = "/goal ";
-                        let text_elements = draft
-                            .text_elements
-                            .into_iter()
-                            .map(|element| {
-                                element.map_range(|range| ByteRange {
-                                    start: range.start + GOAL_PREFIX.len(),
-                                    end: range.end + GOAL_PREFIX.len(),
-                                })
-                            })
-                            .collect();
-                        self.queue_user_message_with_options(
-                            UserMessage {
-                                text: format!("{GOAL_PREFIX}{}", draft.objective),
-                                local_images: draft.local_images,
-                                remote_image_urls: draft.remote_image_urls,
-                                text_elements,
-                                mention_bindings: Vec::new(),
-                            },
-                            QueuedInputAction::ParseSlash,
-                            draft.pending_pastes,
-                        );
-                        self.clear_live_goal_submission();
-                    } else {
-                        self.add_info_message(
-                            GOAL_USAGE.to_string(),
-                            Some("The session must start before you can set a goal.".to_string()),
-                        );
-                    }
-                    return;
-                };
-                let history_objective = draft.objective.clone();
-                self.app_event_tx.send(AppEvent::SetThreadGoalDraft {
-                    thread_id,
-                    draft,
-                    mode: ThreadGoalSetMode::ConfirmIfExists,
-                });
-                self.append_message_history_entry(format!("/goal {history_objective}"));
-                if source == SlashCommandDispatchSource::Live {
-                    self.clear_live_goal_submission();
-                }
+                    source,
+                );
             }
             SlashCommand::Side | SlashCommand::Btw if !trimmed.is_empty() => {
                 let Some(parent_thread_id) = self.thread_id else {
@@ -1397,7 +1304,7 @@ impl ChatWidget {
         }
     }
 
-    fn slash_command_args_elements(
+    pub(super) fn slash_command_args_elements(
         rest: &str,
         rest_offset: usize,
         text_elements: &[TextElement],

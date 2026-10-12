@@ -338,6 +338,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 ## TUI doctrine
 
+### explicit-command-verbs
+
+- Telos: a mistyped command never becomes an instruction to execute or a value to store.
+- Holds: a command with no subcommands may accept bare prose; if subcommands exist, all are explicit. Enumerated verbs reject unknowns before executing, queuing work, or changing goal, conversation, or draft state. Prose at a verb-bearing boundary requires its explicit verb or delimiter. Bare menu/status affordances remain valid. `/goal set <objective>` alone enters the objective path; `/goal` opens the existing menu, and replacing an unfinished goal still requires confirmation. Use the existing typed enum/parsing machinery, not a second generic command framework.
+- Owners: `codex-rs/tui/src/chatwidget/goal_command.rs` (`GoalVerb`, `ChatWidget::dispatch_goal_command`), `codex-rs/tui/src/chatwidget/slash_dispatch.rs`, `codex-rs/tui/src/goal_display.rs`, `codex-rs/tui/src/slash_command.rs`; top-level CLI prose is already explicit through `codex --prompt` in `codex-rs/tui/src/cli.rs`.
+- Tripwire: `goal_control_slash_commands_emit_goal_events`, `goal_slash_command_emits_attached_images`, `queued_goal_slash_command_emits_set_goal_event_after_thread_starts`, `restored_queued_goal_slash_command_emits_set_goal_event` (`codex-rs/tui/src/chatwidget/tests/slash_commands.rs`), `goal_slash_command_emits_only_inserted_paste_text_element` (`codex-rs/tui/src/chatwidget/tests/goal_validation.rs`), `set_thread_goal_draft_materializes_long_objective_and_confirms_before_paste` (`codex-rs/tui/src/app/tests.rs`), `unrecognized_words_are_rejected_rather_than_seeded_as_prompts` (`codex-rs/cli/src/main.rs`). Remaining mixed grammars are recorded in the command-grammar audit, not silently exempted.
+- Pressure: upstream `/goal` treats every unrecognized control word as a new objective; upstream's CLI also allows bare positional prompts. Preserve explicit verbs and the confirmation path when merging dispatch, help, or completion changes.
+- Evidence: command-grammar owner decision, 2026-10-12.
+
 ### fullscreen-only
 
 - Telos: the fork maintains one frontend, the owned screen.
@@ -409,6 +418,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/turn_admission.rs`: shared-daemon
 - `codex-rs/cli/Cargo.toml`: removed-stacks
 - `codex-rs/cli/src/main.rs`: pipelined-crate-graph, removed-stacks
+- `codex-rs/tui/src/cli.rs`: explicit-command-verbs
 - `codex-rs/code-mode-protocol/src/description.rs`: mcp-roster, standing-context-trims, local-coprocessor, response-order-fences
 - `codex-rs/codex-mcp/src/binding.rs`: standing-context-trims
 - `codex-rs/codex-mcp/src/client_tool_catalog.rs`: catalog-at-model-boundaries
@@ -461,6 +471,10 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/bottom_pane/chat_composer_history.rs`: key-doctrine
 - `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/chatwidget/interaction.rs`: key-doctrine
+- `codex-rs/tui/src/chatwidget.rs`: explicit-command-verbs
+- `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs
+- `codex-rs/tui/src/goal_display.rs`: explicit-command-verbs
+- `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/chatwidget/questions.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/clipboard_copy.rs`: key-doctrine
 - `codex-rs/tui/src/exec_cell/compact.rs`: fullscreen-only
@@ -559,6 +573,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/transcript_splice.rs`: fullscreen-only
 - `codex-rs/tui/src/app/ui_reload.rs`: reload-host
 - `codex-rs/tui/src/app_server_session/account.rs`: pinned-accounts
+- `codex-rs/tui/src/chatwidget/goal_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/history_cell/code_mode.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/code_mode_projection.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/preamble.rs`: token-bills

@@ -55,7 +55,7 @@ async fn goal_slash_command_accepts_objective_at_limit() {
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS);
-    let command = format!("/goal {objective}");
+    let command = format!("/goal set {objective}");
 
     submit_composer_text(&mut chat, &command);
     assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
@@ -82,7 +82,7 @@ async fn goal_slash_command_accepts_multiline_objective_after_blank_first_line()
     chat.thread_id = Some(thread_id);
     let objective = "follow these instructions\npreserve this detail";
 
-    submit_composer_text(&mut chat, &format!("/goal \n\n{objective}"));
+    submit_composer_text(&mut chat, &format!("/goal set \n\n{objective}"));
     assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
 
     let event = rx.try_recv().expect("expected goal objective event");
@@ -107,7 +107,7 @@ async fn goal_slash_command_emits_oversized_objective() {
     chat.thread_id = Some(thread_id);
     let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS + 1);
 
-    submit_composer_text(&mut chat, &format!("/goal {objective}"));
+    submit_composer_text(&mut chat, &format!("/goal set {objective}"));
 
     assert_eq!(next_goal_objective(&mut rx, thread_id), objective);
     assert_no_submit_op(&mut op_rx);
@@ -121,7 +121,7 @@ async fn goal_slash_command_preserves_large_pasted_objective() {
     chat.thread_id = Some(thread_id);
     let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS + 1);
     chat.bottom_pane
-        .set_composer_text("/goal ".to_string(), Vec::new(), Vec::new());
+        .set_composer_text("/goal set ".to_string(), Vec::new(), Vec::new());
     chat.handle_paste(objective.clone());
 
     assert!(
@@ -144,7 +144,7 @@ async fn queued_goal_slash_command_emits_oversized_objective_and_stops_queue() {
     handle_turn_started(&mut chat, "turn-1");
     let objective = "x".repeat(MAX_THREAD_GOAL_OBJECTIVE_CHARS + 1);
 
-    queue_composer_text_with_tab(&mut chat, &format!("/goal {objective}"));
+    queue_composer_text_with_tab(&mut chat, &format!("/goal set {objective}"));
     queue_composer_text_with_tab(&mut chat, "continue");
     assert_eq!(chat.input_queue.queued_user_messages.len(), 2);
 
@@ -164,7 +164,7 @@ async fn goal_slash_command_emits_only_inserted_paste_text_element() {
     let paste = "x".repeat(1_001);
     let placeholder = format!("[Pasted Content {} chars]", paste.chars().count());
     chat.bottom_pane.set_composer_text(
-        format!("/goal keep literal {placeholder} and "),
+        format!("/goal set keep literal {placeholder} and "),
         Vec::new(),
         Vec::new(),
     );
@@ -179,6 +179,12 @@ async fn goal_slash_command_emits_only_inserted_paste_text_element() {
             .contains(&format!("keep literal {placeholder} and {placeholder}")),
         "expected literal placeholder and inserted paste placeholder, got {:?}",
         draft.objective
+    );
+    let inserted_start = draft.objective.rfind(&placeholder).expect("inserted placeholder");
+    assert_eq!(draft.text_elements.len(), 1);
+    assert_eq!(
+        draft.text_elements[0].byte_range,
+        (inserted_start..inserted_start + placeholder.len()).into()
     );
     assert_eq!(draft.pending_pastes, vec![(placeholder, paste)]);
     assert!(chat.bottom_pane.composer_pending_pastes().is_empty());

@@ -277,6 +277,7 @@ mod work_status;
 use self::goal_status::GoalStatusState;
 #[cfg(test)]
 use self::goal_status::goal_status_indicator_from_app_goal;
+pub(crate) mod goal_command;
 mod goal_menu;
 mod ide_context;
 mod image_submission;
