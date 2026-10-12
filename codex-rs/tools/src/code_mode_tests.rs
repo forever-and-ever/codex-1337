@@ -70,15 +70,22 @@ fn code_mode_materializes_mcp_output_schemas() {
 fn code_mode_tool_names_do_not_prefix_the_default_namespace() {
     for tool_name in [
         ToolName::plain("apply_patch"),
+        ToolName::namespaced("", "apply_patch"),
         ToolName::namespaced("functions", "apply_patch"),
     ] {
         assert_eq!(code_mode_name_for_tool_name(&tool_name), "apply_patch");
+        assert_eq!(tool_name.to_string(), "apply_patch");
     }
 
+    // Diagnostic qualification must not become the code-mode callable alias.
+    let tool_name = ToolName::namespaced("editor", "apply_patch");
+    assert_eq!(tool_name.to_string(), "editor.apply_patch");
     assert_eq!(
-        code_mode_name_for_tool_name(&ToolName::namespaced("editor", "apply_patch")),
+        code_mode_name_for_tool_name(&tool_name),
         "editor__apply_patch"
     );
+    let opaque_alias = ToolName::plain("editor__apply_patch");
+    assert_eq!(opaque_alias.to_string(), "editor__apply_patch");
 }
 
 #[test]

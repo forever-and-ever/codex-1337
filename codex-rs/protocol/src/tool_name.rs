@@ -55,7 +55,7 @@ impl fmt::Display for ToolName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.namespace {
             Some(_) if self.is_default_namespace() => f.write_str(&self.name),
-            Some(namespace) => write!(f, "{namespace}{}", self.name),
+            Some(namespace) => write!(f, "{namespace}.{}", self.name),
             None => f.write_str(&self.name),
         }
     }
