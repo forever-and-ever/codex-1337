@@ -843,6 +843,29 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert_eq!(resumes_for(acquisition_y), 1);
     // Partial detachment changes local attachment truth only for confirmed targets.
     // The recorder rejects the original thread's unsubscribe, but confirms the visible one.
+    // A connection barrier keeps this side turn definitively unsent. Confirmed closure must
+    // recover it before removing the side, rather than promoting an unattended turn afterward.
+    let closing_side = server.start_thread(&app.config).await?.session.thread_id;
+    app.ensure_thread_channel(closing_side).mark_live();
+    app.side_threads.insert(
+        closing_side,
+        super::super::side::SideThreadState {
+            parent_thread_id: other_id,
+            parent_status: None,
+        },
+    );
+    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+        .await;
+    app.enqueue_subagent_turn(
+        &server,
+        closing_side,
+        None,
+        vec![codex_app_server_protocol::UserInput::Text {
+            text: "unsent closed-side draft".into(),
+            text_elements: Vec::new(),
+        }],
+    );
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     let draft_before_detach = recovered_message(&mut app);
     assert!(matches!(
         app.handle_exit_mode(&mut server, ExitMode::ShutdownFirst)
@@ -876,7 +899,29 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         "attachment gate also holds for embedded frontends"
     );
     assert_eq!(app.current_displayed_thread_id(), Some(other_id));
-    assert_eq!(recovered_message(&mut app), draft_before_detach);
+    let recovered_after_detach = recovered_message(&mut app);
+    assert!(
+        recovered_after_detach
+            .text
+            .contains(&draft_before_detach.text)
+    );
+    assert!(
+        recovered_after_detach
+            .text
+            .contains("unsent closed-side draft")
+    );
+    assert_eq!(
+        recovered_after_detach.remote_image_urls,
+        draft_before_detach.remote_image_urls
+    );
+    assert_eq!(
+        recovered_after_detach.local_images,
+        draft_before_detach.local_images
+    );
+    assert!(app.abandoned_side_threads.contains(&closing_side));
+    assert!(!app.thread_event_channels.contains_key(&closing_side));
+    assert!(app.thread_unavailable(closing_side));
+    assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     assert!(!app.chat_widget.maybe_send_next_queued_input());
     server.shutdown().await?;
     proxy.await??;

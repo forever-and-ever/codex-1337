@@ -446,7 +446,8 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         }
                     }
                     if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
-                        && matches!(request.method.as_str(), "turn/start" | "turn/steer" | "skills/list" | "turn/interrupt" | "thread/realtime/listVoices")
+                        && (matches!(request.method.as_str(), "turn/start" | "turn/steer" | "skills/list" | "thread/realtime/listVoices")
+                            || request.method == "turn/interrupt" && request_sink.lock().expect("request recorder lock").iter().any(|seen| seen.method == "turn/start" && seen.params.as_ref().and_then(|params| params.get("threadId")) == request.params.as_ref().and_then(|params| params.get("threadId"))))
                     {
                         continue;
                     }

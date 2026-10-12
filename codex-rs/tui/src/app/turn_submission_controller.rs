@@ -451,6 +451,54 @@ impl App {
         );
     }
 
+    pub(super) async fn take_unsent_detached_operations(
+        &mut self,
+        thread_id: ThreadId,
+        store: &Arc<Mutex<ThreadEventStore>>,
+    ) -> Vec<SubmissionDraft> {
+        let matches_origin = |entry: &PendingSubmission| matches!(&entry.origin, OperationOrigin::Thread { thread_id: id, store: origin } if *id == thread_id && Arc::ptr_eq(origin, store));
+        let keys = self.server_operations.lanes.keys().copied().filter(|lane| matches!(lane, OperationLane::Thread(id) | OperationLane::Realtime(id) if *id == thread_id)).collect::<Vec<_>>();
+        let mut removed = Vec::new();
+        let mut protected_starts = HashSet::new();
+        for key in keys {
+            let Some(mut lane) = self.server_operations.lanes.remove(&key) else {
+                continue;
+            };
+            if !matches!(lane.state, LaneState::Queued) && requests::holds_start_lease(&lane.active)
+            {
+                protected_starts.insert(thread_id);
+            }
+            let mut retained = VecDeque::new();
+            for entry in lane.waiting.drain(..) {
+                if matches_origin(&entry) {
+                    removed.push(entry);
+                } else {
+                    retained.push_back(entry);
+                }
+            }
+            lane.waiting = retained;
+            if matches!(lane.state, LaneState::Queued) && matches_origin(&lane.active) {
+                removed.push(lane.active);
+                if let Some(active) = lane.waiting.pop_front() {
+                    self.server_operations.lanes.insert(
+                        key,
+                        SubmissionLane {
+                            active,
+                            state: LaneState::Queued,
+                            waiting: lane.waiting,
+                        },
+                    );
+                }
+            } else {
+                self.server_operations.lanes.insert(key, lane);
+            }
+        }
+        removed.sort_by_key(|entry| entry.order);
+        self.cleanup_unsent_operations(removed.iter(), &protected_starts)
+            .await;
+        recoverable_drafts(removed.into_iter())
+    }
+
     pub(in crate::app) async fn handle_submission_event(
         &mut self,
         server: &AppServerSession,
