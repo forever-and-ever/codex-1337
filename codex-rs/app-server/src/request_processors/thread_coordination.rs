@@ -38,10 +38,12 @@ use codex_protocol::protocol::ThreadSettingsOverrides;
 use serde_json::json;
 
 use super::super::thread_input::ensure_direct_input_allowed;
+use super::ServerResume;
 use super::ThreadRequestProcessor;
 use super::ThreadResumeTarget;
 use super::internal_error;
 use super::invalid_request;
+use super::thread_fork::ThreadForkOrigin;
 use super::thread_start::HeadlessStart;
 use crate::thread_state::ThreadRuntimeLease;
 
@@ -204,7 +206,7 @@ impl ThreadCoordinationService {
         self.read(thread_id).await?;
         self.threads
             .thread_resume(
-                ThreadResumeTarget::Coordination,
+                ThreadResumeTarget::Server(ServerResume::Coordination),
                 ThreadResumeParams {
                     thread_id: thread_id.to_owned(),
                     exclude_turns: true,
@@ -401,7 +403,7 @@ impl ThreadCoordinationService {
         params: ThreadForkParams,
     ) -> Result<ThreadForkResponse, JSONRPCErrorError> {
         Box::pin(self.threads.thread_fork_inner(
-            /*request_id*/ None,
+            ThreadForkOrigin::Coordination,
             params,
             /*app_server_client_name*/ None,
             /*app_server_client_version*/ None,

@@ -43,6 +43,7 @@ use crate::request_processors::ProcessExecRequestProcessor;
 use crate::request_processors::ProjectRequestProcessor;
 use crate::request_processors::RemoteControlRequestProcessor;
 use crate::request_processors::SearchRequestProcessor;
+use crate::request_processors::ServerResume;
 use crate::request_processors::ThreadGoalRequestProcessor;
 use crate::request_processors::ThreadQueueRequestProcessor;
 use crate::request_processors::ThreadRequestProcessor;
@@ -822,7 +823,9 @@ impl MessageProcessor {
             if let Err(err) = self
                 .thread_processor
                 .thread_resume(
-                    ThreadResumeTarget::DaemonRecovery(snapshot.interrupted.remove(&thread_id)),
+                    ThreadResumeTarget::Server(ServerResume::DaemonRecovery(
+                        snapshot.interrupted.remove(&thread_id),
+                    )),
                     codex_app_server_protocol::ThreadResumeParams {
                         thread_id: thread_id.clone(),
                         exclude_turns: true,

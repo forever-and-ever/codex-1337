@@ -29,6 +29,15 @@ mod thread_warming;
 #[path = "thread_start.rs"]
 mod thread_start;
 
+#[path = "thread_resume.rs"]
+mod thread_resume;
+
+#[path = "thread_fork.rs"]
+mod thread_fork;
+
+use thread_fork::ThreadForkOrigin;
+pub(crate) use thread_resume::ServerResume;
+pub(crate) use thread_resume::ThreadResumeTarget;
 use thread_start::FrontendStart;
 use thread_start::ThreadStartOrigin;
 
@@ -495,14 +504,6 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) alarms: crate::alarms::Alarms,
 }
 
-/// Whether resume attaches a client or restores a cold runtime during daemon startup.
-pub(crate) enum ThreadResumeTarget {
-    Client(ConnectionRequestId),
-    /// Restore a runtime for server-owned work without subscribing a frontend.
-    Coordination,
-    DaemonRecovery(Option<codex_app_server_transport::daemon_recovery::InterruptedTurn>),
-}
-
 /// Outcome of trying to satisfy a resume request from an already loaded thread.
 enum RunningThreadResumeResult {
     /// The request was delegated to the loaded thread.
@@ -626,7 +627,7 @@ impl ThreadRequestProcessor {
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         // Keep the large fork future out of the shared request dispatcher's stack frame.
         Box::pin(self.thread_fork_inner(
-            Some(request_id),
+            ThreadForkOrigin::Client(request_id),
             params,
             app_server_client_name,
             app_server_client_version,
@@ -3714,24 +3715,9 @@ impl ThreadRequestProcessor {
                 }
                 RunningThreadResumeResult::NotRunning(stored_thread) => stored_thread,
             },
-            ThreadResumeTarget::Coordination | ThreadResumeTarget::DaemonRecovery(_) => {
-                let thread_id = ThreadId::from_string(&params.thread_id)
-                    .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
-                // Recheck under the same permit as client resume, including after config loading.
-                if let Ok(thread) = self.thread_manager.get_thread(thread_id).await {
-                    if matches!(target, ThreadResumeTarget::Coordination)
-                        && matches!(thread.agent_status().await, AgentStatus::Shutdown)
-                    {
-                        self.thread_manager
-                            .remove_thread_if_matches(&thread_id, &thread)
-                            .await;
-                    } else {
-                        if let ThreadResumeTarget::DaemonRecovery(Some(saved)) = target {
-                            self.continue_daemon_turn(&params.thread_id, saved.clone())
-                                .await;
-                        }
-                        return Ok(ControlFlow::Break(()));
-                    }
+            ThreadResumeTarget::Server(server) => {
+                if server.reuse_runtime(self, &params.thread_id).await?.is_break() {
+                    return Ok(ControlFlow::Break(()));
                 }
                 None
             }
@@ -4026,9 +4012,7 @@ impl ThreadRequestProcessor {
                     ThreadResumeTarget::Client(request_id) => {
                         self.request_trace_context(request_id).await
                     }
-                    ThreadResumeTarget::Coordination | ThreadResumeTarget::DaemonRecovery(_) => {
-                        None
-                    }
+                    ThreadResumeTarget::Server(_) => None,
                 },
                 client_mcp_extensions,
             )
@@ -4040,25 +4024,13 @@ impl ThreadRequestProcessor {
                 session_configured,
                 ..
             }) => {
-                let ThreadResumeTarget::Client(request_id) = target else {
-                    // Observe lifecycle events without attaching a client subscription.
-                    self.thread_watch_manager
-                        .upsert_thread(&thread_id.to_string())
-                        .await;
-                    // Invoke idle work before arming subscriber-based unloading.
-                    codex_thread
-                        .emit_thread_idle_lifecycle_if_idle(ThreadIdleCause::Completed)
-                        .await;
-                    if let ThreadResumeTarget::DaemonRecovery(Some(saved)) = target {
-                        self.continue_daemon_turn(&thread_id.to_string(), saved.clone())
-                            .await;
+                let request_id = match target {
+                    ThreadResumeTarget::Client(request_id) => request_id.clone(),
+                    ThreadResumeTarget::Server(server) => {
+                        server.observe_runtime(self, thread_id, &codex_thread).await?;
+                        return Ok(ControlFlow::Break(()));
                     }
-                    let state = self.thread_state_manager.thread_state(thread_id).await;
-                    self.ensure_listener_task_running(thread_id, Arc::clone(&codex_thread), state)
-                        .await?;
-                    return Ok(ControlFlow::Break(()));
                 };
-                let request_id = request_id.clone();
                 if let Err(err) = Self::set_app_server_client_info(
                     codex_thread.as_ref(),
                     app_server_client_name,
@@ -4909,7 +4881,7 @@ impl ThreadRequestProcessor {
 
     async fn thread_fork_inner(
         &self,
-        request_id: Option<ConnectionRequestId>,
+        origin: ThreadForkOrigin,
         params: ThreadForkParams,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
@@ -4971,15 +4943,8 @@ impl ThreadRequestProcessor {
                 "ephemeral paginated thread/fork requires `excludeTurns: true`",
             ));
         }
-        if paginated_source
-            && include_turns
-            && let Some(request_id) = &request_id
-        {
-            self.send_deprecation_notice(
-                request_id.connection_id,
-                PAGINATED_FULL_HISTORY_DEPRECATION_SUMMARY,
-            )
-            .await;
+        if paginated_source && include_turns {
+            origin.warn_full_history(self).await;
         }
         let source_thread_id = source_thread.thread_id;
         let source_thread_name = source_thread
@@ -5175,10 +5140,7 @@ impl ThreadRequestProcessor {
         let goals_enabled = config.features.enabled(Feature::Goals);
 
         let fallback_model_provider = config.model_provider_id.clone();
-        let parent_trace = match &request_id {
-            Some(request_id) => self.request_trace_context(request_id).await,
-            None => None,
-        };
+        let parent_trace = origin.request_trace(self).await;
         let thread_source = thread_source.map(Into::into);
 
         let mut history_items = if prepared_fork.is_some() {
@@ -5401,23 +5363,9 @@ impl ThreadRequestProcessor {
         let instruction_sources = forked_thread.legacy_instruction_sources().await;
 
         // Auto-attach a conversation listener when forking a thread.
-        if let Some(request_id) = &request_id {
-            log_listener_attach_result(
-                self.ensure_conversation_listener(
-                    thread_id,
-                    request_id.connection_id,
-                    /*raw_events_enabled*/ false,
-                )
-                .await,
-                thread_id,
-                request_id.connection_id,
-                "thread",
-            );
-        } else {
-            let state = self.thread_state_manager.thread_state(thread_id).await;
-            self.ensure_listener_task_running(thread_id, Arc::clone(&forked_thread), state)
-                .await?;
-        }
+        origin
+            .observe_runtime(self, thread_id, &forked_thread)
+            .await?;
 
         let config_snapshot = forked_thread.config_snapshot().await;
 
@@ -5517,30 +5465,16 @@ impl ThreadRequestProcessor {
         };
 
         let notif = thread_started_notification(thread);
-        if let Some(request_id) = request_id {
-            let connection_id = request_id.connection_id;
-            self.outgoing
-                .send_response_with_thread_originator(
-                    request_id,
-                    response.clone(),
-                    thread_originator,
-                )
-                .await;
-            // `excludeTurns` is the cheap fork path, so skip restored usage replay
-            // instead of rebuilding history only to attribute a historical update.
-            if let Some(token_usage_turn_id) = token_usage_turn_id {
-                // Mirror the resume contract for forks: the new thread is usable as soon
-                // as the response arrives, so restored usage must follow immediately.
-                send_thread_token_usage_update_to_connection(
-                    &self.outgoing,
-                    connection_id,
-                    thread_id,
-                    forked_thread.as_ref(),
-                    token_usage_turn_id,
-                )
-                .await;
-            }
-        }
+        origin
+            .publish_response(
+                self,
+                &response,
+                thread_originator,
+                thread_id,
+                forked_thread.as_ref(),
+                token_usage_turn_id,
+            )
+            .await;
 
         self.outgoing
             .send_server_notification(ServerNotification::ThreadStarted(notif))
