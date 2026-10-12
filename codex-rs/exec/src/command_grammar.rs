@@ -8,6 +8,7 @@ use clap::Args;
 use clap::Parser;
 use codex_protocol::protocol::ThreadSource;
 use codex_utils_cli::CliConfigOverrides;
+use codex_utils_cli::SharedCliOptions;
 use std::path::PathBuf;
 
 // TELOS(explicit-command-verbs): a missing or unknown verb cannot start a task.
@@ -108,13 +109,98 @@ pub struct RunArgs {
     pub images: Vec<PathBuf>,
 }
 
-pub(crate) fn mark_exec_global_args(cmd: clap::Command) -> clap::Command {
-    // Images belong to each command; global copies would duplicate resumed attachments.
-    let ids = cmd
-        .get_arguments()
-        .filter(|arg| arg.get_id().as_str() != "images")
-        .map(|arg| arg.get_id().clone())
-        .collect::<Vec<_>>();
-    ids.into_iter()
-        .fold(cmd, |cmd, id| cmd.mut_arg(id, |arg| arg.global(true)))
+pub(crate) fn augment_exec_shared_args(cmd: clap::Command, for_update: bool) -> clap::Command {
+    // Shared options inherit through the typed root/exec merge, not clap's global ID propagation.
+    let schema = clap::Command::new("exec-shared");
+    let schema = if for_update {
+        SharedCliOptions::augment_args_for_update(schema)
+    } else {
+        SharedCliOptions::augment_args(schema)
+    };
+    let args = schema.get_arguments().map(|arg| {
+        let conflicts = schema
+            .get_arg_conflicts_with(arg)
+            .into_iter()
+            .map(|conflict| exec_shared_id(conflict.get_id().as_str()));
+        arg.clone()
+            .id(exec_shared_id(arg.get_id().as_str()))
+            .conflicts_with(None::<&str>)
+            .conflicts_with_all(conflicts)
+            // Images belong to each command; global copies duplicate resumed attachments.
+            .global(arg.get_id().as_str() != "images")
+    });
+    let groups = schema.get_groups().map(|group| {
+        let members = group.get_args().map(|id| exec_shared_id(id.as_str()));
+        group.clone().arg(None::<&str>).args(members)
+    });
+    cmd.args(args).groups(groups)
+}
+
+fn exec_shared_id(id: &str) -> &'static str {
+    match id {
+        "images" => "exec_images",
+        "model" => "exec_model",
+        "oss" => "exec_oss",
+        "oss_provider" => "exec_oss_provider",
+        "config_profile_v2" => "exec_config_profile_v2",
+        "sandbox_mode" => "exec_sandbox_mode",
+        "auto_review" => "exec_auto_review",
+        "dangerously_bypass_approvals_and_sandbox" => {
+            "exec_dangerously_bypass_approvals_and_sandbox"
+        }
+        "bypass_hook_trust" => "exec_bypass_hook_trust",
+        "cwd" => "exec_cwd",
+        "add_dir" => "exec_add_dir",
+        _ => panic!("shared CLI argument has no exec parser scope: {id}"),
+    }
+}
+
+pub(crate) fn parse_exec_shared_args(
+    matches: &clap::ArgMatches,
+    current: &SharedCliOptions,
+) -> SharedCliOptions {
+    macro_rules! optional {
+        ($field:ident) => {{
+            let id = exec_shared_id(stringify!($field));
+            if matches.contains_id(id) {
+                matches.get_one(id).cloned()
+            } else {
+                current.$field.clone()
+            }
+        }};
+    }
+    macro_rules! flag {
+        ($field:ident) => {{
+            let id = exec_shared_id(stringify!($field));
+            matches.get_one(id).copied().unwrap_or(current.$field)
+        }};
+    }
+    macro_rules! many {
+        ($field:ident) => {{
+            let id = exec_shared_id(stringify!($field));
+            if matches.contains_id(id) {
+                matches
+                    .get_many(id)
+                    .map(|values| values.cloned().collect())
+                    .unwrap_or_default()
+            } else {
+                current.$field.clone()
+            }
+        }};
+    }
+
+    // Exhaustive construction forces newly shared fields to choose their parser scope.
+    SharedCliOptions {
+        images: many!(images),
+        model: optional!(model),
+        oss: flag!(oss),
+        oss_provider: optional!(oss_provider),
+        config_profile_v2: optional!(config_profile_v2),
+        sandbox_mode: optional!(sandbox_mode),
+        auto_review: flag!(auto_review),
+        dangerously_bypass_approvals_and_sandbox: flag!(dangerously_bypass_approvals_and_sandbox),
+        bypass_hook_trust: flag!(bypass_hook_trust),
+        cwd: optional!(cwd),
+        add_dir: many!(add_dir),
+    }
 }

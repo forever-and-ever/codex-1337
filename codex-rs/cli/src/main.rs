@@ -3012,8 +3012,21 @@ mod tests {
 
     #[test]
     fn approve_for_me_defaults_propagate_from_root_to_exec() {
-        let exec =
-            finalize_exec_from_args(&["codex", "--approve-for-me", "exec", "run", "summarize"]);
+        let exec = finalize_exec_from_args(&[
+            "codex",
+            "--approve-for-me",
+            "--add-dir",
+            "/root-work",
+            "--add-dir",
+            "/shared-work",
+            "exec",
+            "run",
+            "--add-dir",
+            "/leaf-work",
+            "--add-dir",
+            "/shared-work",
+            "summarize",
+        ]);
 
         assert_eq!(
             exec.config_overrides.raw_overrides,
@@ -3024,6 +3037,13 @@ mod tests {
             ]
         );
         assert!(exec.sandbox_mode.is_none());
+        // Root and leaf each contribute once; intentionally repeated paths remain ordered.
+        assert_eq!(
+            exec.add_dir,
+            ["/root-work", "/shared-work", "/leaf-work", "/shared-work"]
+                .map(PathBuf::from)
+                .to_vec()
+        );
     }
 
     #[test]

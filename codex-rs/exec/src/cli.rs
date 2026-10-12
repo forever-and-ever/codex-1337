@@ -67,26 +67,26 @@ impl std::ops::DerefMut for ExecSharedCliOptions {
 
 impl Args for ExecSharedCliOptions {
     fn augment_args(cmd: clap::Command) -> clap::Command {
-        mark_exec_global_args(SharedCliOptions::augment_args(cmd))
+        crate::command_grammar::augment_exec_shared_args(cmd, false)
     }
 
     fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        mark_exec_global_args(SharedCliOptions::augment_args_for_update(cmd))
+        crate::command_grammar::augment_exec_shared_args(cmd, true)
     }
 }
 
 impl FromArgMatches for ExecSharedCliOptions {
     fn from_arg_matches(matches: &clap::ArgMatches) -> Result<Self, clap::Error> {
-        SharedCliOptions::from_arg_matches(matches).map(Self)
+        Ok(Self(crate::command_grammar::parse_exec_shared_args(
+            matches,
+            &SharedCliOptions::default(),
+        )))
     }
 
     fn update_from_arg_matches(&mut self, matches: &clap::ArgMatches) -> Result<(), clap::Error> {
-        self.0.update_from_arg_matches(matches)
+        self.0 = crate::command_grammar::parse_exec_shared_args(matches, &self.0);
+        Ok(())
     }
-}
-
-fn mark_exec_global_args(cmd: clap::Command) -> clap::Command {
-    crate::command_grammar::mark_exec_global_args(cmd)
 }
 
 pub use crate::command_grammar::Command;
