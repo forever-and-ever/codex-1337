@@ -299,7 +299,7 @@ async fn run_compact_task_inner_impl(
         instructions
     };
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
-    let continuation = CompactionContinuation::capture(history.raw_items());
+    let continuation = CompactionContinuation::capture(history.raw_items())?;
     history.record_items(
         &[initial_input_for_turn.into()],
         turn_context.model_info().truncation_policy.into(),

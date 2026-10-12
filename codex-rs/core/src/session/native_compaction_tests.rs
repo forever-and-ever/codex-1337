@@ -3,6 +3,7 @@ use super::user_message;
 use crate::compact::CompactedHistoryMetadata;
 use crate::compact::CompactionWindow;
 use codex_history::ResponseItemEnvelope;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -58,7 +59,8 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
         &step,
         &world_state,
         Vec::new(),
-        crate::context::CompactionContinuation::capture(source.iter().map(|item| &item.item)),
+        crate::context::CompactionContinuation::capture(source.iter().map(|item| &item.item))
+            .unwrap(),
     )
     .await;
     let continuation = initial_context.last().expect("captured continuation");
@@ -72,6 +74,35 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
         !text.contains("concurrent tail"),
         "capture only the frozen compaction input"
     );
+    // Retained evidence is data: guidance wording can change, but malformed
+    // authenticated observations must fail without silently losing handling history.
+    let mut persisted = continuation.item.clone();
+    if let ResponseItem::Message { content, .. } = &mut persisted
+        && let [ContentItem::InputText { text }] = content.as_mut_slice()
+    {
+        let guidance = text.lines().nth(1).unwrap().to_owned();
+        *text = text.replacen(&guidance, "Reworded guidance is not record framing.", 1);
+    } else {
+        panic!("text continuation");
+    }
+    let recaptured = crate::context::CompactionContinuation::capture([&persisted])
+        .unwrap()
+        .into_item()
+        .unwrap();
+    let ResponseItem::Message { content, .. } = recaptured else {
+        panic!("recaptured continuation");
+    };
+    assert_eq!(
+        crate::content_items_to_text(&content).as_deref(),
+        Some(text.as_str())
+    );
+    if let ResponseItem::Message { content, .. } = &mut persisted
+        && let [ContentItem::InputText { text }] = content.as_mut_slice()
+    {
+        *text = text.replace("\"user_request\"", "\"invalid_observation\"");
+    }
+    assert!(crate::context::CompactionContinuation::capture([&persisted]).is_err());
+
     let replacement = std::iter::once(ResponseItemEnvelope::new(checkpoint.clone()))
         .chain(initial_context)
         .collect::<Vec<_>>();

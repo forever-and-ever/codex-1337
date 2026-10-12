@@ -6,6 +6,8 @@ use super::UserGoalUpdate;
 use super::is_user_authorization_message;
 use crate::event_mapping::parse_turn_item;
 use codex_protocol::ToolName;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::TurnItem;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
@@ -13,6 +15,7 @@ use codex_protocol::models::ResponseItem;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fmt::Display;
 
 const KIND: &str = "compaction.continuation.v1";
 const MAX_RECORD_BYTES: usize = 6_144;
@@ -47,13 +50,15 @@ pub(crate) struct CompactionContinuation(Vec<Observation>);
 
 impl CompactionContinuation {
     /// Capture the frozen input, before filtering history or adding the compaction prompt.
-    pub(crate) fn capture<'a>(items: impl IntoIterator<Item = &'a ResponseItem>) -> Self {
+    pub(crate) fn capture<'a>(
+        items: impl IntoIterator<Item = &'a ResponseItem>,
+    ) -> CodexResult<Self> {
         let mut continuation = Self::default();
         let mut calls = HashMap::new();
         for item in items {
-            if let Some(previous) = Self::read(item) {
+            if let Some(previous) = Self::read(item)? {
                 for observation in previous.0 {
-                    continuation.push(observation);
+                    continuation.push(observation)?;
                 }
                 continue;
             }
@@ -61,7 +66,7 @@ impl CompactionContinuation {
                 // Goal fragments already omit oversized objectives whole, preserving their status.
                 continuation.push(Observation::UserGoal {
                     text: text.to_owned(),
-                });
+                })?;
                 continue;
             }
             if let ResponseItem::Message { content, .. } = item
@@ -70,13 +75,13 @@ impl CompactionContinuation {
             {
                 continuation.push(Observation::UserRequest {
                     text: complete_text(content),
-                });
+                })?;
                 continue;
             }
             match item {
                 ResponseItem::Message { role, content, .. } if role == "assistant" => {
                     if let Some(text) = complete_text(content) {
-                        continuation.push(Observation::AssistantReport { text });
+                        continuation.push(Observation::AssistantReport { text })?;
                     }
                 }
                 ResponseItem::FunctionCall {
@@ -122,19 +127,15 @@ impl CompactionContinuation {
                         input: input.clone(),
                         output: text.to_owned(),
                         success: output.success,
-                    });
+                    })?;
                 }
                 _ => {}
             }
         }
-        continuation
+        Ok(continuation)
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "host-authenticated continuation corruption must fail rather than silently erase handling evidence"
-    )]
-    fn read(item: &ResponseItem) -> Option<Self> {
+    fn read(item: &ResponseItem) -> CodexResult<Option<Self>> {
         let ResponseItem::Message {
             role,
             content,
@@ -142,29 +143,45 @@ impl CompactionContinuation {
             ..
         } = item
         else {
-            return None;
+            return Ok(None);
         };
-        let [kind] = metadata.content_item_kinds.as_deref()? else {
-            return None;
+        let Some(kinds) = metadata.content_item_kinds.as_deref() else {
+            return Ok(None);
         };
-        if role != "developer" || kind.0 != KIND {
-            return None;
+        if !kinds.iter().any(|kind| kind.0 == KIND) {
+            return Ok(None);
+        }
+        if role != "developer" || kinds.len() != 1 {
+            return Err(Self::invalid("invalid host annotation"));
         }
         let [ContentItem::InputText { text }] = content.as_slice() else {
-            panic!("host-annotated continuation must contain one text fragment");
+            return Err(Self::invalid("expected one text fragment"));
         };
         let (start, end) = Self::type_markers();
+        // v1 stores compact JSON on the final line. Guidance is not machine framing:
+        // changing its wording must not invalidate already-persisted observations.
         let data = text
             .strip_prefix(start)
-            .and_then(|text| text.strip_prefix(REMINDER))
             .and_then(|text| text.strip_suffix(end))
-            .expect("host-annotated continuation must retain its framing");
-        Some(Self(
-            serde_json::from_str(data).expect("host-annotated continuation must decode"),
+            .and_then(|body| body.rsplit_once('\n'))
+            .map(|(_, data)| data)
+            .ok_or_else(|| Self::invalid("missing record framing"))?;
+        if data.len() > MAX_RECORD_BYTES {
+            return Err(Self::invalid("record exceeds its byte bound"));
+        }
+        serde_json::from_str(data)
+            .map(Self)
+            .map(Some)
+            .map_err(Self::invalid)
+    }
+
+    fn invalid(reason: impl Display) -> CodexErr {
+        CodexErr::Fatal(format!(
+            "Cannot compact: invalid retained continuation ({reason}); existing history is unchanged."
         ))
     }
 
-    fn push(&mut self, observation: Observation) {
+    fn push(&mut self, observation: Observation) -> CodexResult<()> {
         if matches!(observation, Observation::UserRequest { .. }) {
             self.0
                 .retain(|entry| !matches!(entry, Observation::UserRequest { .. }));
@@ -172,7 +189,7 @@ impl CompactionContinuation {
             self.0
                 .retain(|entry| !matches!(entry, Observation::UserGoal { .. }));
         } else if self.0.contains(&observation) {
-            return;
+            return Ok(());
         }
         self.0.push(observation);
         // The latest explicit goal change must not disappear behind a long train of receipts.
@@ -183,14 +200,13 @@ impl CompactionContinuation {
                     Observation::UserGoal { .. } | Observation::UserRequest { .. }
                 )
             }) else {
-                assert!(
-                    self.record().len() <= MAX_RECORD_BYTES,
-                    "request and goal fragments exceed continuation bound"
-                );
-                break;
+                return Err(Self::invalid(
+                    "request and goal fragments exceed the byte bound",
+                ));
             };
             self.0.remove(oldest);
         }
+        Ok(())
     }
 
     pub(crate) fn into_item(self) -> Option<ResponseItem> {

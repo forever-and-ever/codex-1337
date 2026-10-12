@@ -3720,7 +3720,11 @@ impl ThreadRequestProcessor {
                 RunningThreadResumeResult::NotRunning(stored_thread) => stored_thread,
             },
             ThreadResumeTarget::Server(server) => {
-                if server.reuse_runtime(self, &params.thread_id).await?.is_break() {
+                if server
+                    .reuse_runtime(self, &params.thread_id)
+                    .await?
+                    .is_break()
+                {
                     return Ok(ControlFlow::Break(()));
                 }
                 None
@@ -4031,7 +4035,9 @@ impl ThreadRequestProcessor {
                 let request_id = match target {
                     ThreadResumeTarget::Client(request_id) => request_id.clone(),
                     ThreadResumeTarget::Server(server) => {
-                        server.observe_runtime(self, thread_id, &codex_thread).await?;
+                        server
+                            .observe_runtime(self, thread_id, &codex_thread)
+                            .await?;
                         return Ok(ControlFlow::Break(()));
                     }
                 };
