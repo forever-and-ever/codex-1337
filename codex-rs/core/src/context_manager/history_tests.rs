@@ -1,5 +1,4 @@
 use super::*;
-use crate::context::APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX;
 use crate::context::UserInstructions;
 use crate::context::world_state::SectionTransition;
 use crate::context::world_state::WorldState;
@@ -1988,9 +1987,7 @@ fn drop_last_n_user_turns_trims_saved_prefix_update_above_rolled_back_turn() {
         assistant_msg("session prefix item"),
         user_input_text_msg("turn 1 user"),
         assistant_msg("turn 1 assistant"),
-        developer_msg(&format!(
-            "{APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX}\n- [\"touch\"]"
-        )),
+        developer_msg("Approved command prefix saved:\n- [\"touch\"]"),
         user_input_text_msg("turn 2 user"),
         assistant_msg("turn 2 assistant"),
     ];
