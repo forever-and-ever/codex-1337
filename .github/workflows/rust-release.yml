@@ -1502,18 +1502,10 @@ jobs:
           path: dist
           pattern: "{aarch64,x86_64}-{apple-darwin{,-app-server},unknown-linux-musl{,-app-server},pc-windows-msvc}"
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          run_install: false
-
       - name: Setup Node.js for npm packaging
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: 22
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Stage npm packages
         run: |
@@ -1522,8 +1514,7 @@ jobs:
             --release-version "$release_version" \
             --artifacts-dir "${GITHUB_WORKSPACE}/dist" \
             --package codex \
-            --package codex-responses-api-proxy \
-            --package codex-sdk
+            --package codex-responses-api-proxy
 
       - name: Upload staged npm packages
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -1822,7 +1813,6 @@ jobs:
             "codex-npm-darwin-*-${version}.tgz"
             "codex-npm-win32-*-${version}.tgz"
             "codex-responses-api-proxy-npm-${version}.tgz"
-            "codex-sdk-npm-${version}.tgz"
           )
           for pattern in "${patterns[@]}"; do
             gh release download "$tag" \
@@ -1844,7 +1834,6 @@ jobs:
           fi
 
           root_tarball="dist/npm/codex-npm-${VERSION}.tgz"
-          sdk_tarball="dist/npm/codex-sdk-npm-${VERSION}.tgz"
           # Keep this list in sync with CODEX_PLATFORM_PACKAGES in
           # codex-cli/scripts/build_npm_package.py. The root wrapper advances
           # @openai/codex@latest as soon as it publishes, so every platform
@@ -1868,7 +1857,7 @@ jobs:
           shopt -s nullglob
           other_tarballs=()
           for tarball in dist/npm/*-"${VERSION}".tgz; do
-            if [[ "${tarball}" == "${root_tarball}" || "${tarball}" == "${sdk_tarball}" ]]; then
+            if [[ "${tarball}" == "${root_tarball}" ]]; then
               continue
             fi
 
@@ -1894,10 +1883,6 @@ jobs:
             "${other_tarballs[@]}"
             "${root_tarball}"
           )
-          # The SDK depends on this exact root package version.
-          if [[ -f "${sdk_tarball}" ]]; then
-            tarballs+=("${sdk_tarball}")
-          fi
 
           for tarball in "${tarballs[@]}"; do
             filename="$(basename "${tarball}")"
@@ -1909,7 +1894,7 @@ jobs:
                 platform="${platform%-${VERSION}.tgz}"
                 tag="${prefix}${platform}"
                 ;;
-              codex-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz|codex-sdk-npm-"${VERSION}".tgz)
+              codex-npm-"${VERSION}".tgz|codex-responses-api-proxy-npm-"${VERSION}".tgz)
                 tag="${NPM_TAG}"
                 ;;
               *)

@@ -172,14 +172,6 @@ class OfficialScenarioResult:
     runner_detail: str = ""
 
 
-def default_conformance_command() -> list[str]:
-    return [
-        "npx",
-        "--yes",
-        (f"github:{OFFICIAL_CONFORMANCE_REPOSITORY}#{OFFICIAL_CONFORMANCE_GIT_REF}"),
-    ]
-
-
 def scenarios_for_mode(
     mode: str,
     requested: Sequence[str] | None = None,

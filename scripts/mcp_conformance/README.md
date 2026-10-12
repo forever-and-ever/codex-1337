@@ -11,10 +11,9 @@ Use Node.js 22 and Python 3.10 or later.
 
 ## Run the conformance gate
 
-First install the frozen workspace dependencies and build Codex:
+Build Codex:
 
 ```bash
-pnpm install --frozen-lockfile
 cargo build --locked --manifest-path codex-rs/Cargo.toml -p codex-cli --bin codex
 ```
 
@@ -22,15 +21,15 @@ From a published Codex checkout, run:
 
 ```bash
 python3 scripts/mcp_conformance/run_codex_compliance.py \
-  codex-rs/target/debug/codex \
-  --conformance-cli node_modules/@modelcontextprotocol/conformance/dist/index.js \
+  /absolute/path/to/codex \
+  --conformance-cli /absolute/path/to/conformance/dist/index.js \
   --baseline-report scripts/mcp_conformance/regression-baseline-v1.json \
   --report /tmp/codex-mcp-conformance.json
 ```
 
-The positional executable can also point to an already built Codex binary.
-`--conformance-cli` selects the exact, lockfile-installed upstream JavaScript
-runner instead of downloading a moving version during a test.
+`--conformance-cli` must select an existing runner built from the pinned upstream
+revision. The harness never downloads dependencies; provision the runner
+separately. Baseline extraction does not require it.
 
 ## What the baseline means
 
@@ -106,16 +105,8 @@ env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   python3 -m pytest -q scripts/mcp_conformance
 ```
 
-## Run the required SDK integration
+## CI coverage
 
-The existing required SDK workflow runs the complete Python fixture self-tests.
-Its TypeScript job builds the actual Codex executable, sets `CODEX_EXEC_PATH`,
-installs the pinned upstream conformance runner, and runs both the official
-authenticated suite and the separate production reviewer regression matrix.
-Neither gate can be skipped. To reproduce the focused integration locally:
-
-```bash
-CODEX_EXEC_PATH=/absolute/path/to/codex \
-  pnpm --filter @openai/codex-sdk test -- \
-  --runInBand tests/mcpConformance.test.ts
-```
+The Python SDK workflow runs the fixture self-tests. The retired TypeScript SDK
+integration no longer runs the official conformance or production reviewer
+regression gates in CI; both remain available through the manual commands above.

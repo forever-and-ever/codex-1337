@@ -28,7 +28,6 @@ from official_conformance import (
     _run_scenario,
     _scrub_retained_artifacts,
     _terminate_process_group,
-    default_conformance_command,
     redact_sensitive_text,
     run_official_mode,
     scenarios_for_mode,
@@ -107,13 +106,6 @@ def test_auth_adapter_allows_a_single_error_callback_for_client_validation() -> 
         _validated_callback_url(_authorization_url(redirect_uri), callback_url)
         == callback_url
     )
-
-
-def test_official_runner_is_pinned_instead_of_using_npm_latest() -> None:
-    command = default_conformance_command()
-
-    assert OFFICIAL_CONFORMANCE_GIT_REF in command[-1]
-    assert "@latest" not in command[-1]
 
 
 def test_official_adapter_launcher_preserves_strict_production_auth_mode(

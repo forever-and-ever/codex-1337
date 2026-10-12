@@ -56,17 +56,6 @@ jobs:
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
-        with:
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: 22
-          cache: pnpm
-
       - name: Prepare Bazel CI
         id: setup_bazel
         uses: ./.github/actions/prepare-bazel-ci
@@ -122,18 +111,6 @@ jobs:
         run: |
           set -euo pipefail
           "${CODEX_EXEC_PATH}" --version
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build SDK packages
-        run: pnpm -r --filter ./sdk/typescript run build
-
-      - name: Lint SDK packages
-        run: pnpm -r --filter ./sdk/typescript run lint
-
-      - name: Test SDK packages
-        run: pnpm -r --filter ./sdk/typescript run test
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0

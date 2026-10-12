@@ -30,7 +30,6 @@ from official_conformance import (  # noqa: E402 - direct scripts must first add
     OFFICIAL_CONFORMANCE_GIT_REF,
     OFFICIAL_CONFORMANCE_REPOSITORY,
     OfficialScenarioResult,
-    default_conformance_command,
     run_official_mode,
     scenarios_for_mode,
 )
@@ -2015,8 +2014,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--conformance-cli",
         type=Path,
         help=(
-            "Use an existing official conformance executable. By default the "
-            "runner bootstraps the pinned upstream Git commit with npx."
+            "Path to an existing official conformance executable; required "
+            "except when extracting a baseline. The runner never downloads dependencies."
         ),
     )
     parser.add_argument(
@@ -2175,28 +2174,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Regression baseline: {output_path}")
         return 0
 
-    conformance_command: list[str]
     if args.conformance_cli is None:
-        conformance_command = default_conformance_command()
+        print("error: --conformance-cli is required to run conformance", file=sys.stderr)
+        return 2
+
+    conformance_cli = args.conformance_cli.expanduser().resolve()
+    if not conformance_cli.is_file():
+        print(
+            f"error: official conformance CLI does not exist: {conformance_cli}",
+            file=sys.stderr,
+        )
+        return 2
+    conformance_command: list[str]
+    if os.access(conformance_cli, os.X_OK):
+        conformance_command = [str(conformance_cli)]
+    elif conformance_cli.suffix in {".js", ".mjs"} and shutil.which("node"):
+        conformance_command = [str(shutil.which("node")), str(conformance_cli)]
     else:
-        conformance_cli = args.conformance_cli.expanduser().resolve()
-        if not conformance_cli.is_file():
-            print(
-                f"error: official conformance CLI does not exist: {conformance_cli}",
-                file=sys.stderr,
-            )
-            return 2
-        if os.access(conformance_cli, os.X_OK):
-            conformance_command = [str(conformance_cli)]
-        elif conformance_cli.suffix in {".js", ".mjs"} and shutil.which("node"):
-            conformance_command = [str(shutil.which("node")), str(conformance_cli)]
-        else:
-            print(
-                "error: --conformance-cli must be executable (or a JavaScript "
-                f"file runnable with node): {conformance_cli}",
-                file=sys.stderr,
-            )
-            return 2
+        print(
+            "error: --conformance-cli must be executable (or a JavaScript "
+            f"file runnable with node): {conformance_cli}",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         for mode in modes:

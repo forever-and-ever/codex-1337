@@ -74,7 +74,7 @@ class NpmAlphaTagTest(unittest.TestCase):
         # published release. Also exercise a missing pointer and dotted hotfix.
         cases = [
             (
-                "@openai/codex-sdk",
+                "@openai/codex",
                 "latest",
                 "0.100.0",
                 "0.99.9",
@@ -110,7 +110,7 @@ class NpmAlphaTagTest(unittest.TestCase):
                 "alpha-win32-arm64",
             ),
             (
-                "@openai/codex-sdk",
+                "@openai/codex",
                 "alpha",
                 "0.158.0-alpha.10",
                 "0.158.0-alpha.10.1",
@@ -123,7 +123,7 @@ class NpmAlphaTagTest(unittest.TestCase):
                 "0.158.0-alpha.10.1",
                 "release-0.158.0-alpha.10.1-alpha",
             ),
-            ("@openai/codex-sdk", "alpha", None, "0.158.0-alpha.10", "alpha"),
+            ("@openai/codex", "alpha", None, "0.158.0-alpha.10", "alpha"),
             (
                 "@openai/codex",
                 "alpha-linux-x64",
