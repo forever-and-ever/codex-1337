@@ -23,7 +23,7 @@ mod turn_submissions;
 pub(crate) use turn_submissions::turn_start_params;
 mod warming;
 
-mod alarms;
+mod operation_capabilities;
 mod web_search;
 
 #[cfg(test)]
@@ -60,9 +60,7 @@ use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::ConfigBatchWriteParams;
 use codex_app_server_protocol::ConfigRequirementsReadResponse;
-use codex_app_server_protocol::ConfigWriteResponse;
 use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
@@ -75,22 +73,12 @@ use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::NewThreadModelDefaults;
 use codex_app_server_protocol::RateLimitSnapshot;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::ReviewDelivery;
-use codex_app_server_protocol::ReviewStartParams;
-use codex_app_server_protocol::ReviewStartResponse;
-use codex_app_server_protocol::ReviewTarget;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::SkillsListParams;
 use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadApproveGuardianDeniedActionParams;
-use codex_app_server_protocol::ThreadApproveGuardianDeniedActionResponse;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
-use codex_app_server_protocol::ThreadBackgroundTerminalsCleanParams;
-use codex_app_server_protocol::ThreadBackgroundTerminalsCleanResponse;
-use codex_app_server_protocol::ThreadCompactStartParams;
-use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadDeleteParams;
 use codex_app_server_protocol::ThreadDeleteResponse;
 use codex_app_server_protocol::ThreadForkParams;
@@ -124,8 +112,6 @@ use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadSettingsUpdateParams;
 use codex_app_server_protocol::ThreadSettingsUpdateResponse;
-use codex_app_server_protocol::ThreadShellCommandParams;
-use codex_app_server_protocol::ThreadShellCommandResponse;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
@@ -143,7 +129,6 @@ use codex_app_server_protocol::UserInput;
 use codex_config::ConfigLayerSource;
 use codex_otel::TelemetryAuthMode;
 use codex_protocol::ThreadId;
-use codex_protocol::approvals::GuardianAssessmentEvent;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::models::BaseInstructionsProvenance;
@@ -303,7 +288,7 @@ pub(crate) async fn request_thread_start_with_history_fallback(
     }
 }
 
-fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) -> bool {
+pub(crate) fn is_thread_settings_update_unsupported(source: &JSONRPCErrorError) -> bool {
     source.code == JSONRPC_METHOD_NOT_FOUND
         || (source.code == JSONRPC_INVALID_REQUEST
             && source.message.contains(THREAD_SETTINGS_UPDATE_METHOD))
@@ -1521,100 +1506,6 @@ impl AppServerSession {
         Ok(())
     }
 
-    pub(crate) async fn thread_compact_start(&mut self, thread_id: ThreadId) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadCompactStartResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadCompactStart {
-                request_id,
-                params: ThreadCompactStartParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/compact/start failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn thread_shell_command(
-        &mut self,
-        thread_id: ThreadId,
-        command: String,
-    ) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadShellCommandResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadShellCommand {
-                request_id,
-                params: ThreadShellCommandParams {
-                    thread_id: thread_id.to_string(),
-                    command,
-                    timeout_ms: None,
-                },
-            })
-            .await
-            .wrap_err("thread/shellCommand failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn thread_approve_guardian_denied_action(
-        &mut self,
-        thread_id: ThreadId,
-        event: &GuardianAssessmentEvent,
-    ) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadApproveGuardianDeniedActionResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadApproveGuardianDeniedAction {
-                request_id,
-                params: ThreadApproveGuardianDeniedActionParams {
-                    thread_id: thread_id.to_string(),
-                    event: serde_json::to_value(event)
-                        .wrap_err("failed to serialize Auto Review denial event")?,
-                },
-            })
-            .await
-            .wrap_err("thread/approveGuardianDeniedAction failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn thread_background_terminals_clean(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadBackgroundTerminalsCleanResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadBackgroundTerminalsClean {
-                request_id,
-                params: ThreadBackgroundTerminalsCleanParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/backgroundTerminals/clean failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn review_start(
-        &mut self,
-        thread_id: ThreadId,
-        target: ReviewTarget,
-    ) -> Result<ReviewStartResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ReviewStart {
-                request_id,
-                params: ReviewStartParams {
-                    thread_id: thread_id.to_string(),
-                    target,
-                    delivery: Some(ReviewDelivery::Inline),
-                },
-            })
-            .await
-            .wrap_err("review/start failed in TUI")
-    }
-
     pub(crate) async fn skills_list(
         &mut self,
         params: SkillsListParams,
@@ -1624,24 +1515,6 @@ impl AppServerSession {
             .request_typed(ClientRequest::SkillsList { request_id, params })
             .await
             .wrap_err("skills/list failed in TUI")
-    }
-
-    pub(crate) async fn reload_user_config(&mut self) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ConfigWriteResponse = self
-            .client
-            .request_typed(ClientRequest::ConfigBatchWrite {
-                request_id,
-                params: ConfigBatchWriteParams {
-                    edits: Vec::new(),
-                    file_path: None,
-                    expected_version: None,
-                    reload_user_config: true,
-                },
-            })
-            .await
-            .wrap_err("config/batchWrite failed while reloading user config in TUI")?;
-        Ok(())
     }
 
     pub(crate) async fn reject_server_request(

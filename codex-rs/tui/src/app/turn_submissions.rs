@@ -1,5 +1,6 @@
-//! One ordered submission lane per thread. Only App mutates the ledger; widgets receive receipts
-//! and immutable previews. An uncertain predecessor retires its whole lane into unsent drafts.
+//! One operation owner with ordered thread lanes and a connection-wide configuration barrier.
+//! Only App mutates the ledger; workers own requests and widgets receive immutable previews.
+//! Turn failures preserve draft recovery; uncertain mutations retain their ordering fence.
 
 use super::thread_delivery::LocalThreadCompletion;
 use super::*;
@@ -17,19 +18,46 @@ mod controller;
 #[path = "turn_submission_worker.rs"]
 mod worker;
 
+#[path = "server_operation_requests.rs"]
+mod requests;
+use requests::OperationReceipt;
+pub(in crate::app) use requests::ThreadOperation;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum OperationLane {
+    Thread(ThreadId),
+    Connection,
+}
+
+pub(in crate::app) use requests::CatalogRequest;
+pub(in crate::app) use requests::ConnectionMutation;
+pub(in crate::app) use requests::ThreadMutation;
+
 #[derive(Default)]
-pub(super) struct TurnSubmissions {
-    lanes: HashMap<ThreadId, SubmissionLane>,
+pub(super) struct ServerOperations {
+    lanes: HashMap<OperationLane, SubmissionLane>,
+    next_order: u64,
+    epoch: u64,
 }
 
 struct SubmissionLane {
     active: PendingSubmission,
-    task: AbortOnDropHandle<()>,
+    state: LaneState,
     waiting: VecDeque<PendingSubmission>,
+}
+
+enum LaneState {
+    Queued,
+    Running(AbortOnDropHandle<()>),
+    Uncertain,
 }
 
 struct PendingSubmission {
     id: Uuid,
+    order: u64,
+    epoch: u64,
+    thread_id: ThreadId,
+    store: Arc<Mutex<ThreadEventStore>>,
     request: SubmissionRequest,
     buffering: Option<codex_app_server_protocol::ModelSafetyBufferingUpdatedNotification>,
 }
@@ -40,6 +68,11 @@ enum SubmissionRequest {
         client_id: String,
         action: PendingSteerCancelAction,
         draft: Option<Box<SubmissionDraft>>,
+    },
+    Operation(Box<ThreadOperation>),
+    Continuation {
+        review: Arc<crate::chatwidget::MisalignmentReview>,
+        params: Box<TurnStartParams>,
     },
 }
 
@@ -108,6 +141,14 @@ enum WorkerRequest {
     Cancel {
         client_id: String,
     },
+    Operation {
+        id: Uuid,
+        operation: Box<ThreadOperation>,
+    },
+    Continuation {
+        params: Box<TurnStartParams>,
+        review: Arc<crate::chatwidget::MisalignmentReview>,
+    },
 }
 
 enum WorkerCommand {
@@ -157,13 +198,14 @@ impl From<PendingSteerCancelAction> for DraftDisposition {
 pub(crate) enum SubmissionPreviewEntry {
     Message { id: Uuid, text: String },
     Cancellation { text: &'static str },
+    Operation { id: Uuid, text: &'static str },
 }
 
 impl SubmissionPreviewEntry {
     pub(crate) fn text(&self) -> &str {
         match self {
             Self::Message { text, .. } => text,
-            Self::Cancellation { text } => text,
+            Self::Cancellation { text } | Self::Operation { text, .. } => text,
         }
     }
 }
@@ -196,6 +238,7 @@ pub(super) enum SubmissionOutcome {
         observations: Vec<TurnObservation>,
         result: Result<SubmissionReceipt, SubmissionFailure>,
     },
+    Operation(Result<OperationReceipt, SubmissionFailure>),
 }
 
 #[derive(Debug)]
@@ -219,6 +262,7 @@ pub(super) enum SubmissionReceipt {
     },
     Cancelled(bool),
     Deferred(String),
+    Continued(codex_app_server_protocol::Turn),
 }
 
 #[derive(Debug)]
@@ -236,6 +280,14 @@ impl PendingSubmission {
                 text: history_cell::sanitize_user_text(turn.draft.message.text.clone().into())
                     .into_owned(),
             },
+            SubmissionRequest::Operation(operation) => SubmissionPreviewEntry::Operation {
+                id: self.id,
+                text: operation.label(),
+            },
+            SubmissionRequest::Continuation { .. } => SubmissionPreviewEntry::Operation {
+                id: self.id,
+                text: "Continuing after review",
+            },
             SubmissionRequest::Cancel { action, .. } => SubmissionPreviewEntry::Cancellation {
                 text: match action {
                     PendingSteerCancelAction::Edit => "Editing pending steer",
@@ -245,10 +297,11 @@ impl PendingSubmission {
         }
     }
 
-    fn client_id(&self) -> &str {
+    fn client_id(&self) -> Option<&str> {
         match &self.request {
-            SubmissionRequest::Turn(turn) => &turn.draft.client_id,
-            SubmissionRequest::Cancel { client_id, .. } => client_id,
+            SubmissionRequest::Turn(turn) => Some(&turn.draft.client_id),
+            SubmissionRequest::Cancel { client_id, .. } => Some(client_id),
+            SubmissionRequest::Operation(_) | SubmissionRequest::Continuation { .. } => None,
         }
     }
 
@@ -256,6 +309,7 @@ impl PendingSubmission {
         match self.request {
             SubmissionRequest::Turn(turn) => Some(turn.draft),
             SubmissionRequest::Cancel { draft, .. } => draft.map(|draft| *draft),
+            SubmissionRequest::Operation(_) | SubmissionRequest::Continuation { .. } => None,
         }
     }
 
@@ -272,6 +326,14 @@ impl PendingSubmission {
                 },
                 params: Box::new(turn.params.clone()),
             },
+            SubmissionRequest::Operation(operation) => WorkerRequest::Operation {
+                id: self.id,
+                operation: operation.clone(),
+            },
+            SubmissionRequest::Continuation { params, review } => WorkerRequest::Continuation {
+                params: params.clone(),
+                review: Arc::clone(review),
+            },
             SubmissionRequest::Cancel { client_id, .. } => WorkerRequest::Cancel {
                 client_id: client_id.clone(),
             },
@@ -279,23 +341,104 @@ impl PendingSubmission {
     }
 }
 
-impl TurnSubmissions {
+impl ServerOperations {
+    fn take_unsent(
+        &mut self,
+        thread_id: ThreadId,
+        id: Uuid,
+        action: PendingSteerCancelAction,
+    ) -> Option<PendingSubmission> {
+        let editable = |entry: &PendingSubmission| {
+            entry.id == id
+                && (matches!(entry.request, SubmissionRequest::Turn(_))
+                    || action == PendingSteerCancelAction::Remove)
+        };
+        let key = self.lanes.iter().find_map(|(key, lane)| {
+            if *key != OperationLane::Connection && lane.active.thread_id != thread_id {
+                return None;
+            }
+            ((matches!(lane.state, LaneState::Queued) && editable(&lane.active))
+                || lane.waiting.iter().any(&editable))
+            .then_some(*key)
+        })?;
+        let SubmissionLane {
+            active,
+            state,
+            mut waiting,
+        } = self
+            .lanes
+            .remove(&key)
+            .expect("selected operation lane disappeared");
+        if active.id == id {
+            if let Some(next) = waiting.pop_front() {
+                self.lanes.insert(
+                    key,
+                    SubmissionLane {
+                        active: next,
+                        state: LaneState::Queued,
+                        waiting,
+                    },
+                );
+            }
+            Some(active)
+        } else {
+            let index = waiting
+                .iter()
+                .position(editable)
+                .expect("selected queued operation disappeared");
+            let removed = waiting.remove(index);
+            self.lanes.insert(
+                key,
+                SubmissionLane {
+                    active,
+                    state,
+                    waiting,
+                },
+            );
+            removed
+        }
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.lanes.is_empty()
     }
 
-    fn preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
-        match thread_id.and_then(|id| self.lanes.get(&id)) {
-            Some(lane) => SubmissionPreview::Sending {
-                active: lane.active.preview(),
-                waiting: lane
-                    .waiting
-                    .iter()
-                    .map(PendingSubmission::preview)
-                    .collect(),
-            },
-            None => SubmissionPreview::Idle,
+    pub(in crate::app) fn preview(&self, thread_id: Option<ThreadId>) -> SubmissionPreview {
+        let Some(thread_id) = thread_id else {
+            return SubmissionPreview::Idle;
+        };
+        let mut entries = Vec::new();
+        for key in [OperationLane::Thread(thread_id), OperationLane::Connection] {
+            if let Some(lane) = self.lanes.get(&key) {
+                entries.push((
+                    &lane.active,
+                    matches!(lane.state, LaneState::Queued),
+                    matches!(lane.state, LaneState::Uncertain),
+                ));
+                entries.extend(lane.waiting.iter().map(|entry| (entry, true, false)));
+            }
         }
+        entries.sort_by_key(|(entry, _, _)| entry.order);
+        let Some((first, queued, uncertain)) = entries.first() else {
+            return SubmissionPreview::Idle;
+        };
+        let active = if *queued {
+            SubmissionPreviewEntry::Cancellation {
+                text: "Waiting for earlier work",
+            }
+        } else if *uncertain {
+            SubmissionPreviewEntry::Cancellation {
+                text: "Operation outcome unknown; no retry sent",
+            }
+        } else {
+            first.preview()
+        };
+        let waiting = entries
+            .iter()
+            .skip(usize::from(!*queued))
+            .map(|(entry, _, _)| entry.preview())
+            .collect();
+        SubmissionPreview::Sending { active, waiting }
     }
 }
 

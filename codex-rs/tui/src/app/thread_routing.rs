@@ -16,6 +16,11 @@ use codex_app_server_protocol::TurnInterruptResponse;
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
 const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
 
+use super::turn_submissions::CatalogRequest;
+use super::turn_submissions::ConnectionMutation;
+use super::turn_submissions::ThreadMutation;
+use super::turn_submissions::ThreadOperation;
+
 impl App {
     pub(super) async fn stop_realtime_conversation(&mut self, app_server: &mut AppServerSession) {
         let thread_id = self
@@ -845,19 +850,25 @@ impl App {
                 Ok(true)
             }
             AppCommand::ListSkills { cwds, force_reload } => {
-                self.handle_skills_list_result(
-                    app_server
-                        .skills_list(codex_app_server_protocol::SkillsListParams {
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Catalog(CatalogRequest::Skills {
+                        params: codex_app_server_protocol::SkillsListParams {
                             cwds: cwds.clone(),
                             force_reload: *force_reload,
-                        })
-                        .await,
-                    "failed to refresh skills",
+                        },
+                        cwd: self.chat_widget.config_ref().cwd.to_path_buf(),
+                    }),
                 );
                 Ok(true)
             }
             AppCommand::Compact => {
-                app_server.thread_compact_start(thread_id).await?;
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Mutation(ThreadMutation::Compact),
+                );
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {
@@ -866,19 +877,19 @@ impl App {
                 Ok(true)
             }
             AppCommand::Review { target } => {
-                let response = app_server.review_start(thread_id, target.clone()).await?;
-                let review_thread_id = ThreadId::from_string(&response.review_thread_id)
-                    .wrap_err("review/start returned invalid review thread id")?;
-                let store = Arc::clone(&self.ensure_thread_channel(review_thread_id).store);
-                let mut store = store.lock().await;
-                store.set_active_turn_id(response.turn.id);
-                self.chat_widget.on_review_started();
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Mutation(ThreadMutation::Review(target.clone())),
+                );
                 Ok(true)
             }
             AppCommand::CleanBackgroundTerminals => {
-                app_server
-                    .thread_background_terminals_clean(thread_id)
-                    .await?;
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Mutation(ThreadMutation::CleanBackgroundTerminals),
+                );
                 Ok(true)
             }
             AppCommand::RealtimeConversationStart {
@@ -939,13 +950,19 @@ impl App {
                 Ok(true)
             }
             AppCommand::RunUserShellCommand { command } => {
-                app_server
-                    .thread_shell_command(thread_id, command.to_string())
-                    .await?;
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Mutation(ThreadMutation::ServerShell(command.clone())),
+                );
                 Ok(true)
             }
             AppCommand::ReloadUserConfig => {
-                app_server.reload_user_config().await?;
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Connection(ConnectionMutation::ReloadUserConfig),
+                );
                 Ok(true)
             }
             AppCommand::OverrideTurnContext { .. } => {
@@ -954,9 +971,13 @@ impl App {
                 Ok(true)
             }
             AppCommand::ApproveGuardianDeniedAction { event } => {
-                app_server
-                    .thread_approve_guardian_denied_action(thread_id, event)
-                    .await?;
+                let event = serde_json::to_value(event)
+                    .wrap_err("failed to serialize Auto Review denial event")?;
+                self.enqueue_server_operation(
+                    app_server,
+                    thread_id,
+                    ThreadOperation::Mutation(ThreadMutation::GuardianApproval(event)),
+                );
                 Ok(true)
             }
             _ => Ok(false),

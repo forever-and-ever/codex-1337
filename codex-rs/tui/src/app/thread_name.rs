@@ -140,48 +140,19 @@ impl App {
         name: String,
         conflict_thread_ids: Vec<String>,
     ) {
-        let result = app_server
-            .thread_allocate_name(ThreadSetNameParams {
-                thread_id: thread_id.to_string(),
-                name: name.clone(),
-                naming_mode: Some(ThreadNameMode::Explicit),
-                conflict_thread_ids: (!conflict_thread_ids.is_empty())
-                    .then_some(conflict_thread_ids),
-            })
-            .await;
-        match result {
-            Ok(name) => {
-                self.chat_widget.expect_manual_thread_name(thread_id, name);
-                self.cancel_thread_title_generation(thread_id);
-            }
-            Err(error) => {
-                if error
-                    .downcast_ref::<TypedRequestError>()
-                    .is_some_and(|error| {
-                        self.confirm_thread_name_conflict(
-                            error,
-                            ThreadNameRequest::Rename {
-                                thread_id,
-                                name: name.clone(),
-                            },
-                        )
-                    })
-                {
-                    return;
-                }
-                if self.agents_overview.rendered_full_screen {
-                    if let Ok(mut state) = self.agents_overview.view_state.lock() {
-                        state.set_rename_input(&name, &self.keymap);
-                        state.rename_target = Some(thread_id);
-                    }
-                    self.repaint_agents_overview();
-                    self.add_agents_overview_error(format!("Failed to rename task: {error}"));
-                } else {
-                    self.chat_widget
-                        .add_error_message(format!("Failed to rename thread: {error}"));
-                }
-            }
-        }
+        self.enqueue_server_operation(
+            app_server,
+            thread_id,
+            super::turn_submissions::ThreadOperation::Mutation(
+                super::turn_submissions::ThreadMutation::Rename(ThreadSetNameParams {
+                    thread_id: thread_id.to_string(),
+                    name,
+                    naming_mode: Some(ThreadNameMode::Explicit),
+                    conflict_thread_ids: (!conflict_thread_ids.is_empty())
+                        .then_some(conflict_thread_ids),
+                }),
+            ),
+        );
     }
 
     pub(super) async fn fork_current_thread(

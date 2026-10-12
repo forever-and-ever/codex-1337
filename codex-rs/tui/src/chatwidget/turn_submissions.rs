@@ -108,7 +108,13 @@ impl ChatWidget {
         if let SubmissionPreview::Sending { waiting, .. } = &self.submission_preview
             && let Some(id) = waiting.iter().rev().find_map(|entry| match entry {
                 SubmissionPreviewEntry::Message { id, .. } => Some(*id),
-                SubmissionPreviewEntry::Cancellation { .. } => None,
+                SubmissionPreviewEntry::Operation { id, .. }
+                    if action == PendingSteerCancelAction::Remove =>
+                {
+                    Some(*id)
+                }
+                SubmissionPreviewEntry::Operation { .. }
+                | SubmissionPreviewEntry::Cancellation { .. } => None,
             })
             && let Some(thread_id) = self.thread_id()
         {

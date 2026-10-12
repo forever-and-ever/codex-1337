@@ -245,7 +245,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     app.handle_local_thread_completion(&mut server, completion)
         .await?;
     tokio::time::resume();
-    assert!(app.turn_submissions.is_empty());
+    assert!(app.server_operations.is_empty());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "live draft");
     let recovered = render_bottom_popup(&app.chat_widget, 100);
     assert!(
@@ -300,7 +300,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         AppEvent::Submission(crate::app::turn_submissions::SubmissionEvent::Retire),
     ))
     .await?;
-    assert!(app.turn_submissions.is_empty());
+    assert!(app.server_operations.is_empty());
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "other thread draft"
@@ -341,6 +341,105 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         assert_eq!(recovered_message(&mut app), rich);
     }
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
+    // The same owner orders non-turn mutations and connection barriers while input stays live.
+    let skills_before = recorded_params(&requests, "skills/list").len();
+    let reloads_before = recorded_params(&requests, "config/batchWrite").len();
+    let renames_before = recorded_params(&requests, "thread/name/set").len();
+    app.submit_thread_op(
+        &mut server,
+        other_id,
+        AppCommand::ListSkills {
+            cwds: vec![app.config.cwd.to_path_buf()],
+            force_reload: false,
+        },
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "skills/list").len() == skills_before {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("skills worker reached withheld response");
+    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+        .await?;
+    app.submit_thread_op(
+        &mut server,
+        thread_id,
+        AppCommand::SetThreadName {
+            name: "queued rename".into(),
+        },
+    )
+    .await?;
+    assert_eq!(
+        recorded_params(&requests, "config/batchWrite").len(),
+        reloads_before
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/name/set").len(),
+        renames_before
+    );
+    let preview = render_bottom_popup(&app.chat_widget, 100);
+    assert!(preview.contains("Loading skills") && preview.contains("Reloading settings"));
+    app.chat_widget.apply_external_edit("RPC draft".into());
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().is_empty());
+    let rename_id = match app.server_operations.preview(Some(thread_id)) {
+        crate::app::turn_submissions::SubmissionPreview::Sending { waiting, .. } => waiting
+            .into_iter()
+            .find_map(|entry| match entry {
+                crate::app::turn_submissions::SubmissionPreviewEntry::Operation {
+                    id,
+                    text: "Renaming conversation",
+                } => Some(id),
+                _ => None,
+            })
+            .expect("queued mutation remains visible and cancellable"),
+        _ => panic!("queued mutation preview"),
+    };
+    app.handle_submission_event(crate::app::turn_submissions::SubmissionEvent::Edit {
+        thread_id,
+        id: rename_id,
+        action: crate::app_command::PendingSteerCancelAction::Remove,
+    })
+    .await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(31)).await;
+    let completion = app
+        .thread_delivery
+        .completion_rx
+        .recv()
+        .await
+        .expect("skills timeout");
+    app.handle_local_thread_completion(&mut server, completion)
+        .await?;
+    tokio::time::resume();
+    app.settle_turn_submissions(&mut server).await?;
+    assert_eq!(
+        recorded_params(&requests, "skills/list").len(),
+        skills_before + 1
+    );
+    assert_eq!(
+        recorded_params(&requests, "config/batchWrite").len(),
+        reloads_before + 1
+    );
+    assert_eq!(
+        recorded_params(&requests, "thread/name/set").len(),
+        renames_before
+    );
+    assert!(app.server_operations.is_empty());
     server.shutdown().await?;
     proxy.await??;
     Ok(())

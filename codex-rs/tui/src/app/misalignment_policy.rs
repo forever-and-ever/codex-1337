@@ -4,10 +4,7 @@
 use super::*;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::chatwidget::MisalignmentReview;
-use crate::chatwidget::MisalignmentTurnSource;
-use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::TurnStartParams;
-use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 
 impl App {
@@ -58,47 +55,7 @@ impl App {
         // The event store can be newer than the widget while UI actions are queued.
         if let Some(channel) = self.thread_event_channels.get(&review.thread_id) {
             let store = channel.store.lock().await;
-            if store.active_turn_id().is_some() {
-                return;
-            }
-            let latest = store.buffer.iter().rev().find_map(|event| {
-                let ThreadBufferedEvent::Notification(notification) = event else {
-                    return None;
-                };
-                let (turn_id, error) = match notification.as_ref() {
-                    ServerNotification::TurnStarted(_) => return Some(false),
-                    ServerNotification::TurnCompleted(n) if n.turn.status == TurnStatus::Failed => {
-                        (&n.turn.id, n.turn.error.as_ref())
-                    }
-                    ServerNotification::TurnCompleted(_) => return Some(false),
-                    ServerNotification::Error(n)
-                        if !n.will_retry
-                            && (n.turn_id == review.turn_id
-                                || n.error.codex_error_info
-                                    == Some(
-                                        AppServerCodexErrorInfo::MisalignmentPolicyViolation,
-                                    )) =>
-                    {
-                        (&n.turn_id, Some(&n.error))
-                    }
-                    _ => return None,
-                };
-                let Some(error) = error else {
-                    return Some(false);
-                };
-                if turn_id != &review.turn_id
-                    || error.codex_error_info
-                        != Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
-                {
-                    return Some(false);
-                }
-                // Empty duplicates do not supersede the latest supplied findings.
-                error
-                    .misalignment
-                    .as_ref()
-                    .map(|details| details == &review.details)
-            });
-            if latest == Some(false) {
+            if !review_matches_store(&store, &review) {
                 return;
             }
         }
@@ -151,59 +108,72 @@ impl App {
             );
             return;
         };
-        let result = app_server
-            .request_handle()
-            .request_typed::<TurnStartResponse>(ClientRequest::TurnStart {
-                request_id: app_server.next_request_id(),
-                params: TurnStartParams {
-                    thread_id: review.thread_id.to_string(),
-                    cwd: Some(config.cwd.to_path_buf()),
-                    runtime_workspace_roots: Some(
-                        config.permissions.user_visible_workspace_roots().to_vec(),
-                    ),
-                    approval_policy: Some(config.permissions.approval_policy.value().into()),
-                    approvals_reviewer: Some(config.approvals_reviewer.into()),
-                    sandbox_policy,
-                    permissions,
-                    cyber_access_program: cyber_access_program.map(Into::into),
-                    input: vec![UserInput::Text {
-                        text: message.to_string(),
-                        text_elements: Vec::new(),
-                    }],
-                    responsesapi_client_metadata: Some(HashMap::from([(
-                        "misalignment_override".to_string(),
-                        serde_json::json!({"timestamp": chrono::Utc::now().timestamp_millis()})
-                            .to_string(),
-                    )])),
-                    ..Default::default()
-                },
-            })
-            .await;
-        match result {
-            Ok(response) => {
-                let store = &self.ensure_thread_channel(review.thread_id).store;
-                store.lock().await.active_turn_id = Some(response.turn.id.clone());
-                self.chat_widget.clear_misalignment_for_new_turn(
-                    &response.turn.id,
-                    MisalignmentTurnSource::AcknowledgedContinuation,
-                );
-                self.chat_widget.handle_server_notification(
-                    ServerNotification::TurnStarted(
-                        codex_app_server_protocol::TurnStartedNotification {
-                            thread_id: review.thread_id.to_string(),
-                            turn: response.turn,
-                        },
-                    ),
-                    /*replay_kind*/ None,
-                );
-            }
-            Err(_) => {
-                // An RPC diagnostic can contain the submitted steer. Keep the review error generic.
-                self.chat_widget.add_error_message(
-                    "Couldn’t continue this chat. Review its latest status before trying again."
-                        .to_string(),
-                );
-            }
-        }
+        let params = TurnStartParams {
+            thread_id: review.thread_id.to_string(),
+            cwd: Some(config.cwd.to_path_buf()),
+            runtime_workspace_roots: Some(
+                config.permissions.user_visible_workspace_roots().to_vec(),
+            ),
+            approval_policy: Some(config.permissions.approval_policy.value().into()),
+            approvals_reviewer: Some(config.approvals_reviewer.into()),
+            sandbox_policy,
+            permissions,
+            cyber_access_program: cyber_access_program.map(Into::into),
+            input: vec![UserInput::Text {
+                text: message.to_string(),
+                text_elements: Vec::new(),
+            }],
+            responsesapi_client_metadata: Some(HashMap::from([(
+                "misalignment_override".to_string(),
+                serde_json::json!({"timestamp": chrono::Utc::now().timestamp_millis()}).to_string(),
+            )])),
+            ..Default::default()
+        };
+        self.enqueue_misalignment_continuation(app_server, review, params);
     }
+}
+
+/// Recheck at admission and dispatch: a queued continuation cannot overrule newer findings.
+pub(in crate::app) fn review_matches_store(
+    store: &ThreadEventStore,
+    review: &MisalignmentReview,
+) -> bool {
+    if store.active_turn_id().is_some() {
+        return false;
+    }
+    let latest = store.buffer.iter().rev().find_map(|event| {
+        let ThreadBufferedEvent::Notification(notification) = event else {
+            return None;
+        };
+        let (turn_id, error) = match notification.as_ref() {
+            ServerNotification::TurnStarted(_) => return Some(false),
+            ServerNotification::TurnCompleted(n) if n.turn.status == TurnStatus::Failed => {
+                (&n.turn.id, n.turn.error.as_ref())
+            }
+            ServerNotification::TurnCompleted(_) => return Some(false),
+            ServerNotification::Error(n)
+                if !n.will_retry
+                    && (n.turn_id == review.turn_id
+                        || n.error.codex_error_info
+                            == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)) =>
+            {
+                (&n.turn_id, Some(&n.error))
+            }
+            _ => return None,
+        };
+        let Some(error) = error else {
+            return Some(false);
+        };
+        if turn_id != &review.turn_id
+            || error.codex_error_info != Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
+        {
+            return Some(false);
+        }
+        // Empty duplicates do not supersede the latest supplied findings.
+        error
+            .misalignment
+            .as_ref()
+            .map(|details| details == &review.details)
+    });
+    latest != Some(false)
 }

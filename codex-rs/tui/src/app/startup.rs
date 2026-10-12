@@ -953,7 +953,7 @@ See the Codex keymap documentation for supported actions and examples."
             account_ui: Default::default(),
             rate_limit_refresh_state: Default::default(),
             queued_messages: Default::default(),
-            turn_submissions: Default::default(),
+            server_operations: Default::default(),
             pending_mcp_login_start: None,
             active_mcp_login_ids: HashMap::new(),
             pending_plugin_enabled_writes: HashMap::new(),
@@ -1155,6 +1155,7 @@ See the Codex keymap documentation for supported actions and examples."
             Ok(exit_reason)
         } else {
             loop {
+                app.drive_server_operations(&app_server);
                 app.retry_pending_thread_delivery().await;
                 // Reconnect can dismiss an overlay from the server-event path.
                 if app.overlay.is_none() {

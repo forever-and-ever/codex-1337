@@ -439,7 +439,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         continue;
                     }
                     if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
-                        && matches!(request.method.as_str(), "turn/start" | "turn/steer")
+                        && matches!(request.method.as_str(), "turn/start" | "turn/steer" | "skills/list")
                     {
                         continue;
                     }

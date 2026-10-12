@@ -13,12 +13,12 @@ impl App {
         if current && !self.chat_widget.begin_alarm_disarm(thread_id, &id) {
             return;
         }
-        if let Err(message) = app_server.thread_alarm_disarm(thread_id, id).await {
-            if current {
-                self.chat_widget.alarm_disarm_failed(message);
-            } else {
-                self.chat_widget.add_error_message(message);
-            }
-        }
+        self.enqueue_server_operation(
+            app_server,
+            thread_id,
+            super::turn_submissions::ThreadOperation::Mutation(
+                super::turn_submissions::ThreadMutation::DisarmAlarm(id),
+            ),
+        );
     }
 }

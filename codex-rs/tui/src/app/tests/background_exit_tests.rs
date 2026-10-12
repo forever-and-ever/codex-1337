@@ -469,7 +469,12 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
             shlex::try_quote(&running_path)?,
         )
     };
-    app_server.thread_shell_command(thread_id, command).await?;
+    app.submit_thread_op(
+        &mut app_server,
+        thread_id,
+        AppCommand::RunUserShellCommand { command },
+    )
+    .await?;
     let turn_id = time::timeout(Duration::from_secs(/*secs*/ 10), async {
         let mut turn_id = None;
         let mut output = String::new();

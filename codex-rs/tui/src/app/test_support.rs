@@ -114,7 +114,7 @@ pub(crate) async fn make_test_app() -> App {
         rate_limit_hard_stop_generation: 0,
         rate_limit_refresh_state: Default::default(),
         queued_messages: Default::default(),
-        turn_submissions: Default::default(),
+        server_operations: Default::default(),
         pending_mcp_login_start: None,
         active_mcp_login_ids: HashMap::new(),
         pending_plugin_enabled_writes: HashMap::new(),

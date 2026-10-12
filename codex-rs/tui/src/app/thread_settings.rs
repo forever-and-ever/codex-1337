@@ -181,7 +181,22 @@ impl App {
             collaboration_mode: collaboration_mode.clone(),
             ..ThreadSettingsUpdateParams::default()
         };
-        self.send_thread_settings_update(app_server, params).await;
+        let changes_permissions = params.cwd.is_some()
+            || params.approval_policy.is_some()
+            || params.approvals_reviewer.is_some()
+            || params.permissions.is_some();
+        if app_server.operation_settings_supported()
+            && thread_settings_update_has_changes(&params)
+            && !(changes_permissions && self.pending_server_profiles.contains_key(&thread_id))
+        {
+            self.enqueue_server_operation(
+                app_server,
+                thread_id,
+                super::turn_submissions::ThreadOperation::Mutation(
+                    super::turn_submissions::ThreadMutation::Settings(params),
+                ),
+            );
+        }
     }
 
     pub(super) async fn apply_thread_settings_to_cached_session(

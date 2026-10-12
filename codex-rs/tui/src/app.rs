@@ -677,7 +677,7 @@ pub(crate) struct App {
     account_ui: accounts::AccountUi,
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
     queued_messages: queued_messages::QueuedMessages,
-    turn_submissions: turn_submissions::TurnSubmissions,
+    server_operations: turn_submissions::ServerOperations,
     pending_mcp_login_start: Option<PendingMcpLoginStart>,
     // Latest accepted attempt per server; stale retry completions must not update the UI.
     active_mcp_login_ids: HashMap<String, String>,

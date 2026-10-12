@@ -25,6 +25,27 @@ pub(super) async fn send(
     request: WorkerRequest,
     store: Arc<Mutex<ThreadEventStore>>,
 ) -> SubmissionOutcome {
+    if let WorkerRequest::Operation { id, operation } = request {
+        let result = if matches!(
+            &*operation,
+            ThreadOperation::Mutation(requests::ThreadMutation::ServerShell(_))
+        ) {
+            requests::send(handle, thread_id, id, *operation, store)
+                .await
+                .map_err(classify_failure)
+        } else {
+            match tokio::time::timeout(
+                ACK_TIMEOUT,
+                requests::send(handle, thread_id, id, *operation, store),
+            )
+            .await
+            {
+                Ok(result) => result.map_err(classify_failure),
+                Err(_) => Err(SubmissionFailure::TimedOut),
+            }
+        };
+        return SubmissionOutcome::Operation(result);
+    }
     match tokio::time::timeout(ACK_TIMEOUT, send_inner(handle, thread_id, request, store)).await {
         Ok(outcome) => outcome,
         Err(_) => SubmissionOutcome::Finished {
@@ -42,6 +63,27 @@ async fn send_inner(
     store: Arc<Mutex<ThreadEventStore>>,
 ) -> SubmissionOutcome {
     let (params, replacement, expected_turn_id) = match request {
+        WorkerRequest::Operation { .. } => unreachable!("RPC request handled before turn dispatch"),
+        WorkerRequest::Continuation { params, review } => {
+            let eligible = {
+                let store = store.lock().await;
+                super::super::misalignment_policy::review_matches_store(&store, &review)
+            };
+            if !eligible {
+                return finished(ReplacementContinuation::NoReceipt, Vec::new(), Ok(SubmissionReceipt::Deferred("This conversation changed while continuation was queued. No continuation was sent.".into())));
+            }
+            let result = handle
+                .request_typed::<TurnStartResponse>(ClientRequest::TurnStart {
+                    request_id: request_id(),
+                    params: *params,
+                })
+                .await;
+            return finished(
+                ReplacementContinuation::NoReceipt,
+                Vec::new(),
+                result.map(|response| SubmissionReceipt::Continued(response.turn)),
+            );
+        }
         WorkerRequest::Cancel { client_id } => {
             let result: Result<TurnSteerCancelResponse, TypedRequestError> = handle
                 .request_typed(ClientRequest::TurnSteerCancel {
@@ -149,6 +191,14 @@ async fn send_inner(
     .await;
     finished(continuation, observations, result)
 }
+fn classify_failure(error: TypedRequestError) -> SubmissionFailure {
+    match error {
+        TypedRequestError::Server { .. } => SubmissionFailure::Rejected(error),
+        TypedRequestError::Transport { .. } | TypedRequestError::Deserialize { .. } => {
+            SubmissionFailure::Uncertain(error)
+        }
+    }
+}
 fn finished(
     replacement: ReplacementContinuation,
     observations: Vec<TurnObservation>,
@@ -157,11 +207,6 @@ fn finished(
     SubmissionOutcome::Finished {
         replacement,
         observations,
-        result: result.map_err(|error| match error {
-            TypedRequestError::Server { .. } => SubmissionFailure::Rejected(error),
-            TypedRequestError::Transport { .. } | TypedRequestError::Deserialize { .. } => {
-                SubmissionFailure::Uncertain(error)
-            }
-        }),
+        result: result.map_err(classify_failure),
     }
 }
