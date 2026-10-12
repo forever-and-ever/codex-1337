@@ -1,6 +1,25 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "CensusCount": {
+      "anyOf": [
+        {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        {
+          "$ref": "#/definitions/CensusOmission"
+        }
+      ],
+      "description": "Local o200k accounting, or an explicit refusal to spend unbounded census work. Numeric captures from older clients remain valid counted values."
+    },
+    "CensusOmission": {
+      "enum": [
+        "workLimit"
+      ],
+      "type": "string"
+    },
     "ContextInventory": {
       "description": "Retained special material, including superseded instructions and their amendments. An inventory is not an arrival and is never inserted into model history.",
       "properties": {
@@ -89,9 +108,7 @@
           "$ref": "#/definitions/PreambleSection"
         },
         "tokens": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/CensusCount"
         }
       },
       "required": [

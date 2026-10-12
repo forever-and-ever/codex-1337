@@ -623,6 +623,26 @@ class CapabilityRootLocation(RootModel[EnvironmentCapabilityRootLocation]):
     ]
 
 
+class CensusCount1(RootModel[int]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        int,
+        Field(
+            description="Local o200k accounting, or an explicit refusal to spend unbounded census work. Numeric captures from older clients remain valid counted values.",
+            ge=0,
+        ),
+    ]
+
+
+class CensusOmission(RootModel[Literal["workLimit"]]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Literal["workLimit"]
+
+
 class ClaudeSubscriptionAccount1(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7691,6 +7711,18 @@ class CancelLoginAccountResponse(BaseModel):
     status: CancelLoginAccountStatus
 
 
+class CensusCount(RootModel[CensusCount1 | CensusOmission]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        CensusCount1 | CensusOmission,
+        Field(
+            description="Local o200k accounting, or an explicit refusal to spend unbounded census work. Numeric captures from older clients remain valid counted values."
+        ),
+    ]
+
+
 class InitializeRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10006,7 +10038,7 @@ class PreamblePart(BaseModel):
     ] = None
     label: str
     section: PreambleSection
-    tokens: Annotated[int, Field(ge=0)]
+    tokens: CensusCount
 
 
 class ProcessOutputDeltaNotification(BaseModel):

@@ -8,6 +8,8 @@ export type { ApplyPatchApprovalParams } from "./ApplyPatchApprovalParams";
 export type { ApplyPatchApprovalResponse } from "./ApplyPatchApprovalResponse";
 export type { AuthMode } from "./AuthMode";
 export type { AutoCompactTokenLimitScope } from "./AutoCompactTokenLimitScope";
+export type { CensusCount } from "./CensusCount";
+export type { CensusOmission } from "./CensusOmission";
 export type { ClientInfo } from "./ClientInfo";
 export type { ClientNotification } from "./ClientNotification";
 export type { ClientRequest } from "./ClientRequest";

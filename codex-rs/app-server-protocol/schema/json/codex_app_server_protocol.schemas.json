@@ -9503,6 +9503,25 @@
           }
         ]
       },
+      "CensusCount": {
+        "anyOf": [
+          {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          },
+          {
+            "$ref": "#/definitions/v2/CensusOmission"
+          }
+        ],
+        "description": "Local o200k accounting, or an explicit refusal to spend unbounded census work. Numeric captures from older clients remain valid counted values."
+      },
+      "CensusOmission": {
+        "enum": [
+          "workLimit"
+        ],
+        "type": "string"
+      },
       "ClaudeSubscriptionAccount": {
         "properties": {
           "available": {
@@ -19630,9 +19649,7 @@
             "$ref": "#/definitions/v2/PreambleSection"
           },
           "tokens": {
-            "format": "uint64",
-            "minimum": 0.0,
-            "type": "integer"
+            "$ref": "#/definitions/v2/CensusCount"
           }
         },
         "required": [

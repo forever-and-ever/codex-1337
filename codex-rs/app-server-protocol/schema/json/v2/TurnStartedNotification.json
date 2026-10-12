@@ -280,6 +280,25 @@
       ],
       "type": "object"
     },
+    "CensusCount": {
+      "anyOf": [
+        {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        {
+          "$ref": "#/definitions/CensusOmission"
+        }
+      ],
+      "description": "Local o200k accounting, or an explicit refusal to spend unbounded census work. Numeric captures from older clients remain valid counted values."
+    },
+    "CensusOmission": {
+      "enum": [
+        "workLimit"
+      ],
+      "type": "string"
+    },
     "CodeModeEvent": {
       "oneOf": [
         {
@@ -1453,9 +1472,7 @@
           "$ref": "#/definitions/PreambleSection"
         },
         "tokens": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
+          "$ref": "#/definitions/CensusCount"
         }
       },
       "required": [
