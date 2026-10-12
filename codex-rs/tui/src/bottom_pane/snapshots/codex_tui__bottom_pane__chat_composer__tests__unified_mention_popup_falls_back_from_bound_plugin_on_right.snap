@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/chat_composer.rs
-assertion_line: 5328
 expression: terminal.backend()
 ---
 "  Mentions                                                                                          "
@@ -10,5 +9,5 @@ expression: terminal.backend()
 "  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
 "                                                                                                    "
 "› @left  @bound                                                                                     "
-"                                                                                                    "
+"                                                                                                  󰜗 "
 "                                                                                 100% context left  "

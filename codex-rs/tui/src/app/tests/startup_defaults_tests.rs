@@ -609,7 +609,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
                 .replace(&displayed_directory, "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
             › Ask Codex to do anything
-
+                                                                                          󰜗
             ────────────────────────────────────────────────────────────────────────────────
               Activity  —
             ────────────────────────────────────────────────────────────────────────────────

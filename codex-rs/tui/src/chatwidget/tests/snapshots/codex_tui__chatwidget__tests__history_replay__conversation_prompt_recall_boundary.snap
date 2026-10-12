@@ -3,7 +3,7 @@ source: tui/src/chatwidget/tests/history_replay.rs
 expression: "render_bottom_popup(&chat, 80)"
 ---
 › use $sample
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────

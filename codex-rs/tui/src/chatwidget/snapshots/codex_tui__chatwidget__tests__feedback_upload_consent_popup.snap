@@ -4,7 +4,7 @@ expression: popup
 ---
       Upload logs?
 › As
-      The following files will be sent:
+      The following files will be sent:                                       󰜗
 ────    • codex-logs.log                                                    ────
   Ac    • client-logs.txt (if available)
 ────    • codex-doctor-report.json                                          ────

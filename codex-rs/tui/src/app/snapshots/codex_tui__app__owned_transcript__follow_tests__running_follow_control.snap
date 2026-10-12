@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/owned_transcript_follow_tests.rs
-assertion_line: 134
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::tests::buffer_text(buffer))"
 ---
               transcript row 32
@@ -10,7 +9,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 • Working (0s • ⌃c to interrupt)
 
 › draft stays here
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────

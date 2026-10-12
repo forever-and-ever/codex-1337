@@ -6,7 +6,7 @@ expression: popup
       This will stop the current turn and archive the session.
 
 › As
-    › 1. No, don't archive  Return to the current session
+    › 1. No, don't archive  Return to the current session                     󰜗
 ────  2. Yes, archive       Archive this session now                        ────
   Ac
 ────  enter select · esc back                                               ────

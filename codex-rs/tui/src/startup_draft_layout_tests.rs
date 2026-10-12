@@ -41,7 +41,7 @@ fn new_startup_decoration_tracks_draft_and_session_action() {
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 32,
     );
-    let mut blossom_visible = Vec::new();
+    let mut landing_visible = Vec::new();
     for (draft, action, pending) in [
         ("", StartupDraftSessionAction::New, false),
         (" ", StartupDraftSessionAction::New, false),
@@ -58,20 +58,23 @@ fn new_startup_decoration_tracks_draft_and_session_action() {
         let layout = OwnedStartupLayout::new(&pump);
         let mut buffer = Buffer::empty(area);
         layout.render(area, &mut buffer);
-        blossom_visible.push(buffer.content.iter().any(|cell| {
-            cell.symbol()
-                .chars()
-                .any(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch))
-        }));
+        landing_visible.push(
+            buffer
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("/resume"),
+        );
     }
     assert_eq!(
-        blossom_visible,
+        landing_visible,
         [true, false, true, false, false, false, true]
     );
 }
 
 #[tokio::test]
-async fn configured_welcome_opt_out_disables_blossom_and_clicks() -> anyhow::Result<()> {
+async fn configured_welcome_opt_out_controls_static_landing_page() -> anyhow::Result<()> {
     use clap::Parser;
     use codex_config::LoaderOverrides;
     use crossterm::event::KeyModifiers;
@@ -91,7 +94,7 @@ async fn configured_welcome_opt_out_disables_blossom_and_clicks() -> anyhow::Res
     };
     for (settings, enabled) in [
         ("", true),
-        ("[tui]\nanimations = false\n", false),
+        ("[tui]\nanimations = false\n", true),
         ("[tui.effects]\nwelcome = false\n", false),
         (
             "[tui]\nanimations = false\n[tui.effects]\nwelcome = false\n",
@@ -117,23 +120,24 @@ async fn configured_welcome_opt_out_disables_blossom_and_clicks() -> anyhow::Res
         .expect("bootstrap settings");
         let mut pump = crate::startup_draft::tests::quiet_startup_test_pump();
         // The provisional frame uses the bootstrap value; subsequent frames use effective config.
-        pump.motion = presentation.screen.welcome_motion;
+        pump.welcome_enabled = presentation.screen.welcome_enabled;
         for effective in [false, true] {
             if effective {
                 pump.apply_settings(&local_settings, codex_home.path());
             }
             let mut buffer = Buffer::empty(area);
             OwnedStartupLayout::new(&pump).render(area, &mut buffer);
-            let visible = buffer.content.iter().any(|cell| {
-                cell.symbol()
-                    .chars()
-                    .any(|ch| ('\u{2801}'..='\u{28ff}').contains(&ch))
-            });
+            let visible = buffer
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+                .contains("/resume");
             assert_eq!(
                 visible, enabled,
                 "settings: {settings}, effective: {effective}"
             );
-            assert_eq!(pump.blossom.borrow_mut().handle_mouse(click), enabled);
+            assert!(!pump.blossom.borrow_mut().handle_mouse(click));
         }
     }
     Ok(())

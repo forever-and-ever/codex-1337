@@ -9,7 +9,7 @@ empty (48 columns):
 
 
 › Ask Codex to do anything
-
+                                              󰜗
   ? for shortcuts
 ---
 configured (48 columns):
@@ -19,7 +19,7 @@ configured (48 columns):
 
 
 › Ask Codex to do anything
-
+                                              󰜗
   ? for shortcuts
 ---
 resuming (48 columns):
@@ -29,7 +29,7 @@ resuming (48 columns):
   Resuming session…
 
 › Ask Codex to do anything
-
+                                              󰜗
   ? for shortcuts
 ---
 forking (48 columns):
@@ -39,7 +39,7 @@ forking (48 columns):
   Forking session…
 
 › draft while loading
-
+                                              󰜗
 
 ---
 multiline (48 columns):
@@ -50,7 +50,7 @@ multiline (48 columns):
 
 › first startup line
   second startup line
-
+                                              󰜗
 
 ---
 narrow (18 columns):
@@ -63,3 +63,4 @@ narrow (18 columns):
   line
   second startup
   line
+                󰜗

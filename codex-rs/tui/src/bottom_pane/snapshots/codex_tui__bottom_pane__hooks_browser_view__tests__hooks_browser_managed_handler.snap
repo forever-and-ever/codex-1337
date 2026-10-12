@@ -9,7 +9,8 @@ expression: "render_lines(&view, 112)"
 › [x]  1  Unnamed hook                                                                                          
                                                                                                                 
   Event     PermissionRequest                                                                                   
-  Matcher   Bash                                                                                                
+  Tool namespace ^functions$                                                                                    
+  Tool name ^exec_command$                                                                                      
   Source    Admin config                                                                                        
   Command   /enterprise/hooks/permission-check.sh                                                               
   Mode      Sync                                                                                                

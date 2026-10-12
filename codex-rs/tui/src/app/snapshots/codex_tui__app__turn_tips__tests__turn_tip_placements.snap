@@ -10,7 +10,7 @@ working=true, response rows=1, 80x12
   └ Tip: Try /help.
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ working=true, response rows=1, 80x12
 working=true, response rows=1, 80x6
 
 › Ask Codex to do anything
-
+                                                                              󰜗
   Activity  —
 
   gpt-test default · /tmp/project
@@ -32,7 +32,7 @@ working=false, response rows=1, 80x12
 
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ working=false, response rows=30, 80x12
 
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -57,7 +57,7 @@ working=false, response rows=1, 80x9
 
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ working=false, response rows=1, 80x10
 
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ working=false, response rows=1, 80x11
 
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ working=false, response rows=1, 12x12
 
 
 › Ask Codex
-
+          󰜗
 ────────────
   Activity
            —
@@ -105,5 +105,5 @@ working=false, response rows=1, 12x12
 working=false, response rows=1, 80x4
 
 › Ask Codex to do anything
-
+                                                                              󰜗
   gpt-test default · /tmp/project

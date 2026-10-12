@@ -4,7 +4,7 @@ expression: "render_bottom_popup(&chat, 80)"
 ---
       Enable memories?
 › As  Memories are disabled in this TUI session.
-
+                                                                              󰜗
 ────                                                                        ────
   Ac› 1. Yes, enable  Save on the server for new threads without changing
 ────                  this thread                                           ────

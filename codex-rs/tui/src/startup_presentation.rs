@@ -66,9 +66,7 @@ pub(super) async fn load(
         .is_none_or(|items| !items.is_empty());
     let keymap = RuntimeKeymap::from_config(&settings.keymap).map_err(io::Error::other)?;
     let disable_paste_burst = settings.disable_paste_burst.unwrap_or(false);
-    let welcome_motion = crate::motion::MotionMode::from_animations_enabled(
-        settings.animations && settings.effects.welcome,
-    );
+    let welcome_enabled = settings.effects.welcome;
     Ok(StartupPresentation {
         bootstrap_config,
         config_cwd,
@@ -76,7 +74,7 @@ pub(super) async fn load(
             use_alt_screen,
             transcript_mode,
             status_line_enabled,
-            welcome_motion,
+            welcome_enabled,
             keymap,
             disable_paste_burst,
         },

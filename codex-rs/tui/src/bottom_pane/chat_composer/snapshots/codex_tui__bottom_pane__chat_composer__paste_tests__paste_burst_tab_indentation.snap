@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/chat_composer/paste_tests.rs
-assertion_line: 38
 expression: terminal.backend()
 ---
 "                                                            "
@@ -9,5 +8,5 @@ expression: terminal.backend()
 "   third line                                               "
 "                                                            "
 "                                                            "
-"                                                            "
+"                                                          󰜗 "
 "  tab to queue message                   100% context left  "

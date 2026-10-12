@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/chat_composer/reconnect_tests.rs
-assertion_line: 58
 expression: rows
 ---
                                         
@@ -9,5 +8,5 @@ expression: rows
   line 18 abc                           
   line 19 abc                           
   line 20 ac                            
-                                        
+                                      󰜗 
                      100% context left

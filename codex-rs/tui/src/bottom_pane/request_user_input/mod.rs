@@ -3821,7 +3821,7 @@ mod tests {
         › Type your answer (optional)
 
 
-
+                                                                                                                          󰜗
         ⌃x enter to submit answer | ⌃c to interrupt
         ");
     }

@@ -9,7 +9,8 @@ expression: "render_lines(&view, 112)"
 › [x]  1  Unnamed hook                                                                                          
                                                                                                                 
   Event     PreToolUse                                                                                          
-  Matcher   Bash                                                                                                
+  Tool namespace ^functions$                                                                                    
+  Tool name ^exec_command$                                                                                      
   Source    Plugin - security-tools@openai-curated                                                              
   MCP Server scanner                                                                                            
   MCP Tool  scan_file                                                                                           

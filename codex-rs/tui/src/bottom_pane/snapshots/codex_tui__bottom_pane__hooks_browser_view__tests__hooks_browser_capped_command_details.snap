@@ -10,7 +10,8 @@ expression: "render_lines(&view, 44)"
 › [x]  1  Check shell commands before allow…
                                             
   Event     PreToolUse                      
-  Matcher   Bash                            
+  Tool namespace ^functions$                
+  Tool name ^exec_command$                  
   Source    User config - /tmp/h.json       
   Command   one two three four five six     
             seven eight nine ten eleven     

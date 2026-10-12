@@ -5,21 +5,21 @@ expression: "snapshots.join(\"\\n\\n\")"
 40 columns, cursor Some((2, 1))
                             ⠈     ⢀
 ›⠁Ask Codex to do anything         ⠈
-       ⢀            ⠠     ⠄         ⠠
+       ⢀            ⠠     ⠄         ⠠ 󰜗
   ? for shortcuts    100% context left
 first input:
 
 › x
-
+                                      󰜗
                      100% context left
 
 80 columns, cursor Some((2, 1))
                             ⠈     ⢀     ⠁                 ⠂
 ›⠁Ask Codex to do anything         ⠈      ⠁
-       ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀
+       ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀                   󰜗
   ? for shortcuts                                            100% context left
 first input:
 
 › x
-
+                                                                              󰜗
                                                              100% context left

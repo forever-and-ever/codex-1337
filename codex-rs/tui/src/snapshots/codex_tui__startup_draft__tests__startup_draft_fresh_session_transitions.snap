@@ -10,7 +10,7 @@ before:
   Resuming session…
 
 › draft while loading
-
+                                              󰜗
 
 after:
 
@@ -19,7 +19,7 @@ after:
 
 
 › draft while loading
-
+                                              󰜗
 
 ---
 fork lookup fallback:
@@ -30,7 +30,7 @@ before:
   Forking session…
 
 › draft while loading
-
+                                              󰜗
 
 after:
 
@@ -39,7 +39,7 @@ after:
 
 
 › draft while loading
-
+                                              󰜗
 
 ---
 resume picker cancellation:
@@ -52,7 +52,7 @@ after:
 
 
 › Ask Codex to do anything
-
+                                              󰜗
   ? for shortcuts
 ---
 fork picker cancellation:
@@ -65,5 +65,5 @@ after:
 
 
 › Ask Codex to do anything
-
+                                              󰜗
   ? for shortcuts

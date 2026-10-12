@@ -24,7 +24,6 @@ use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::motion::MotionMode;
 use crate::terminal_palette;
 use lighting::Lighting;
 pub(crate) use policy::Presentation;
@@ -197,14 +196,12 @@ impl EmptyStateAnimation {
             .then_some(FRAME_INTERVAL)
     }
 
-    /// Draw only in space the caller has cleared and owns. The centered blossom returns
-    /// on clear, without restarting or scheduling animation.
+    /// Paint the static landing page only in unused space owned by the caller.
     pub(crate) fn render_first_screen(
         &mut self,
         available: Rect,
         buffer: &mut Buffer,
         composer: Option<ComposerState>,
-        _motion: MotionMode,
     ) -> Option<Duration> {
         self.render_landing_page(available, buffer, composer);
         None

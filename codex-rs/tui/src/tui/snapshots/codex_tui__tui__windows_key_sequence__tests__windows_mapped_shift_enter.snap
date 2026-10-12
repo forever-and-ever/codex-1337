@@ -1,6 +1,5 @@
 ---
 source: tui/src/tui/windows_key_sequence_tests.rs
-assertion_line: 188
 expression: terminal.backend()
 ---
 "                                                            "
@@ -10,5 +9,5 @@ expression: terminal.backend()
 "                                                            "
 "                                                            "
 "                                                            "
-"                                                            "
+"                                                          󰜗 "
 "                                         100% context left  "

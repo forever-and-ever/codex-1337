@@ -7,7 +7,7 @@ expression: "setup.replace(&chat.config.cwd.display().to_string(), \"[CWD]\")"
 
 
 › Input disabled until setup completes.
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────

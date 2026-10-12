@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/chat_composer/sparkle_tests.rs
-assertion_line: 561
 expression: "format!(\"command during startup:\\n{}\\n\\nafter command:\\n{}\", text(&pending),\ntext(&completed))"
 ---
 command during startup:
@@ -8,11 +7,11 @@ command during startup:
   /statusline  configure which items appear in the status line
 
 › /status
-
+                                                                              󰜗
                                                              100% context left
 
 after command:
                             ⠈     ⢀     ⠁                 ⠂
 ›⠁Ask Codex to do anything         ⠈      ⠁
-       ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀
+       ⢀            ⠠     ⠄         ⠠          ⢀    ⠠     ⡀                   󰜗
   ? for shortcuts                                            100% context left

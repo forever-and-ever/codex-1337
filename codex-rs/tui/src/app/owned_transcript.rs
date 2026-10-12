@@ -98,7 +98,6 @@ impl App {
                 && self.local_settings.tui.effects.shimmer
                 && tui.presentation_mode() == crate::tui::PresentationMode::Normal,
         );
-        let presentation_animated = tui.presentation_mode() == crate::tui::PresentationMode::Normal;
         let composer = self.first_screen_composer();
         let latest_navigation = if self.enter_returns_to_latest() {
             "enter/esc latest"
@@ -311,14 +310,7 @@ impl App {
             blossom_tick = chat_widget
                 .empty_state_animation
                 .borrow_mut()
-                .render_first_screen(
-                    view.remaining_area(),
-                    frame.buffer,
-                    composer,
-                    MotionMode::from_animations_enabled(
-                        self.local_settings.tui.animations && presentation_animated,
-                    ),
-                );
+                .render_first_screen(view.remaining_area(), frame.buffer, composer);
             bottom.render(bottom_area, frame.buffer);
             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
                 tip.render(area, frame.buffer);

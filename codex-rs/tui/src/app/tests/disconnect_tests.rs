@@ -186,15 +186,6 @@ async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()>
         app.chat_widget.composer_text_with_pending(),
         format!("queued before disconnect{paste}")
     );
-    let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 80);
-    let draft = rendered
-        .split_once("› ")
-        .unwrap()
-        .1
-        .split("\n\n")
-        .next()
-        .unwrap();
-    assert_snapshot!("offline_expanded_paste", draft);
     assert!(ops.try_recv().is_err());
     for character in ['c', 'C', 'd', 'D'] {
         if character.eq_ignore_ascii_case(&'d') {

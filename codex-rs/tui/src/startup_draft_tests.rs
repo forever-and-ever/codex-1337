@@ -35,7 +35,7 @@ where
     StartupDraftPump {
         header,
         blossom: std::cell::RefCell::new(blossom),
-        motion: crate::motion::MotionMode::Animated,
+        welcome_enabled: true,
         bottom_pane: startup_draft_bottom_pane(
             AppEventSender::new(tx),
             FrameRequester::test_dummy(),

@@ -59,7 +59,7 @@ pub(crate) struct StartupScreen {
     pub(crate) use_alt_screen: bool,
     pub(crate) transcript_mode: crate::transcript_mode::TranscriptMode,
     pub(crate) status_line_enabled: bool,
-    pub(crate) welcome_motion: crate::motion::MotionMode,
+    pub(crate) welcome_enabled: bool,
     pub(crate) keymap: RuntimeKeymap,
     pub(crate) disable_paste_burst: bool,
 }
@@ -105,7 +105,7 @@ pub(crate) struct StartupDraft {
 pub(crate) struct StartupDraftPump {
     header: Box<dyn HistoryCell>,
     pub(crate) blossom: std::cell::RefCell<crate::empty_state_animation::EmptyStateAnimation>,
-    motion: crate::motion::MotionMode,
+    welcome_enabled: bool,
     bottom_pane: BottomPane,
     events: Pin<Box<dyn Stream<Item = TuiEvent> + Send>>,
     app_event_rx: UnboundedReceiver<AppEvent>,
@@ -138,7 +138,7 @@ impl StartupDraft {
         tui.terminal_app_over_ssh = initialized_terminal.terminal_app_over_ssh;
         tui.set_alt_screen_enabled(screen.use_alt_screen);
         let mut pump = StartupDraftPump::new(&tui, initial_screen, session_action);
-        pump.motion = screen.welcome_motion;
+        pump.welcome_enabled = screen.welcome_enabled;
         pump.bottom_pane
             .set_status_line_enabled(screen.status_line_enabled);
         pump.bottom_pane.set_keymap_bindings(&screen.keymap);
@@ -209,7 +209,7 @@ impl StartupDraftPump {
         Self {
             header,
             blossom: std::cell::RefCell::new(blossom),
-            motion: crate::system_motion::mode(),
+            welcome_enabled: true,
             bottom_pane: startup_draft_bottom_pane(
                 AppEventSender::new(app_event_tx),
                 tui.frame_requester(),
@@ -259,9 +259,7 @@ impl StartupDraftPump {
             self.cancel_submission();
         }
         self.configured_cwd = Some(cwd.to_path_buf());
-        self.motion = crate::motion::MotionMode::from_animations_enabled(
-            local_settings.tui.animations && local_settings.tui.effects.welcome,
-        );
+        self.welcome_enabled = local_settings.tui.effects.welcome;
         self.header = startup_session_header(Some(cwd));
         history_cell::set_fresh_session(self.header.as_mut(), &self.blossom.borrow().fresh_session);
         self.bottom_pane.set_status_line_enabled(

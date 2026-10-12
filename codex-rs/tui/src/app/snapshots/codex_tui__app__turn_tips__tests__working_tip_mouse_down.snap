@@ -1,6 +1,5 @@
 ---
 source: tui/src/app/turn_tips_tests.rs
-assertion_line: 454
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)"
 ---
   ? for shortcuts
@@ -22,7 +21,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
   └ Tip: Try /help.
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────

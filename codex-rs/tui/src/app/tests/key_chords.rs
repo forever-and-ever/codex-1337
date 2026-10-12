@@ -112,7 +112,7 @@ async fn global_chord_keeps_hints_and_completes_before_deadline() -> Result<()> 
             .replace(&test_path_display("/tmp/project"), "/tmp/project"),
         @"
     › Ask Codex to do anything
-
+                                                                                  󰜗
     ────────────────────────────────────────────────────────────────────────────────
       Activity  —
     ────────────────────────────────────────────────────────────────────────────────

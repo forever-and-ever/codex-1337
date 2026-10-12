@@ -3123,10 +3123,10 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
     app.set_agent_picker_thread_visibility(archived_thread_id, AgentPickerThreadVisibility::Hidden);
 
     Box::pin(app.open_agent_picker(&mut app_server)).await;
-    assert_snapshot!(render_bottom_popup(&app.chat_widget, /*width*/ 80), @r###"
+    assert_snapshot!(render_bottom_popup(&app.chat_widget, /*width*/ 80), @"
           Enable subagents?
     › As  Subagents are disabled in this TUI session.
-
+                                                                                  󰜗
     ────                                                                        ────
       Ac› 1. Yes, enable  Save on the server for new threads without changing
     ────                  this thread                                           ────
@@ -3134,7 +3134,7 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
       Ct
     ────  enter select · esc back                                               ────
       gpt-test default · /tmp/project · Main [default]
-    "###);
+    ");
     Ok(())
 }
 

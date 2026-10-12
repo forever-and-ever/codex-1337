@@ -1,12 +1,11 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
-assertion_line: 4091
 expression: snapshot
 ---
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
-"                                                                                "
+"                                                                              󰜗 "
 "────────────────────────────────────────────────────────────────────────────────"
 "  Activity  —                                                                   "
 "────────────────────────────────────────────────────────────────────────────────"

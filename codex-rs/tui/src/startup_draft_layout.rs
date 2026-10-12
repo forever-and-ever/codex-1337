@@ -64,7 +64,7 @@ impl Renderable for OwnedStartupLayout<'_> {
         paragraph.render(header, buf);
         let message = match self.pump.session_action {
             StartupDraftSessionAction::New | StartupDraftSessionAction::NewFromCommandCenter => {
-                let composer = (!self.pump.submission_pending)
+                let composer = (self.pump.welcome_enabled && !self.pump.submission_pending)
                     .then(|| self.pump.bottom_pane.empty_state_composer())
                     .flatten();
                 self.next_frame
@@ -76,7 +76,6 @@ impl Renderable for OwnedStartupLayout<'_> {
                         },
                         buf,
                         composer,
-                        self.pump.motion,
                     ));
                 None
             }

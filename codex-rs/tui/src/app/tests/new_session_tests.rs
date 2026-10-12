@@ -304,7 +304,7 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
                 .replace(&server_config.cwd.display().to_string(), "<PROJECT>");
             insta::assert_snapshot!(rendered, @"
             › Ask Codex to do anything
-
+                                                                                          󰜗
             ────────────────────────────────────────────────────────────────────────────────
               Activity  —
             ────────────────────────────────────────────────────────────────────────────────

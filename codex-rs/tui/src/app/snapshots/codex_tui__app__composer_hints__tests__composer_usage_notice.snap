@@ -8,7 +8,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
                                                   ⚠ 5h limit: 8% left · /status
 
 › Ask Codex to do anything
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 
 › draft stays
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -34,7 +34,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 • Working (0s • ⌃c to interrupt)
 
 › draft stays
-
+                              󰜗
 ────────────────────────────────
   Activity  —
 ────────────────────────────────
@@ -46,7 +46,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 • Working (0s • ⌃…
 
 › draft stays
-
+                󰜗
 ──────────────────
   Activity  —
 ──────────────────
@@ -66,7 +66,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › draft stays
   second line
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › draft stays
   second line
-
+                                                                              󰜗
 ────────────────────────────────────────────────────────────────────────────────
   Activity  —
 ────────────────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 80 columns, 6 rows, running=true, queued=false
 
 › draft stays
-
+                                                                              󰜗
   Activity  —
 
   GPT-5.6-Sol default · /tmp/project

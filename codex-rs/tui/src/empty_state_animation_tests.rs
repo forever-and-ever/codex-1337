@@ -7,49 +7,42 @@ use pretty_assertions::assert_eq;
 #[test]
 fn first_screen_respects_available_space_without_a_replay_hitbox() {
     for (width, height) in [(120, 44), (80, 24), (40, 16), (24, 8), (24, 7)] {
-        for motion in [MotionMode::Animated, MotionMode::Reduced] {
-            let screen = Rect::new(7, 3, width, height);
-            let free = Rect::new(screen.x + 2, screen.y + 2, width - 4, height - 4);
-            let mut buffer = Buffer::empty(screen);
-            for cell in &mut buffer.content {
-                cell.set_symbol(".");
-            }
-            let before = buffer.clone();
-            let mut animation = EmptyStateAnimation::default();
-            animation.start_fresh();
-            // A stale animated screen must not leave an invisible click target or redraw clock.
-            animation.stage = Some(screen);
-            animation.replaying = true;
-            animation.last_frame = Some(Instant::now());
-            assert_eq!(
-                animation.render_first_screen(
-                    free,
-                    &mut buffer,
-                    Some(ComposerState::Empty),
-                    motion,
-                ),
-                None
-            );
-            assert_eq!(animation.stage, None);
-            assert_eq!(animation.last_frame, None);
-            assert!(!animation.replaying);
-            assert!(!animation.handle_mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: free.x,
-                row: free.y,
-                modifiers: KeyModifiers::NONE,
-            }));
-            let text = buffer
-                .content
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>();
-            assert_eq!(text.contains("/resume"), free.height >= 4);
-            for y in screen.y..screen.bottom() {
-                for x in screen.x..screen.right() {
-                    if !free.contains(Position::new(x, y)) {
-                        assert_eq!(buffer[(x, y)], before[(x, y)]);
-                    }
+        let screen = Rect::new(7, 3, width, height);
+        let free = Rect::new(screen.x + 2, screen.y + 2, width - 4, height - 4);
+        let mut buffer = Buffer::empty(screen);
+        for cell in &mut buffer.content {
+            cell.set_symbol(".");
+        }
+        let before = buffer.clone();
+        let mut animation = EmptyStateAnimation::default();
+        animation.start_fresh();
+        // A stale animated screen must not leave an invisible click target or redraw clock.
+        animation.stage = Some(screen);
+        animation.replaying = true;
+        animation.last_frame = Some(Instant::now());
+        assert_eq!(
+            animation.render_first_screen(free, &mut buffer, Some(ComposerState::Empty)),
+            None
+        );
+        assert_eq!(animation.stage, None);
+        assert_eq!(animation.last_frame, None);
+        assert!(!animation.replaying);
+        assert!(!animation.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: free.x,
+            row: free.y,
+            modifiers: KeyModifiers::NONE,
+        }));
+        let text = buffer
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert_eq!(text.contains("/resume"), free.height >= 4);
+        for y in screen.y..screen.bottom() {
+            for x in screen.x..screen.right() {
+                if !free.contains(Position::new(x, y)) {
+                    assert_eq!(buffer[(x, y)], before[(x, y)]);
                 }
             }
         }

@@ -9,7 +9,8 @@ expression: "render_lines(&view, 112)"
 › [!]  1  Unnamed hook · new                                                                                    
                                                                                                                 
   Event     PreToolUse                                                                                          
-  Matcher   Bash                                                                                                
+  Tool namespace ^functions$                                                                                    
+  Tool name ^exec_command$                                                                                      
   Source    User config - /tmp/hooks.json                                                                       
   Command   ~/bin/untrusted.sh                                                                                  
   Mode      Async                                                                                               

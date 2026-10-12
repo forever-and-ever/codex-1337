@@ -1,6 +1,5 @@
 ---
 source: tui/src/bottom_pane/chat_composer/status_surface_tests.rs
-assertion_line: 344
 expression: "format!(\"{buf:?}\")"
 ---
 Buffer {
@@ -12,7 +11,7 @@ Buffer {
         "  /mcp       list MCP tools; use /mcp verbose or /mcp login <name>              ",
         "                                                                                ",
         "› /m                                                                            ",
-        "                                                                                ",
+        "                                                                              󰜗 ",
         "  model · high · fast                                                           ",
     ],
     styles: [
@@ -35,5 +34,7 @@ Buffer {
         x: 66, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 1, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 78, y: 6, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 79, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
