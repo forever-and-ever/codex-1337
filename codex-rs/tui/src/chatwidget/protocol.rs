@@ -239,7 +239,18 @@ impl ChatWidget {
                         notification.turn_id.clone(),
                         notification.error.message.clone(),
                     ));
-                    if !from_replay
+                    if from_replay
+                        && notification.error.codex_error_info
+                            != Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
+                    {
+                        self.flush_answer_stream_with_separator();
+                        self.finalize_turn();
+                        self.add_to_history(history_cell::FailedTurnCell::new(
+                            notification.turn_id,
+                            notification.error,
+                            None,
+                        ));
+                    } else if !from_replay
                         && notification.error.codex_error_info
                             == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
                     {
@@ -531,6 +542,21 @@ impl ChatWidget {
                     TurnAbortReason::Interrupted
                 };
                 self.on_interrupted_turn(reason);
+            }
+            TurnStatus::Failed
+                if replay_kind.is_some()
+                    && notification.turn.error.as_ref().is_none_or(|error| {
+                        error.codex_error_info
+                            != Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation)
+                    }) =>
+            {
+                self.flush_answer_stream_with_separator();
+                self.finalize_turn();
+                if let Some(cell) = history_cell::FailedTurnCell::from_turn(&notification.turn) {
+                    self.add_to_history(cell);
+                }
+                self.last_non_retry_error = None;
+                self.request_redraw();
             }
             TurnStatus::Failed => {
                 if replay_kind.is_none() {

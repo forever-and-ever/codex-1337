@@ -33,6 +33,34 @@ impl App {
         tui: &mut tui::Tui,
         cell: Arc<dyn HistoryCell>,
     ) {
+        if let Some(failure) = cell.as_any().downcast_ref::<history_cell::FailedTurnCell>()
+            && let Some((index, existing)) =
+                self.transcript_cells
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, cell)| {
+                        cell.as_any()
+                            .downcast_ref::<history_cell::FailedTurnCell>()
+                            .filter(|existing| existing.turn_id == failure.turn_id)
+                            .map(|existing| (index, existing))
+                    })
+        {
+            if existing.completed_at == failure.completed_at && existing.error == failure.error {
+                return;
+            }
+            // A buffered Error may follow its authoritative completion during replay.
+            if existing.completed_at.is_none() || failure.completed_at.is_some() {
+                self.commit_transcript_splice(
+                    tui,
+                    TranscriptSplice {
+                        range: index..index + 1,
+                        cells: vec![cell],
+                        shape: SpliceShape::Revision,
+                    },
+                );
+            }
+            return;
+        }
         if cell
             .as_any()
             .downcast_ref::<history_cell::CodeModeCell>()

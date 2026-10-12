@@ -218,7 +218,7 @@ impl App {
         }
     }
 
-    /// Project successful turn completion metadata after the corresponding page's final item.
+    /// Project terminal witnesses with their turn, including still-unloaded failures.
     #[expect(
         clippy::too_many_arguments,
         reason = "retain the page's native projection inputs while scoped hydration updates the existing reading view"
@@ -253,7 +253,7 @@ impl App {
             }
         }
         let mut cells = Vec::new();
-        for (items, completed_turn) in completion::group_completed_turn_items(items, turns) {
+        for (items, completed_turn) in completion::group_turn_items(items, turns) {
             // Internal prompts stay invisible, but still separate adjacent tool groups.
             for visible in items.split(|item| hidden_item_ids.contains(item.id())) {
                 let projected = thread_items_to_transcript_cells(
@@ -277,12 +277,16 @@ impl App {
                     }
                 }
             }
-            if let Some(turn) = completed_turn
-                && let Some(completion) = self
-                    .chat_widget
-                    .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
-            {
-                cells.push(Arc::new(completion));
+            if let Some(turn) = completed_turn {
+                if let Some(failure) = history_cell::FailedTurnCell::from_turn(turn) {
+                    cells.push(Arc::new(failure));
+                } else if turn.status == TurnStatus::Completed
+                    && let Some(completion) = self
+                        .chat_widget
+                        .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
+                {
+                    cells.push(Arc::new(completion));
+                }
             }
         }
         cells.retain(|cell| {
@@ -295,8 +299,53 @@ impl App {
                     .is_some_and(|existing| existing.id == thought.id)
             })
         });
+        self.reseat_history_failures(tui, &mut cells);
         self.transcript_view.seat_thoughts(&mut cells);
         cells
+    }
+
+    /// Move metadata witnesses with their source turn, never with a later page's tools.
+    fn reseat_history_failures(&mut self, tui: &mut tui::Tui, cells: &mut [Arc<dyn HistoryCell>]) {
+        let mut removed = Vec::new();
+        for cell in cells {
+            let Some(failure) = cell.as_any().downcast_ref::<history_cell::FailedTurnCell>() else {
+                continue;
+            };
+            if let Some((index, existing)) =
+                self.transcript_cells
+                    .iter()
+                    .enumerate()
+                    .find(|(_, existing)| {
+                        existing
+                            .as_any()
+                            .downcast_ref::<history_cell::FailedTurnCell>()
+                            .is_some_and(|existing| existing.turn_id == failure.turn_id)
+                    })
+            {
+                let existing_failure = existing
+                    .as_any()
+                    .downcast_ref::<history_cell::FailedTurnCell>()
+                    .expect("matched failure cell");
+                if existing_failure.completed_at == failure.completed_at
+                    && existing_failure.error == failure.error
+                {
+                    *cell = Arc::clone(existing);
+                }
+                removed.push(index);
+            }
+        }
+        removed.sort_unstable();
+        removed.dedup();
+        for index in removed.into_iter().rev() {
+            self.commit_transcript_splice(
+                tui,
+                TranscriptSplice {
+                    range: index..index + 1,
+                    cells: Vec::new(),
+                    shape: SpliceShape::Members(Vec::new()),
+                },
+            );
+        }
     }
 
     /// Insert each page once, keeping session headers and any backtrack selection in place.

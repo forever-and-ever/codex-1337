@@ -127,10 +127,13 @@ mod arrival;
 mod base;
 mod dynamic;
 mod exec;
+mod failed_turn;
 mod hook_cell;
 mod markdown_render_cache;
 mod mcp;
 mod messages;
+pub(crate) use failed_turn::FailedTurnCell;
+
 mod notices;
 mod patches;
 mod plans;
