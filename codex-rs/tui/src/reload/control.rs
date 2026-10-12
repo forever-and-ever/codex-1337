@@ -340,6 +340,7 @@ mod tests {
         });
         let thread_id = codex_protocol::ThreadId::new().to_string();
         let mut operation = legacy_input.clone();
+        // Compact/review/shell after finalization can retain the previous stale ID.
         operation["safety_buffering_prompt"] = Value::Null;
         let mut prepared = legacy_input.clone();
         prepared["pending_user_message_client_id"] = Value::Null;
@@ -419,6 +420,23 @@ mod tests {
             let mut mixed = legacy_checkpoint.clone();
             mixed[slot] = canonical[slot].clone();
             assert_eq!(version(&mixed).unwrap(), 3);
+        }
+        // Finalization leaves an unrelated retired ID; unavailable recovery leaves
+        // the same ID already owned by an uncertain queue entry. Neither is a live
+        // prompt, and normalizing either must preserve the entire recovered draft.
+        for stale_id in ["retired-id", "uncertain-id"] {
+            let mut finalized = legacy_checkpoint.clone();
+            finalized["draft"]["safety_buffering_prompt"] = Value::Null;
+            finalized["draft"]["user_turn_pending_start"] = json!(false);
+            finalized["draft"]["pending_user_message_client_id"] = json!(stale_id);
+            let migrated: super::super::RetainedInput = serde_json::from_value(finalized)?;
+            let finalized = serde_json::to_value(migrated)?;
+            assert_eq!(finalized["draft"]["input_queue"]["turn"], "Idle");
+            assert_eq!(finalized["draft"]["composer"], composer);
+            assert_eq!(
+                finalized["draft"]["input_queue"]["queued_user_messages"],
+                canonical["draft"]["input_queue"]["queued_user_messages"]
+            );
         }
         let mut unknown = legacy_checkpoint.clone();
         unknown["threads"][&thread_id]["unknown_input_fact"] = json!(true);

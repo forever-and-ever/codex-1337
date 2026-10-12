@@ -125,6 +125,12 @@ impl LegacyInput {
                 message,
                 source: self.safety_buffering_source,
             },
+            // Old finalization retired the prompt without clearing its receipt ID;
+            // compact/review/shell could then mark that same state pending again.
+            // Unavailable recovery also left the ID after moving the whole prompt
+            // into an exact-ID Unconfirmed queue entry. Without a prompt this ID
+            // cannot enrich a submission or reconcile receipt: normalize the stale
+            // artifact, preserving any actionable identity in the queue itself.
             (true, None, _) => UserTurnInput::AwaitingStart(PendingTurnStart::Operation),
             (false, None, _) => UserTurnInput::Idle,
         };
