@@ -182,7 +182,7 @@ hooks = true
 [hooks]
 
 [[hooks.PreToolUse]]
-selector = { type = "tool", namespace = "^functions$", name = "^exec_command$" }
+selector = {{ type = "tool", namespace = "^functions$", name = "^exec_command$" }}
 
 [[hooks.PreToolUse.hooks]]
 type = "command"
