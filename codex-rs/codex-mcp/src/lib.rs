@@ -112,6 +112,11 @@ mod client_tool_catalog;
 pub(crate) mod codex_apps;
 pub(crate) mod connection_manager;
 pub(crate) mod elicitation;
+mod elicitation_authority;
+
+pub use elicitation_authority::ElicitationApprovalAuthority;
+pub use elicitation_authority::IssuingElicitationReviewer;
+pub use elicitation_authority::PreparedElicitationReview;
 mod ema_auth;
 mod event_stream;
 mod executor_environment_http_client;

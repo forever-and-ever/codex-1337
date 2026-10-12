@@ -63,7 +63,8 @@ pub trait ElicitationReviewer: Send + Sync {
     ) -> BoxFuture<'static, Result<Option<ElicitationResponse>>>;
 }
 
-pub type ElicitationReviewerHandle = Arc<dyn ElicitationReviewer>;
+pub type ElicitationReviewerHandle =
+    Arc<dyn crate::elicitation_authority::IssuingElicitationReviewer>;
 
 /// Holds an owner-provided registration while an MCP elicitation is waiting for a response.
 #[derive(Clone)]
@@ -352,8 +353,31 @@ impl ElicitationRequestManager {
                     lifecycle,
                     ..
                 } = &authority;
-                let approval_policy = config.approval_policy.value();
-                let Some(permission_profile) = config.permission_profile_for_server(&server_name)
+                let issued_authority = crate::elicitation_authority::resolve(
+                    reviewer.as_ref(),
+                    config,
+                    ElicitationReviewRequest {
+                        server_name: server_name.clone(),
+                        request_id: id.clone(),
+                        elicitation: elicitation.clone(),
+                    },
+                )
+                .await;
+                let issued_authority = match issued_authority {
+                    Ok(prepared) => prepared,
+                    Err(_)
+                        if elicitation
+                            .meta()
+                            .and_then(|meta| meta.get(STRICT_AUTO_REVIEW_KEY))
+                            == Some(&Value::Bool(true)) =>
+                    {
+                        return Ok(strict_auto_review_decline());
+                    }
+                    Err(error) => return Err(error),
+                };
+                let approval_policy = issued_authority.authority.approval_policy;
+                let Some(permission_profile) =
+                    issued_authority.authority.permission_profile.as_ref()
                 else {
                     return Ok(ElicitationResponse {
                         action: ElicitationAction::Decline,
@@ -373,40 +397,31 @@ impl ElicitationRequestManager {
                         ) {
                             return Ok(strict_auto_review_decline());
                         }
-                        let Some(reviewer) = reviewer.as_ref() else {
+                        if reviewer.is_none() {
                             return Ok(strict_auto_review_decline());
-                        };
+                        }
                         let _active_elicitation =
                             lifecycle.as_ref().map(ElicitationLifecycle::start);
-                        return Ok(
-                            match reviewer
-                                .review(ElicitationReviewRequest {
-                                    server_name,
-                                    request_id: id,
-                                    elicitation,
-                                })
-                                .await
+                        return Ok(match issued_authority.review.await {
+                            Ok(Some(response))
+                                if (response.action == ElicitationAction::Accept
+                                    && response.content == Some(serde_json::json!({}))
+                                    || matches!(
+                                        response.action,
+                                        ElicitationAction::Decline | ElicitationAction::Cancel
+                                    ) && response.content.is_none())
+                                    && response
+                                        .meta
+                                        .as_ref()
+                                        .and_then(Value::as_object)
+                                        .and_then(|meta| meta.get(APPROVALS_REVIEWER_KEY))
+                                        .and_then(Value::as_str)
+                                        == Some("auto_review") =>
                             {
-                                Ok(Some(response))
-                                    if (response.action == ElicitationAction::Accept
-                                        && response.content == Some(serde_json::json!({}))
-                                        || matches!(
-                                            response.action,
-                                            ElicitationAction::Decline | ElicitationAction::Cancel
-                                        ) && response.content.is_none())
-                                        && response
-                                            .meta
-                                            .as_ref()
-                                            .and_then(Value::as_object)
-                                            .and_then(|meta| meta.get(APPROVALS_REVIEWER_KEY))
-                                            .and_then(Value::as_str)
-                                            == Some("auto_review") =>
-                                {
-                                    response
-                                }
-                                Ok(Some(_)) | Ok(None) | Err(_) => strict_auto_review_decline(),
-                            },
-                        );
+                                response
+                            }
+                            Ok(Some(_)) | Ok(None) | Err(_) => strict_auto_review_decline(),
+                        });
                     }
                     None | Some(Value::Bool(false)) => {}
                     Some(_) => return Ok(strict_auto_review_decline()),
@@ -457,15 +472,8 @@ impl ElicitationRequestManager {
                         });
                     }
 
-                    if let Some(reviewer) = reviewer {
-                        let request = ElicitationReviewRequest {
-                            server_name: server_name.clone(),
-                            request_id: id.clone(),
-                            elicitation: elicitation.clone(),
-                        };
-                        if let Some(response) = reviewer.review(request).await? {
-                            return Ok(response);
-                        }
+                    if let Some(response) = issued_authority.review.await? {
+                        return Ok(response);
                     }
                 }
 

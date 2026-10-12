@@ -18,6 +18,22 @@ struct RecordingReviewer {
     calls: AtomicUsize,
     active_elicitations: Arc<AtomicUsize>,
     response: ReviewerResponse,
+    authority: Option<crate::ElicitationApprovalAuthority>,
+}
+
+impl crate::IssuingElicitationReviewer for RecordingReviewer {
+    fn approval_authority(
+        self: Arc<Self>,
+        request: ElicitationReviewRequest,
+    ) -> BoxFuture<'static, anyhow::Result<Option<crate::PreparedElicitationReview>>> {
+        let authority = self.authority.clone();
+        Box::pin(async move {
+            Ok(authority.map(|authority| crate::PreparedElicitationReview {
+                authority,
+                review: Box::pin(async move { self.review(request).await }),
+            }))
+        })
+    }
 }
 
 impl RecordingReviewer {
@@ -26,6 +42,7 @@ impl RecordingReviewer {
             calls: AtomicUsize::default(),
             active_elicitations: Arc::default(),
             response,
+            authority: None,
         })
     }
 }
@@ -93,7 +110,7 @@ fn elicitation_fixture(
         .insert("another-independent-mcp".to_string(), permission_profile);
     let manager = ElicitationRequestManager::new(
         config,
-        reviewer.map(|reviewer| reviewer as Arc<dyn ElicitationReviewer>),
+        reviewer.map(|reviewer| reviewer as crate::ElicitationReviewerHandle),
         lifecycle,
         ElicitationRequestRouter::default(),
     );
@@ -158,10 +175,21 @@ async fn permission_elicitation_preserves_automatic_review_decisions() {
                 meta: Some(json!({"approvals_reviewer": "auto_review", "message": "Denied"})),
             },
         ] {
-            let reviewer = RecordingReviewer::new(Ok(Some(response.clone())));
+            let mut reviewer = RecordingReviewer::new(Ok(Some(response.clone())));
+            Arc::get_mut(&mut reviewer).unwrap().authority =
+                Some(crate::ElicitationApprovalAuthority {
+                    approval_policy,
+                    permission_profile: Some(PermissionProfile::Disabled),
+                });
+            // The connection's published settings belong to a future action.
+            let future_policy = if approval_policy == AskForApproval::Never {
+                AskForApproval::OnRequest
+            } else {
+                AskForApproval::Never
+            };
             let (manager, events, sender) = elicitation_fixture(
-                approval_policy,
-                PermissionProfile::Disabled,
+                future_policy,
+                PermissionProfile::read_only(),
                 Some(reviewer.clone()),
             );
             let [request, _, _] = form_elicitations(
@@ -579,7 +607,7 @@ fn verification_fixture(
     Arc::make_mut(&mut config).mcp_server_catalog = catalog.build();
     let manager = ElicitationRequestManager::new(
         config,
-        reviewer.map(|reviewer| reviewer as Arc<dyn ElicitationReviewer>),
+        reviewer.map(|reviewer| reviewer as crate::ElicitationReviewerHandle),
         /*lifecycle*/ None,
         ElicitationRequestRouter::default(),
     );

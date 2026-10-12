@@ -94,11 +94,11 @@ for line in sys.stdin:
         send(pending_elicitations.pop(0))
         continue
     elif method is None and str(request.get("id", "")).startswith("server-approval"):
-        approval_results[request["id"]] = request.get("result")
+        approval_results[request["id"]] = request.get("result", {"error": request.get("error")})
         if pending_elicitations:
             send(pending_elicitations.pop(0))
         else:
-            result = approval_results if multiple else request.get("result")
+            result = approval_results if multiple else approval_results[request["id"]]
             send({"id": pending_call, "result": {"content": [
                 {"type": "text", "text": json.dumps(result)}]}})
         continue
@@ -621,8 +621,11 @@ async fn node_elicitations_attribute_independent_reviews_without_changing_action
             _ => {}
         }
     }
-    assert_eq!(assessments.len(), 2);
-    assert_ne!(assessments[0].id, assessments[1].id);
+    let invalid_identity = !matches!(call_id_source, CallIdSource::Host | CallIdSource::Missing);
+    assert_eq!(assessments.len(), if invalid_identity { 0 } else { 2 });
+    if !invalid_identity {
+        assert_ne!(assessments[0].id, assessments[1].id);
+    }
     let attributed = call_id_source == CallIdSource::Host && server_name != "elicitation";
     for (index, (assessment, status)) in assessments
         .iter()
@@ -707,6 +710,22 @@ async fn node_elicitations_attribute_independent_reviews_without_changing_action
             .context("MCP fixture responses")?,
     )?;
     assert_eq!(replies.as_object().map(serde_json::Map::len), Some(2));
+    if invalid_identity {
+        // An advertised invocation is an authority claim, not optional attribution.
+        // Only a genuinely absent identity can request independent server review.
+        assert!(guardian.iter().all(|review| review.requests().is_empty()));
+        for reply in replies.as_object().expect("MCP fixture responses").values() {
+            assert_eq!(reply["error"]["code"], -32603);
+            assert!(
+                reply["error"]["message"]
+                    .as_str()
+                    .expect("identity error")
+                    .contains("invocation")
+            );
+        }
+        test.codex.shutdown_and_wait().await?;
+        return Ok(());
+    }
     assert_eq!(
         replies["server-approval-0"],
         json!({

@@ -49,10 +49,6 @@ pub(crate) struct ResolvedStepSettings {
     pub(crate) reasoning_summary: ReasoningSummary,
     /// Tier sent on requests, filtered by feature and model support.
     pub(crate) service_tier: Option<String>,
-    /// MCP elicitations historically follow refreshed thread defaults. Preserve that
-    /// for older clients until this turn receives an explicit live reviewer update.
-    /// MCP tool calls answer to the issuing step instead.
-    pub(crate) mcp_approvals_reviewer_override: Option<ApprovalsReviewer>,
 }
 
 impl ResolvedStepSettings {
@@ -72,7 +68,6 @@ impl ResolvedStepSettings {
             model_info,
             reasoning_summary,
             service_tier,
-            mcp_approvals_reviewer_override: None,
         }
     }
 
@@ -138,11 +133,7 @@ impl ResolvedStepSettings {
             } else {
                 Arc::new(selected.resolve_model_info(models_manager, overrides).await)
             };
-        let mut next = Self::new(Arc::new(selected), model_info, features);
-        next.mcp_approvals_reviewer_override = update
-            .approvals_reviewer
-            .or(self.mcp_approvals_reviewer_override);
-        Ok(next)
+        Ok(Self::new(Arc::new(selected), model_info, features))
     }
 
     /// Rechecks the retained selection against current managed constraints.

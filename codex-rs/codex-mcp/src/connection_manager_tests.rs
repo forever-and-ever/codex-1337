@@ -1090,6 +1090,8 @@ struct DecliningElicitationReviewer {
     review_count: AtomicUsize,
 }
 
+impl crate::IssuingElicitationReviewer for DecliningElicitationReviewer {}
+
 impl ElicitationReviewer for DecliningElicitationReviewer {
     fn review(
         &self,
