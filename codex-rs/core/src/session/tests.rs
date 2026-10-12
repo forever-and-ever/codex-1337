@@ -118,6 +118,7 @@ use crate::rollout::recorder::RolloutRecorder;
 use crate::session::Submission;
 use crate::state::ActiveTurn;
 use crate::state::TaskKind;
+use crate::tasks::RegularTask;
 use crate::tasks::SessionTask;
 use crate::tasks::SessionTaskResult;
 use crate::tasks::UserShellCommandMode;
@@ -2376,11 +2377,20 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         .unwrap();
     compacted_mail.id = Some(compacted_id.clone());
     let replacement = session.clone_history().await.annotated_items().to_vec();
-    let checkpoint = serde_json::from_value(json!({
-        "message": "checkpoint excluding compacted mail",
-        "replacement_history": replacement,
-    }))
-    .unwrap();
+    let checkpoint = CompactedItem {
+        message: "checkpoint excluding compacted mail".into(),
+        replacement_history: Some(replacement),
+        guardian_history: None,
+        retained_context: None,
+        mcp_resource_origins: None,
+        window_number: None,
+        first_window_id: None,
+        previous_window_id: None,
+        window_id: None,
+        compaction_response_id: None,
+        latest_token_usage_record: None,
+        resume_metadata: None,
+    };
     session
         .live_thread()
         .unwrap()
