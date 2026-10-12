@@ -1,3 +1,4 @@
+mod agent_mail;
 mod archive_thread;
 mod context_role;
 mod create_thread;

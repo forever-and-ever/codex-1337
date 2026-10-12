@@ -10,7 +10,6 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_rollout::ResponseItemEnvelope;
-use codex_rollout::RolloutItem;
 use codex_state::AgentMailState;
 use codex_thread_store::AgentMailPersistence;
 use futures::FutureExt;
@@ -67,41 +66,16 @@ pub(super) fn accepted_mail_submission_id(op: &codex_protocol::protocol::Op) -> 
     }
 }
 
-fn canonical_agent_mail<'a>(
-    history: &'a [RolloutItem],
+fn canonical_agent_mail(
+    history: &std::collections::HashMap<ResponseItemId, ResponseItemEnvelope>,
     communication: &InterAgentCommunication,
-) -> CodexResult<Option<&'a ResponseItemEnvelope>> {
-    let Some(id) = communication.id.as_ref() else {
-        return Ok(None);
+) -> CodexResult<bool> {
+    let Some(envelope) = communication.id.as_ref().and_then(|id| history.get(id)) else {
+        return Ok(false);
     };
-    let expected = communication.to_model_input_item();
-    let ResponseItem::AgentMessage {
-        author,
-        recipient,
-        content,
-        ..
-    } = &expected
-    else {
-        unreachable!("ordinary communication is typed mail")
-    };
-    for item in history {
-        let RolloutItem::ResponseItem(item) = item else {
-            continue;
-        };
-        if item.id() != Some(id) {
-            continue;
-        }
-        if matches!(&item.item, ResponseItem::AgentMessage {
-            author: saved_author, recipient: saved_recipient, content: saved_content, ..
-        } if saved_author == author && saved_recipient == recipient && saved_content == content)
-        {
-            return Ok(Some(item));
-        }
-        return Err(CodexErr::Fatal(format!(
-            "canonical agent-mail identity {id} has conflicting attribution or content"
-        )));
-    }
-    Ok(None)
+    codex_thread_store::validate_accepted_agent_mail(envelope, communication)
+        .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+    Ok(true)
 }
 
 impl Session {
@@ -241,11 +215,15 @@ impl Session {
             .await
             .unwrap_or_else(|_| unreachable!("communication boundary remains open"));
         self.check_agent_mail_health()?;
-        let history = live_thread.load_history(true).await.map_err(|error| {
-            CodexErr::Fatal(format!(
-                "cannot reconcile accepted agent-mail history: {error}"
-            ))
-        })?;
+        let ids: Vec<_> = pending.iter().map(|record| record.id.clone()).collect();
+        let history = live_thread
+            .find_accepted_agent_mail(&ids)
+            .await
+            .map_err(|error| {
+                CodexErr::Fatal(format!(
+                    "cannot reconcile accepted agent-mail history: {error}"
+                ))
+            })?;
         for record in pending {
             if self.services.local_agent_runtime.agent_mail_family_root() != Some(record.root) {
                 return Err(CodexErr::InvalidRequest(
@@ -260,7 +238,7 @@ impl Session {
                     CodexErr::Fatal(format!("invalid accepted agent-mail payload: {error}"))
                 })?;
             communication.id = Some(record.id.clone());
-            if canonical_agent_mail(&history.items, &communication)?.is_some() {
+            if canonical_agent_mail(&history, &communication)? {
                 // Identity proves past admission, not current context membership.
                 // Owned admission or ordinary resume owns effective history;
                 // compaction/rollback removal must never be undone here.
@@ -513,12 +491,15 @@ impl Session {
             CodexErr::Fatal("accepted agent mail requires canonical recipient history".into())
         })?;
         // The owned caller already holds the communication boundary.
-        let history = live_thread.load_history(true).await.map_err(|error| {
-            CodexErr::Fatal(format!(
-                "cannot inspect canonical agent-mail admission: {error}"
-            ))
-        })?;
-        if canonical_agent_mail(&history.items, communication)?.is_some() {
+        let history = live_thread
+            .find_accepted_agent_mail(std::slice::from_ref(id))
+            .await
+            .map_err(|error| {
+                CodexErr::Fatal(format!(
+                    "cannot inspect canonical agent-mail admission: {error}"
+                ))
+            })?;
+        if canonical_agent_mail(&history, communication)? {
             // Resume owns effective context; past canonical admission must never
             // resurrect an item subsequently removed by compaction or rollback.
             db.thread_queue()

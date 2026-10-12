@@ -1,11 +1,17 @@
 //! Accepted mail distinguishes canonical commitment from rebuildable metadata projection.
 
 use super::LiveThread;
+use crate::LocalThreadStore;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
 use crate::UpdateThreadMetadataParams;
+use codex_protocol::ResponseItemId;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 
 pub enum AgentMailCommit {
@@ -14,6 +20,12 @@ pub enum AgentMailCommit {
 }
 
 pub trait AgentMailPersistence {
+    /// Searches retained raw canonical history, including items removed from model context.
+    fn find_accepted_agent_mail(
+        &self,
+        ids: &[ResponseItemId],
+    ) -> impl Future<Output = ThreadStoreResult<HashMap<ResponseItemId, ResponseItemEnvelope>>> + Send;
+
     /// Err means canonical completion is uncertain, not that no bytes were written.
     fn append_accepted_agent_mail(
         &self,
@@ -22,6 +34,33 @@ pub trait AgentMailPersistence {
 }
 
 impl AgentMailPersistence for LiveThread {
+    async fn find_accepted_agent_mail(
+        &self,
+        ids: &[ResponseItemId],
+    ) -> ThreadStoreResult<HashMap<ResponseItemId, ResponseItemEnvelope>> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        if let Some(store) = self
+            .thread_store
+            .as_any()
+            .downcast_ref::<LocalThreadStore>()
+        {
+            return store.find_accepted_agent_mail(self.thread_id, ids).await;
+        }
+        // Nonlocal full-history stores retain their existing canonical history contract.
+        // A store that cannot supply that history fails closed, not via volatile context.
+        let history = self.load_history(true).await?;
+        let ids = ids.iter().cloned().collect();
+        let mut found = HashMap::new();
+        for item in history.items {
+            if let RolloutItem::ResponseItem(envelope) = item {
+                retain_accepted_agent_mail(&mut found, &ids, envelope)?;
+            }
+        }
+        Ok(found)
+    }
+
     async fn append_accepted_agent_mail(
         &self,
         envelope: &ResponseItemEnvelope,
@@ -39,6 +78,54 @@ impl AgentMailPersistence for LiveThread {
             Err(error) => AgentMailCommit::MetadataPending(error),
         })
     }
+}
+
+pub fn validate_accepted_agent_mail(
+    envelope: &ResponseItemEnvelope,
+    communication: &InterAgentCommunication,
+) -> ThreadStoreResult<()> {
+    if communication.trigger_turn
+        || communication.id.is_none()
+        || envelope.id() != communication.id.as_ref()
+        || !same_agent_mail(&envelope.item, &communication.to_model_input_item())
+    {
+        return Err(ThreadStoreError::Conflict {
+            message: format!(
+                "canonical agent-mail identity {:?} has conflicting attribution, content or mode",
+                communication.id
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn same_agent_mail(left: &ResponseItem, right: &ResponseItem) -> bool {
+    matches!((left, right), (
+        ResponseItem::AgentMessage { author: left_author, recipient: left_recipient, content: left_content, .. },
+        ResponseItem::AgentMessage { author: right_author, recipient: right_recipient, content: right_content, .. },
+    ) if left_author == right_author && left_recipient == right_recipient && left_content == right_content)
+}
+
+pub(crate) fn retain_accepted_agent_mail(
+    found: &mut HashMap<ResponseItemId, ResponseItemEnvelope>,
+    ids: &HashSet<ResponseItemId>,
+    envelope: ResponseItemEnvelope,
+) -> ThreadStoreResult<()> {
+    let Some(id) = envelope.id().filter(|id| ids.contains(*id)).cloned() else {
+        return Ok(());
+    };
+    if let Some(previous) = found.get(&id) {
+        if !same_agent_mail(&previous.item, &envelope.item) {
+            return Err(ThreadStoreError::Conflict {
+                message: format!(
+                    "canonical agent-mail identity {id} has conflicting attribution or content"
+                ),
+            });
+        }
+    } else {
+        found.insert(id, envelope);
+    }
+    Ok(())
 }
 
 impl LiveThread {

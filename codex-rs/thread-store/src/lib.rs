@@ -37,6 +37,7 @@ pub use live_thread::AgentMailCommit;
 pub use live_thread::AgentMailPersistence;
 pub use live_thread::LiveThread;
 pub use live_thread::LiveThreadInitGuard;
+pub use live_thread::validate_accepted_agent_mail;
 pub use local::LocalThreadStore;
 pub use local::LocalThreadStoreConfig;
 pub use local::RolloutMigrationFailureReason;

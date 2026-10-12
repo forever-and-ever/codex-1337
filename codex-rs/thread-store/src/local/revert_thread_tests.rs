@@ -1,13 +1,18 @@
+use codex_protocol::AgentPath;
+use codex_protocol::ResponseItemId;
 use codex_protocol::ThreadId;
 use codex_protocol::models::BaseInstructions;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
+use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
+use codex_state::AgentMailState;
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
@@ -24,6 +29,7 @@ use crate::SortDirection;
 use crate::StoredTurnItemsView;
 use crate::ThreadPersistenceMetadata;
 use crate::ThreadStore;
+use crate::validate_accepted_agent_mail;
 
 #[tokio::test]
 async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
@@ -38,13 +44,48 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
     let store = LocalThreadStore::new(config, Some(state_db.clone()));
     let thread_id = ThreadId::new();
     create_paginated_thread(&store, thread_id).await;
+    let sender = ThreadId::new();
+    let mut mail = Vec::new();
+    for content in [
+        "retained canonical mail",
+        "discarded canonical mail",
+        "not yet admitted",
+    ] {
+        let mut communication = InterAgentCommunication::new(
+            AgentPath::root().join("sender").expect("sender path"),
+            AgentPath::root(),
+            Vec::new(),
+            content.to_string(),
+            false,
+        );
+        let id = ResponseItemId::new("amsg_mail");
+        let payload = serde_json::to_string(&communication).expect("serialize accepted mail");
+        state_db
+            .thread_queue()
+            .accept_agent_mail(
+                &id,
+                thread_id,
+                sender,
+                thread_id,
+                content,
+                &"0".repeat(64),
+                &payload,
+            )
+            .await
+            .expect("accept mail before process-crash boundary");
+        communication.id = Some(id);
+        mail.push(communication);
+    }
+    // Canonical append completed, but the process died before the inbox acknowledgment.
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
             items: vec![
                 turn_started("turn-1"),
+                RolloutItem::ResponseItem(ResponseItemEnvelope::new(mail[0].to_model_input_item())),
                 turn_completed("turn-1"),
                 turn_started("turn-2"),
+                RolloutItem::ResponseItem(ResponseItemEnvelope::new(mail[1].to_model_input_item())),
                 turn_completed("turn-2"),
             ],
         })
@@ -107,6 +148,45 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         Some(vec![home.path().join("workspace")])
     );
     assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
+    let ids: Vec<_> = mail
+        .iter()
+        .map(|communication| communication.id.clone().expect("accepted ID"))
+        .collect();
+    for id in &ids[..2] {
+        assert_eq!(
+            state_db
+                .thread_queue()
+                .agent_mail(thread_id, id)
+                .await
+                .expect("read admitted mail")
+                .expect("accepted identity")
+                .state,
+            AgentMailState::Admitted
+        );
+    }
+    let pending = state_db
+        .thread_queue()
+        .pending_agent_mail(thread_id)
+        .await
+        .expect("read remaining inbox");
+    assert_eq!(
+        pending.iter().map(|record| &record.id).collect::<Vec<_>>(),
+        vec![&ids[2]]
+    );
+    let retained = store
+        .find_accepted_agent_mail(thread_id, &ids)
+        .await
+        .expect("scan retained lineage across compressed source");
+    assert_eq!(retained.len(), 1);
+    validate_accepted_agent_mail(
+        retained.get(&ids[0]).expect("retained canonical mail"),
+        &mail[0],
+    )
+    .expect("canonical attribution and content");
+    assert!(
+        !retained.contains_key(&ids[1]),
+        "discarded suffix is not canonical merely because its file survives"
+    );
 
     // Simulate an older binary replacing the rollout without the creator fields it does not know.
     let rollout = tokio::fs::read_to_string(&first_replacement_path)
@@ -135,6 +215,22 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .await
         .expect("revert before first turn");
     assert_eq!(turn_ids(&store, thread_id).await, Vec::<String>::new());
+    assert!(
+        store
+            .find_accepted_agent_mail(thread_id, &ids)
+            .await
+            .expect("scan empty reverted history")
+            .is_empty()
+    );
+    let pending = state_db
+        .thread_queue()
+        .pending_agent_mail(thread_id)
+        .await
+        .expect("read inbox after repeated revert");
+    assert_eq!(
+        pending.iter().map(|record| &record.id).collect::<Vec<_>>(),
+        vec![&ids[2]]
+    );
     let stored = state_db
         .get_thread(thread_id)
         .await
