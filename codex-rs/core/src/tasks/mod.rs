@@ -468,10 +468,7 @@ impl Session {
             .acquire()
             .await
             .unwrap_or_else(|_| unreachable!("extension admission semaphore is never closed"));
-        if !self.input_queue.has_pending_mailbox_items().await
-            || (!self.input_queue.has_trigger_turn_mailbox_items().await
-                && !self.has_outstanding_durable_sleep())
-        {
+        if !self.input_queue.has_pending_mailbox_items().await {
             return;
         }
 
@@ -518,7 +515,7 @@ impl Session {
         if !input.iter().any(
             |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
         ) {
-            // Queue-only mail wakes durable sleep without selecting a new task's settings.
+            // Ordinary mail resumes the recipient without selecting a new task's settings.
             start_options = previous_options;
             start_options.cyber_access_program = self
                 .reference_context_item()

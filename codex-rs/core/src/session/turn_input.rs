@@ -694,7 +694,10 @@ impl Session {
             return None;
         }
         let needs_new_turn = self.input_queue.has_trigger_turn_mailbox_items().await;
-        if !needs_new_turn && !self.has_outstanding_durable_sleep() {
+        if !self.input_queue.has_pending_mailbox_items().await {
+            return None;
+        }
+        if !self.mailbox_turn_has_capacity().await {
             return None;
         }
         let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);

@@ -82,8 +82,8 @@ pub struct ResolvedMultiAgentV2UsageHints {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum MessageDeliveryMode {
-    /// Deliver to the mailbox without starting an idle agent.
-    QueueOnly,
+    /// Deliver attributed mail, waking an idle recipient without assigning a new task.
+    Ordinary,
     /// Deliver to the active turn or start work if the agent is idle.
     TriggerTurn,
 }

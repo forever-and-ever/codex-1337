@@ -64,11 +64,11 @@ pub trait AgentControl: Send + Sync {
     ) -> BoxFuture<'_, Result<(LiveAgent, ThreadConfigSnapshot)>>;
 
     /// Resolve, reload if needed and accept input. Agent messages retain their attribution
-    /// and wake mode: queue-only messages do not start work and follow-ups cannot target
+    /// and task identity: ordinary messages may wake idle work and follow-ups cannot target
     /// the root. Legacy user input can address loaded threads outside the agent registry.
     fn send(&self, request: SendRequest) -> BoxFuture<'_, Result<DeliveryReceipt>>;
 
-    /// Take queued, non-turn-starting mail in order, without loading the recipient.
+    /// Take queued ordinary mail in order, without loading the recipient.
     /// This in-memory operation performs no I/O; returning transfers ownership to the caller.
     fn take_mailbox(
         &self,
@@ -76,7 +76,7 @@ pub trait AgentControl: Send + Sync {
     ) -> Vec<codex_protocol::protocol::InterAgentCommunication>;
 
     /// Observe whether unread mail is available. Subscribe before the first read so
-    /// arrivals cannot be missed; notifications do not consume mail or start a turn.
+    /// arrivals cannot be missed; notifications do not consume mail; the recipient owns admission.
     fn watch_mailbox(&self, agent: ThreadId) -> tokio::sync::watch::Receiver<bool>;
 
     /// Load a recorded V2 child through its live immediate parent, without sending input.

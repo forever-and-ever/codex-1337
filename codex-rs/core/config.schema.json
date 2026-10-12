@@ -2974,7 +2974,7 @@
           "type": "string"
         },
         "wait_agent_batch_window_ms": {
-          "description": "Maximum mailbox batching window; zero disables batching.",
+          "description": "Fixed family-mail delivery window while at least two subagents are active; zero disables batching.",
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"

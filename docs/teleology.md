@@ -90,8 +90,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### turn-economy
 
 - Telos: the model spends a round trip only when there is news.
-- Holds: Code Mode `exec` and `wait` return only when the cell finishes or yields, user input or turn-triggering mail arrives, or `[features.code_mode] max_yield_time_ms` (default 600000) expires, and ignore the model's `yield_time_ms`; in Code Mode Only, `exec_command` waits for exit unless `background` is set, and an empty `write_stdin` from a cell reports a running process no sooner than 60 s; `wait_agent` batches mailbox wakes while several children run; Code Mode exposes `clock.sleep`.
-- Owners: `codex-rs/core/src/session/input_queue/interjection.rs` (`Interjection`), `codex-rs/core/src/tools/code_mode/wait_handler.rs`, `codex-rs/core/src/tools/code_mode/execute_handler.rs`, `codex-rs/core/src/tools/handlers/multi_agents_v2/wake_batch.rs`, `codex-rs/core/src/unified_exec/initial_wait.rs` (`InitialWait`), `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`, `codex-rs/core/src/tools/handlers/unified_exec/write_stdin/cell.rs` (`EMPTY_WRITE_FLOOR_MS`), `codex-rs/core/src/tools/spec_plan.rs`.
+- Holds: Code Mode `exec` and `wait` return only when the cell finishes or yields, user input or released mail arrives, or `[features.code_mode] max_yield_time_ms` (default 600000) expires, and ignore the model's `yield_time_ms`; in Code Mode Only, `exec_command` waits for exit unless `background` is set, and an empty `write_stdin` from a cell reports a running process no sooner than 60 s; ordinary family mail wakes idle recipients and batches for one fixed window while at least two subagents are active anywhere in the family; `wait_agent` observes released mail without adding another hold; Code Mode exposes `clock.sleep`.
+- Owners: `codex-rs/core/src/session/input_queue/interjection.rs` (`Interjection`), `codex-rs/core/src/tools/code_mode/wait_handler.rs`, `codex-rs/core/src/tools/code_mode/execute_handler.rs`, `codex-rs/core/src/session/input_queue/mailbox_batch.rs`, `codex-rs/core/src/unified_exec/initial_wait.rs` (`InitialWait`), `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`, `codex-rs/core/src/tools/handlers/unified_exec/write_stdin/cell.rs` (`EMPTY_WRITE_FLOOR_MS`), `codex-rs/core/src/tools/spec_plan.rs`.
 - Tripwire: `interjections_yield_exec_and_wait_without_stopping_the_cell` and `wait_agent_wake_preserves_mail_and_steers` (`codex-rs/core/tests/suite/pending_input.rs`), `code_mode_can_return_exec_command_output` (`codex-rs/core/tests/suite/code_mode.rs`), `sleep_tool_uses_configured_time_provider` (`codex-rs/core/tests/suite/current_time_reminder.rs`). The 60 s floor: none.
 - Pressure: 0.162 #51812 enables `instant_interrupt` by default, which decides whether an `Interjection` cuts off streaming, and edits `pending_input.rs`; #51209 edits `code_mode/mod.rs` and `execute_handler.rs`; #51332 edits `multi_agents_v2/wait.rs`; #50962 and #50741 edit `exec_command.rs` and `write_stdin.rs`.
 - Evidence: 25226df915, 2d9f646044, 9050de4515, cc4701d2fe.
@@ -520,7 +520,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
 - `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`: server-hosted-agents
-- `codex-rs/core/src/tools/handlers/multi_agents_v2/wake_batch.rs`: turn-economy
+- `codex-rs/core/src/session/input_queue/mailbox_batch.rs`: turn-economy
 - `codex-rs/core/src/tools/handlers/script_exec/`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`: turn-economy
 - `codex-rs/core/src/tools/handlers/unified_exec/write_stdin/cell.rs`: turn-economy

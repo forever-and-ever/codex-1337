@@ -43,7 +43,7 @@ impl Handler {
             parse_agent_message(args.message, args.plaintext_message, &invocation.source)?;
         handle_agent_message_tool(
             invocation,
-            MessageDeliveryMode::QueueOnly,
+            MessageDeliveryMode::Ordinary,
             args.target,
             message,
             analytics,

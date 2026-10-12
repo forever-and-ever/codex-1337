@@ -2907,7 +2907,6 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
 ) -> Result<()> {
     const SPAWN_WORKER_PROMPT: &str = "spawn the completion-routing worker";
     const SPAWN_REQUESTER_PROMPT: &str = "spawn the completion-routing requester";
-    const READ_RESULT_PROMPT: &str = "read the completion-routing worker result";
     const WORKER_INITIAL_TASK: &str = "finish the worker initial task";
     const REQUESTER_TASK: &str = "ask the sibling worker to do more";
     const WORKER_FOLLOWUP_TASK: &str = "finish the peer-requested worker task";
@@ -2932,6 +2931,43 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
     let test = builder.build_with_auto_env(&server).await?;
     let root_thread_id = test.session_configured.thread_id;
     let mut created_threads = test.thread_manager.subscribe_thread_created();
+
+    // Install before completion: ordinary results now wake the idle root themselves.
+    let root_result_request = mount_sse_once_match(
+        &server,
+        move |request: &wiremock::Request| {
+            body_contains(request, "peer follow-up finished")
+                && decoded_body(request).is_some_and(|body| {
+                    serde_json::from_slice::<Value>(&body).is_ok_and(|body| {
+                        body["client_metadata"]["thread_id"] == json!(root_thread_id)
+                    })
+                })
+        },
+        sse(vec![
+            ev_response_created("resp-routing-root-result"),
+            ev_assistant_message("msg-routing-root-result", "result received"),
+            ev_completed("resp-routing-root-result"),
+        ]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .and(move |request: &wiremock::Request| {
+            request_has_input_type(request, "agent_message")
+                && decoded_body(request).is_some_and(|body| {
+                    serde_json::from_slice::<Value>(&body).is_ok_and(|body| {
+                        body["client_metadata"]["thread_id"] == json!(root_thread_id)
+                    })
+                })
+        })
+        .respond_with(sse_response(sse(vec![
+            ev_response_created("resp-routing-root-notice"),
+            ev_assistant_message("msg-routing-root-notice", "notice received"),
+            ev_completed("resp-routing-root-notice"),
+        ])))
+        .with_priority(10)
+        .mount(&server)
+        .await;
 
     let worker_spawn_args = serde_json::to_string(&json!({
         "message": WORKER_INITIAL_TASK,
@@ -3134,7 +3170,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
             .await?;
         worker_thread = test.thread_manager.get_thread(worker_thread_id).await?;
         // Simulate the extension restoring durable sleep; Core owns the
-        // queue-only wake and completion routing exercised below.
+        // ordinary-mail wake and completion routing exercised below.
         worker_thread
             .thread_extension_data()
             .insert(codex_extension_items::sleep::SleepItem {
@@ -3212,38 +3248,11 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
         )
     );
 
-    // Fresh turn input is sampled before queued mail is drained. Let that first
-    // request complete successfully so the next request can include the result.
-    mount_sse_once_match(
-        &server,
-        |request: &wiremock::Request| {
-            body_contains(request, READ_RESULT_PROMPT)
-                && !body_contains(request, "peer follow-up finished")
-        },
-        sse(vec![ev_completed("resp-routing-root-before-mail")]),
-    )
-    .await;
-    let root_result_request = mount_sse_once_match(
-        &server,
-        |request: &wiremock::Request| {
-            body_contains(request, READ_RESULT_PROMPT)
-                && body_contains(request, "Sender: /root/worker")
-                && body_contains(request, "peer follow-up finished")
-        },
-        sse(vec![
-            ev_response_created("resp-routing-root-result"),
-            ev_assistant_message("msg-routing-root-result", "result received"),
-            ev_completed("resp-routing-root-result"),
-        ]),
-    )
-    .await;
-    test.submit_turn(READ_RESULT_PROMPT).await?;
-    let root_request = root_result_request
-        .requests()
+    let root_request = wait_for_requests(&root_result_request)
+        .await?
         .into_iter()
         .find(|request| {
             request.body_json()["client_metadata"]["thread_id"] == json!(root_thread_id)
-                && request.body_contains_text(READ_RESULT_PROMPT)
                 && request.body_contains_text("peer follow-up finished")
         })
         .expect("root result request");

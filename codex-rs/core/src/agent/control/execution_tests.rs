@@ -27,9 +27,21 @@ fn execution_guards_count_active_v2_subagent_turns() {
     control
         .ensure_execution_capacity(MultiAgentVersion::V2, &source)
         .expect("first active turn should fit");
+    let mut active = control.runtime.active_subagents();
+    assert_eq!(active.borrow().active, 0);
     let first = control
         .execution_guard(MultiAgentVersion::V2, &source)
         .expect("v2 subagent execution should be counted");
+    assert!(active.has_changed().unwrap());
+    assert_eq!(active.borrow_and_update().active, 1);
+    assert_eq!(
+        LocalAgentControl::default()
+            .runtime
+            .active_subagents()
+            .borrow()
+            .active,
+        0
+    );
     let Err(err) = control.ensure_execution_capacity(MultiAgentVersion::V2, &source) else {
         panic!("second active turn should exceed the derived non-root cap");
     };
@@ -39,6 +51,9 @@ fn execution_guards_count_active_v2_subagent_turns() {
     assert_eq!(*max_threads, 1);
 
     drop(first);
+    assert!(active.has_changed().unwrap());
+    assert_eq!(active.borrow_and_update().active, 0);
+    assert_eq!(active.borrow().release_generation, 1);
     control
         .ensure_execution_capacity(MultiAgentVersion::V2, &source)
         .expect("capacity should be released when the running task drops");

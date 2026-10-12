@@ -201,7 +201,7 @@ impl V2Residency {
                     return false;
                 }
                 // The submission loop has stopped and the residency guard excludes senders.
-                // Preserve unread queue-only mail before dropping the session that held it.
+                // Preserve unread ordinary mail before dropping the session that held it.
                 let mail = candidate_thread
                     .session
                     .input_queue
@@ -301,11 +301,8 @@ async fn is_unloadable(thread: &CodexThread) -> bool {
         AgentStatus::Completed(_) | AgentStatus::Errored(_) | AgentStatus::Interrupted
     ) && thread.session.active_turn.lock().await.is_none()
         && !thread.session.has_outstanding_durable_sleep()
-        && !thread
-            .session
-            .input_queue
-            .has_trigger_turn_mailbox_items()
-            .await
+        && !thread.session.input_queue.has_held_mailbox_items().await
+        && !thread.session.input_queue.has_pending_mailbox_items().await
 }
 
 #[cfg(test)]

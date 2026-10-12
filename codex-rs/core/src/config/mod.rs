@@ -1380,7 +1380,7 @@ pub struct MultiAgentV2Config {
     pub message_board_in_memory: bool,
     pub message_board_remote: Option<codex_features::RemoteMessageBoardConfigToml>,
     pub non_code_mode_only: bool,
-    /// None disables batching; TOML 0 resolves to None.
+    /// Fixed family-mail delivery window with 2+ active subagents. TOML 0 disables it.
     pub wait_agent_batch_window_ms: Option<NonZeroU64>,
 }
 

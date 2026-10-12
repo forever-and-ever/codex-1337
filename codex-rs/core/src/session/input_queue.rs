@@ -20,6 +20,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 
+mod mailbox_batch;
+use mailbox_batch::MailboxQueue;
+
 mod interjection;
 pub(crate) use interjection::Interjection;
 
@@ -99,7 +102,8 @@ pub(crate) struct TurnInputQueue {
 pub(crate) struct InputQueue {
     activity_tx: watch::Sender<InputQueueActivity>,
     controller: Option<(ThreadId, Arc<dyn AgentControl>, watch::Receiver<bool>)>,
-    mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>,
+    mailbox_pending_mails: Mutex<MailboxQueue>,
+    mailbox_batch_changed: tokio::sync::Notify,
 }
 
 pub(crate) struct PendingMailboxCommunication {
@@ -114,7 +118,8 @@ impl InputQueue {
         Self {
             activity_tx,
             controller: None,
-            mailbox_pending_mails: Mutex::new(VecDeque::new()),
+            mailbox_pending_mails: Mutex::new(MailboxQueue::default()),
+            mailbox_batch_changed: tokio::sync::Notify::new(),
         }
     }
 
@@ -211,9 +216,11 @@ impl InputQueue {
         communication: InterAgentCommunication,
         start_options: TurnStartOptions,
     ) {
-        let mut pending = self.mailbox_pending_mails.lock().await;
+        let mut queue = self.mailbox_pending_mails.lock().await;
+        queue.release();
+        let pending = &mut queue.ready;
         // Mail retained while unloaded precedes new submissions to the loaded session.
-        self.read_mailbox(&mut pending);
+        self.read_mailbox(pending);
         pending.push_back(PendingMailboxCommunication {
             communication,
             start_options,
@@ -223,7 +230,7 @@ impl InputQueue {
     }
 
     pub(crate) async fn has_pending_mailbox_items(&self) -> bool {
-        !self.mailbox_pending_mails.lock().await.is_empty()
+        !self.mailbox_pending_mails.lock().await.ready.is_empty()
             || self
                 .controller
                 .as_ref()
@@ -234,14 +241,15 @@ impl InputQueue {
         self.mailbox_pending_mails
             .lock()
             .await
+            .ready
             .iter()
             .any(|mail| mail.communication.trigger_turn)
     }
 
     pub(crate) async fn drain_mailbox(&self) -> Vec<PendingMailboxCommunication> {
         let mut pending = self.mailbox_pending_mails.lock().await;
-        self.read_mailbox(&mut pending);
-        pending.drain(..).collect()
+        self.read_mailbox(&mut pending.ready);
+        pending.ready.drain(..).collect()
     }
 
     pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
@@ -636,37 +644,145 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn input_queue_notifies_mailbox_subscribers() {
+        use futures::FutureExt;
+        use std::num::NonZeroU64;
+        use std::time::Duration;
+        use tokio::time::advance;
+
         let input_queue = InputQueue::new();
-        let (mut activity_rx, pending_activity) =
-            input_queue.subscribe_activity(/*turn_state*/ None).await;
-        assert_eq!(pending_activity, None);
-
-        let mail_one = make_mail(
-            AgentPath::root(),
-            AgentPath::try_from("/root/worker").expect("agent path"),
+        let (mut activity_rx, pending) = input_queue.subscribe_activity(None).await;
+        assert_eq!(pending, None);
+        let execution = |active| crate::agent::control::FamilyExecution {
+            active,
+            ..Default::default()
+        };
+        let (active_tx, mut active_rx) = watch::channel(execution(2));
+        let window = NonZeroU64::new(60_000);
+        // Siblings and deeper descendants share the same deadline; ancestry is not a gate.
+        let first = make_mail(
+            AgentPath::try_from("/root/a/deep").unwrap(),
+            AgentPath::try_from("/root/b").unwrap(),
             "one",
-            /*trigger_turn*/ false,
+            false,
         );
         input_queue
-            .enqueue_mailbox_communication(mail_one, Default::default())
+            .enqueue_batched_mailbox_communication(
+                first.clone(),
+                Default::default(),
+                window,
+                execution(2),
+            )
             .await;
-        let mail_two = make_mail(
-            AgentPath::root(),
-            AgentPath::try_from("/root/worker").expect("agent path"),
+        advance(Duration::from_secs(40)).await;
+        let second = make_mail(
+            AgentPath::try_from("/root/a").unwrap(),
+            AgentPath::try_from("/root/b").unwrap(),
             "two",
-            /*trigger_turn*/ false,
+            false,
         );
         input_queue
-            .enqueue_mailbox_communication(mail_two, Default::default())
+            .enqueue_batched_mailbox_communication(
+                second.clone(),
+                Default::default(),
+                window,
+                execution(2),
+            )
             .await;
-
-        activity_rx.changed().await.expect("mailbox update");
+        advance(Duration::from_secs(19)).await;
+        assert!(
+            input_queue
+                .wait_for_mailbox_release(&mut active_rx)
+                .now_or_never()
+                .is_none()
+        );
+        assert!(!activity_rx.has_changed().unwrap());
+        assert!(!input_queue.has_pending_mailbox_items().await);
+        // Another arrival must not restart the first message's fixed window.
+        advance(Duration::from_secs(1)).await;
+        input_queue.wait_for_mailbox_release(&mut active_rx).await;
+        activity_rx.changed().await.unwrap();
         assert_eq!(
             *activity_rx.borrow_and_update(),
             InputQueueActivity::Mailbox
         );
+        assert_eq!(
+            input_queue.drain_mailbox_input_items().await.0,
+            vec![
+                TurnInput::InterAgentCommunication(first.clone()),
+                TurnInput::InterAgentCommunication(second)
+            ]
+        );
+        assert!(input_queue.drain_mailbox_input_items().await.0.is_empty());
+
+        input_queue
+            .enqueue_batched_mailbox_communication(
+                first.clone(),
+                Default::default(),
+                window,
+                execution(2),
+            )
+            .await;
+        // watch may coalesce a drop and restart; eligibility must remain irrevocable.
+        active_tx.send_modify(|state| {
+            state.active = 1;
+            state.release_generation += 1;
+        });
+        active_tx.send_modify(|state| state.active = 2);
+        input_queue.wait_for_mailbox_release(&mut active_rx).await;
+        assert_eq!(
+            input_queue.drain_mailbox_input_items().await.0,
+            vec![TurnInput::InterAgentCommunication(first.clone())]
+        );
+        // Root instructions and explicit new tasks bypass the hold without overtaking older mail.
+        for (author, task) in [
+            (AgentPath::root(), false),
+            (AgentPath::try_from("/root/a").unwrap(), true),
+        ] {
+            input_queue
+                .enqueue_batched_mailbox_communication(
+                    first.clone(),
+                    Default::default(),
+                    window,
+                    execution(2),
+                )
+                .await;
+            let instruction = make_mail(
+                author,
+                AgentPath::try_from("/root/b").unwrap(),
+                "continue",
+                task,
+            );
+            input_queue
+                .enqueue_batched_mailbox_communication(
+                    instruction.clone(),
+                    Default::default(),
+                    window,
+                    execution(2),
+                )
+                .await;
+            assert_eq!(
+                input_queue.drain_mailbox_input_items().await.0,
+                vec![
+                    TurnInput::InterAgentCommunication(first.clone()),
+                    TurnInput::InterAgentCommunication(instruction)
+                ]
+            );
+        }
+        for active in [0, 1] {
+            input_queue
+                .enqueue_batched_mailbox_communication(
+                    first.clone(),
+                    Default::default(),
+                    window,
+                    execution(active),
+                )
+                .await;
+            assert!(input_queue.has_pending_mailbox_items().await);
+            assert!(!input_queue.has_held_mailbox_items().await);
+            input_queue.drain_mailbox().await;
+        }
     }
 
     #[tokio::test]

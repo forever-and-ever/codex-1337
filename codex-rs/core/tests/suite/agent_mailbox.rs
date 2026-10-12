@@ -1,41 +1,86 @@
-//! Pending mail survives eviction without loading idle recipients.
+//! Ordinary family mail wakes idle recipients without another user submission.
 
 use super::*;
-use crate::suite::settings_commits::COMMITTED_MODEL;
-use crate::suite::settings_commits::PauseAfterCommit;
 use codex_core::config::Config;
 use codex_extension_api::ExtensionRegistryBuilder;
-use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::Op;
 use core_test_support::ThreadIdle;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::mpsc;
-use tokio::sync::oneshot;
 
+#[test_case::test_case(false, false; "singleton")]
+#[test_case::test_case(true, false; "nested_active_family")]
+#[test_case::test_case(false, true; "completion_wakes_idle_parent")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn idle_mail_survives_eviction_and_preserves_followup_order() -> Result<()> {
-    const MAIL: &str = "Keep this note for later";
-    const LATE_MAIL: &str = "Another note while unloaded";
-    const FOLLOWUP: &str = "Read the pending note";
-    const AFTER_FOLLOWUP: &str = "This note must follow the new task";
+async fn idle_mail_wakes_without_user_input(nested: bool, completion: bool) -> Result<()> {
+    const MAIL: &str = "mail after the parent finished";
+    const LATER: &str = "a second message in the same batch";
     let server = start_mock_server().await;
     mount_root_collaboration_call(
         &server,
         FIRST_PROMPT,
         "first-call",
         "spawn_agent",
-        json!({ "message": FIRST_TASK, "task_name": "first", "fork_turns": "none" }),
+        json!({"message": FIRST_TASK, "task_name": "first", "fork_turns": "none"}),
     )
     .await;
-    mount_completed_worker(&server, FIRST_TASK, "first-call").await;
-    let (entered_tx, entered_rx) = oneshot::channel();
-    let (release_tx, release_rx) = mpsc::channel();
+    let first_response = if nested {
+        ev_function_call_with_namespace(
+            "nested-spawn",
+            MULTI_AGENT_V2_NAMESPACE,
+            "spawn_agent",
+            &json!({"message": SECOND_TASK, "task_name": "nested", "fork_turns": "none"})
+                .to_string(),
+        )
+    } else {
+        ev_function_call_with_namespace(
+            "first-wait",
+            MULTI_AGENT_V2_NAMESPACE,
+            "wait_agent",
+            r#"{"timeout_ms":3600000}"#,
+        )
+    };
+    mount_sse_once_match(
+        &server,
+        |request: &wiremock::Request| {
+            body_contains(request, FIRST_TASK) && !has_function_call_output(request, "first-call")
+        },
+        sse(vec![
+            ev_response_created("worker"),
+            first_response,
+            ev_completed("worker"),
+        ]),
+    )
+    .await;
+    if nested {
+        for (task, call_id, wait_id) in [
+            (FIRST_TASK, Some("nested-spawn"), "first-wait"),
+            (SECOND_TASK, None, "nested-wait"),
+        ] {
+            mount_sse_once_match(
+                &server,
+                move |request: &wiremock::Request| {
+                    body_contains(request, task)
+                        && call_id
+                            .map_or(!has_function_call_output(request, "nested-spawn"), |id| {
+                                has_function_call_output(request, id)
+                            })
+                },
+                sse(vec![
+                    ev_response_created(wait_id),
+                    ev_function_call_with_namespace(
+                        wait_id,
+                        MULTI_AGENT_V2_NAMESPACE,
+                        "wait_agent",
+                        r#"{"timeout_ms":3600000}"#,
+                    ),
+                    ev_completed(wait_id),
+                ]),
+            )
+            .await;
+        }
+    }
     let mut extensions = ExtensionRegistryBuilder::<Config>::new();
-    extensions.config_contributor(Arc::new(PauseAfterCommit {
-        gate: Mutex::new(Some((entered_tx, release_rx))),
-    }));
     extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
     let test = test_codex()
         .with_model("gpt-5.6-sol")
@@ -43,154 +88,112 @@ async fn idle_mail_survives_eviction_and_preserves_followup_order() -> Result<()
         .with_config(|config| {
             config.features.enable(Feature::Collab).unwrap();
             config.features.enable(Feature::MultiAgentV2).unwrap();
-            config.multi_agent_v2.max_concurrent_threads_per_session = 2;
-            config.multi_agent_v2.hide_spawn_agent_metadata = true;
+            config.multi_agent_v2.max_concurrent_threads_per_session = 4;
+            config.multi_agent_v2.max_wait_timeout_ms = 3_600_000;
+            config.multi_agent_v2.wait_agent_batch_window_ms = std::num::NonZeroU64::new(300);
         })
         .build_with_auto_env(&server)
         .await?;
     let mut created = test.thread_manager.subscribe_thread_created();
     test.submit_turn(FIRST_PROMPT).await?;
     ThreadIdle::wait(&test.codex).await;
-    let first_id = created.recv().await?;
-    let first = test.thread_manager.get_thread(first_id).await?;
-    wait_for_event(&first, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    ThreadIdle::wait(&first).await;
-
-    mount_root_collaboration_call(
+    let first = test
+        .thread_manager
+        .get_thread(created.recv().await?)
+        .await?;
+    wait_for_event(&first, |event| {
+        matches!(event, EventMsg::CollabWaitingBegin(_))
+    })
+    .await;
+    let grandchild = if nested {
+        let child = test
+            .thread_manager
+            .get_thread(created.recv().await?)
+            .await?;
+        wait_for_event(&child, |event| {
+            matches!(event, EventMsg::CollabWaitingBegin(_))
+        })
+        .await;
+        Some(child)
+    } else {
+        None
+    };
+    let resumed = mount_sse_once_match(
         &server,
-        "send a note",
-        "queued-mail",
-        "send_message",
-        json!({ "target": "first", "message": MAIL }),
+        |request: &wiremock::Request| body_contains(request, MAIL),
+        sse(vec![
+            ev_response_created("mail-wake"),
+            ev_assistant_message("mail-answer", "Received the worker updates."),
+            ev_completed("mail-wake"),
+        ]),
     )
     .await;
-    test.submit_turn("send a note").await?;
-    ThreadIdle::wait(&test.codex).await;
-    // Wait for delivery through the submission queue before attempting eviction.
-    submit_thread_settings(&first, ThreadSettingsOverrides::default()).await?;
-    assert_eq!(
-        first.agent_status().await,
-        AgentStatus::Completed(Some("worker completed".into()))
-    );
-    drop(first);
-
-    mount_root_collaboration_call(
-        &server,
-        "spawn while child is idle",
-        "replacement-spawn",
-        "spawn_agent",
-        json!({ "message": SECOND_TASK, "task_name": "replacement", "fork_turns": "none" }),
-    )
-    .await;
-    mount_completed_worker(&server, SECOND_TASK, "replacement-spawn").await;
-    test.submit_turn("spawn while child is idle").await?;
-    ThreadIdle::wait(&test.codex).await;
-    let replacement_id = created.recv().await?;
-    let replacement = test.thread_manager.get_thread(replacement_id).await?;
-    wait_for_event(&replacement, |event| {
+    let send = |text: &'static str| {
+        let author = if nested {
+            "/root/first/nested"
+        } else {
+            "/root/first"
+        };
+        test.codex.submit(Op::InterAgentCommunication {
+            communication: codex_protocol::protocol::InterAgentCommunication::new(
+                codex_protocol::AgentPath::try_from(author).unwrap(),
+                codex_protocol::AgentPath::root(),
+                Vec::new(),
+                text.to_owned(),
+                false,
+            ),
+            start_options: Default::default(),
+        })
+    };
+    if completion {
+        mount_sse_once_match(
+            &server,
+            |request: &wiremock::Request| has_function_call_output(request, "first-wait"),
+            sse(vec![
+                ev_response_created("worker-finished"),
+                ev_assistant_message("worker-finished", MAIL),
+                ev_completed("worker-finished"),
+            ]),
+        )
+        .await;
+        first
+            .start_or_steer_turn(codex_protocol::turn_input::TurnInputRequest::user_input(
+                vec![codex_protocol::user_input::UserInput::Text {
+                    text: "finish your work".to_owned(),
+                    text_elements: Vec::new(),
+                }],
+            ))
+            .await?;
+        wait_for_event(&first, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    } else {
+        send(MAIL).await?;
+    }
+    if nested {
+        // The durable timing invariant is exercised with virtual time in InputQueue's test.
+        // Here the real server seam must not require another parent user submission.
+        submit_thread_settings(&test.codex, ThreadSettingsOverrides::default()).await?;
+        assert!(resumed.requests().is_empty());
+        send(LATER).await?;
+    }
+    wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-    ThreadIdle::wait(&replacement).await;
-    assert!(test.thread_manager.get_thread(first_id).await.is_err());
-    assert_eq!(test.thread_manager.list_thread_ids().await.len(), 2);
-    mount_root_collaboration_call(
-        &server,
-        "send while unloaded",
-        "late-mail",
-        "send_message",
-        // Encrypted delivery reloads the recipient to validate its provider.
-        json!({ "target": "first", "plaintext_message": LATE_MAIL }),
-    )
-    .await;
-    test.submit_turn("send while unloaded").await?;
     ThreadIdle::wait(&test.codex).await;
-    assert!(test.thread_manager.get_thread(first_id).await.is_err());
-
-    // Reload without starting a turn, then hold dispatch while both tools submit.
-    // The older queued notes must precede the follow-up, and the newer note must follow it.
-    test.thread_manager
-        .ensure_multi_agent_v2_child_loaded(first_id)
-        .await?;
-    let resumed = test.thread_manager.get_thread(first_id).await?;
-    resumed
-        .submit(Op::ThreadSettings {
-            thread_settings: ThreadSettingsOverrides {
-                model: Some(COMMITTED_MODEL.to_string()),
-                ..Default::default()
-            },
-            reply: None,
-        })
-        .await?;
-    entered_rx.await?;
-    mount_root_collaboration_call(
-        &server,
-        "drain the note",
-        "followup",
-        "followup_task",
-        json!({ "target": "first", "message": FOLLOWUP }),
-    )
-    .await;
-    mount_sse_once_match(
-        &server,
-        |request: &wiremock::Request| {
-            body_contains(request, FOLLOWUP) && !has_function_call_output(request, "followup")
-        },
-        sse(vec![
-            ev_response_created("worker-wait"),
-            ev_function_call_with_namespace(
-                "wait-note",
-                MULTI_AGENT_V2_NAMESPACE,
-                "wait_agent",
-                r#"{"timeout_ms":1}"#,
-            ),
-            ev_completed("worker-wait"),
-        ]),
-    )
-    .await;
-    let delivered = mount_sse_once_match(
-        &server,
-        |request: &wiremock::Request| has_function_call_output(request, "wait-note"),
-        sse(vec![
-            ev_assistant_message("done", "Read all notes"),
-            ev_completed("done"),
-        ]),
-    )
-    .await;
-    test.submit_turn("drain the note").await?;
-    ThreadIdle::wait(&test.codex).await;
-    mount_root_collaboration_call(
-        &server,
-        "send after followup",
-        "after-followup",
-        "send_message",
-        json!({ "target": "first", "message": AFTER_FOLLOWUP }),
-    )
-    .await;
-    test.submit_turn("send after followup").await?;
-    ThreadIdle::wait(&test.codex).await;
-    release_tx.send(())?;
-    wait_for_event(&resumed, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    ThreadIdle::wait(&resumed).await;
-    let request = delivered
-        .requests()
-        .into_iter()
-        .find(|request| request.function_call_output_text("wait-note").is_some())
-        .expect("worker continuation after waiting for mail");
-    let messages = request.inputs_of_type("agent_message");
-    let expected = [MAIL, LATE_MAIL, FOLLOWUP, AFTER_FOLLOWUP];
-    let received = messages
-        .iter()
-        .filter_map(|item| {
-            expected
-                .iter()
-                .find(|text| item.to_string().contains(**text))
-                .copied()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(received, expected);
-    assert_eq!(test.thread_manager.list_thread_ids().await.len(), 2);
-
+    let requests = resumed.requests();
+    assert_eq!(requests.len(), 1);
+    let messages = requests[0].inputs_of_type("agent_message");
+    assert!(messages.iter().any(|item| item.to_string().contains(MAIL)));
+    assert_eq!(
+        messages.iter().any(|item| item.to_string().contains(LATER)),
+        nested
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|item| item.to_string().contains("NEW_TASK"))
+    );
+    drop(grandchild);
     test.thread_manager
         .shutdown_all_threads_bounded(Duration::from_secs(5))
         .await;
