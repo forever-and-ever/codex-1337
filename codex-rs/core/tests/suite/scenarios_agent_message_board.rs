@@ -239,7 +239,7 @@ async fn board_shares_posts_with_children_and_preserves_storage_policy(
                     .is_some_and(|item| item["type"] == "agent_message")
         })
         .respond_with(responses::sse_response(done()))
-        .with_priority(1)
+        .with_priority(10)
         .mount(&server)
         .await;
     responses::mount_sse_sequence(
@@ -280,8 +280,12 @@ async fn board_shares_posts_with_children_and_preserves_storage_policy(
         .expect("child runtime");
     let child = root.thread_manager.get_thread(child_id).await?;
     wait_for_event(&child, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    let child_post = responses::mount_sse_sequence(
+    let child_post = responses::mount_sse_sequence_match(
         &server,
+        move |request: &wiremock::Request| {
+            ResponsesRequest::from(request.clone()).body_json()["client_metadata"]["thread_id"]
+                == json!(child_id)
+        },
         vec![
             tool(
                 "worker-post",
@@ -306,8 +310,13 @@ async fn board_shares_posts_with_children_and_preserves_storage_policy(
     let post: Value =
         serde_json::from_str(&output).with_context(|| format!("child post result: {output}"))?;
     assert_eq!(post["author"], "/root/worker");
-    let read = responses::mount_sse_sequence(
+    let read = responses::mount_sse_sequence_match(
         &server,
+        move |request: &wiremock::Request| {
+            let request = ResponsesRequest::from(request.clone());
+            request.body_json()["client_metadata"]["thread_id"] == json!(root_id)
+                && request.body_contains_text("Read the worker's decision.")
+        },
         vec![
             tool(
                 "root-read",

@@ -1476,10 +1476,21 @@ pub async fn mount_function_call_agent_response(
     }
 }
 
+pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> ResponseMock {
+    mount_sse_sequence_match(server, |_: &wiremock::Request| true, bodies).await
+}
+
 /// Mounts a sequence of SSE response bodies and serves them in order for each
 /// POST to `/v1/responses`. Panics if more requests are received than bodies
 /// provided. Also asserts the exact number of expected calls.
-pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> ResponseMock {
+pub async fn mount_sse_sequence_match<M>(
+    server: &MockServer,
+    matcher: M,
+    bodies: Vec<String>,
+) -> ResponseMock
+where
+    M: wiremock::Match + Send + Sync + 'static,
+{
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
@@ -1508,8 +1519,11 @@ pub async fn mount_sse_sequence(server: &MockServer, bodies: Vec<String>) -> Res
         responses: bodies,
     };
 
-    let (mock, response_mock) = base_mock();
-    mock.respond_with(responder)
+    let response_mock = ResponseMock::new();
+    base_request()
+        .and(matcher)
+        .and(response_mock.clone())
+        .respond_with(responder)
         .up_to_n_times(num_calls as u64)
         .expect(num_calls as u64)
         .mount(server)
