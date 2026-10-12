@@ -1,8 +1,8 @@
 //! Bounded, credential-redacted diagnostics; never retain headers, URLs or body dumps.
 
+use codex_api::AnthropicStreamError;
 use codex_api::ApiError;
 use codex_api::TransportError;
-use codex_api::anthropic::AnthropicStreamError;
 use serde_json::Value;
 use serde_json::json;
 

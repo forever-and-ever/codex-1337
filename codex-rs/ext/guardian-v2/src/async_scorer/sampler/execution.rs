@@ -170,6 +170,7 @@ impl SamplingExecution {
                 )
                 | ApiError::ContextWindowExceeded
                 | ApiError::NativeStream(_)
+                | ApiError::AnthropicStream { .. }
                 | ApiError::QuotaExceeded
                 | ApiError::UsageNotIncluded
                 | ApiError::RateLimit(_)
