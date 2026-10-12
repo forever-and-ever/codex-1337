@@ -223,7 +223,11 @@ impl App {
             }
             Err(error) => {
                 if let Some(widget) = self.voice_widget_for_thread(thread_id) {
-                    widget.reject_unsent_realtime_start(thread_id, identity.attempt_id, error);
+                    widget.reject_unsent_realtime_start(
+                        thread_id,
+                        identity.attempt_id,
+                        format!("Voice conversation failed: {error}"),
+                    );
                 }
                 false
             }
