@@ -1,5 +1,5 @@
 use super::*;
-use crate::environment_selection::TurnEnvironment;
+use crate::session::turn_context::TurnEnvironment;
 use codex_mcp::ElicitationApprovalAuthority;
 use codex_mcp::IssuingElicitationReviewer;
 

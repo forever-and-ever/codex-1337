@@ -1,6 +1,8 @@
 //! Native extensions use the existing policy and pending-approval machinery,
 //! without manufacturing an MCP transport or trusting a frontend's identity.
 
+use std::sync::Arc;
+
 use codex_config::types::AppToolApproval;
 use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::ReviewDecision;
@@ -139,7 +141,8 @@ pub(crate) async fn approve_extension_tool(
         &call.call_id,
         &invocation,
         metadata.clone(),
-        crate::guardian::GuardianReviewContext::from(&call.step_context),
+        Arc::clone(&call.step_context),
+        &call.cancellation_token,
     );
     let mcp_config = config
         .to_mcp_config(&call.session.services.plugins_manager)
