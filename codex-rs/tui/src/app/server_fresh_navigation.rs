@@ -1,6 +1,7 @@
 //! Fresh acquisition retains the unsent initial draft independently of subscription custody.
 
 use super::*;
+use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::app_server_session::session_preparation::{
     PreparedSession, StartPreparation, SubscriptionCustody, ThreadStartChoice,
 };
