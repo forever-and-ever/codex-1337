@@ -1,5 +1,6 @@
 //! Pending accepted mail, not a frontend or one-generation shutdown snapshot, drives recovery.
 
+use super::ServerResume;
 use super::ThreadRequestProcessor;
 use super::ThreadResumeTarget;
 use crate::turn_admission::TurnAdmission;
@@ -42,7 +43,7 @@ impl ThreadRequestProcessor {
             if self.thread_manager.get_thread(root).await.is_err() {
                 if let Err(error) = self
                     .thread_resume(
-                        ThreadResumeTarget::DaemonRecovery(None),
+                        ThreadResumeTarget::Server(ServerResume::DaemonRecovery(None)),
                         ThreadResumeParams {
                             thread_id: root.to_string(),
                             exclude_turns: true,
