@@ -4,7 +4,7 @@ use super::LiveThread;
 use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
 use crate::UpdateThreadMetadataParams;
-use codex_protocol::models::ResponseItemEnvelope;
+use codex_rollout::ResponseItemEnvelope;
 use codex_rollout::RolloutItem;
 use std::future::Future;
 
