@@ -6176,12 +6176,12 @@ async fn ctrl_l_clears_owned_history_and_preserves_the_draft() -> Result<()> {
     let cursor = app_server
         .begin_older_history_page(thread_id)
         .expect("older page");
-    let page = app_server
-        .thread_items_page(
+    let page = cursor
+        .load(
+            &app_server.request_handle(),
+            app_server.next_request_id(),
             thread_id,
-            /*turn_id*/ None,
-            Some(cursor.clone()),
-            /*limit*/ 100,
+            100,
         )
         .await?;
     app.chat_widget.set_model("gpt-test");
@@ -8727,12 +8727,12 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     let cursor = app_server
         .begin_older_history_page(source_thread_id)
         .expect("older page");
-    let page = app_server
-        .thread_items_page(
+    let page = cursor
+        .load(
+            &app_server.request_handle(),
+            app_server.next_request_id(),
             source_thread_id,
-            /*turn_id*/ None,
-            Some(cursor.clone()),
-            /*limit*/ 1,
+            1,
         )
         .await?;
     app.handle_older_history_page(

@@ -3,6 +3,7 @@
 use super::pagination_completion_tests::completed_history_app;
 use super::session_lifecycle_requests::start_recording_app_server;
 use super::*;
+use crate::app_server_session::HistoryPage;
 use crate::history_cell::PlainHistoryCell;
 use crate::pager_overlay::TranscriptHistoryState;
 use pretty_assertions::assert_eq;
@@ -89,15 +90,19 @@ async fn browsing_loads_before_the_oldest_prompt_after_a_partial_answer() -> Res
         assert!(app_server.is_older_history_page_pending(thread_id, &cursor));
         assert!(event_rx.try_recv().is_err());
         // Complete only an answer item first: browsing must continue to a page with a prompt.
-        let first_page = app_server
-            .thread_items_page(
+        let HistoryPage::Items(first_page) = cursor
+            .load(
+                &app_server.request_handle(),
+                app_server.next_request_id(),
                 thread_id,
-                /*turn_id*/ None,
-                Some(cursor.clone()),
-                /*limit*/ 1,
+                1,
             )
-            .await?;
-        let next_cursor = first_page.next_cursor.clone().expect("older prompt page");
+            .await?
+        else {
+            panic!("item frontier");
+        };
+        let next_cursor =
+            HistoryPage::Items(first_page.next_cursor.clone().expect("older prompt page"));
         if cancel_before_completion {
             app.handle_tui_event(
                 &mut tui,
@@ -111,7 +116,7 @@ async fn browsing_loads_before_the_oldest_prompt_after_a_partial_answer() -> Res
             &mut app_server,
             thread_id,
             &cursor,
-            Ok(first_page),
+            Ok(HistoryPage::Items(first_page)),
         )
         .await?;
         assert_eq!(

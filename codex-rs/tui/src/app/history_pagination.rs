@@ -7,15 +7,16 @@ use super::transcript_splice::SpliceShape;
 use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
-use crate::app_server_session::thread_items_page_params;
+use crate::app_server_session::HistoryContent;
+use crate::app_server_session::HistoryCursor;
+use crate::app_server_session::HistoryPage;
+use crate::app_server_session::HistoryResponse;
 use crate::history_cell::SessionHeaderHistoryCell;
 use crate::history_cell::SessionInfoCell;
 use crate::history_cell::UserHistoryCell;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::thread_items_to_transcript_cells;
-use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::ThreadItemsListResponse;
 
 #[path = "history_completion.rs"]
 mod completion;
@@ -32,7 +33,7 @@ impl App {
         };
         tracing::debug!(
             %thread_id,
-            %cursor,
+            ?cursor,
             overlay = self.overlay.is_some(),
             "loading older transcript history page"
         );
@@ -40,16 +41,13 @@ impl App {
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let result = request_handle
-                .request_typed::<ThreadItemsListResponse>(ClientRequest::ThreadItemsList {
+            let result = cursor
+                .load(
+                    &request_handle,
                     request_id,
-                    params: thread_items_page_params(
-                        thread_id,
-                        /*turn_id*/ None,
-                        Some(cursor.clone()),
-                        HISTORY_ITEM_PAGE_LIMIT,
-                    ),
-                })
+                    thread_id,
+                    HISTORY_ITEM_PAGE_LIMIT,
+                )
                 .await
                 .map_err(|err| err.to_string());
             app_event_tx.send(AppEvent::OlderThreadHistoryLoaded {
@@ -66,8 +64,8 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
-        cursor: &str,
-        result: Result<ThreadItemsListResponse, String>,
+        cursor: &HistoryCursor,
+        result: Result<HistoryResponse, String>,
     ) -> Result<()> {
         if !app_server.is_older_history_page_pending(thread_id, cursor) {
             return Ok(());
@@ -228,13 +226,27 @@ impl App {
     fn project_older_history_cells(
         &mut self,
         tui: &mut tui::Tui,
-        items: Vec<ThreadItem>,
+        content: HistoryContent,
         turns: &[Turn],
         hidden_item_ids: &HashSet<&str>,
         thread_id: ThreadId,
         cwd: &AbsolutePathBuf,
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
+        let items = match content {
+            HistoryPage::Items(items) => items,
+            HistoryPage::Turns(turns) => {
+                // Item exhaustion does not imply turn exhaustion. Only this admitted prefix
+                // belongs here; reseating all known failures would move newer boundaries.
+                let mut cells = turns
+                    .iter()
+                    .filter_map(history_cell::FailedTurnCell::from_turn)
+                    .map(|failure| Arc::new(failure) as Arc<dyn HistoryCell>)
+                    .collect::<Vec<_>>();
+                self.reseat_history_failures(tui, &mut cells);
+                return cells;
+            }
+        };
         for item in &items {
             match item.native_item() {
                 ThreadItem::ToolOutputTokens {

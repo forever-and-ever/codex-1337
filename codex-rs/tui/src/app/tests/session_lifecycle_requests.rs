@@ -17,7 +17,7 @@ use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadItemsListParams;
-use codex_app_server_protocol::ThreadItemsListResponse;
+
 use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::AgentPath;
 use codex_protocol::items::AgentMessageContent;
@@ -1346,18 +1346,13 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
         .begin_older_history_page(thread_id)
         .expect("review-mode marker should remain on an older page");
     let request_id = app_server.next_request_id();
-    let page: ThreadItemsListResponse = app_server
-        .request_handle()
-        .request_typed(ClientRequest::ThreadItemsList {
+    let page = cursor
+        .load(
+            &app_server.request_handle(),
             request_id,
-            params: ThreadItemsListParams {
-                thread_id: thread_id.to_string(),
-                turn_id: None,
-                cursor: Some(ThreadItemsListCursor::Opaque(cursor.clone())),
-                limit: Some(crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT),
-                sort_direction: Some(SortDirection::Desc),
-            },
-        })
+            thread_id,
+            crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT,
+        )
         .await?;
     app.handle_older_history_page(&mut tui, &mut app_server, thread_id, &cursor, Ok(page))
         .await?;
@@ -1926,8 +1921,13 @@ async fn paginated_resume_and_fork_survive_post_response_hydration_failure() -> 
         assert!(messages.contains("Conversation history is incomplete"));
         assert!(messages.contains("saved history unavailable"));
         while let Some(cursor) = app_server.begin_older_history_page(parent_thread_id) {
-            let page = app_server
-                .thread_items_page(parent_thread_id, None, Some(cursor.clone()), 100)
+            let page = cursor
+                .load(
+                    &app_server.request_handle(),
+                    app_server.next_request_id(),
+                    parent_thread_id,
+                    100,
+                )
                 .await?;
             app_server
                 .apply_older_history_page(parent_thread_id, &cursor, page, &mut retained_turns)

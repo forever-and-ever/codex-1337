@@ -127,6 +127,77 @@ fn advancing_cursor(
     next.filter(|next| seen_cursors.insert(next.clone()))
 }
 
+/// One frontier, carried through request, response, and admission without confusing cursor domains.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum HistoryPage<Items, Turns> {
+    Items(Items),
+    Turns(Turns),
+}
+
+pub(crate) type HistoryCursor = HistoryPage<String, String>;
+pub(crate) type HistoryResponse = HistoryPage<ThreadItemsListResponse, ThreadTurnsListResponse>;
+pub(crate) type HistoryContent = HistoryPage<Vec<ThreadItem>, Vec<Turn>>;
+
+impl HistoryCursor {
+    pub(crate) async fn load(
+        &self,
+        handle: &codex_app_server_client::AppServerRequestHandle,
+        request_id: codex_app_server_protocol::RequestId,
+        thread_id: ThreadId,
+        limit: u32,
+    ) -> std::result::Result<HistoryResponse, codex_app_server_client::TypedRequestError> {
+        match self {
+            Self::Items(cursor) => handle
+                .request_typed(ClientRequest::ThreadItemsList {
+                    request_id,
+                    params: thread_items_page_params(thread_id, None, Some(cursor.clone()), limit),
+                })
+                .await
+                .map(HistoryPage::Items),
+            Self::Turns(cursor) => handle
+                .request_typed(ClientRequest::ThreadTurnsList {
+                    request_id,
+                    params: ThreadTurnsListParams {
+                        thread_id: thread_id.to_string(),
+                        cursor: Some(cursor.clone()),
+                        limit: Some(limit),
+                        sort_direction: Some(SortDirection::Desc),
+                        items_view: Some(TurnItemsView::NotLoaded),
+                    },
+                })
+                .await
+                .map(HistoryPage::Turns),
+        }
+    }
+}
+
+impl ThreadHistoryPagination {
+    fn next_page(&self) -> Option<HistoryCursor> {
+        self.next_item_cursor
+            .clone()
+            .map(HistoryPage::Items)
+            .or_else(|| self.next_turn_cursor.clone().map(HistoryPage::Turns))
+    }
+}
+
+fn merge_turn_page(
+    cursor: &str,
+    page: ThreadTurnsListResponse,
+    state: &mut ThreadHistoryPagination,
+    turns: &mut Vec<Turn>,
+) -> Vec<Turn> {
+    state.next_turn_cursor =
+        advancing_cursor(Some(cursor), page.next_cursor, &mut state.seen_turn_cursors);
+    let admitted = page
+        .data
+        .into_iter()
+        .rev()
+        .filter(|turn| !turns.iter().any(|known| known.id == turn.id))
+        .collect::<Vec<_>>();
+    turns.splice(0..0, admitted.iter().cloned());
+    admitted
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ThreadHistoryPagination {
     pub(super) history_mode: ThreadHistoryMode,
@@ -176,29 +247,40 @@ impl AppServerSession {
     pub(crate) fn has_older_history(&self, thread_id: ThreadId) -> bool {
         self.history_pagination
             .get(&thread_id)
-            .is_some_and(|page| page.next_item_cursor.is_some())
+            .is_some_and(|page| page.next_page().is_some())
     }
 
-    pub(crate) fn begin_older_history_page(&mut self, thread_id: ThreadId) -> Option<String> {
+    pub(crate) fn begin_older_history_page(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Option<HistoryCursor> {
         let page = self.history_pagination.get_mut(&thread_id)?;
         if page.loading_older {
             return None;
         }
-        let cursor = page.next_item_cursor.clone()?;
+        let cursor = page.next_page()?;
         page.loading_older = true;
         Some(cursor)
     }
 
     /// Match a completion to the page still pending for this thread, before interpreting its result.
-    pub(crate) fn is_older_history_page_pending(&self, thread_id: ThreadId, cursor: &str) -> bool {
-        self.history_pagination.get(&thread_id).is_some_and(|page| {
-            page.loading_older && page.next_item_cursor.as_deref() == Some(cursor)
-        })
+    pub(crate) fn is_older_history_page_pending(
+        &self,
+        thread_id: ThreadId,
+        cursor: &HistoryCursor,
+    ) -> bool {
+        self.history_pagination
+            .get(&thread_id)
+            .is_some_and(|page| page.loading_older && page.next_page().as_ref() == Some(cursor))
     }
 
-    pub(crate) fn cancel_older_history_page(&mut self, thread_id: ThreadId, cursor: &str) {
+    pub(crate) fn cancel_older_history_page(
+        &mut self,
+        thread_id: ThreadId,
+        cursor: &HistoryCursor,
+    ) {
         if let Some(page) = self.history_pagination.get_mut(&thread_id)
-            && page.next_item_cursor.as_deref() == Some(cursor)
+            && page.next_page().as_ref() == Some(cursor)
         {
             page.loading_older = false;
         }
@@ -207,22 +289,29 @@ impl AppServerSession {
     pub(crate) async fn apply_older_history_page(
         &mut self,
         thread_id: ThreadId,
-        cursor: &str,
-        page: ThreadItemsListResponse,
+        cursor: &HistoryCursor,
+        page: HistoryResponse,
         turns: &mut Vec<Turn>,
-    ) -> Result<Vec<ThreadItem>> {
+    ) -> Result<HistoryContent> {
         if !self.is_older_history_page_pending(thread_id, cursor) {
-            return Ok(Vec::new());
+            return Ok(HistoryPage::Items(Vec::new()));
         }
         let Some(mut state) = self.history_pagination.get(&thread_id).cloned() else {
-            return Ok(Vec::new());
+            return Ok(HistoryPage::Items(Vec::new()));
         };
-        let items = self
-            .merge_thread_item_page(thread_id, page, &mut state, turns)
-            .await?;
+        let admitted = match (cursor, page) {
+            (HistoryPage::Items(_), HistoryPage::Items(page)) => HistoryPage::Items(
+                self.merge_thread_item_page(thread_id, page, &mut state, turns)
+                    .await?,
+            ),
+            (HistoryPage::Turns(cursor), HistoryPage::Turns(page)) => {
+                HistoryPage::Turns(merge_turn_page(cursor, page, &mut state, turns))
+            }
+            _ => return Err(eyre!("history response does not match its cursor domain")),
+        };
         state.loading_older = false;
         self.history_pagination.insert(thread_id, state);
-        Ok(items)
+        Ok(admitted)
     }
 
     pub(crate) async fn thread_items_page(
@@ -293,15 +382,9 @@ impl AppServerSession {
                 let page = self
                     .thread_turns_page(thread_id, Some(cursor.clone()), limit)
                     .await?;
-                state.next_turn_cursor = advancing_cursor(
-                    Some(&cursor),
-                    page.next_cursor,
-                    &mut state.seen_turn_cursors,
-                );
-                for turn in &page.data {
+                for turn in merge_turn_page(&cursor, page, state, turns) {
                     missing_turn_ids.remove(&turn.id);
                 }
-                turns.splice(0..0, page.data.into_iter().rev());
             }
             if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
                 && !turn.items.iter().any(|item| item.id() == entry.item.id())
@@ -407,6 +490,14 @@ impl AppServerSession {
                 }
                 if empty_page || state.next_item_cursor.is_none() {
                     break;
+                }
+            }
+            if scope == HistoryHydrationScope::Complete {
+                while let Some(cursor) = state.next_turn_cursor.clone() {
+                    let page = self
+                        .thread_turns_page(thread_id, Some(cursor.clone()), HISTORY_ITEM_PAGE_LIMIT)
+                        .await?;
+                    merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
                 }
             }
             Ok(())

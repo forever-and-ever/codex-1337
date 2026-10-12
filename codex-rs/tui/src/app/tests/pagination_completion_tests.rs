@@ -2,11 +2,12 @@
 
 use super::session_lifecycle_requests::start_recording_app_server;
 use super::*;
+use crate::app_server_session::HistoryPage;
 use crate::pager_overlay::TranscriptHistoryState;
 use app_test_support::create_fake_paginated_rollout;
 use app_test_support::rollout_path;
 use chrono::TimeZone;
-use codex_app_server_protocol::ThreadItemsListResponse;
+
 use codex_protocol::items::AgentMessageContent;
 use codex_protocol::items::AgentMessageItem;
 use codex_protocol::items::TurnItem;
@@ -153,22 +154,31 @@ async fn older_pagination_completion_footers_follow_answers_without_overlap_dupl
         let cursor = app_server
             .begin_older_history_page(thread_id)
             .expect("older page");
-        let mut page: ThreadItemsListResponse = app_server
-            .thread_items_page(
+        let HistoryPage::Items(mut page) = cursor
+            .load(
+                &app_server.request_handle(),
+                app_server.next_request_id(),
                 thread_id,
-                /*turn_id*/ None,
-                Some(cursor.clone()),
                 limit,
             )
-            .await?;
+            .await?
+        else {
+            panic!("item frontier");
+        };
         if let Some(answer) = overlapping_answer.take() {
             // The later response repeats the preceding page's completed answer.
             page.data.insert(/*index*/ 0, answer);
         } else {
             overlapping_answer = page.data.first().cloned();
         }
-        app.handle_older_history_page(&mut tui, &mut app_server, thread_id, &cursor, Ok(page))
-            .await?;
+        app.handle_older_history_page(
+            &mut tui,
+            &mut app_server,
+            thread_id,
+            &cursor,
+            Ok(HistoryPage::Items(page)),
+        )
+        .await?;
         snapshots.push(
             app.render_transcript_lines_for_reflow(/*width*/ 80)
                 .lines
@@ -287,15 +297,29 @@ async fn older_pagination_completion_footers_follow_answers_without_overlap_dupl
         let cursor = app_server
             .begin_older_history_page(thread_id)
             .expect("older page");
-        let mut page = app_server
-            .thread_items_page(thread_id, None, Some(cursor.clone()), 1)
-            .await?;
+        let HistoryPage::Items(mut page) = cursor
+            .load(
+                &app_server.request_handle(),
+                app_server.next_request_id(),
+                thread_id,
+                1,
+            )
+            .await?
+        else {
+            panic!("item frontier");
+        };
         if let Some(item) = overlapping.take() {
             page.data.insert(0, item);
         }
         overlapping = page.data.last().cloned();
-        app.handle_older_history_page(&mut tui, &mut app_server, thread_id, &cursor, Ok(page))
-            .await?;
+        app.handle_older_history_page(
+            &mut tui,
+            &mut app_server,
+            thread_id,
+            &cursor,
+            Ok(HistoryPage::Items(page)),
+        )
+        .await?;
         assert_eq!(failures(&app), original_failures);
     }
     // Repeated messages retain distinct turn identities and the same immutable cells.
@@ -432,15 +456,19 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
         let cursor = app_server
             .begin_older_history_page(thread_id)
             .expect("older page");
-        let first_page = app_server
-            .thread_items_page(
+        let HistoryPage::Items(first_page) = cursor
+            .load(
+                &app_server.request_handle(),
+                app_server.next_request_id(),
                 thread_id,
-                /*turn_id*/ None,
-                Some(cursor.clone()),
-                /*limit*/ 1,
+                1,
             )
-            .await?;
-        let final_cursor = first_page.next_cursor.clone().expect("another older page");
+            .await?
+        else {
+            panic!("item frontier");
+        };
+        let final_cursor =
+            HistoryPage::Items(first_page.next_cursor.clone().expect("another older page"));
         tui.screen_size_for_event(&TuiEvent::Resize(size))?;
         assert!(app.handle_owned_transcript_event(
             &mut tui,
@@ -456,7 +484,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             &mut app_server,
             thread_id,
             &cursor,
-            Ok(first_page),
+            Ok(HistoryPage::Items(first_page)),
         )
         .await?;
         assert!(app_server.is_older_history_page_pending(thread_id, &final_cursor));
@@ -465,7 +493,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             .expect("final page completion");
         assert!(matches!(
             &final_event,
-            AppEvent::OlderThreadHistoryLoaded { result: Ok(page), .. }
+            AppEvent::OlderThreadHistoryLoaded { result: Ok(HistoryPage::Items(page)), .. }
                 if page.next_cursor.is_none()
         ));
         // A draw while the completion is waiting must leave the viewport and loading intent intact.
@@ -542,11 +570,11 @@ async fn returning_to_latest_retains_pending_pages_without_continuing_to_the_beg
         let cursor = app_server
             .begin_older_history_page(thread_id)
             .expect("older page");
-        let page = app_server
-            .thread_items_page(
+        let page = cursor
+            .load(
+                &app_server.request_handle(),
+                app_server.next_request_id(),
                 thread_id,
-                /*turn_id*/ None,
-                Some(cursor.clone()),
                 limit,
             )
             .await?;
@@ -607,12 +635,12 @@ async fn stale_history_completions_preserve_the_current_request_and_failure_can_
     let cursor = app_server
         .begin_older_history_page(thread_id)
         .expect("older page");
-    let page = app_server
-        .thread_items_page(
+    let page = cursor
+        .load(
+            &app_server.request_handle(),
+            app_server.next_request_id(),
             thread_id,
-            /*turn_id*/ None,
-            Some(cursor.clone()),
-            /*limit*/ 1,
+            1,
         )
         .await?;
     for result in [Ok(page.clone()), Err("obsolete request failed".to_string())] {
@@ -620,7 +648,7 @@ async fn stale_history_completions_preserve_the_current_request_and_failure_can_
             &mut tui,
             &mut app_server,
             thread_id,
-            "obsolete-cursor",
+            &HistoryPage::Items("obsolete-cursor".to_string()),
             result,
         )
         .await?;
@@ -651,7 +679,10 @@ async fn stale_history_completions_preserve_the_current_request_and_failure_can_
         app_server.begin_older_history_page(thread_id),
         Some(cursor.clone())
     );
-    app_server.cancel_older_history_page(thread_id, "obsolete-cursor");
+    app_server.cancel_older_history_page(
+        thread_id,
+        &HistoryPage::Items("obsolete-cursor".to_string()),
+    );
     assert!(app_server.is_older_history_page_pending(thread_id, &cursor));
     app.transcript_view.history = TranscriptHistoryState::LoadingOlder;
     // Initialize the viewport as the app's first draw does before accepting Find input.
