@@ -223,6 +223,7 @@ impl App {
             match (&target.kind, result.result) {
                 (DetachKind::Side { .. }, Ok(())) => {
                     self.abandoned_side_threads.insert(target.thread_id);
+                    self.pause_detached_thread_input(target).await;
                     self.discard_thread_local_state(target.thread_id).await;
                 }
                 (DetachKind::Side { .. }, Err(error)) => {
@@ -231,14 +232,33 @@ impl App {
                         target.thread_id
                     ));
                 }
-                (DetachKind::Conversation, result) => {
-                    if let Err(error) = result {
-                        tracing::warn!(thread_id = %target.thread_id, %error, "failed to unsubscribe conversation");
-                    }
-                    self.abort_thread_event_listener(target.thread_id);
-                    self.pending_server_profiles.remove(&target.thread_id);
+                (DetachKind::Conversation, Ok(())) => {
+                    let thread_id = target.thread_id;
+                    self.thread_event_channels
+                        .get_mut(&thread_id)
+                        .expect("matching detach target checked")
+                        .mark_replay_only();
+                    self.abort_thread_event_listener(thread_id);
+                    self.pending_server_profiles.remove(&thread_id);
+                    self.pause_detached_thread_input(target).await;
+                }
+                (DetachKind::Conversation, Err(error)) => {
+                    tracing::warn!(thread_id = %target.thread_id, %error, "unsubscribe not confirmed; local attachment retained");
                 }
             }
+        }
+    }
+
+    async fn pause_detached_thread_input(&mut self, target: &DetachTarget) {
+        let thread_id = target.thread_id;
+        if self.chat_widget.thread_id() == Some(thread_id) {
+            self.chat_widget.pause_unavailable_thread();
+        }
+        if let Some(input) = self.agents_overview.input_states.get_mut(&thread_id) {
+            input.pause_unavailable_thread();
+        }
+        if let Some(input) = target.store.lock().await.input_state.as_mut() {
+            input.pause_unavailable_thread();
         }
     }
 }

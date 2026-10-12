@@ -841,6 +841,43 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     assert_eq!(resumes_for(acquisition_x), 1);
     assert_eq!(resumes_for(acquisition_y), 1);
+    // Partial detachment changes local attachment truth only for confirmed targets.
+    // The recorder rejects the original thread's unsubscribe, but confirms the visible one.
+    let draft_before_detach = recovered_message(&mut app);
+    assert!(matches!(
+        app.handle_exit_mode(&mut server, ExitMode::ShutdownFirst)
+            .await,
+        AppRunControl::Continue
+    ));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while app.thread_event_channels[&other_id].attachment() == ThreadEventAttachment::Live {
+            let completion = app
+                .server_operations
+                .control_rx
+                .recv()
+                .await
+                .expect("owned partial-detach receipt");
+            app.handle_server_completion(&mut tui, &mut server, completion)
+                .await?;
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
+    assert_eq!(
+        app.thread_event_channels[&other_id].attachment(),
+        ThreadEventAttachment::ReplayOnly
+    );
+    assert_eq!(
+        app.thread_event_channels[&thread_id].attachment(),
+        ThreadEventAttachment::Live
+    );
+    assert!(
+        app.thread_unavailable(other_id),
+        "attachment gate also holds for embedded frontends"
+    );
+    assert_eq!(app.current_displayed_thread_id(), Some(other_id));
+    assert_eq!(recovered_message(&mut app), draft_before_detach);
+    assert!(!app.chat_widget.maybe_send_next_queued_input());
     server.shutdown().await?;
     proxy.await??;
     Ok(())

@@ -556,8 +556,9 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                 message: "method not found".to_string(),
                             },
                         })
-                    } else if history_capabilities == HistoryCapabilities::ThreadStartFails
-                        && request.method == "thread/start"
+                    } else if (history_capabilities == HistoryCapabilities::ThreadStartFails && request.method == "thread/start")
+                        || (history_capabilities == HistoryCapabilities::TurnSubmissionStalls && request.method == "thread/unsubscribe"
+                            && request_sink.lock().expect("request recorder lock").iter().find(|seen| seen.method == "turn/start").is_some_and(|seen| seen.params.as_ref().and_then(|params| params.get("threadId")) == params.and_then(|params| params.get("threadId"))))
                     {
                         JSONRPCMessage::Error(JSONRPCError {
                             id: request_id,

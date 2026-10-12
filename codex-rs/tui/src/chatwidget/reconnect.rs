@@ -1,6 +1,8 @@
 //! Disconnects preserve input and reconcile confirmed submissions before resuming unsent queues.
 //! Unavailable threads retain uncertain prompts in recovered queues before clearing activity.
 
+use super::input_queue::InputQueueState;
+use super::input_queue::UserTurnInput;
 use super::realtime::RealtimeConversationPhase;
 use super::*;
 use crate::bottom_pane::RestrictedInputMode;
@@ -111,13 +113,7 @@ impl ChatWidget {
         self.turn_lifecycle.restore_running(false, Instant::now());
         self.review.is_review_mode = false;
         self.mcp_startup_status = None;
-        if self.input_queue.turn.is_pending()
-            && let Some(message) = std::mem::take(&mut self.input_queue.turn).into_queued(true)
-        {
-            self.input_queue.queued_user_messages.push_front(message);
-        }
-        self.input_queue.turn = input_queue::UserTurnInput::Idle;
-        self.input_queue.recovered_queue = true;
+        self.input_queue.pause_unavailable_thread();
         self.update_task_running_state();
         self.refresh_pending_input_preview();
     }
@@ -163,5 +159,27 @@ impl ChatWidget {
         self.add_error_message(
             "Automatic reconnect could not restore this session. Your draft is still editable. Copy it before quitting with Ctrl+C, then reconnect with the same command.".into(),
         );
+    }
+}
+
+impl InputQueueState {
+    pub(super) fn pause_unavailable_thread(&mut self) {
+        if self.turn.is_pending()
+            && let Some(message) = std::mem::take(&mut self.turn).into_queued(true)
+        {
+            self.queued_user_messages.push_front(message);
+        }
+        self.turn = UserTurnInput::Idle;
+        self.recovered_queue = true;
+    }
+}
+impl ThreadInputState {
+    pub(crate) fn pause_unavailable_thread(&mut self) {
+        if let Some(questions) = &mut self.questions {
+            questions.delivery_enabled = false;
+        }
+        self.agent_turn_running = false;
+        self.task_running = false;
+        self.input_queue.pause_unavailable_thread();
     }
 }
