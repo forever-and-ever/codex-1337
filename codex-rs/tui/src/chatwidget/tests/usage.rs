@@ -66,12 +66,20 @@ fn expiry_timestamp(day: u32, hour: u32, minute: u32) -> i64 {
         .timestamp()
 }
 
+fn reset_credit_confirmation() -> codex_app_server_protocol::ResetCreditConfirmation {
+    codex_app_server_protocol::ResetCreditConfirmation {
+        token: "confirmed-payer".into(),
+        scope: codex_app_server_protocol::ResetCreditScope::Global,
+    }
+}
+
 fn show_rate_limit_reset_confirmation_from_event(
     chat: &mut ChatWidget,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) -> u64 {
     let Ok(AppEvent::OpenRateLimitResetConfirmation {
         picker_request_id,
+        confirmation,
         confirmation_gate,
         credit_id,
         reset_title,
@@ -83,6 +91,7 @@ fn show_rate_limit_reset_confirmation_from_event(
     };
     assert!(chat.show_rate_limit_reset_confirmation(
         picker_request_id,
+        confirmation,
         confirmation_gate,
         credit_id,
         reset_title,
@@ -342,6 +351,7 @@ async fn rate_limit_reset_popup_states_snapshot() {
                 ),
             ],
         )),
+        Some(reset_credit_confirmation()),
     ));
     record_popup(&chat, &mut states);
 
@@ -351,6 +361,7 @@ async fn rate_limit_reset_popup_states_snapshot() {
         empty_request_id,
         Vec::new(),
         Ok(reset_credits(/*available_count*/ 0)),
+        Some(reset_credit_confirmation()),
     ));
     record_popup(&chat, &mut states);
 
@@ -360,6 +371,7 @@ async fn rate_limit_reset_popup_states_snapshot() {
         load_error_request_id,
         Vec::new(),
         Err("backend unavailable".to_string()),
+        Some(reset_credit_confirmation()),
     ));
     record_popup(&chat, &mut states);
 
@@ -368,6 +380,7 @@ async fn rate_limit_reset_popup_states_snapshot() {
     record_popup(&chat, &mut states);
     assert!(!chat.finish_rate_limit_reset_consume(
         consuming_request_id,
+        reset_credit_confirmation(),
         "redeem-1".to_string(),
         /*credit_id*/ None,
         Err("request timed out".to_string()),
@@ -429,6 +442,7 @@ async fn rate_limit_reset_picker_wraps_expiry_details_snapshot() {
                 reset_credit("credit-1", Some(expiry)),
             ],
         )),
+        Some(reset_credit_confirmation()),
     ));
 
     assert_chatwidget_snapshot!(
@@ -452,11 +466,13 @@ async fn rate_limit_reset_confirmation_uses_backend_copy_snapshot() {
             /*available_count*/ 1,
             vec![credit],
         )),
+        Some(reset_credit_confirmation()),
     ));
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     let Ok(AppEvent::OpenRateLimitResetConfirmation {
         picker_request_id,
+        confirmation,
         confirmation_gate,
         credit_id,
         reset_title,
@@ -484,6 +500,7 @@ async fn rate_limit_reset_confirmation_uses_backend_copy_snapshot() {
     );
     assert!(chat.show_rate_limit_reset_confirmation(
         picker_request_id,
+        confirmation,
         confirmation_gate,
         credit_id,
         reset_title,
@@ -505,6 +522,7 @@ async fn rate_limit_reset_confirmation_no_and_escape_return_to_picker() {
         request_id,
         Vec::new(),
         Ok(reset_credits(/*available_count*/ 1)),
+        Some(reset_credit_confirmation()),
     ));
     let picker = render_bottom_popup(&chat, /*width*/ 80);
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -541,6 +559,7 @@ async fn reset_picker_allows_only_one_pending_confirmation() {
                 reset_credit_with_title("credit-2", /*expires_at*/ None, "Second reset"),
             ],
         )),
+        Some(reset_credit_confirmation()),
     ));
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -575,6 +594,7 @@ async fn rate_limit_reset_picker_starts_with_soonest_expiries_and_keeps_all_rows
         request_id,
         Vec::new(),
         Ok(detailed_reset_credits(/*available_count*/ 9, credits)),
+        Some(reset_credit_confirmation()),
     ));
 
     let rendered = render_bottom_popup(&chat, /*width*/ 80);
@@ -594,6 +614,7 @@ async fn rate_limit_reset_picker_starts_with_soonest_expiries_and_keeps_all_rows
         Ok(AppEvent::OpenRateLimitResetConfirmation {
             picker_request_id,
             confirmation_gate: _,
+            confirmation: _,
             credit_id,
             reset_title,
             reset_detail,
@@ -617,6 +638,7 @@ async fn rate_limit_reset_confirmation_can_use_reset() {
             /*available_count*/ 1,
             vec![reset_credit("credit-1", /*expires_at*/ None)],
         )),
+        Some(reset_credit_confirmation()),
     ));
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -626,6 +648,7 @@ async fn rate_limit_reset_confirmation_can_use_reset() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     let Ok(AppEvent::ConsumeRateLimitResetCredit {
+        confirmation,
         idempotency_key,
         credit_id,
     }) = rx.try_recv()
@@ -645,6 +668,7 @@ async fn rate_limit_reset_confirmation_can_use_reset() {
     );
     assert!(!chat.finish_rate_limit_reset_consume(
         consume_request_id,
+        confirmation,
         idempotency_key,
         credit_id,
         Ok(consume_response(
@@ -661,6 +685,7 @@ async fn rate_limit_reset_retry_reuses_idempotency_key() {
     let request_id = chat.show_rate_limit_reset_consuming_popup();
     assert!(!chat.finish_rate_limit_reset_consume(
         request_id,
+        reset_credit_confirmation(),
         "stable-redeem-id".to_string(),
         Some("credit-1".to_string()),
         Err("response lost".to_string()),
@@ -669,12 +694,14 @@ async fn rate_limit_reset_retry_reuses_idempotency_key() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     let Ok(AppEvent::ConsumeRateLimitResetCredit {
+        confirmation,
         idempotency_key,
         credit_id,
     }) = rx.try_recv()
     else {
         panic!("expected reset retry event");
     };
+    assert_eq!(confirmation, reset_credit_confirmation());
     assert_eq!(
         (idempotency_key.as_str(), credit_id.as_deref()),
         ("stable-redeem-id", Some("credit-1"))
@@ -720,6 +747,7 @@ async fn no_credit_outcome_disables_reset_entry_in_usage_menu() {
     let consume_request_id = chat.show_rate_limit_reset_consuming_popup();
     assert!(!chat.finish_rate_limit_reset_consume(
         consume_request_id,
+        reset_credit_confirmation(),
         "redeem-selected".to_string(),
         Some("stale-credit".to_string()),
         Ok(consume_response(
@@ -840,6 +868,7 @@ async fn account_change_invalidates_pending_reset_requests() {
         request_id,
         Vec::new(),
         Ok(reset_credits(/*available_count*/ 2)),
+        Some(reset_credit_confirmation()),
     ));
     assert!(chat.bottom_pane.no_modal_or_popup_active());
 }
@@ -877,6 +906,7 @@ async fn rate_limit_reset_load_result_updates_popup_beneath_overlay() {
         request_id,
         Vec::new(),
         Ok(reset_credits(/*available_count*/ 2)),
+        Some(reset_credit_confirmation()),
     ));
     assert_eq!(
         chat.bottom_pane.active_view_id(),
@@ -925,9 +955,11 @@ async fn account_change_dismisses_reset_popup_beneath_overlay() {
         request_id,
         Vec::new(),
         Ok(reset_credits(/*available_count*/ 1)),
+        Some(reset_credit_confirmation()),
     ));
     assert!(chat.show_rate_limit_reset_confirmation(
         request_id,
+        reset_credit_confirmation(),
         Arc::new(AtomicBool::new(true)),
         /*credit_id*/ None,
         "Full reset".to_string(),
@@ -937,6 +969,7 @@ async fn account_change_dismisses_reset_popup_beneath_overlay() {
     chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     let Ok(AppEvent::ConsumeRateLimitResetCredit {
+        confirmation: _,
         idempotency_key,
         credit_id: None,
     }) = rx.try_recv()
@@ -951,6 +984,7 @@ async fn account_change_dismisses_reset_popup_beneath_overlay() {
     );
     assert!(!chat.show_rate_limit_reset_confirmation(
         request_id,
+        reset_credit_confirmation(),
         Arc::new(AtomicBool::new(true)),
         /*credit_id*/ None,
         "Stale reset".to_string(),
@@ -1099,6 +1133,7 @@ fn finish_reset_consume_outcome(
 ) -> bool {
     chat.finish_rate_limit_reset_consume(
         request_id,
+        reset_credit_confirmation(),
         idempotency_key.to_string(),
         /*credit_id*/ None,
         Ok(consume_response(outcome)),

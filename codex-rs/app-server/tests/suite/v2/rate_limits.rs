@@ -250,6 +250,7 @@ async fn get_account_rate_limits_returns_snapshot(
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountRateLimitsResponse {
+        reset_credit_confirmation: received.reset_credit_confirmation.clone(),
         ordinary_usage_allowed: Some(true),
         account_id: Some("account-123".to_string()),
         rate_limit_upsell: Some(banner),
@@ -435,7 +436,8 @@ async fn get_account_rate_limits_filters_banner_by_identity(
         "ordinaryUsageAllowed": if permitted { Some(true) } else { None },
         "accountId": account, "rateLimitUpsell": if permitted { Some(banner) } else { None },
         "rateLimits": snapshot, "rateLimitsByLimitId": {"codex": snapshot},
-        "rateLimitResetCredits": {"availableCount": 0, "credits": []}
+        "rateLimitResetCredits": {"availableCount": 0, "credits": []},
+        "resetCreditConfirmation": received.reset_credit_confirmation
     }))?;
     assert_eq!(received, expected);
     server.verify().await;

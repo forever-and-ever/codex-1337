@@ -105,6 +105,7 @@ pub(crate) struct AccountRequestProcessor {
     gateway_client: Arc<std::sync::Mutex<Option<Arc<codex_login::GatewayAuthManager>>>>,
     _gateway_notifications: Arc<tokio_util::task::AbortOnDropHandle<()>>,
     pub(super) enterprise_login: Arc<enterprise_login::EnterpriseLoginState>,
+    reset_credit_confirmations: Arc<Mutex<rate_limit_resets::ResetCreditConfirmations>>,
 }
 
 impl AccountRequestProcessor {
@@ -159,6 +160,7 @@ impl AccountRequestProcessor {
             config_manager,
             active_login: Arc::new(Mutex::new(None)),
             quota_cache: Arc::default(),
+            reset_credit_confirmations: Arc::default(),
             gateway_login: Arc::new(std::sync::Mutex::new(/*t*/ None)),
             gateway_client: Arc::new(std::sync::Mutex::new(/*t*/ None)),
             workspace_routing: Arc::new(Mutex::new(None)),
@@ -1126,8 +1128,12 @@ impl AccountRequestProcessor {
         &self,
         params: GetAccountRateLimitsParams,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
-        let Some((auth, http_client_factory)) =
-            self.auth_manager.auth_with_http_client_factory().await
+        let auth_manager = self.reset_credit_read_auth_manager(&params).await?;
+        let owner_generation = auth_manager
+            .auth_change_state_receiver()
+            .borrow()
+            .owner_generation;
+        let Some((auth, http_client_factory)) = auth_manager.auth_with_http_client_factory().await
         else {
             return Err(invalid_request(
                 "codex account authentication required to read rate limits",
@@ -1147,7 +1153,7 @@ impl AccountRequestProcessor {
         );
 
         let usage_request = async {
-            if let Some(id) = self.auth_manager.selected_account_id() {
+            if let Some(id) = auth_manager.selected_account_id() {
                 let capability = if params.supports_luna_reserve {
                     quota::QuotaCapability::LunaReserve
                 } else {
@@ -1238,7 +1244,14 @@ impl AccountRequestProcessor {
             .rate_limit_upsell
             .filter(|_| matches_active_account);
 
+        let reset_credit_confirmation = if rate_limit_reset_credits.is_some() {
+            self.bind_reset_credit_confirmation(&params, auth_manager, owner_generation)
+                .await
+        } else {
+            None
+        };
         Ok(GetAccountRateLimitsResponse {
+            reset_credit_confirmation,
             ordinary_usage_allowed: response
                 .ordinary_usage_allowed
                 .filter(|_| matches_active_account),

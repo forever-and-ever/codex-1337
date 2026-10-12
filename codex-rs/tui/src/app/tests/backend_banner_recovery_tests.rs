@@ -449,6 +449,10 @@ async fn backend_banner_reset_redemption_rejects_pre_reset_content() -> Result<(
         &mut session,
         AppEvent::RateLimitResetCreditConsumed {
             request_id,
+            confirmation: codex_app_server_protocol::ResetCreditConfirmation {
+                token: "confirmed-payer".into(),
+                scope: codex_app_server_protocol::ResetCreditScope::Global,
+            },
             idempotency_key: "mock-reset".into(),
             credit_id: None,
             result: Ok(

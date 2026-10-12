@@ -121,6 +121,7 @@ impl ChatWidget {
         request_id: u64,
         snapshots: Vec<RateLimitSnapshot>,
         result: Result<RateLimitResetCreditsSummary, String>,
+        confirmation: Option<codex_app_server_protocol::ResetCreditConfirmation>,
     ) -> bool {
         if self.pending_rate_limit_reset_request_id != Some(request_id) {
             return false;
@@ -131,12 +132,12 @@ impl ChatWidget {
         }
 
         let mut shows_picker = false;
-        let params = match result {
-            Ok(response) => {
+        let params = match (result, confirmation) {
+            (Ok(response), Some(confirmation)) => {
                 let available_count = response.available_count;
                 let params = if available_count > 0 {
                     shows_picker = true;
-                    self.rate_limit_reset_picker_params(request_id, &response)
+                    self.rate_limit_reset_picker_params(request_id, &response, confirmation)
                 } else {
                     Self::rate_limit_reset_message_params(
                         "You don't have any usage limit resets available.",
@@ -145,9 +146,7 @@ impl ChatWidget {
                 self.available_rate_limit_reset_credits = Some(available_count);
                 params
             }
-            Err(_) => {
-                Self::reset_refresh_params("Couldn't load usage limit resets. Please try again.")
-            }
+            _ => Self::reset_refresh_params("Couldn't load usage limit resets. Please try again."),
         };
         let replaced = self
             .bottom_pane
@@ -163,12 +162,14 @@ impl ChatWidget {
         &self,
         picker_request_id: u64,
         reset_credits: &RateLimitResetCreditsSummary,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
     ) -> SelectionViewParams {
         let confirmation_gate = Arc::new(AtomicBool::new(true));
         let mut items = reset_credit_options(reset_credits, self.clock_format)
             .into_iter()
             .map(|option| {
                 let confirmation_gate = confirmation_gate.clone();
+                let confirmation = confirmation.clone();
                 let credit_id = option.credit_id;
                 let reset_title = option.name.clone();
                 let reset_detail = option.detail;
@@ -183,6 +184,7 @@ impl ChatWidget {
                         if confirmation_gate.swap(false, Ordering::AcqRel) {
                             tx.send(AppEvent::OpenRateLimitResetConfirmation {
                                 picker_request_id,
+                                confirmation: confirmation.clone(),
                                 confirmation_gate: confirmation_gate.clone(),
                                 credit_id: credit_id.clone(),
                                 reset_title: reset_title.clone(),
@@ -218,6 +220,7 @@ impl ChatWidget {
     pub(crate) fn show_rate_limit_reset_confirmation(
         &mut self,
         picker_request_id: u64,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         confirmation_gate: Arc<AtomicBool>,
         credit_id: Option<String>,
         reset_title: String,
@@ -251,6 +254,7 @@ impl ChatWidget {
                     description: Some(reset_description),
                     actions: vec![Box::new(move |tx| {
                         tx.send(AppEvent::ConsumeRateLimitResetCredit {
+                            confirmation: confirmation.clone(),
                             idempotency_key: idempotency_key.clone(),
                             credit_id: credit_id.clone(),
                         });
@@ -354,6 +358,7 @@ impl ChatWidget {
     pub(crate) fn finish_rate_limit_reset_consume(
         &mut self,
         request_id: u64,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         idempotency_key: String,
         credit_id: Option<String>,
         result: Result<ConsumeAccountRateLimitResetCreditResponse, String>,
@@ -397,18 +402,21 @@ impl ChatWidget {
                 self.replace_rate_limit_reset_popup(Self::rate_limit_reset_message_params(message));
                 false
             }
-            Err(_) => {
+            Err(error) => {
                 self.pending_rate_limit_reset_request_id = None;
                 self.pending_rate_limit_reset_idempotency_key = Some(idempotency_key.clone());
                 self.replace_rate_limit_reset_popup(SelectionViewParams {
                     view_id: Some(RATE_LIMIT_RESET_VIEW_ID),
                     title: Some("Usage limit resets".to_string()),
-                    subtitle: Some("Couldn't reset usage. Please try again.".to_string()),
+                    subtitle: Some(format!(
+                        "Couldn't confirm the reset outcome. Retry keeps the same attempt. {error}"
+                    )),
                     items: vec![
                         SelectionItem {
                             name: "Try again".to_string(),
                             actions: vec![Box::new(move |tx| {
                                 tx.send(AppEvent::ConsumeRateLimitResetCredit {
+                                    confirmation: confirmation.clone(),
                                     idempotency_key: idempotency_key.clone(),
                                     credit_id: credit_id.clone(),
                                 });

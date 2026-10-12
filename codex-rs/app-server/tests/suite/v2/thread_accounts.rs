@@ -311,6 +311,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
                 .expect("quota account header");
             ResponseTemplate::new(/*s*/ 200).set_body_json(json!({
                 "account_id": id, "user_id": id, "plan_type": "pro",
+                "rate_limit_reset_credits": {"available_count": 1},
                 "rate_limit": {"allowed": true, "limit_reached": false,
                     "primary_window": {"used_percent": 10, "limit_window_seconds": 18000,
                         "reset_after_seconds": 1800, "reset_at": 2000000000}}
@@ -440,7 +441,8 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             .send_request(
                 "account/rateLimitResetCredit/consume",
                 Some(json!({
-                    "newThread": new_thread, "idempotencyKey": format!("reset-{id}")
+                    "newThread": new_thread, "idempotencyKey": format!("reset-{id}"),
+                    "confirmation": quota.reset_credit_confirmation
                 })),
             )
             .await?;
@@ -475,6 +477,156 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         );
     }
+    // A draft confirmation owns its payer, not the login selected while its dialog is open.
+    let request = app
+        .send_request(
+            "account/rateLimits/read",
+            Some(json!({
+                "newThread": {}, "excludeResetCreditDetails": true
+            })),
+        )
+        .await?;
+    let confirmed: GetAccountRateLimitsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let confirmation = confirmed
+        .reset_credit_confirmation
+        .expect("draft confirmation");
+    assert_eq!(
+        confirmation.scope,
+        codex_app_server_protocol::ResetCreditScope::NewThread {
+            params: codex_app_server_protocol::NewThreadAccountParams {
+                model_provider: None,
+                cwd: None,
+                config: None
+            }
+        }
+    );
+    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_attempts = attempts.clone();
+    Mock::given(method("POST"))
+        .and(path("/api/codex/rate-limit-reset-credits/consume"))
+        .and(body_json(
+            json!({"redeem_request_id": "pinned-draft", "credit_id": "draft-credit"}),
+        ))
+        .respond_with(move |request: &wiremock::Request| {
+            assert_eq!(request.headers["chatgpt-account-id"], "bob");
+            assert_eq!(request.headers["authorization"], "Bearer access-bob");
+            if observed_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                ResponseTemplate::new(500)
+            } else {
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"code": "already_redeemed", "windows_reset": 0}))
+            }
+        })
+        .expect(2)
+        .mount(&server)
+        .await;
+    let request = app
+        .send_request(
+            "thread/account/select",
+            Some(json!({
+                "threadId": threads[1], "accountId": "alice:alice"
+            })),
+        )
+        .await?;
+    let _: ThreadAccountSelectResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let confirmed_attempt = json!({
+        "newThread": {}, "confirmation": confirmation, "idempotencyKey": "pinned-draft", "creditId": "draft-credit"
+    });
+    let request = app
+        .send_request(
+            "account/rateLimitResetCredit/consume",
+            Some(confirmed_attempt.clone()),
+        )
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32603);
+    let request = app
+        .send_request(
+            "account/rateLimitResetCredit/consume",
+            Some(confirmed_attempt.clone()),
+        )
+        .await?;
+    let retry: ConsumeAccountRateLimitResetCreditResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    assert_eq!(
+        retry.outcome,
+        ConsumeAccountRateLimitResetCreditOutcome::AlreadyRedeemed
+    );
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    // A valid token is not authority for a different conversation or a rewritten draft scope.
+    let mut mismatched = confirmed_attempt;
+    mismatched
+        .as_object_mut()
+        .expect("attempt object")
+        .remove("newThread");
+    mismatched["threadId"] = json!(threads[0]);
+    let request = app
+        .send_request("account/rateLimitResetCredit/consume", Some(mismatched))
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // A conversation's captured credentials cannot survive a payer switch on that conversation.
+    let request = app
+        .send_request(
+            "account/rateLimits/read",
+            Some(json!({
+                "threadId": threads[0], "excludeResetCreditDetails": true
+            })),
+        )
+        .await?;
+    let confirmed: GetAccountRateLimitsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let thread_confirmation = confirmed
+        .reset_credit_confirmation
+        .expect("conversation confirmation");
+    let request = app
+        .send_request(
+            "thread/account/select",
+            Some(json!({
+                "threadId": threads[0], "accountId": "alice:alice"
+            })),
+        )
+        .await?;
+    let _: ThreadAccountSelectResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let request = app
+        .send_request(
+            "account/rateLimitResetCredit/consume",
+            Some(json!({
+                "threadId": threads[0], "confirmation": thread_confirmation,
+                "idempotencyKey": "pinned-draft", "creditId": "draft-credit"
+            })),
+        )
+        .await?;
+    let error = timeout(
+        DEFAULT_READ_TIMEOUT,
+        app.read_stream_until_error_message(RequestId::Integer(request)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    let request = app
+        .send_request(
+            "thread/account/select",
+            Some(json!({
+                "threadId": threads[0], "accountId": "bob:bob"
+            })),
+        )
+        .await?;
+    let _: ThreadAccountSelectResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
     // The catalog follows the account: a lapsed former login once hid models that only the
     // chosen account's plan offers. An unscoped read speaks for the active login, and a
     // conversation's read for that conversation's own account.

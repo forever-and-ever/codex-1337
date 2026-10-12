@@ -802,6 +802,7 @@ pub(crate) enum AppEvent {
     /// Confirm the reset credit selected from the reset-credit picker.
     OpenRateLimitResetConfirmation {
         picker_request_id: u64,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         confirmation_gate: Arc<AtomicBool>,
         credit_id: Option<String>,
         reset_title: String,
@@ -811,6 +812,7 @@ pub(crate) enum AppEvent {
 
     /// Consume one reset credit using a stable idempotency key.
     ConsumeRateLimitResetCredit {
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         idempotency_key: String,
         credit_id: Option<String>,
     },
@@ -818,6 +820,7 @@ pub(crate) enum AppEvent {
     /// Result of consuming one reset credit.
     RateLimitResetCreditConsumed {
         request_id: u64,
+        confirmation: codex_app_server_protocol::ResetCreditConfirmation,
         idempotency_key: String,
         credit_id: Option<String>,
         result: Result<ConsumeAccountRateLimitResetCreditResponse, String>,
