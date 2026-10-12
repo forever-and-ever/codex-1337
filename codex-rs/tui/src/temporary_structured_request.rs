@@ -3,8 +3,6 @@
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::ConfigReadParams;
-use codex_app_server_protocol::ConfigReadResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxMode;
 use codex_app_server_protocol::SandboxPolicy;
@@ -40,7 +38,6 @@ pub(crate) struct TemporaryStructuredThreadOptions {
     pub(crate) model_provider: String,
     pub(crate) cwd: String,
     pub(crate) active_permission_profile: Option<String>,
-    pub(crate) mcp_server_names: Vec<String>,
 }
 
 /// Start an ephemeral thread without widening permissions or exposing tools and environment access.
@@ -58,44 +55,19 @@ pub(crate) async fn start_temporary_thread(
         model_provider,
         cwd,
         active_permission_profile,
-        mcp_server_names,
     } = options;
     let custom_permission_profile =
         active_permission_profile.filter(|profile| !profile.starts_with(':'));
+    // Suppress startup effects and prompt enrichment independently of tool authority.
     let mut config = std::collections::HashMap::from([
-        ("features.apps".to_string(), false.into()),
-        ("features.code_mode".to_string(), false.into()),
-        ("features.code_mode_only".to_string(), false.into()),
         ("features.context_management".to_string(), false.into()),
         ("features.current_time_reminder".to_string(), false.into()),
-        ("features.deferred_executor".to_string(), false.into()),
-        ("features.enable_fanout".to_string(), false.into()),
-        ("features.goals".to_string(), false.into()),
         ("features.hooks".to_string(), false.into()),
-        ("features.image_generation".to_string(), false.into()),
         ("features.memories".to_string(), false.into()),
-        ("features.multi_agent".to_string(), false.into()),
-        ("features.multi_agent_v2".to_string(), false.into()),
         ("features.plugins".to_string(), false.into()),
-        (
-            "features.request_permissions_tool".to_string(),
-            false.into(),
-        ),
         ("features.shell_snapshot".to_string(), false.into()),
-        ("features.shell_tool".to_string(), false.into()),
-        ("features.standalone_web_search".to_string(), false.into()),
-        ("features.token_budget".to_string(), false.into()),
-        ("features.tool_suggest".to_string(), false.into()),
-        ("features.unified_exec".to_string(), false.into()),
-        ("features.view_image".to_string(), false.into()),
         ("cloud.skills.enabled".to_string(), false.into()),
         ("skills.include_instructions".to_string(), false.into()),
-        (
-            "tools.experimental_request_user_input.enabled".to_string(),
-            false.into(),
-        ),
-        ("tools.update_plan.enabled".to_string(), false.into()),
-        ("web_search".to_string(), "disabled".into()),
     ]);
     if custom_permission_profile.is_none() {
         // Managed profiles take precedence over the legacy sandbox override below.
@@ -105,37 +77,6 @@ pub(crate) async fn start_temporary_thread(
         );
     }
     let response: ThreadStartResponse = tokio::time::timeout(STRUCTURED_TURN_TIMEOUT, async {
-        // Fail closed if the remote-effective MCP configuration cannot be read.
-        let effective_config: ConfigReadResponse = request_handle
-            .request_typed(ClientRequest::ConfigRead {
-                request_id: RequestId::String(format!("temporary-config-{}", Uuid::new_v4())),
-                params: ConfigReadParams {
-                    include_layers: false,
-                    cwd: Some(cwd.clone()),
-                },
-            })
-            .await?;
-        let mut mcp_server_names = mcp_server_names
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>();
-        if let Some(effective_mcp_servers) = effective_config
-            .config
-            .additional
-            .get("mcp_servers")
-            .and_then(Value::as_object)
-        {
-            mcp_server_names.extend(effective_mcp_servers.keys().cloned());
-        }
-        config.insert(
-            "mcp_servers".to_string(),
-            Value::Object(
-                mcp_server_names
-                    .into_iter()
-                    .map(|name| (name, serde_json::json!({ "enabled": false })))
-                    .collect(),
-            ),
-        );
-
         request_handle
             .request_typed(ClientRequest::ThreadStart {
                 request_id: RequestId::String(format!("temporary-structured-{}", Uuid::new_v4())),
@@ -152,6 +93,7 @@ pub(crate) async fn start_temporary_thread(
                     thread_source: Some(thread_source),
                     environments: Some(Vec::new()),
                     dynamic_tools: Some(Vec::new()),
+                    tool_policy: Some(codex_app_server_protocol::ToolPolicyCeiling::NoTools),
                     selected_capability_roots: Some(Vec::new()),
                     config: Some(config),
                     ..ThreadStartParams::default()
@@ -161,6 +103,13 @@ pub(crate) async fn start_temporary_thread(
     })
     .await
     .map_err(|_| eyre!("temporary structured thread start timed out"))??;
+
+    if response.tool_policy != Some(codex_app_server_protocol::ToolPolicyCeiling::NoTools) {
+        unsubscribe_temporary_thread(request_handle, response.thread.id.clone()).await;
+        return Err(eyre!(
+            "app server did not enforce the no-tools startup ceiling"
+        ));
+    }
 
     if let Some(expected_profile) = custom_permission_profile {
         if response

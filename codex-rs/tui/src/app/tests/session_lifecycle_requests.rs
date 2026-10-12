@@ -668,6 +668,9 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                 },
                             })
                         } else {
+                            let legacy_tool_policy = history_capabilities
+                                == HistoryCapabilities::LegacyDynamicToolsAndHistory
+                                && matches!(&request, ClientRequest::ThreadStart { .. });
                             let unknown_voice = history_capabilities
                                 == HistoryCapabilities::ConfigReadUnknownVoice
                                 && matches!(&request, ClientRequest::ConfigRead { .. });
@@ -690,6 +693,9 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             if background {
                                 let terminal = r#"{"data":[{"itemId":"x","processId":"x","command":"x","cwd":"/"}],"nextCursor":null}"#;
                                 result = Ok(serde_json::from_str(terminal)?);
+                            }
+                            if legacy_tool_policy && let Ok(value) = &mut result {
+                                value.as_object_mut().expect("thread/start result").remove("toolPolicy");
                             }
                             match result {
                                 Ok(result) => JSONRPCMessage::Response(JSONRPCResponse {
@@ -1137,6 +1143,30 @@ async fn older_external_server_starts_without_unsupported_dynamic_tools_or_histo
         assert_eq!(attempts[0]["historyMode"], "paginated");
         assert_eq!(attempts[1]["historyMode"], serde_json::Value::Null);
     }
+
+    // Missing authority receipts must fail closed before sending transcript data to an old server.
+    let error = crate::temporary_structured_request::start_temporary_thread(
+        &app_server.request_handle(),
+        crate::temporary_structured_request::TemporaryStructuredThreadOptions {
+            thread_source: codex_app_server_protocol::ThreadSource::Feature("system".to_string()),
+            model: "gpt-5.2".to_string(),
+            model_provider: app.config.model_provider_id.clone(),
+            cwd: app.config.cwd.display().to_string(),
+            active_permission_profile: app
+                .config
+                .permissions
+                .active_permission_profile()
+                .map(|profile| profile.id),
+        },
+    )
+    .await
+    .expect_err("old server must acknowledge no-tools authority");
+    assert_eq!(
+        error.to_string(),
+        "app server did not enforce the no-tools startup ceiling"
+    );
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    assert_eq!(recorded_params(&requests, "thread/unsubscribe").len(), 1);
 
     app_server.shutdown().await?;
     proxy.await??;

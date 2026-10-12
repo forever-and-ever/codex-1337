@@ -766,7 +766,7 @@ async fn dispatch_uses_canonical_tool_names_for_lifecycle_contributors() -> anyh
         tool_name: failing_tool.clone(),
         result: LifecycleTestResult::Err,
     }) as Arc<dyn CoreToolRuntime>;
-    let registry = ToolRegistry::from_tools([ok_handler, failing_handler]);
+    let mut registry = ToolRegistry::from_tools([ok_handler, failing_handler]);
     let session = Arc::new(session);
     let turn = Arc::new(turn);
 
@@ -797,6 +797,43 @@ async fn dispatch_uses_canonical_tool_names_for_lifecycle_contributors() -> anyh
         Err(err) => err,
     };
     assert_eq!(err.to_string(), "handler failed");
+
+    // A deferred runtime can remain registered while a stricter session ceiling forbids it.
+    // Dispatch must reject both guessed direct calls and nested Code Mode calls before hooks.
+    let (mut restricted_session, restricted_turn) =
+        crate::session::tests::make_session_and_context().await;
+    restricted_session.services.extensions = Arc::clone(&session.services.extensions);
+    restricted_session.tool_policy = Arc::new(ToolPolicy {
+        allowed_tools: Some(Vec::new()),
+        ..Default::default()
+    });
+    let restricted_session = Arc::new(restricted_session);
+    let restricted_turn = Arc::new(restricted_turn);
+    registry
+        .entries_mut()
+        .for_each(|tool| tool.exposure = ToolExposure::Deferred);
+    for source in [
+        crate::tools::context::ToolCallSource::Direct,
+        crate::tools::context::ToolCallSource::CodeMode {
+            cell_id: "cell".to_string(),
+            runtime_tool_call_id: "nested".to_string(),
+        },
+    ] {
+        let invocation = ToolInvocation {
+            source,
+            ..test_invocation(
+                Arc::clone(&restricted_session),
+                Arc::clone(&restricted_turn),
+                "denied-call",
+                ok_tool.clone(),
+            )
+        };
+        let err = match registry.dispatch_any_with_state(invocation, None).await {
+            Ok(_) => panic!("the startup ceiling must prevent handler execution"),
+            Err(err) => err,
+        };
+        assert_eq!(err.to_string(), "unsupported call: ok_tool");
+    }
 
     let expected = vec![
         RecordedToolLifecycle::Start {

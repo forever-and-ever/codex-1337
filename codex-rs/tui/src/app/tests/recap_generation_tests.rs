@@ -58,6 +58,19 @@ async fn prepare_eligible_recap(app: &mut App, thread_id: ThreadId) {
 
 #[tokio::test]
 async fn recap_generation_uses_bounded_structured_request_and_inserts_result() -> Result<()> {
+    // A model may guess a tool despite an empty declaration list.
+    let guessed_call = vec![StreamingSseChunk {
+        gate: None,
+        body: responses::sse(vec![
+            ev_response_created("guessed-tool-response"),
+            responses::ev_function_call(
+                "guessed-tool",
+                "exec_command",
+                r#"{"cmd":"echo should-not-run"}"#,
+            ),
+            ev_completed("guessed-tool-response"),
+        ]),
+    }];
     let chunks = [
         ev_response_created("recap-response"),
         ev_assistant_message(
@@ -72,7 +85,7 @@ async fn recap_generation_uses_bounded_structured_request_and_inserts_result() -
         body: responses::sse(vec![event]),
     })
     .collect();
-    let (model_server, _completions) = start_streaming_sse_server(vec![chunks]).await;
+    let (model_server, _completions) = start_streaming_sse_server(vec![guessed_call, chunks]).await;
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
     std::fs::write(
@@ -191,7 +204,16 @@ stream_max_retries = 0
     );
 
     let model_requests = model_server.requests().await;
-    assert_eq!(model_requests.len(), 1);
+    assert_eq!(model_requests.len(), 2);
+    let continuation: Value = serde_json::from_slice(&model_requests[1])?;
+    let rejected = continuation["input"]
+        .as_array()
+        .expect("continuation input")
+        .iter()
+        .find(|item| item["call_id"] == "guessed-tool" && item["type"] == "function_call_output")
+        .expect("dispatch rejection returned to model");
+    assert_eq!(rejected["output"], "unsupported call: exec_command");
+    assert_eq!(continuation["tools"], serde_json::json!([]));
     let request: Value = serde_json::from_slice(&model_requests[0])?;
     let prompt = request["input"]
         .as_array()
@@ -461,7 +483,6 @@ async fn temporary_recap_threads_disable_memories_and_remote_mcp_servers() -> Re
             .permissions
             .active_permission_profile()
             .map(|profile| profile.id),
-        mcp_server_names: Vec::new(),
     };
     let response = crate::temporary_structured_request::start_temporary_thread(
         &app_server.request_handle(),
@@ -497,10 +518,9 @@ async fn temporary_recap_threads_disable_memories_and_remote_mcp_servers() -> Re
     assert_eq!(starts[0]["config"]["features.memories"], false);
     assert_eq!(starts[0]["config"]["features.context_management"], false);
     assert!(starts[0]["config"].get("features.memory_tool").is_none());
-    assert_eq!(
-        starts[0]["config"]["mcp_servers"]["filesystem"]["enabled"],
-        false
-    );
+    assert_eq!(starts[0]["toolPolicy"], "noTools");
+    assert!(starts[0]["config"].get("mcp_servers").is_none());
+    assert!(recorded_params(&requests, "config/read").is_empty());
 
     app_server.shutdown().await?;
     proxy.await??;

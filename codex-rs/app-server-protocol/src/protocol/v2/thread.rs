@@ -53,6 +53,8 @@ pub enum ThreadStartSource {
     Clear,
 }
 
+pub use codex_protocol::tool_policy::ToolPolicyCeiling;
+
 // === Threads, Turns, and Items ===
 // Thread APIs
 #[derive(
@@ -150,6 +152,11 @@ pub struct ThreadStartParams {
     )]
     #[ts(optional = nullable)]
     pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
+    /// Immutable startup ceiling for ephemeral threads, which cannot be resumed or forked.
+    /// Omission preserves inherited tool restrictions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tool_policy: Option<ToolPolicyCeiling>,
     /// Capability roots selected for this thread by the hosting platform.
     #[experimental("thread/start.selectedCapabilityRoots")]
     #[ts(optional = nullable)]
@@ -188,6 +195,10 @@ pub struct MockExperimentalMethodResponse {
 #[ts(export_to = "v2/")]
 pub struct ThreadStartResponse {
     pub thread: Thread,
+    /// Startup ceiling enforced by this server. Missing on older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tool_policy: Option<ToolPolicyCeiling>,
     pub model: String,
     pub model_provider: String,
     pub service_tier: Option<String>,

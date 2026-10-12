@@ -560,7 +560,9 @@ impl ToolRegistry {
         }
 
         let dispatch_trace = ToolDispatchTrace::start(&invocation);
-        let tool = match self.tool(&tool_name) {
+        let tool = match self.tool(&tool_name).filter(|_| {
+            self.tool_policy.allows(&tool_name) && invocation.session.tool_policy.allows(&tool_name)
+        }) {
             Some(tool) => tool,
             None => {
                 let message = unsupported_tool_call_message(&invocation.payload, &tool_name);
