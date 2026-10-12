@@ -744,12 +744,15 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
     let cwd = std::path::Path::new("/workspace");
     let source = (0..12)
         .map(|index| {
-            format!("Passage {index:02} alpha   beta   gamma   delta   epsilon   zeta   theta.\n\n")
+            format!("Passage {index:02} alpha   beta   gamma   delta   epsilon   zeta   theta. 界 e\u{301} [linked text](https://example.com/plan).\n\n")
         })
         .collect::<String>();
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 42, /*height*/ 9,
+        /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 9,
     );
+    // Triple spaces make `Passage 01 alpha   beta` exceed the plan body by one column.
+    let plan_body_width = area.width - crate::transcript_geometry::GUTTER_COLUMNS - 4;
+    assert_eq!(plan_body_width, 22);
     let render = |overlay: &mut TranscriptOverlay, area: Rect| {
         let mut buffer = Buffer::empty(area);
         overlay.render(area, &mut buffer);
@@ -761,9 +764,7 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
         ])) as Arc<dyn HistoryCell>];
         let replacement: Arc<dyn HistoryCell> = if plan {
             let mut controller = PlanStreamController::new(
-                Some(usize::from(
-                    area.width - crate::transcript_geometry::GUTTER_COLUMNS - 4,
-                )),
+                Some(usize::from(plan_body_width)),
                 cwd,
                 HistoryRenderMode::Rich,
             );
@@ -771,7 +772,8 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             while let (Some(cell), _) = controller.on_commit_tick_batch(/*max_lines*/ 1) {
                 cells.push(cell.into());
             }
-            let (tail, _) = controller.finalize();
+            let (tail, finalized_source) = controller.finalize();
+            assert_eq!(finalized_source.as_deref(), Some(source.as_str()));
             if let Some(tail) = tail {
                 cells.push(tail.into());
             }
@@ -788,7 +790,8 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             while let (Some(cell), _) = controller.on_commit_tick_batch(/*max_lines*/ 1) {
                 cells.push(cell.into());
             }
-            let (tail, _) = controller.finalize();
+            let (tail, finalized_source) = controller.finalize();
+            assert_eq!(finalized_source.as_deref(), Some(source.as_str()));
             if let Some(tail) = tail {
                 cells.push(tail.into());
             }
@@ -801,6 +804,35 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
             cells.len() > 3,
             "the stream must span multiple committed fragments"
         );
+        // Compare every passage, including Unicode and hyperlink targets, not only the anchor.
+        let full_area = Rect {
+            height: 160,
+            ..area
+        };
+        let mut full_overlay = transcript_overlay(cells.clone());
+        full_overlay.view.jump_to_beginning(&full_overlay.cells);
+        let streamed = render(&mut full_overlay, full_area);
+        let end = full_overlay.cells.len();
+        full_overlay.consolidate_cells(1..end, Arc::clone(&replacement));
+        let completed = render(&mut full_overlay, full_area);
+        let full_content = Rect {
+            y: 1,
+            height: full_area.height - 5,
+            ..full_area
+        };
+        assert_eq!(
+            buffer_to_text(&completed, full_content),
+            buffer_to_text(&streamed, full_content),
+            "full plan {plan}"
+        );
+        let destination = "https://example.com/plan";
+        for buffer in [&streamed, &completed] {
+            assert!(full_content.positions().any(|position| {
+                buffer[position]
+                    .symbol()
+                    .contains(&format!("\x1b]8;;{destination}\x07"))
+            }));
+        }
         for resize_before_draw in [false, true] {
             let mut overlay = transcript_overlay(cells.clone());
             render(&mut overlay, area);
