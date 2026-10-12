@@ -651,22 +651,17 @@ fn conversation_body_matches(left: &ConversationBody, right: &ConversationBody) 
                     },
                 ) => left_summary == right_summary,
                 (
-                    ConversationPart::PayloadRef {
-                        label: left_label, ..
+                    ConversationPart::SignatureRef {
+                        kind: left_kind,
+                        sha256: left_digest,
+                        ..
                     },
-                    ConversationPart::PayloadRef {
-                        label: right_label, ..
+                    ConversationPart::SignatureRef {
+                        kind: right_kind,
+                        sha256: right_digest,
+                        ..
                     },
-                ) if matches!(
-                    left_label.split_once(":sha256:"),
-                    Some((
-                        "native_compaction" | "native_thinking" | "native_redacted_thinking",
-                        _
-                    ))
-                ) =>
-                {
-                    left_label == right_label
-                }
+                ) => left_kind == right_kind && left_digest == right_digest,
                 _ => left == right,
             })
 }

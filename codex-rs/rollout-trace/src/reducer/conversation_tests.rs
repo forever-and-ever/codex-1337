@@ -1125,7 +1125,8 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         "output_items": [
             {"type": "reasoning", "summary": [{"type": "summary_text", "text": "think"}],
                 "encrypted_content": "native-thinking-signature-secret"},
-            {"type": "function_call", "call_id": "function-1", "arguments": "{\"path\":\".\"}"},
+            {"type": "function_call", "call_id": "function-1",
+                "arguments": "{\"input\":\"ordinary-function-input\",\"arguments\":{\"nested\":true},\"extra\":7}"},
             {"type": "custom_tool_call", "call_id": "custom-1", "name": "exec", "input": "text('ok')"}
         ]
     }))?;
@@ -1139,12 +1140,18 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         }]}, wire_user, wire_summary,
         {"role": "assistant", "content": [
             {"type": "thinking", "thinking": "think", "signature": "native-thinking-signature-secret"},
-            {"type": "tool_use", "id": "function-1", "name": "f0", "input": {"arguments": {"path": "."}}},
-            {"type": "tool_use", "id": "custom-1", "name": "c0", "input": {"input": "text('ok')"}}
+            {"type": "tool_use", "id": "function-1", "name": "f0", "input": {"arguments": {
+                "input": "ordinary-function-input", "arguments": {"nested": true}, "extra": 7
+            }}},
+            {"type": "tool_use", "id": "custom-1", "name": "c0", "input": {"input": "text('ok')"}},
+            {"type": "tool_use", "id": "malformed-1", "name": "unknown", "input": {
+                "arguments": {"value": 3}, "extra": "must-survive"
+            }}
         ]},
         {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": "function-1", "content": [{"type": "text", "text": "files"}]},
-            {"type": "tool_result", "tool_use_id": "custom-1", "content": "ok"}
+            {"type": "tool_result", "tool_use_id": "custom-1", "content": "ok"},
+            {"type": "tool_result", "tool_use_id": "malformed-1", "content": "rejected"}
         ]}]
     }))?;
             append_request("inference-3", "turn-3", changed)?;
@@ -1201,9 +1208,8 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
         if native {
             assert!(matches!(parts.as_slice(), [
             ConversationPart::Summary { text },
-            ConversationPart::PayloadRef { label, raw_payload_id }
-        ] if text == "signed summary" && label.starts_with("native_compaction:sha256:")
-            && rollout.raw_payloads.contains_key(raw_payload_id)));
+            ConversationPart::SignatureRef { kind: crate::model::NativeSignatureKind::Compaction, raw_payload_id, .. }
+        ] if text == "signed summary" && rollout.raw_payloads.contains_key(raw_payload_id)));
             assert_ne!(
                 rollout.inference_calls["inference-3"].request_item_ids[1],
                 second.request_item_ids[1]
@@ -1211,6 +1217,13 @@ fn compaction_boundary_repeats_prefix_and_reuses_replacement_items() -> anyhow::
             assert_eq!(
                 &rollout.inference_calls["inference-3"].request_item_ids[4..7],
                 second.response_item_ids.as_slice()
+            );
+            let malformed_id = &rollout.inference_calls["inference-3"].request_item_ids[7];
+            let malformed = &rollout.conversation_items[malformed_id];
+            assert!(
+                matches!(malformed.body.parts.as_slice(), [ConversationPart::Json { summary, .. }]
+                if serde_json::from_str::<serde_json::Value>(summary).unwrap()
+                    == json!({"arguments": {"value": 3}, "extra": "must-survive"}))
             );
             assert!(!serde_json::to_string(&rollout)?.contains("signature-secret"));
             let raw = &rollout.raw_payloads[&second.raw_request_payload_id];

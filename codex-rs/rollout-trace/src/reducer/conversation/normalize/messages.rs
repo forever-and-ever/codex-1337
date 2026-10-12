@@ -11,6 +11,13 @@ use serde_json::Value;
 use super::NormalizedConversationItem;
 use super::native_compaction_item;
 use super::normalize_model_item;
+use super::signed_payload_ref_part;
+use crate::model::ConversationBody;
+use crate::model::ConversationChannel;
+use crate::model::ConversationItemKind;
+use crate::model::ConversationPart;
+use crate::model::ConversationRole;
+use crate::model::NativeSignatureKind;
 use crate::payload::RawPayloadRef;
 
 pub(in super::super) fn normalize_messages_request(
@@ -97,8 +104,15 @@ fn append_content(
                     custom_calls.insert(id.to_string());
                     serde_json::json!({"type": "custom_tool_call", "call_id": id, "input": input})
                 } else {
-                    serde_json::json!({"type": "function_call", "call_id": id,
-                        "arguments": input.get("arguments").unwrap_or(input)})
+                    // Only the adapter's exact one-key object envelope can be unwrapped.
+                    // Rejected/unknown native calls retain malformed input in full as raw JSON.
+                    let arguments = input
+                        .as_object()
+                        .filter(|input| input.len() == 1)
+                        .and_then(|input| input.get("arguments"))
+                        .filter(|arguments| arguments.is_object())
+                        .unwrap_or(input);
+                    serde_json::json!({"type": "function_call", "call_id": id, "arguments": arguments})
                 }
             }
             "tool_result" => {
@@ -111,35 +125,31 @@ fn append_content(
             }
             "thinking" | "redacted_thinking" => {
                 // Signed thinking is lazy evidence, not JSON that might print its signature.
-                let (label, signature) = if kind == "thinking" {
+                let (kind, signature) = if kind == "thinking" {
                     (
-                        "native_thinking",
+                        NativeSignatureKind::Thinking,
                         block.get("signature").and_then(Value::as_str),
                     )
                 } else {
                     (
-                        "native_redacted_thinking",
+                        NativeSignatureKind::RedactedThinking,
                         block.get("data").and_then(Value::as_str),
                     )
                 };
                 let signature = signature.context("signed Messages thinking had no signature")?;
                 let mut parts = Vec::new();
                 if let Some(text) = block.get("thinking").and_then(Value::as_str) {
-                    parts.push(crate::model::ConversationPart::Summary {
+                    parts.push(ConversationPart::Summary {
                         text: text.to_string(),
                     });
                 }
-                parts.push(super::signed_payload_ref_part(
-                    label,
-                    signature,
-                    raw_payload,
-                ));
+                parts.push(signed_payload_ref_part(kind, signature, raw_payload));
                 items.push(NormalizedConversationItem {
-                    role: crate::model::ConversationRole::Assistant,
-                    channel: Some(crate::model::ConversationChannel::Analysis),
-                    kind: crate::model::ConversationItemKind::Reasoning,
+                    role: ConversationRole::Assistant,
+                    channel: Some(ConversationChannel::Analysis),
+                    kind: ConversationItemKind::Reasoning,
                     agent_message: None,
-                    body: crate::model::ConversationBody { parts },
+                    body: ConversationBody { parts },
                     call_id: None,
                 });
                 continue;

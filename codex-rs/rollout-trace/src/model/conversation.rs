@@ -105,6 +105,15 @@ pub enum ModelRequestProtocol {
     Messages,
 }
 
+/// Native signed content whose exact authentication material lives in raw evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSignatureKind {
+    Compaction,
+    Thinking,
+    RedactedThinking,
+}
+
 /// One model-visible part inside a conversation item.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
@@ -138,6 +147,12 @@ pub enum ConversationPart {
     Code {
         language: String,
         source: String,
+    },
+    /// Signed native content identity without exposing authentication bytes.
+    SignatureRef {
+        kind: NativeSignatureKind,
+        sha256: [u8; 32],
+        raw_payload_id: RawPayloadId,
     },
     /// Large or uncommon payload that should be lazy-loaded from details UI.
     PayloadRef {

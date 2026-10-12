@@ -13,6 +13,7 @@ use crate::model::ConversationChannel;
 use crate::model::ConversationItemKind;
 use crate::model::ConversationPart;
 use crate::model::ConversationRole;
+use crate::model::NativeSignatureKind;
 use crate::model::TokenUsage;
 use crate::payload::RawPayloadRef;
 
@@ -52,15 +53,18 @@ fn normalize_native_compaction_item(
 }
 
 fn signed_payload_ref_part(
-    label: &str,
+    kind: NativeSignatureKind,
     signature: &str,
     raw_payload: &RawPayloadRef,
 ) -> ConversationPart {
     use sha2::Digest;
     use sha2::Sha256;
     // Exact signatures stay in opt-in raw captures. Digests are identity, not model text.
-    let digest = format!("{:x}", Sha256::digest(signature.as_bytes()));
-    payload_ref_part(&format!("{label}:sha256:{digest}"), raw_payload)
+    ConversationPart::SignatureRef {
+        kind,
+        sha256: Sha256::digest(signature.as_bytes()).into(),
+        raw_payload_id: raw_payload.raw_payload_id.clone(),
+    }
 }
 
 pub(super) fn normalize_model_items_for_protocol(
@@ -74,12 +78,12 @@ pub(super) fn normalize_model_items_for_protocol(
             if item.kind == ConversationItemKind::Reasoning {
                 for part in &mut item.body.parts {
                     if let ConversationPart::Encoded { value, .. } = part {
-                        let (label, signature) = value
-                            .strip_prefix("claude-redacted-thinking:")
-                            .map_or(("native_thinking", value.as_str()), |signature| {
-                                ("native_redacted_thinking", signature)
-                            });
-                        *part = signed_payload_ref_part(label, signature, raw_payload);
+                        let (kind, signature) =
+                            value.strip_prefix("claude-redacted-thinking:").map_or(
+                                (NativeSignatureKind::Thinking, value.as_str()),
+                                |signature| (NativeSignatureKind::RedactedThinking, signature),
+                            );
+                        *part = signed_payload_ref_part(kind, signature, raw_payload);
                     }
                 }
             }
@@ -102,7 +106,11 @@ fn native_compaction_item(
                 ConversationPart::Summary {
                     text: checkpoint.content().to_string(),
                 },
-                signed_payload_ref_part("native_compaction", checkpoint.signature(), raw_payload),
+                signed_payload_ref_part(
+                    NativeSignatureKind::Compaction,
+                    checkpoint.signature(),
+                    raw_payload,
+                ),
             ],
         },
         call_id: None,
