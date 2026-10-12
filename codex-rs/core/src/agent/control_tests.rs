@@ -1389,16 +1389,16 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
                 agent_role: None,
             }),
             options: SpawnAgentOptions {
-                user_request: Some(crate::agent::types::UserSpawnRequest {
-                    request_id: request_id.clone(),
-                    instructions: String::new(),
-                    parent_developer_instructions: None,
-                    fork_history: None,
-                }),
                 fork_mode: Some(SpawnAgentForkMode::FullHistory),
                 parent_thread_id: Some(parent_thread_id),
                 ..Default::default()
             },
+        },
+        user_request: crate::agent::types::UserSpawnRequest {
+            request_id: request_id.clone(),
+            instructions: String::new(),
+            parent_developer_instructions: None,
+            fork_history: None,
         },
         payload_sha256: "a".repeat(64),
         task_name: Some("rejected_farm".into()),

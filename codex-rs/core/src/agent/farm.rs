@@ -53,6 +53,8 @@ pub struct FarmRequest {
 
 pub struct FarmSpawnRequest {
     pub spawn: SpawnRequest,
+    /// Authoritative captured user boundary, transferred into spawn options by the controller.
+    pub user_request: UserSpawnRequest,
     pub payload_sha256: String,
     pub task_name: Option<String>,
     pub authorization: RetainedUserMessage,
@@ -90,12 +92,6 @@ pub(crate) fn apply_farm_instructions(config: &mut crate::config::Config, instru
         });
     }
     config.multi_agent_v2.subagent_developer_instructions = config.developer_instructions.clone();
-}
-
-impl From<CodexErr> for FarmError {
-    fn from(error: CodexErr) -> Self {
-        Self::Rejected(error)
-    }
 }
 
 pub(crate) fn replay(
@@ -366,18 +362,18 @@ impl CodexThread {
                     input: AgentInput::UserInput(request.input),
                     source,
                     options: SpawnAgentOptions {
-                        user_request: Some(UserSpawnRequest {
-                            request_id: request_id.clone(),
-                            instructions,
-                            parent_developer_instructions: turn.developer_instructions.clone(),
-                            fork_history,
-                        }),
                         fork_mode,
                         parent_thread_id: Some(self.session.thread_id),
                         environments: Some(turn.initial_environments.clone()),
                         cyber_access_program: turn.cyber_access_program,
                         ..Default::default()
                     },
+                },
+                user_request: UserSpawnRequest {
+                    request_id: request_id.clone(),
+                    instructions,
+                    parent_developer_instructions: turn.developer_instructions.clone(),
+                    fork_history,
                 },
                 payload_sha256: payload_sha256.clone(),
                 task_name: request.task_name,

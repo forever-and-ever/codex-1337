@@ -103,10 +103,12 @@ impl AgentControl for TestAgentControl {
         request: codex_core::FarmSpawnRequest,
     ) -> BoxFuture<'_, std::result::Result<codex_core::FarmReceipt, codex_core::FarmError>> {
         assert_eq!(request.spawn.caller, self.thread_id);
-        Box::pin(async {
-            Err(codex_core::FarmError::Rejected(CodexErr::InvalidRequest(
-                "host farm rejection".to_string(),
-            )))
+        Box::pin(async move {
+            Err(codex_core::FarmError::Uncertain {
+                request_id: request.user_request.request_id,
+                child: None,
+                message: "host did not verify a durable farm outcome".to_string(),
+            })
         })
     }
 

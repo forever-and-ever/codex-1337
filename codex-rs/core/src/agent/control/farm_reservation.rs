@@ -32,6 +32,11 @@ pub(super) enum SpawnAdmission {
     },
 }
 
+enum FarmAttemptError {
+    Preclaim(CodexErr),
+    Outcome(FarmError),
+}
+
 impl LocalAgentControl {
     pub(super) async fn check_farm_path_owner(
         &self,
@@ -72,6 +77,7 @@ impl LocalAgentControl {
     ) -> Result<FarmReceipt, FarmError> {
         let FarmSpawnRequest {
             mut spawn,
+            user_request,
             payload_sha256,
             task_name,
             authorization,
@@ -79,10 +85,8 @@ impl LocalAgentControl {
             turn,
         } = request;
         let parent_id = spawn.caller;
-        let user_request = spawn.options.user_request.as_ref().ok_or_else(|| {
-            CodexErr::InvalidRequest("farm requires its captured user boundary".into())
-        })?;
         let request_id = user_request.request_id.clone();
+        spawn.options.user_request = Some(user_request);
         // A captured identity can already belong to a concurrent submission.
         // Losing access to its parent is not evidence that it was never allocated.
         let parent = async { self.runtime.upgrade()?.get_thread(parent_id).await }
@@ -114,22 +118,25 @@ impl LocalAgentControl {
         }
         let admitted = async {
             if spawn.config.ephemeral || parent.session.live_thread().is_none() {
-                return Err(CodexErr::InvalidRequest(
+                return Err(FarmAttemptError::Preclaim(CodexErr::InvalidRequest(
                     "farm requires persistent parent and child conversations".into(),
-                )
-                .into());
+                )));
             }
             let parent_path = turn
                 .session_source
                 .get_agent_path()
                 .unwrap_or_else(AgentPath::root);
             if let Some(name) = &task_name {
-                parent_path.join(name).map_err(CodexErr::InvalidRequest)?;
+                parent_path
+                    .join(name)
+                    .map_err(CodexErr::InvalidRequest)
+                    .map_err(FarmAttemptError::Preclaim)?;
             }
             let requested_path = spawn
                 .source
                 .get_agent_path()
-                .ok_or_else(|| CodexErr::InvalidRequest("farm requires a child path".into()))?;
+                .ok_or_else(|| CodexErr::InvalidRequest("farm requires a child path".into()))
+                .map_err(FarmAttemptError::Preclaim)?;
             let stem = task_name.as_deref().unwrap_or_else(|| {
                 requested_path
                     .as_str()
@@ -151,33 +158,40 @@ impl LocalAgentControl {
                 }
                 let path = parent_path
                     .join(&format!("{}{tail}", &stem[..stem.len().min(capacity)]))
-                    .map_err(CodexErr::InvalidRequest)?;
+                    .map_err(CodexErr::InvalidRequest)
+                    .map_err(FarmAttemptError::Preclaim)?;
                 if path.as_str().len() > MAX_DELEGATION_RECEIPT_PATH_BYTES {
-                    return Err(CodexErr::InvalidRequest(
+                    return Err(FarmAttemptError::Preclaim(CodexErr::InvalidRequest(
                         "farm child path exceeds receipt limit".into(),
-                    )
-                    .into());
+                    )));
                 }
-                let mut reservation = self.runtime.registry.reserve_spawn_slot(None)?;
+                let mut reservation = self
+                    .runtime
+                    .registry
+                    .reserve_spawn_slot(None)
+                    .map_err(FarmAttemptError::Preclaim)?;
                 if let Err(error) = reservation.reserve_agent_path(&path) {
                     if matches!(error.details(), CodexErrorDetails::UnsupportedOperation(_)) {
                         continue;
                     }
-                    return Err(error.into());
+                    return Err(FarmAttemptError::Preclaim(error));
                 }
                 let claim = db
                     .claim_farm_request(parent_id, &request_id, &payload_sha256, path.as_str())
                     .await
-                    .map_err(|error| FarmError::Uncertain {
-                        request_id: request_id.clone(),
-                        child: None,
-                        message: format!(
-                            "could not confirm farm reservation: {error}; replay this request ID, never submit it as new work"
-                        ),
+                    .map_err(|error| {
+                        FarmAttemptError::Outcome(FarmError::Uncertain {
+                            request_id: request_id.clone(),
+                            child: None,
+                            message: format!(
+                                "could not confirm farm reservation: {error}; replay this request ID, never submit it as new work"
+                            ),
+                        })
                     })?;
                 match claim {
                     FarmRequestClaim::Existing(record) => {
-                        return replay(&request_id, &payload_sha256, record);
+                        return replay(&request_id, &payload_sha256, record)
+                            .map_err(FarmAttemptError::Outcome);
                     }
                     FarmRequestClaim::PathOccupied => continue,
                     FarmRequestClaim::Claimed => {
@@ -195,7 +209,9 @@ impl LocalAgentControl {
             let reservation = match reserved {
                 Some(reservation) => reservation,
                 None => {
-                    return Err(CodexErr::InvalidRequest("No available farm child path".into()).into());
+                    return Err(FarmAttemptError::Preclaim(CodexErr::InvalidRequest(
+                        "No available farm child path".into(),
+                    )));
                 }
             };
             let startup = Arc::new(SessionStartup::default());
@@ -267,7 +283,9 @@ impl LocalAgentControl {
                             .await
                             .is_ok()
                         {
-                            return Err(FarmError::Rejected(rejection.into()));
+                            return Err(FarmAttemptError::Outcome(FarmError::Rejected(
+                                rejection.into(),
+                            )));
                         }
                     }
                     let child =
@@ -289,19 +307,19 @@ impl LocalAgentControl {
                         }
                         FarmAllocationPhase::Allocated(id) => format!("child {id} was allocated"),
                     };
-                    Err(FarmError::Uncertain {
+                    Err(FarmAttemptError::Outcome(FarmError::Uncertain {
                         request_id: request_id.clone(),
                         child,
                         message: format!(
                             "Delegation outcome is uncertain: {error}; {allocation}. This submission will not be executed again."
                         ),
-                    })
+                    }))
                 }
             }
         }
         .await;
         match admitted {
-            Err(FarmError::Rejected(error)) => {
+            Err(FarmAttemptError::Preclaim(error)) => {
                 crate::agent::farm::reject_unclaimed(
                     &db,
                     parent_id,
@@ -311,7 +329,8 @@ impl LocalAgentControl {
                 )
                 .await
             }
-            outcome => outcome,
+            Err(FarmAttemptError::Outcome(error)) => Err(error),
+            Ok(receipt) => Ok(receipt),
         }
     }
 }
