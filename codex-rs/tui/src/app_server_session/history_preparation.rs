@@ -179,7 +179,7 @@ pub(in crate::app_server_session) async fn read_thread(
     Ok(response.thread)
 }
 
-pub(super) async fn prepare_initial_thread_history(
+pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     handle: &codex_app_server_client::AppServerRequestHandle,
     thread: &mut Thread,
     turn_cursor: Option<String>,

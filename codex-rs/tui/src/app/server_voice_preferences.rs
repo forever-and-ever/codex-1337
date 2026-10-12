@@ -1,6 +1,7 @@
 //! Connection-owned voice preference reads and acknowledged-write confirmation.
 
 use super::*;
+use codex_app_server_protocol as api;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
 
