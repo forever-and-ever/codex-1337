@@ -11,12 +11,10 @@ use crate::model_messages::permissions::ResolvedApprovalMessages;
 use crate::model_messages::permissions::ResolvedPermissionMessages;
 use crate::model_messages::permissions::WORKSPACE_WRITE_TEMPLATE;
 use codex_context_fragments::ContextualUserFragment;
-use codex_execpolicy::Policy;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::SandboxMode;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::PermissionProfile;
-use codex_protocol::models::format_allow_prefixes;
 use codex_protocol::permissions::FileSystemSandboxPolicyContext;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::GranularApprovalConfig;
@@ -30,8 +28,7 @@ const REQUEST_PERMISSION_RULE: &str =
     include_str!("../templates/permissions/approval_policy/on_request_rule_request_permission.md");
 const REQUEST_PERMISSIONS_TOOL: &str = "# request_permissions Tool\n\nThe built-in `request_permissions` tool is available in this session. Invoke it when you need to request additional `network` or `file_system` permissions before later shell-like commands need them. Request only the specific permissions required for the task.";
 const AUTO_REVIEW_SUFFIX: &str = "`approvals_reviewer` is `auto_review`: Sandbox escalations with require_escalated will be reviewed for compliance with the policy. If a rejection happens, you should proceed only with a materially safer alternative, or inform the user of the risk and send a final message to ask for approval.";
-const APPROVED_PREFIXES: &str =
-    "## Approved command prefixes\nThe following prefix rules have already been approved: ";
+
 const GRANULAR_INTRO: &str = "# Approval Requests\n\nApproval policy is `granular`. Categories set to `false` are automatically rejected instead of prompting the user.";
 const GRANULAR_PROMPTED_CATEGORIES: &str =
     "These approval categories may still prompt the user when needed:";
@@ -79,7 +76,6 @@ struct PermissionsRenderContext<'a> {
     sandbox_mode: SandboxMode,
     network_access: NetworkAccess,
     approval_policy: AskForApproval,
-    approved_command_prefixes: &'a [Vec<String>],
     writable_roots: &'a [String],
     denied_read_paths: &'a [String],
     denied_read_globs: &'a [String],
@@ -137,7 +133,6 @@ impl PermissionsInstructions {
                 context.approval_policy,
                 approval_context.reviewer,
                 approval_context.messages,
-                context.approved_command_prefixes,
                 context.exec_permission_approvals_enabled,
                 context.request_permissions_tool_enabled,
             ),
@@ -158,12 +153,10 @@ impl PermissionsInstructions {
     }
 
     /// Uses executor paths when supplied, otherwise retaining local path resolution.
-    #[allow(clippy::too_many_arguments)]
     pub fn from_permission_profile(
         permission_profile: &PermissionProfile,
         approval_policy: AskForApproval,
         approval_context: ApprovalPromptContext<'_>,
-        exec_policy: &Policy,
         cwd: &Path,
         paths: Option<&FileSystemSandboxPolicyContext<'_>>,
         exec_permission_approvals_enabled: bool,
@@ -245,7 +238,6 @@ impl PermissionsInstructions {
                     NetworkAccess::Restricted
                 },
                 approval_policy,
-                approved_command_prefixes: &exec_policy.get_allowed_prefixes(),
                 // Codex-1337: the environment context's filesystem block already lists the
                 // writable roots; restating them here only spends context.
                 writable_roots: &[],
@@ -292,7 +284,6 @@ fn approval_text(
     approval_policy: AskForApproval,
     approvals_reviewer: ApprovalsReviewer,
     messages: ResolvedApprovalMessages<'_>,
-    approved_command_prefixes: &[Vec<String>],
     exec_permission_approvals_enabled: bool,
     request_permissions_tool_enabled: bool,
 ) -> String {
@@ -328,14 +319,10 @@ fn approval_text(
             if request_permissions_tool_enabled {
                 sections.push(REQUEST_PERMISSIONS_TOOL.to_string());
             }
-            if let Some(prefixes) = approved_command_prefixes_text(approved_command_prefixes) {
-                sections.push(format!("{APPROVED_PREFIXES}{prefixes}"));
-            }
             sections.join("\n\n")
         }
         AskForApproval::Granular(granular_config) => granular_instructions(
             granular_config,
-            approved_command_prefixes,
             exec_permission_approvals_enabled,
             request_permissions_tool_enabled,
         ),
@@ -399,14 +386,8 @@ fn denied_reads_text(paths: &[String], globs: &[String]) -> Option<String> {
     ))
 }
 
-fn approved_command_prefixes_text(approved_command_prefixes: &[Vec<String>]) -> Option<String> {
-    format_allow_prefixes(approved_command_prefixes.to_vec())
-        .filter(|prefixes| !prefixes.is_empty())
-}
-
 fn granular_instructions(
     granular_config: GranularApprovalConfig,
-    approved_command_prefixes: &[Vec<String>],
     exec_permission_approvals_enabled: bool,
     request_permissions_tool_enabled: bool,
 ) -> String {
@@ -465,10 +446,6 @@ fn granular_instructions(
 
     if request_permissions_tool_prompts_allowed {
         sections.push(REQUEST_PERMISSIONS_TOOL.to_string());
-    }
-
-    if let Some(prefixes) = approved_command_prefixes_text(approved_command_prefixes) {
-        sections.push(format!("{APPROVED_PREFIXES}{prefixes}"));
     }
 
     sections.join("\n\n")

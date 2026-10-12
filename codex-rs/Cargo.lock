@@ -3671,7 +3671,6 @@ dependencies = [
  "anyhow",
  "codex-collaboration-mode-templates",
  "codex-context-fragments",
- "codex-execpolicy",
  "codex-git-utils",
  "codex-guardian-context",
  "codex-protocol",

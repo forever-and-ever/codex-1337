@@ -8,7 +8,6 @@ use crate::context::world_state::AgentsMdState;
 use crate::context::world_state::AppsInstructionsState;
 use crate::context::world_state::BaseInstructionsState;
 use crate::context::world_state::CollaborationModeState;
-use crate::context::world_state::CompactPermissionsState;
 use crate::context::world_state::ContextWindowGuidanceState;
 use crate::context::world_state::EnvironmentsInstructionsState;
 use crate::context::world_state::EnvironmentsState;
@@ -223,9 +222,6 @@ impl Session {
         ));
         world_state
             .add_instruction_section(AgentsMdState::new(step_context.loaded_agents_md.as_deref()));
-        // Codex-1337 keeps approved command prefixes out of the model context: the sandbox
-        // applies them when a command runs, whatever the model knew.
-        let exec_policy = codex_execpolicy::Policy::empty();
         if turn_context.config.include_permissions_instructions {
             let environment = step_context.environments.primary();
             let sandbox = environment
@@ -251,7 +247,6 @@ impl Session {
                     ToolMode::CodeModeOnly => approval_context.for_cells(),
                     ToolMode::Direct | ToolMode::CodeMode => approval_context,
                 },
-                &exec_policy,
                 &cwd,
                 paths.as_ref(),
                 turn_context
@@ -263,8 +258,6 @@ impl Session {
                     .features
                     .enabled(Feature::RequestPermissionsTool),
             ));
-        } else {
-            world_state.add_section(CompactPermissionsState::new(&exec_policy));
         }
         if turn_context.config.include_collaboration_mode_instructions {
             world_state.add_instruction_section(CollaborationModeState::from_collaboration_mode(
