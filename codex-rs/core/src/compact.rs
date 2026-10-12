@@ -1,3 +1,4 @@
+use crate::context::CompactionContinuation;
 use crate::context::UserGoalUpdate;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -91,16 +92,16 @@ pub(crate) async fn build_compaction_replacement_history(
     step_context: &StepContext,
     world_state: &WorldState,
     compacted_history: Vec<ResponseItemEnvelope>,
+    continuation: CompactionContinuation,
 ) -> (Vec<ResponseItemEnvelope>, WorldStateSnapshot) {
     let (updates, snapshot) = sess
         .build_initial_context_with_world_state(step_context, world_state)
         .await;
     let (prefix, context) = split_prefix_updates(updates);
     let context = merge_world_state_updates(context);
-    (
-        assemble_compaction_history(compacted_history, prefix, context),
-        snapshot,
-    )
+    let mut history = assemble_compaction_history(compacted_history, prefix, context);
+    history.extend(continuation.into_item().map(ResponseItemEnvelope::new));
+    (history, snapshot)
 }
 
 fn assemble_compaction_history(
@@ -298,6 +299,7 @@ async fn run_compact_task_inner_impl(
         instructions
     };
     let input_goal_ids = UserGoalUpdate::message_ids(history.raw_items());
+    let continuation = CompactionContinuation::capture(history.raw_items());
     history.record_items(
         &[initial_input_for_turn.into()],
         turn_context.model_info().truncation_policy.into(),
@@ -429,6 +431,7 @@ async fn run_compact_task_inner_impl(
         &replacement_step_context,
         &world_state,
         new_history,
+        continuation,
     )
     .await;
     sess.replace_compacted_history(

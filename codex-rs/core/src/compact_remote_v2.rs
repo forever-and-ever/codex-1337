@@ -1,3 +1,5 @@
+use crate::context::CompactionContinuation;
+
 use std::sync::Arc;
 
 use crate::Prompt;
@@ -342,6 +344,7 @@ async fn run_remote_compact_task_inner_impl(
         analytics_details.cached_input_tokens = Some(token_usage.cached_input_tokens);
         analytics_details.cache_write_input_tokens = Some(token_usage.cache_write_input_tokens);
     }
+    let continuation = CompactionContinuation::capture(&prompt_input);
     let (compacted_history, retained_images) = build_v2_compacted_history(
         prompt_input,
         prompt_input_metadata,
@@ -360,6 +363,7 @@ async fn run_remote_compact_task_inner_impl(
         replacement_step_context,
         &world_state,
         compacted_history,
+        continuation,
     )
     .await;
     let reviewer_compaction_hash = if crate::context::GuardianContextMode::from_history(

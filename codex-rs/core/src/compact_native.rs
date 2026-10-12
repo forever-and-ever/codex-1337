@@ -6,6 +6,7 @@
 //! even that small request yet returns no checkpoint, the thread resets to the same material
 //! without a model call. Every concession is announced.
 
+use crate::context::CompactionContinuation;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -385,6 +386,7 @@ async fn install_checkpoint(
         replacement_step_context,
         world_state,
         Vec::new(),
+        CompactionContinuation::capture(source.iter().map(|envelope| &envelope.item)),
     )
     .await;
     // Anthropic requires its signed checkpoint before conversation messages, and initial
@@ -442,6 +444,7 @@ async fn install_reset(
         replacement_step_context,
         world_state,
         history,
+        CompactionContinuation::capture(source.iter().map(|envelope| &envelope.item)),
     )
     .await;
     sess.replace_compacted_history(

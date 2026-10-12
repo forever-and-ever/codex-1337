@@ -257,12 +257,21 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
 
     let server = wiremock::MockServer::start().await;
     mock_server::run(&[&server], async {
-        let retained_text = "annotated v2 user message";
+        let retained_text = "Pause the work until I explicitly resume it.";
         let response_mock = responses::mount_sse_sequence(
             &server,
             vec![
                 sse(vec![
-                    responses::ev_assistant_message("message-1", "before compaction"),
+                    responses::ev_function_call(
+                        "handled-pause",
+                        "exec_command",
+                        &json!({"cmd": "printf handling-receipt", "max_output_tokens": 100})
+                            .to_string(),
+                    ),
+                    responses::ev_completed("response-tool"),
+                ]),
+                sse(vec![
+                    responses::ev_assistant_message("message-1", "The pause has been handled."),
                     responses::ev_completed("response-1"),
                 ]),
                 sse(vec![
@@ -275,7 +284,21 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
                     }),
                     responses::ev_completed("response-compact"),
                 ]),
-                sse(vec![responses::ev_completed("response-after")]),
+                sse(vec![
+                    responses::ev_assistant_message(
+                        "message-after",
+                        "Resumed work is still in progress.",
+                    ),
+                    responses::ev_completed("response-after"),
+                ]),
+                sse(vec![
+                    json!({
+                        "type": "response.output_item.done",
+                        "item": {"type": "compaction", "encrypted_content": "SECOND_CHECKPOINT"},
+                    }),
+                    responses::ev_completed("response-compact-again"),
+                ]),
+                sse(vec![responses::ev_completed("response-fresh-pause")]),
             ],
         )
         .await;
@@ -292,6 +315,13 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
             .build(&server)
             .await?;
         initial.submit_turn(retained_text).await?;
+        initial
+            .codex
+            .record_user_goal_update(codex_core::context::UserGoalUpdate::Set {
+                objective: None,
+                status: Some(codex_protocol::protocol::ThreadGoalStatus::Active),
+            })
+            .await?;
         let home = initial.home.clone();
         let rollout_path = initial
             .session_configured
@@ -307,10 +337,14 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
         resumed.codex.submit(Op::Compact).await?;
         wait_for_turn_complete(&resumed.codex).await;
         resumed.submit_turn("continue after compaction").await?;
+        resumed.codex.submit(Op::Compact).await?;
+        wait_for_turn_complete(&resumed.codex).await;
+        resumed.submit_turn("Pause again now.").await?;
         resumed.codex.shutdown_and_wait().await?;
 
         let requests = response_mock.requests();
-        let compact_request = &requests[1];
+        assert_eq!(requests.len(), 6);
+        let compact_request = &requests[2];
         assert_eq!(
             compact_request.inputs_of_type("compaction_trigger").len(),
             1
@@ -318,10 +352,84 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
         assert_compact_request_omits_harness_metadata(compact_request);
         assert_compacted_user_metadata(&rollout_path, retained_text)?;
         assert_eq!(
-            requests[2].inputs_of_type("compaction")[0]["encrypted_content"],
+            requests[3].inputs_of_type("compaction")[0]["encrypted_content"],
             "ANNOTATED_V2_COMPACTION_SUMMARY"
         );
-        assert!(requests[2].body_contains_text("continue after compaction"));
+        assert!(requests[3].body_contains_text("continue after compaction"));
+
+        // Opaque checkpoints used to leave the old pause visible without the later resume.
+        // Preserve observations, never promote acknowledgment to a completion verdict, and
+        // carry the same record across another compaction without nesting it as quoted text.
+        for request in [&requests[3], &requests[5]] {
+            let messages = request.inputs_of_type("message");
+            let continuations = messages
+                .iter()
+                .filter_map(|message| {
+                    (message["role"] == "developer")
+                        .then(|| {
+                            message["content"].as_array()?.iter().find_map(|item| {
+                                item["text"]
+                                    .as_str()
+                                    .filter(|text| text.starts_with("<compaction_continuation>"))
+                            })
+                        })
+                        .flatten()
+                })
+                .collect::<Vec<_>>();
+            let [continuation] = continuations.as_slice() else {
+                panic!("one continuation record");
+            };
+            assert!(continuation.contains("Compaction is not new user input."));
+            assert!(continuation.contains(
+                "Assistant reports, including acknowledgments, are not proof of completion."
+            ));
+            let data = continuation
+                .lines()
+                .nth(3)
+                .expect("serialized observation record");
+            let observations: Vec<Value> = serde_json::from_str(data)?;
+            assert!(data.len() <= 6_144);
+            assert!(observations.len() <= 12);
+            assert!(observations.iter().any(|entry| {
+                entry["source"] == "user_goal"
+                    && entry["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("\"active\""))
+            }));
+            assert!(observations.iter().any(|entry| {
+                entry["source"] == "tool_receipt"
+                    && entry["call_id"] == "handled-pause"
+                    && entry["output"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("handling-receipt"))
+            }));
+        }
+        let final_input = requests[5].body_json();
+        let final_input = final_input["input"].as_array().expect("continuing input");
+        let new_pause = final_input
+            .iter()
+            .position(|item| {
+                item["content"].as_array().is_some_and(|parts| {
+                    parts.iter().any(|part| part["text"] == "Pause again now.")
+                })
+            })
+            .expect("fresh pause remains input");
+        let record = final_input
+            .iter()
+            .position(|item| {
+                item["content"].as_array().is_some_and(|parts| {
+                    parts.iter().any(|part| {
+                        part["text"]
+                            .as_str()
+                            .is_some_and(|text| text.starts_with("<compaction_continuation>"))
+                    })
+                })
+            })
+            .expect("continuation record");
+        assert!(
+            record < new_pause,
+            "fresh steering must follow historical observations"
+        );
 
         Ok(())
     })

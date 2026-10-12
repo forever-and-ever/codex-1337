@@ -10469,6 +10469,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        crate::context::CompactionContinuation::default(),
     )
     .await;
 
@@ -10509,6 +10510,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         &step_a,
         &world_a,
         Vec::new(),
+        crate::context::CompactionContinuation::default(),
     )
     .await;
 
