@@ -73,7 +73,7 @@ pub(in crate::app_server_session) async fn request<T: serde::de::DeserializeOwne
     if matches!(policy, RequestPolicy::Unbounded) {
         return handle.request_typed(request).await;
     }
-    let method = request.method().to_string();
+    let method = request.method_name().to_string();
     tokio::time::timeout(
         crate::app::turn_submissions::ACK_TIMEOUT,
         handle.request_typed(request),

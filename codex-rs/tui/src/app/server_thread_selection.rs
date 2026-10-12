@@ -8,6 +8,7 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 
 use crate::app_server_session::session_preparation::RequestPolicy;
+use crate::local_settings::LocalSettings;
 
 pub(super) enum SelectStage {
     Liveness {

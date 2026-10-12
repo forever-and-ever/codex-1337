@@ -5729,10 +5729,10 @@ async fn side_thread_snapshot_does_not_refresh_from_fork_history() {
         input_state: None,
     };
 
-    assert!(!app.should_refresh_snapshot_session(
+    assert!(!app.should_refresh_thread_session(
         side_thread_id,
         /*is_replay_only*/ false,
-        &snapshot
+        snapshot.session.as_ref()
     ));
 }
 

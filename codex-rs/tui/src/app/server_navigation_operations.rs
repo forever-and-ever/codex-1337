@@ -8,7 +8,7 @@ use futures::FutureExt;
 mod selection;
 
 use selection::SelectStage;
-pub(super) use selection::SelectionAfter;
+pub(in crate::app) use selection::SelectionAfter;
 
 #[derive(Default)]
 pub(super) struct NavigationOwner {
