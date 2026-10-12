@@ -1,3 +1,5 @@
+use crate::anthropic::AnthropicStreamError;
+use crate::anthropic::AnthropicStreamProgress;
 use crate::rate_limits::RateLimitError;
 use codex_client::TransportError;
 use codex_http_client::RetryAfter;
@@ -17,6 +19,12 @@ pub enum ApiError {
     /// A native inference may have executed; replay would duplicate usage or tools.
     #[error("native stream error (not replayed): {0}")]
     NativeStream(String),
+    #[error("Anthropic stream error ({progress:?}): {source}")]
+    AnthropicStream {
+        progress: AnthropicStreamProgress,
+        #[source]
+        source: AnthropicStreamError,
+    },
     #[error("stream error: Incomplete response returned, reason: content_filter")]
     ContentFilter,
     #[error("context window exceeded")]

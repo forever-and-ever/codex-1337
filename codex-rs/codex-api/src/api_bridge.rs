@@ -1,4 +1,5 @@
 use crate::TransportError;
+use crate::anthropic::AnthropicStreamProgress;
 use crate::error::ApiError;
 use crate::error::parse_flex_unavailable;
 use crate::rate_limits::parse_promo_message;
@@ -29,6 +30,7 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
         | ApiError::Api { .. }
         | ApiError::Stream(_)
         | ApiError::NativeStream(_)
+        | ApiError::AnthropicStream { .. }
         | ApiError::ContentFilter
         | ApiError::ContextWindowExceeded
         | ApiError::QuotaExceeded
@@ -59,6 +61,16 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         }
         ApiError::Stream(msg) => CodexErr::Stream(msg),
         ApiError::NativeStream(message) => CodexErr::Fatal(message),
+        ApiError::AnthropicStream { progress, source } => {
+            // Partial output is not yet reconciled across attempts. Even an empty item
+            // start has exposed its lifecycle to consumers, so only pre-output retries
+            // use the existing finite stream budget.
+            if progress == AnthropicStreamProgress::BeforeOutput && source.retryable() {
+                CodexErr::Stream(source.to_string())
+            } else {
+                CodexErr::Fatal(format!("Anthropic stream error ({progress:?}): {source}"))
+            }
+        }
         ApiError::ContentFilter => CodexErr::new(CodexErrorDetails::ContentFilter),
         ApiError::ServerOverloaded { .. } => CodexErr::ServerOverloaded,
         ApiError::FlexUnavailable => CodexErr::new(CodexErrorDetails::FlexUnavailable),

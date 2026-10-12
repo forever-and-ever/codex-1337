@@ -29,6 +29,7 @@ use std::sync::Arc;
 mod client;
 mod decoder;
 mod stream;
+mod stream_error;
 mod usage;
 mod warm;
 
@@ -39,6 +40,8 @@ pub use decoder::anthropic_context_window_exceeded;
 pub use decoder::anthropic_output_limit_exceeded;
 pub use decoder::anthropic_refused;
 pub use decoder::anthropic_stop_reason;
+pub use stream_error::AnthropicStreamError;
+pub use stream_error::AnthropicStreamProgress;
 pub use warm::AnthropicWarmingRequest;
 
 /// Canonical history borrowed by the native Messages encoder, without a Responses payload.

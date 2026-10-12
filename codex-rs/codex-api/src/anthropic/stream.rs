@@ -1,4 +1,6 @@
 use super::AnthropicRequest;
+use super::AnthropicStreamError;
+use super::AnthropicStreamProgress;
 use super::decoder::Decoder;
 use crate::ApiError;
 use crate::ResponseEvent;
@@ -6,6 +8,7 @@ use crate::ResponseStream;
 use crate::telemetry::SseTelemetry;
 use codex_client::StreamResponse;
 use codex_client::TransportError;
+use eventsource_stream::EventStreamError;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use std::sync::Arc;
@@ -74,6 +77,7 @@ async fn process(
     });
     let mut events = bytes.eventsource();
     let mut decoder = Decoder::new(request.tools());
+    let mut progress = AnthropicStreamProgress::BeforeOutput;
     loop {
         let start = Instant::now();
         let poll = tokio::select! {
@@ -84,25 +88,32 @@ async fn process(
             telemetry.on_sse_poll(&poll, start.elapsed());
         }
         let event = match poll {
-            Err(_) => {
-                return Err(ApiError::NativeStream(
-                    "Anthropic stream idle timeout".into(),
-                ));
+            Err(error) => {
+                return Err(ApiError::AnthropicStream {
+                    progress,
+                    source: AnthropicStreamError::IdleTimeout(error),
+                });
             }
             Ok(Some(Err(error))) => {
-                return Err(ApiError::NativeStream(format!("Anthropic SSE: {error}")));
+                let source = match error {
+                    EventStreamError::Transport(error) => AnthropicStreamError::Transport(error),
+                    error => AnthropicStreamError::MalformedSse(error),
+                };
+                return Err(ApiError::AnthropicStream { progress, source });
             }
             Ok(None) => {
-                return Err(ApiError::NativeStream(
-                    "Anthropic stream truncated before message_stop".into(),
-                ));
+                return Err(ApiError::AnthropicStream {
+                    progress,
+                    source: AnthropicStreamError::Truncated,
+                });
             }
             Ok(Some(Ok(event))) => event,
         };
         let decoded = decoder.decode(&event.data)?;
         for event in decoded {
+            let delivered_progress = progress.after(&event);
             match timeout(idle_timeout, tx.send(Ok(event))).await {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => progress = delivered_progress,
                 Ok(Err(_)) => return Ok(()),
                 Err(_) => return Err(ApiError::NativeStream("Anthropic consumer stalled".into())),
             }
