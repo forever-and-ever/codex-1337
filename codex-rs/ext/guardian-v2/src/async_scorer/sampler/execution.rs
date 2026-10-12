@@ -347,7 +347,7 @@ impl SamplingExecution {
                     }
                 };
                 match event {
-                    ResponseEvent::OutputTextDelta(delta) => {
+                    ResponseEvent::OutputTextDelta { delta, .. } => {
                         if mode.early_result_sent() {
                             continue;
                         }

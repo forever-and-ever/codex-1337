@@ -11,7 +11,6 @@ use crate::telemetry::SseTelemetry;
 use codex_client::ByteStream;
 use codex_client::StreamResponse;
 use codex_protocol::ResponseUsageMetadata;
-use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::ModelVerification;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::protocol::TurnModerationMetadataEvent;
@@ -326,79 +325,38 @@ fn json_value_as_string(value: &Value) -> Option<String> {
     }
 }
 
+#[path = "responses_identity.rs"]
+pub(crate) mod identity;
+
 #[derive(Debug)]
 pub enum ResponsesEventError {
     Api(ApiError),
+    ItemIdentity(String),
 }
 
 impl ResponsesEventError {
     pub fn into_api_error(self) -> ApiError {
         match self {
             Self::Api(error) => error,
+            Self::ItemIdentity(message) => ApiError::Stream(message),
         }
     }
 }
 
 pub fn process_responses_event(
     event: ResponsesStreamEvent,
+    identity: &mut identity::ResponsesItemIdentity,
 ) -> std::result::Result<Option<ResponseEvent>, ResponsesEventError> {
+    if identity::ResponsesItemIdentity::handles(&event) {
+        return identity.process(event);
+    }
     match event.kind.as_str() {
         "error" => {
             if let Some(error) = event.error.as_ref().and_then(parse_flex_unavailable) {
                 return Err(ResponsesEventError::Api(error));
             }
         }
-        "response.output_item.done" => {
-            if let Some(item_val) = event.item {
-                if let Ok(item) = serde_json::from_value::<ResponseItem>(item_val) {
-                    return Ok(Some(ResponseEvent::OutputItemDone(item)));
-                }
-                debug!("failed to parse ResponseItem from output_item.done");
-            }
-        }
-        "response.output_text.delta" => {
-            if let Some(delta) = event.delta {
-                return Ok(Some(ResponseEvent::OutputTextDelta(delta)));
-            }
-        }
-        "response.custom_tool_call_input.delta" => {
-            if let (Some(delta), Some(item_id)) =
-                (event.delta, event.item_id.clone().or(event.call_id.clone()))
-            {
-                return Ok(Some(ResponseEvent::ToolCallInputDelta {
-                    item_id,
-                    call_id: event.call_id,
-                    delta,
-                }));
-            }
-        }
-        "response.reasoning_summary_text.delta" => {
-            if let (Some(delta), Some(summary_index)) = (event.delta, event.summary_index) {
-                return Ok(Some(ResponseEvent::ReasoningSummaryDelta {
-                    delta,
-                    summary_index,
-                }));
-            }
-        }
-        "response.reasoning_summary_text.done" => {
-            if let (Some(item_id), Some(text), Some(summary_index)) =
-                (event.item_id, event.text, event.summary_index)
-            {
-                return Ok(Some(ResponseEvent::ReasoningSummaryDone {
-                    item_id,
-                    text,
-                    summary_index,
-                }));
-            }
-        }
-        "response.reasoning_text.delta" => {
-            if let (Some(delta), Some(content_index)) = (event.delta, event.content_index) {
-                return Ok(Some(ResponseEvent::ReasoningContentDelta {
-                    delta,
-                    content_index,
-                }));
-            }
-        }
+
         "response.created" => {
             if let Some(response) = event.response {
                 let response_id = response
@@ -476,21 +434,7 @@ pub fn process_responses_event(
                 }
             }
         }
-        "response.output_item.added" => {
-            if let Some(item_val) = event.item {
-                if let Ok(item) = serde_json::from_value::<ResponseItem>(item_val) {
-                    return Ok(Some(ResponseEvent::OutputItemAdded(item)));
-                }
-                debug!("failed to parse ResponseItem from output_item.added");
-            }
-        }
-        "response.reasoning_summary_part.added" => {
-            if let Some(summary_index) = event.summary_index {
-                return Ok(Some(ResponseEvent::ReasoningSummaryPartAdded {
-                    summary_index,
-                }));
-            }
-        }
+
         "codex.response.metadata"
         | "response.content_part.added"
         | "response.content_part.done"
@@ -543,6 +487,7 @@ async fn process_sse_with_treatment(
     safety_buffering_treatment: SafetyBufferingTreatment,
 ) {
     let mut stream = stream.eventsource();
+    let mut identity = identity::ResponsesItemIdentity::default();
     let mut response_error: Option<ApiError> = None;
     let mut last_server_model: Option<String> = None;
 
@@ -640,7 +585,7 @@ async fn process_sse_with_treatment(
             return;
         }
 
-        match process_responses_event(event) {
+        match process_responses_event(event, &mut identity) {
             Ok(Some(event)) => {
                 let is_completed = matches!(event, ResponseEvent::Completed { .. });
                 if tx_event.send(Ok(event)).await.is_err() {
@@ -652,8 +597,9 @@ async fn process_sse_with_treatment(
             }
             Ok(None) => {}
             Err(error) => {
+                let terminal_identity = matches!(error, ResponsesEventError::ItemIdentity(_));
                 let error = error.into_api_error();
-                if matches!(error, ApiError::FlexUnavailable) {
+                if terminal_identity || matches!(error, ApiError::FlexUnavailable) {
                     let _ = tx_event.send(Err(error)).await;
                     return;
                 }
@@ -761,6 +707,7 @@ mod tests {
         let delta = json!({"type": "response.output_text.delta", "delta": "First result."});
         let mut done_item = item;
         done_item["content"] = json!([{"type": "output_text", "text": "First result."}]);
+        done_item.as_object_mut().unwrap().remove("id");
         let done = json!({"type": "response.output_item.done", "item": done_item});
         let completed = json!({
             "type": "response.completed",
@@ -774,18 +721,45 @@ mod tests {
         let events = collect_events(&[stream.as_bytes()]).await;
         assert_matches!(events.as_slice(), [
             Ok(ResponseEvent::OutputItemAdded(ResponseItem::Message {
-                phase: Some(MessagePhase::PartialAnswer), content: start_content, ..
+                id: Some(start_id), phase: Some(MessagePhase::PartialAnswer), content: start_content, ..
             })),
-            Ok(ResponseEvent::OutputTextDelta(text)),
+            Ok(ResponseEvent::OutputTextDelta { item_id: delta_id, delta: text }),
             Ok(ResponseEvent::OutputItemDone(ResponseItem::Message {
-                phase: Some(MessagePhase::PartialAnswer), content: done_content, ..
+                id: Some(done_id), phase: Some(MessagePhase::PartialAnswer), content: done_content, ..
             })),
             Ok(ResponseEvent::Completed { end_turn: Some(false), .. }),
-        ] if start_content.is_empty()
+        ] if start_id.as_str() == "msg_partial" && start_id == delta_id && delta_id == done_id
+            && start_content.is_empty()
             && text == "First result."
             && done_content == &vec![codex_protocol::models::ContentItem::OutputText {
                 text: "First result.".to_string()
             }]);
+        // Missing or contradictory identity cannot borrow the most recent start.
+        for invalid in [
+            json!({"type":"response.output_text.delta","delta":"ambiguous"}),
+            json!({"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[]}}),
+            json!({"type":"response.output_text.delta","item_id":"reasoning","delta":"wrong category"}),
+            json!({"type":"response.output_text.delta","item_id":"absent","delta":"unknown"}),
+            json!({"type":"response.output_item.done","item_id":"second","item":{"id":"first","type":"message","role":"assistant","content":[]}}),
+        ] {
+            let mut identity = identity::ResponsesItemIdentity::default();
+            for item in [
+                json!({"type":"message","id":"first","role":"assistant","content":[]}),
+                json!({"type":"message","id":"second","role":"assistant","content":[]}),
+                json!({"type":"reasoning","id":"reasoning","summary":[]}),
+            ] {
+                let event = serde_json::from_value(
+                    json!({"type":"response.output_item.added","item":item}),
+                )
+                .unwrap();
+                process_responses_event(event, &mut identity).unwrap();
+            }
+            let event = serde_json::from_value(invalid).unwrap();
+            assert_matches!(
+                process_responses_event(event, &mut identity),
+                Err(ResponsesEventError::ItemIdentity(_))
+            );
+        }
     }
 
     #[tokio::test]
@@ -888,6 +862,7 @@ mod tests {
     #[tokio::test]
     async fn parses_reasoning_summary_done() {
         let events = run_sse(vec![
+            json!({"type":"response.output_item.added","item":{"type":"reasoning","id":"reasoning-1","summary":[]}}),
             json!({
                 "type": "response.reasoning_summary_text.done",
                 "item_id": "reasoning-1",
@@ -902,12 +877,12 @@ mod tests {
         .await;
 
         assert_matches!(
-            &events[0],
+            &events[1],
             ResponseEvent::ReasoningSummaryDone {
                 item_id,
                 text,
                 summary_index: 0,
-            } if item_id == "reasoning-1" && text == "Checking"
+            } if item_id.as_str() == "reasoning-1" && text == "Checking"
         );
     }
 
@@ -978,6 +953,7 @@ mod tests {
     #[tokio::test]
     async fn parses_tool_call_input_deltas() {
         let events = run_sse(vec![
+            json!({"type":"response.output_item.added","item":{"type":"custom_tool_call","id":"ctc_1","call_id":"call_1","name":"apply_patch","input":""}}),
             json!({
                 "type": "response.custom_tool_call_input.delta",
                 "item_id": "ctc_1",
@@ -997,14 +973,14 @@ mod tests {
         .await;
 
         assert_matches!(
-            &events[0],
+            &events[1],
             ResponseEvent::ToolCallInputDelta {
                 item_id,
                 call_id: Some(call_id),
                 delta,
-            } if item_id == "ctc_1" && call_id == "call_1" && delta == "*** Begin"
+            } if item_id.as_str() == "ctc_1" && call_id == "call_1" && delta == "*** Begin"
         );
-        assert_matches!(&events[1], ResponseEvent::Completed { .. });
+        assert_matches!(&events[2], ResponseEvent::Completed { .. });
     }
 
     #[tokio::test]
@@ -1747,6 +1723,7 @@ mod tests {
                 "response": { "id": "resp-1" },
                 "safety_buffering": false
             }),
+            json!({"type":"response.output_item.added","item":{"type":"message","id":"msg","role":"assistant","content":[]}}),
             json!({
                 "type": "response.output_text.delta",
                 "delta": "hello",
@@ -1775,29 +1752,30 @@ mod tests {
         ])
         .await;
 
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 8);
         assert_matches!(&events[0], ResponseEvent::Created { .. });
+        assert_matches!(&events[1], ResponseEvent::OutputItemAdded(_));
         assert_matches!(
-            &events[1],
+            &events[2],
             ResponseEvent::SafetyBuffering(buffering)
                 if buffering.use_cases == ["cyber"]
                     && buffering.reasons == ["user_risk"]
                     && buffering.show_buffering_ui
                     && buffering.faster_model.as_deref() == Some("gpt-fast-wire")
         );
-        assert_matches!(&events[2], ResponseEvent::OutputTextDelta(delta) if delta == "hello");
+        assert_matches!(&events[3], ResponseEvent::OutputTextDelta { delta, .. } if delta == "hello");
         assert_matches!(
-            &events[3],
+            &events[4],
             ResponseEvent::SafetyBuffering(buffering)
                 if buffering.use_cases == ["cyber"] && buffering.reasons == ["user_risk"]
         );
-        assert_matches!(&events[4], ResponseEvent::OutputTextDelta(delta) if delta == " world");
+        assert_matches!(&events[5], ResponseEvent::OutputTextDelta { delta, .. } if delta == " world");
         assert_matches!(
-            &events[5],
+            &events[6],
             ResponseEvent::SafetyBuffering(buffering)
                 if buffering.use_cases == ["cyber"] && buffering.reasons == ["user_risk"]
         );
-        assert_matches!(&events[6], ResponseEvent::Completed { response_id, .. } if response_id == "resp-1");
+        assert_matches!(&events[7], ResponseEvent::Completed { response_id, .. } if response_id == "resp-1");
     }
 
     #[test]

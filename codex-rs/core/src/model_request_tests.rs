@@ -13,9 +13,13 @@ impl ModelResponseInterceptor for Append {
     fn intercept(self: Box<Self>, stream: ModelResponseStream) -> ModelResponseStream {
         Box::pin(stream.map(move |event| {
             event.map(|event| match event {
-                ResponseEvent::OutputTextDelta(text) => {
-                    ResponseEvent::OutputTextDelta(format!("{text}{}", self.0))
-                }
+                ResponseEvent::OutputTextDelta {
+                    item_id,
+                    delta: text,
+                } => ResponseEvent::OutputTextDelta {
+                    item_id,
+                    delta: format!("{text}{}", self.0),
+                },
                 other => other,
             })
         }))
@@ -43,7 +47,10 @@ async fn interceptors_forward_before_completion_in_order_and_cancel_upstream() {
         vec![Box::new(Append("a")), Box::new(Append("b"))],
     );
     tx_event
-        .send(Ok(ResponseEvent::OutputTextDelta("text".into())))
+        .send(Ok(ResponseEvent::OutputTextDelta {
+            item_id: codex_protocol::ResponseItemId::from_server("message".into()),
+            delta: "text".into(),
+        }))
         .await
         .unwrap();
     // Upstream remains open and has not sent Completed.
@@ -52,10 +59,15 @@ async fn interceptors_forward_before_completion_in_order_and_cancel_upstream() {
         .unwrap()
         .unwrap()
         .unwrap();
-    let ResponseEvent::OutputTextDelta(text) = event else {
+    let ResponseEvent::OutputTextDelta {
+        item_id,
+        delta: text,
+    } = event
+    else {
         panic!("expected text delta");
     };
     assert_eq!(text, "textab");
+    assert_eq!(item_id.as_str(), "message");
     drop(stream);
     tokio::time::timeout(Duration::from_secs(1), upstream_cancelled.cancelled())
         .await

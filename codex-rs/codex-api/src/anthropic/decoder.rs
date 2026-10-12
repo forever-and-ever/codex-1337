@@ -142,7 +142,7 @@ enum Delta {
 
 struct OpenBlock {
     block: Block,
-    item_id: String,
+    item_id: ResponseItemId,
     json: String,
 }
 
@@ -257,7 +257,7 @@ impl<'a> Decoder<'a> {
                 }
                 let open = OpenBlock {
                     block: content_block,
-                    item_id: format!("{id}_{index}"),
+                    item_id: ResponseItemId::from_server(format!("{id}_{index}")),
                     json: String::new(),
                 };
                 if let Block::ToolUse { id, name, .. } = &open.block {
@@ -285,12 +285,16 @@ impl<'a> Decoder<'a> {
                 }
                 match &open.block {
                     Block::Text { text } if !text.is_empty() => {
-                        events.push(ResponseEvent::OutputTextDelta(text.clone()))
+                        events.push(ResponseEvent::OutputTextDelta {
+                            item_id: open.item_id.clone(),
+                            delta: text.clone(),
+                        })
                     }
                     Block::Thinking { thinking, .. } if !thinking.is_empty() => {
                         events.push(ResponseEvent::ReasoningSummaryDelta {
+                            item_id: open.item_id.clone(),
                             delta: thinking.clone(),
-                            summary_index: index as i64,
+                            summary_index: 0,
                         })
                     }
                     _ => {}
@@ -305,7 +309,10 @@ impl<'a> Decoder<'a> {
                 match (&mut open.block, delta) {
                     (Block::Text { text }, Delta::Text { text: part }) => {
                         text.push_str(&part);
-                        events.push(ResponseEvent::OutputTextDelta(part));
+                        events.push(ResponseEvent::OutputTextDelta {
+                            item_id: open.item_id.clone(),
+                            delta: part,
+                        });
                     }
                     (Block::ToolUse { .. }, Delta::InputJson { partial_json }) => {
                         // Neither function envelopes nor custom string wrappers
@@ -315,8 +322,9 @@ impl<'a> Decoder<'a> {
                     (Block::Thinking { thinking, .. }, Delta::Thinking { thinking: part }) => {
                         thinking.push_str(&part);
                         events.push(ResponseEvent::ReasoningSummaryDelta {
+                            item_id: open.item_id.clone(),
                             delta: part,
-                            summary_index: index as i64,
+                            summary_index: 0,
                         });
                     }
                     (
@@ -364,7 +372,7 @@ impl<'a> Decoder<'a> {
                             && self.tools.iter().any(|tool| tool.name == *name) =>
                     {
                         ResponseItem::RejectedToolCall {
-                            id: Some(ResponseItemId::from_server(open.item_id.clone())),
+                            id: Some(open.item_id.clone()),
                             reason: ToolCallRejection::MalformedInput,
                             call: NativeToolCall::Anthropic {
                                 call_id: id.clone(),
@@ -452,7 +460,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn item(&self, open: &OpenBlock) -> Result<ResponseItem, ApiError> {
-        let id = Some(ResponseItemId::from_server(open.item_id.clone()));
+        let id = Some(open.item_id.clone());
         Ok(match &open.block {
             Block::Text { text } => ResponseItem::Message {
                 id,

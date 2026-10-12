@@ -207,7 +207,7 @@ async fn decision(
     let mut output = String::new();
     while let Some(event) = stream.rx_event.recv().await {
         match event.map_err(LunaSamplerError::Api)? {
-            ResponseEvent::OutputTextDelta(delta) => {
+            ResponseEvent::OutputTextDelta { delta, .. } => {
                 if output.len().saturating_add(delta.len()) > MAX_OUTPUT_BYTES {
                     return Err(LunaSamplerError::OutputTooLarge);
                 }

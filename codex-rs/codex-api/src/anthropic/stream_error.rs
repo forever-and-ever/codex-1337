@@ -16,7 +16,7 @@ impl AnthropicStreamProgress {
         match (self, event) {
             (Self::CompletedItem, _) | (_, ResponseEvent::OutputItemDone(_)) => Self::CompletedItem,
             (_, ResponseEvent::OutputItemAdded(_))
-            | (_, ResponseEvent::OutputTextDelta(_))
+            | (_, ResponseEvent::OutputTextDelta { .. })
             | (_, ResponseEvent::ToolCallInputDelta { .. })
             | (_, ResponseEvent::ReasoningSummaryDelta { .. })
             | (_, ResponseEvent::ReasoningSummaryDone { .. })

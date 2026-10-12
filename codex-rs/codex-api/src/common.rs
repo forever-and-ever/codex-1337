@@ -1,13 +1,8 @@
 use crate::error::ApiError;
-use codex_protocol::ResponseUsageMetadata;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use codex_protocol::config_types::Verbosity as VerbosityConfig;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
-use codex_protocol::protocol::ModelVerification;
-use codex_protocol::protocol::RateLimitSnapshot;
-use codex_protocol::protocol::TokenUsage;
-use codex_protocol::protocol::TurnModerationMetadataEvent;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::turn_input::CyberAccessProgram;
 use futures::Stream;
@@ -77,59 +72,9 @@ pub struct MemorySummarizeOutput {
 #[derive(Clone, Debug)]
 pub struct ResponseId(pub String);
 
-#[derive(Debug)]
-pub enum ResponseEvent {
-    Created {
-        /// Existing server response ID, when supplied by the stream.
-        response_id: Option<String>,
-    },
-    SafetyBuffering(SafetyBuffering),
-    OutputItemDone(ResponseItem),
-    OutputItemAdded(ResponseItem),
-    /// Emitted when the server includes `OpenAI-Model` on the stream response.
-    /// This can differ from the requested model when backend safety routing applies.
-    ServerModel(String),
-    /// Emitted when the server recommends additional account verification.
-    ModelVerifications(Vec<ModelVerification>),
-    /// Emitted when the server includes moderation metadata for first-party turn presentation.
-    TurnModerationMetadata(TurnModerationMetadataEvent),
-    /// Emitted when `X-Reasoning-Included: true` is present on the response,
-    /// meaning the server already accounted for past reasoning tokens and the
-    /// client should not re-estimate them.
-    ServerReasoningIncluded(bool),
-    Completed {
-        response_id: String,
-        token_usage: Option<TokenUsage>,
-        usage_metadata: Option<ResponseUsageMetadata>,
-        /// Did the model affirmatively end its turn? Some providers do not set this,
-        /// so we rely on fallback logic when this is `None`.
-        end_turn: Option<bool>,
-    },
-    OutputTextDelta(String),
-    ToolCallInputDelta {
-        item_id: String,
-        call_id: Option<String>,
-        delta: String,
-    },
-    ReasoningSummaryDelta {
-        delta: String,
-        summary_index: i64,
-    },
-    ReasoningSummaryDone {
-        item_id: String,
-        text: String,
-        summary_index: i64,
-    },
-    ReasoningContentDelta {
-        delta: String,
-        content_index: i64,
-    },
-    ReasoningSummaryPartAdded {
-        summary_index: i64,
-    },
-    RateLimits(RateLimitSnapshot),
-    ModelsEtag(String),
-}
+#[path = "response_event.rs"]
+mod response_event;
+pub use response_event::ResponseEvent;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct SafetyBuffering {

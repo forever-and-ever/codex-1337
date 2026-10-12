@@ -91,9 +91,12 @@ async fn native_classification_requires_complete_structured_output() {
         let mut classification =
             tokio::spawn(decision(stream, /*metrics*/ None, Arc::clone(&scored)));
         // Even a full valid low object is provisional until message_stop.
-        tx.send(Ok(ResponseEvent::OutputTextDelta(output.into())))
-            .await
-            .unwrap();
+        tx.send(Ok(ResponseEvent::OutputTextDelta {
+            item_id: codex_protocol::ResponseItemId::from_server("classifier".into()),
+            delta: output.into(),
+        }))
+        .await
+        .unwrap();
         assert!(
             tokio::time::timeout(Duration::from_millis(/*millis*/ 20), &mut classification)
                 .await

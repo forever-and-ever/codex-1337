@@ -19,13 +19,18 @@ use std::net::TcpListener;
 use wiremock::MockServer;
 
 fn sse_incomplete() -> String {
+    // A later start and an earlier completion must not steal an open item's deltas.
     responses::sse(vec![
         responses::ev_message_item_added("committed", ""),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"committed","delta":"Retain "}),
+        responses::ev_reasoning_item_added("unfinished", &[]),
+        serde_json::json!({"type":"response.reasoning_summary_text.delta","item_id":"unfinished","summary_index":0,"delta":"Discard this "}),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"committed","delta":"this completed message."}),
         responses::ev_assistant_message("committed", "Retain this completed message."),
-        responses::ev_message_item_added("unfinished", ""),
-        responses::ev_output_text_delta("Discard this unfinished text."),
+        serde_json::json!({"type":"response.reasoning_summary_text.delta","item_id":"unfinished","summary_index":0,"delta":"unfinished text."}),
         responses::ev_message_item_added("unfinished-next", ""),
-        responses::ev_output_text_delta("Discard this overlapping item too."),
+        serde_json::json!({"type":"response.output_text.delta","item_id":"unfinished-next","delta":"Discard this overlapping item too."}),
+        serde_json::json!({"type":"response.reasoning_summary_text.delta","item_id":"unfinished","summary_index":0,"delta":" Still open."}),
     ])
 }
 
@@ -52,14 +57,14 @@ async fn retries_on_early_close() {
     // environment variables.
 
     let model_provider = ModelProviderInfo {
-        name: "openai".into(),
+        name: "openai".to_owned(),
         adapter: Default::default(),
         base_url: Some(format!("{}/v1", server.uri())),
         model_catalog_url: None,
         // Environment variable that should exist in the test environment.
         // ModelClient will return an error if the environment variable for the
         // provider is not set.
-        env_key: Some("PATH".into()),
+        env_key: Some("PATH".to_owned()),
         env_key_instructions: None,
         experimental_bearer_token: None,
         auth: None,
@@ -90,7 +95,7 @@ async fn retries_on_early_close() {
 
     codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
-            text: "hello".into(),
+            text: "hello".to_owned(),
             text_elements: Vec::new(),
         }]))
         .await
@@ -98,7 +103,18 @@ async fn retries_on_early_close() {
 
     // The retry's semantic boundary must not depend on an optional status warning.
     let mut discarded = Vec::new();
+    let mut text_deltas = Vec::new();
+    let mut reasoning_deltas = Vec::new();
     wait_for_event(&codex, |event| {
+        match event {
+            EventMsg::AgentMessageContentDelta(event) => {
+                text_deltas.push((event.item_id.clone(), event.delta.clone()))
+            }
+            EventMsg::ReasoningContentDelta(event) => {
+                reasoning_deltas.push((event.item_id.clone(), event.delta.clone()))
+            }
+            _ => {}
+        }
         if let EventMsg::StreamItemsDiscarded(event) = event {
             discarded.extend(event.item_ids.clone());
         }
@@ -106,6 +122,25 @@ async fn retries_on_early_close() {
     })
     .await;
     assert_eq!(discarded, ["unfinished", "unfinished-next"]);
+    assert_eq!(
+        text_deltas,
+        [
+            ("committed".to_owned(), "Retain ".to_owned()),
+            ("committed".to_owned(), "this completed message.".to_owned()),
+            (
+                "unfinished-next".to_owned(),
+                "Discard this overlapping item too.".to_owned()
+            ),
+        ]
+    );
+    assert_eq!(
+        reasoning_deltas,
+        [
+            ("unfinished".to_owned(), "Discard this ".to_owned()),
+            ("unfinished".to_owned(), "unfinished text.".to_owned()),
+            ("unfinished".to_owned(), " Still open.".to_owned()),
+        ]
+    );
 
     let requests = server.requests().await;
     assert_eq!(

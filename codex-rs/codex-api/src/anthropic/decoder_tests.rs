@@ -214,55 +214,72 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     // summary counts. Losing any of these corrupts the next request's history.
     let tools = [
         AnthropicTool {
-            name: "functions__exec".into(),
+            name: "functions__exec".to_owned(),
             description: String::new(),
             input_schema: json!({}),
             identity: AnthropicToolIdentity::Custom {
-                name: "exec".into(),
-                namespace: Some("functions".into()),
+                name: "exec".to_owned(),
+                namespace: Some("functions".to_owned()),
             },
         },
         AnthropicTool {
-            name: "send".into(),
+            name: "send".to_owned(),
             description: String::new(),
             input_schema: crate::anthropic::anthropic_function_input_schema(
                 json!({"type":"object"}),
             )
             .unwrap(),
             identity: AnthropicToolIdentity::Function {
-                name: "send".into(),
+                name: "send".to_owned(),
                 namespace: None,
             },
         },
     ];
     let frames = [
         json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":0,"output_tokens":0}}}),
-        json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}),
-        json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Exact α\n"}}),
-        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"first+"}}),
-        json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"second/=="}}),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"A"}}),
+        json!({"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":"Exact ","signature":""}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"α"}}),
+        json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"C"}}),
         json!({"type":"content_block_stop","index":0}),
-        json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"exec1","name":"functions__exec","input":{}}}),
-        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"send1","name":"send","input":{}}}),
-        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"arguments\": { \"target\" :"}}),
-        json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"text('α');\\n\"}"}}),
-        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":" \"worker\" }}"}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"\n"}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"first+"}}),
+        json!({"type":"content_block_delta","index":1,"delta":{"type":"signature_delta","signature":"second/=="}}),
         json!({"type":"content_block_stop","index":1}),
+        json!({"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"exec1","name":"functions__exec","input":{}}}),
+        json!({"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"send1","name":"send","input":{}}}),
+        json!({"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\"arguments\": { \"target\" :"}}),
+        json!({"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"input\":\"text('α');\\n\"}"}}),
+        json!({"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":" \"worker\" }}"}}),
         json!({"type":"content_block_stop","index":2}),
-        json!({"type":"content_block_start","index":3,"content_block":{"type":"compaction","content":"Exact checkpoint. ","signature":""}}),
-        json!({"type":"content_block_delta","index":3,"delta":{"type":"signature_delta","signature":"signed/=="}}),
         json!({"type":"content_block_stop","index":3}),
+        json!({"type":"content_block_start","index":4,"content_block":{"type":"compaction","content":"Exact checkpoint. ","signature":""}}),
+        json!({"type":"content_block_delta","index":4,"delta":{"type":"signature_delta","signature":"signed/=="}}),
+        json!({"type":"content_block_stop","index":4}),
         json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":42,"output_tokens":19,"output_tokens_details":{"thinking_tokens":13},"iterations":[{"input_tokens":42,"output_tokens":19,"cache_creation_input_tokens":7,"cache_read_input_tokens":11},{"input_tokens":3,"output_tokens":2,"cache_creation_input_tokens":5,"cache_read_input_tokens":13}]}}),
         json!({"type":"message_stop"}),
     ];
     let mut decoder = Decoder::new(&tools);
     let mut output = Vec::new();
     let mut tool_deltas = Vec::new();
+    let mut addressed_deltas = Vec::new();
     let mut usage = None;
     for frame in frames {
         for event in decoder.decode(&frame.to_string()).unwrap() {
             match event {
                 ResponseEvent::OutputItemDone(item) => output.push(item),
+                ResponseEvent::OutputTextDelta { item_id, delta } => {
+                    addressed_deltas.push((item_id.to_string(), delta))
+                }
+                ResponseEvent::ReasoningSummaryDelta {
+                    item_id,
+                    delta,
+                    summary_index,
+                } => {
+                    // Each signed block owns one summary, regardless of its outer block index.
+                    assert_eq!(summary_index, 0);
+                    addressed_deltas.push((item_id.to_string(), delta));
+                }
                 ResponseEvent::ToolCallInputDelta {
                     item_id,
                     call_id,
@@ -283,19 +300,30 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         }
     }
     assert_eq!(
+        addressed_deltas,
+        [
+            ("msg_0".to_owned(), "A".to_owned()),
+            ("msg_1".to_owned(), "Exact ".to_owned()),
+            ("msg_1".to_owned(), "α".to_owned()),
+            ("msg_0".to_owned(), "C".to_owned()),
+            ("msg_1".to_owned(), "\n".to_owned()),
+        ]
+    );
+    assert_eq!(
         tool_deltas,
         vec![
-            json!({"item_id":"msg_1","call_id":"exec1","delta":"text('α');\n"}),
-            json!({"item_id":"msg_2","call_id":"send1","delta":"{ \"target\" : \"worker\" }"}),
+            json!({"item_id":"msg_2","call_id":"exec1","delta":"text('α');\n"}),
+            json!({"item_id":"msg_3","call_id":"send1","delta":"{ \"target\" : \"worker\" }"}),
         ]
     );
     assert_eq!(
         serde_json::to_value(output).unwrap(),
         json!([
-        {"type":"reasoning","id":"msg_0","summary":[{"type":"summary_text","text":"Exact α\n"}],"content":null,"encrypted_content":"first+second/=="},
-            {"type":"custom_tool_call","id":"msg_1","call_id":"exec1","name":"exec","namespace":"functions","input":"text('α');\n"},
-            {"type":"function_call","id":"msg_2","call_id":"send1","name":"send","arguments":"{ \"target\" : \"worker\" }","encrypted_function_args":[]},
-            {"type":"native_compaction","id":"msg_3","provider":"anthropic","content":"Exact checkpoint. ","signature":"signed/=="}
+        {"type":"message","id":"msg_0","role":"assistant","content":[{"type":"output_text","text":"AC"}]},
+        {"type":"reasoning","id":"msg_1","summary":[{"type":"summary_text","text":"Exact α\n"}],"content":null,"encrypted_content":"first+second/=="},
+            {"type":"custom_tool_call","id":"msg_2","call_id":"exec1","name":"exec","namespace":"functions","input":"text('α');\n"},
+            {"type":"function_call","id":"msg_3","call_id":"send1","name":"send","arguments":"{ \"target\" : \"worker\" }","encrypted_function_args":[]},
+            {"type":"native_compaction","id":"msg_4","provider":"anthropic","content":"Exact checkpoint. ","signature":"signed/=="}
         ])
     );
     assert_eq!(

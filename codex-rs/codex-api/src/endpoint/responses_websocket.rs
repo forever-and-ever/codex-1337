@@ -673,6 +673,7 @@ async fn run_websocket_response_stream(
     timing_log_context: &ResponsesWebsocketTimingLogContext,
     interrupt: oneshot::Receiver<()>,
 ) -> Result<(), ApiError> {
+    let mut identity = crate::sse::responses::identity::ResponsesItemIdentity::default();
     let mut last_server_model: Option<String> = None;
     let mut safety_buffering_treatment = SafetyBufferingTreatment::default();
     send_websocket_request(
@@ -816,7 +817,7 @@ async fn run_websocket_response_stream(
                         "response event consumer dropped".to_string(),
                     ));
                 }
-                match process_responses_event(event) {
+                match process_responses_event(event, &mut identity) {
                     Ok(Some(event)) => {
                         if let ResponseEvent::Created { response_id: id } = &event {
                             response_id.clone_from(id);

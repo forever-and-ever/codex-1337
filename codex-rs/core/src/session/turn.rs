@@ -56,7 +56,6 @@ use crate::tasks::emit_compact_metric;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::parallel::ToolCallRuntime;
-use crate::tools::registry::ToolArgumentDiffConsumer;
 use crate::tools::router::ToolSuggestCandidates;
 use crate::tools::router::ToolSuggestPresentation;
 use crate::tools::spec_plan::build_tool_router;
@@ -2499,7 +2498,7 @@ async fn emit_turn_item_in_plan_mode(
     sess: &Session,
     turn_context: &TurnContext,
     turn_item: TurnItem,
-    previously_active_item: Option<&TurnItem>,
+    previously_streamed_item: Option<&TurnItem>,
     state: &mut PlanModeStreamState,
 ) {
     match turn_item {
@@ -2507,7 +2506,7 @@ async fn emit_turn_item_in_plan_mode(
             emit_agent_message_in_plan_mode(sess, turn_context, agent_message, state).await;
         }
         _ => {
-            if previously_active_item.is_none() {
+            if previously_streamed_item.is_none() {
                 sess.emit_turn_item_started(turn_context, &turn_item).await;
             }
             sess.emit_turn_item_completed(turn_context, turn_item).await;
@@ -2522,7 +2521,7 @@ async fn handle_assistant_item_done_in_plan_mode(
     turn_store: &codex_extension_api::ExtensionData,
     item: &ResponseItem,
     state: &mut PlanModeStreamState,
-    previously_active_item: Option<&TurnItem>,
+    previously_streamed_item: Option<&TurnItem>,
     last_agent_message: &mut Option<String>,
 ) -> bool {
     let turn_context = &step_context.turn;
@@ -2545,7 +2544,7 @@ async fn handle_assistant_item_done_in_plan_mode(
                 sess,
                 turn_context,
                 finalized_turn_item.turn_item,
-                previously_active_item,
+                previously_streamed_item,
                 state,
             )
             .await;
@@ -2598,21 +2597,6 @@ async fn drain_in_flight(
         }
     }
     Ok(())
-}
-
-fn assign_missing_streamed_response_item_id(
-    item: &mut ResponseItem,
-    active_item: Option<&TurnItem>,
-) {
-    if item.id().is_some_and(|id| !id.is_empty()) {
-        return;
-    }
-
-    let active_item_id = active_item
-        .map(|item| ResponseItemId::from_server(item.id()))
-        .filter(|item_id| !item_id.is_empty());
-    item.set_id(active_item_id);
-    Session::assign_missing_response_item_id(item);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2698,13 +2682,7 @@ async fn try_run_sampling_request(
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
-    let mut active_item: Option<TurnItem> = None;
-    // Delta attribution is singular; unfinished item lifetimes may overlap.
-    let mut unfinished = stream_attempt::UnfinishedItems::default();
-    let mut active_tool_argument_diff_consumer: Option<(
-        String,
-        Box<dyn ToolArgumentDiffConsumer>,
-    )> = None;
+
     let mut should_emit_turn_diff = false;
     let mut should_emit_token_count = false;
     const MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE: usize = 256;
@@ -2722,11 +2700,9 @@ async fn try_run_sampling_request(
         .map(std::string::ToString::to_string)
         .unwrap_or_else(|| "default".to_string());
     let plan_mode = turn_context.mode() == ModeKind::Plan;
-    let mut assistant_message_stream_parsers = AssistantMessageStreamParsers::new(plan_mode);
-    let mut plan_mode_state = plan_mode.then(|| PlanModeStreamState::new(&turn_context.sub_id));
+    let mut items = stream_attempt::StreamItems::new(plan_mode, &turn_context.sub_id);
     let defer_streamed_turn_items_for_contributors =
         !sess.services.extensions.turn_item_contributors().is_empty();
-    let mut active_item_is_streaming_to_client = false;
     let receiving_span = trace_span!("receiving_stream");
     let outcome: CodexResult<SamplingRequestResult> = loop {
         let handle_responses = trace_span!(
@@ -2790,6 +2766,9 @@ async fn try_run_sampling_request(
             .record_responses(&handle_responses, &event);
         record_turn_ttft_metric(&turn_context, &event).await;
 
+        if let Err(error) = items.validate(&event) {
+            break Err(error);
+        }
         match event {
             ResponseEvent::Created { response_id } => {
                 if let Some(response_id) = response_id {
@@ -2798,9 +2777,8 @@ async fn try_run_sampling_request(
                         .insert(codex_api::ResponseId(response_id));
                 }
             }
-            ResponseEvent::OutputItemDone(mut item) => {
-                assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
-                unfinished.completed(&item);
+            ResponseEvent::OutputItemDone(item) => {
+                let completion = items.completed(&item);
                 thought.observe(&item);
                 members.observe(&item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
@@ -2821,18 +2799,7 @@ async fn try_run_sampling_request(
                         analytics_tool_call_ids.push(call_id.to_string());
                     }
                 }
-                if let Some((_, mut consumer)) = active_tool_argument_diff_consumer.take()
-                    && let Ok(Some(event)) = consumer.finish()
-                {
-                    sess.send_event(&turn_context, event).await;
-                }
-                let previously_active_item = active_item.take();
-                let previously_streamed_item = if active_item_is_streaming_to_client {
-                    previously_active_item
-                } else {
-                    None
-                };
-                active_item_is_streaming_to_client = false;
+                let previously_streamed_item = completion.emit(&sess, &turn_context).await;
                 if let Some(previous) = previously_streamed_item.as_ref()
                     && matches!(previous, TurnItem::AgentMessage(_))
                 {
@@ -2840,13 +2807,13 @@ async fn try_run_sampling_request(
                     flush_assistant_text_segments_for_item(
                         &sess,
                         &turn_context,
-                        plan_mode_state.as_mut(),
-                        &mut assistant_message_stream_parsers,
+                        items.plan.as_mut(),
+                        &mut items.parsers,
                         &item_id,
                     )
                     .await;
                 }
-                if let Some(state) = plan_mode_state.as_mut()
+                if let Some(state) = items.plan.as_mut()
                     && handle_assistant_item_done_in_plan_mode(
                         &sess,
                         &step_context,
@@ -2936,11 +2903,11 @@ async fn try_run_sampling_request(
                     });
                 }
             }
-            ResponseEvent::OutputItemAdded(mut item) => {
+            ResponseEvent::OutputItemAdded(item) => {
                 if matches!(&item, ResponseItem::Reasoning { .. }) {
                     thought.observed.get_or_insert_default();
                 }
-                assign_missing_streamed_response_item_id(&mut item, /*active_item*/ None);
+                items.started(&item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
                 if let ResponseItem::CustomToolCall {
@@ -2951,11 +2918,11 @@ async fn try_run_sampling_request(
                 } = &item
                 {
                     let tool_name = ToolName::new(namespace.clone(), name.as_str());
-                    active_tool_argument_diff_consumer = tool_runtime
-                        .create_diff_consumer(&tool_name)
-                        .map(|consumer| (call_id.clone(), consumer));
-                } else if matches!(&item, ResponseItem::FunctionCall { .. }) {
-                    active_tool_argument_diff_consumer = None;
+                    if let Some(consumer) = tool_runtime.create_diff_consumer(&tool_name)
+                        && let Some(id) = item.id()
+                    {
+                        items.arguments(id.clone(), call_id.clone(), consumer);
+                    }
                 }
                 if let Some(turn_item) = handle_non_tool_response_item(
                     sess.as_ref(),
@@ -2974,8 +2941,7 @@ async fn try_run_sampling_request(
                         && let Some(raw_text) = raw_assistant_output_text_from_item(&item)
                     {
                         let item_id = turn_item.id();
-                        let mut seeded =
-                            assistant_message_stream_parsers.seed_item_text(&item_id, &raw_text);
+                        let mut seeded = items.parsers.seed_item_text(&item_id, &raw_text);
                         if let TurnItem::AgentMessage(agent_message) = &mut turn_item {
                             agent_message.content =
                                 vec![codex_protocol::items::AgentMessageContent::Text {
@@ -2990,8 +2956,7 @@ async fn try_run_sampling_request(
                         seeded_item_id = Some(item_id);
                     }
                     if stream_item_to_client {
-                        unfinished.started(&turn_item);
-                        if let Some(state) = plan_mode_state.as_mut()
+                        if let Some(state) = items.plan.as_mut()
                             && matches!(turn_item, TurnItem::AgentMessage(_))
                         {
                             let item_id = turn_item.id();
@@ -3002,7 +2967,7 @@ async fn try_run_sampling_request(
                             sess.emit_turn_item_started(&turn_context, &turn_item).await;
                         }
                         if let (Some(state), Some(item_id), Some(parsed)) = (
-                            plan_mode_state.as_mut(),
+                            items.plan.as_mut(),
                             seeded_item_id.as_deref(),
                             seeded_parsed,
                         ) {
@@ -3016,8 +2981,8 @@ async fn try_run_sampling_request(
                             .await;
                         }
                     }
-                    active_item = Some(turn_item);
-                    active_item_is_streaming_to_client = stream_item_to_client;
+                    let id = item.id().expect("canonical streamed item ID").clone();
+                    items.present(id, turn_item, stream_item_to_client);
                 }
             }
             ResponseEvent::ServerModel(server_model) => {
@@ -3097,8 +3062,8 @@ async fn try_run_sampling_request(
                 flush_assistant_text_segments_all(
                     &sess,
                     &turn_context,
-                    plan_mode_state.as_mut(),
-                    &mut assistant_message_stream_parsers,
+                    items.plan.as_mut(),
+                    &mut items.parsers,
                 )
                 .await;
                 sess.record_observed_response_completed(
@@ -3190,96 +3155,66 @@ async fn try_run_sampling_request(
                     last_agent_message,
                 });
             }
-            ResponseEvent::OutputTextDelta(delta) => {
-                // In review child threads, suppress assistant text deltas; the
-                // UI will show a selection popup from the final ReviewOutput.
-                if let Some(active) = active_item.as_ref() {
-                    if !active_item_is_streaming_to_client {
-                        continue;
-                    }
-                    let item_id = active.id();
-                    if matches!(active, TurnItem::AgentMessage(_)) {
-                        let parsed = assistant_message_stream_parsers.parse_delta(&item_id, &delta);
-                        emit_streamed_assistant_text_delta(
-                            &sess,
-                            &turn_context,
-                            plan_mode_state.as_mut(),
-                            &item_id,
-                            parsed,
-                        )
-                        .await;
-                    } else {
-                        let event = AgentMessageContentDeltaEvent {
-                            thread_id: sess.thread_id.to_string(),
-                            turn_id: turn_context.sub_id.clone(),
-                            item_id,
-                            delta,
-                        };
-                        sess.send_event(&turn_context, EventMsg::AgentMessageContentDelta(event))
-                            .await;
-                    }
-                } else {
-                    error_or_panic("OutputTextDelta without active item".to_string());
+            ResponseEvent::OutputTextDelta { item_id, delta } => {
+                // Contributors receive only completed items, never provisional text.
+                if items.streaming(&item_id).is_some() {
+                    let item_id = item_id.to_string();
+                    let parsed = items.parsers.parse_delta(&item_id, &delta);
+                    emit_streamed_assistant_text_delta(
+                        &sess,
+                        &turn_context,
+                        items.plan.as_mut(),
+                        &item_id,
+                        parsed,
+                    )
+                    .await;
                 }
             }
             ResponseEvent::ToolCallInputDelta {
-                item_id: _,
+                item_id,
                 call_id,
                 delta,
             } => {
-                let Some((active_call_id, consumer)) = active_tool_argument_diff_consumer.as_mut()
-                else {
-                    continue;
-                };
-                let call_id = match call_id {
-                    Some(call_id) if call_id.as_str() != active_call_id.as_str() => continue,
-                    Some(call_id) => call_id,
-                    None => active_call_id.clone(),
-                };
-                if let Some(event) = consumer.consume_diff(turn_context.as_ref(), call_id, &delta) {
+                if let Some(event) =
+                    items.consume_arguments(&item_id, call_id, &delta, turn_context.as_ref())
+                {
                     sess.send_event(&turn_context, event).await;
                 }
             }
             ResponseEvent::ReasoningSummaryDelta {
+                item_id,
                 delta,
                 summary_index,
             } => {
                 if uses_sequential_cutoff_reasoning_summaries {
                     continue;
                 }
-                if let Some(active) = active_item.as_ref() {
-                    if !active_item_is_streaming_to_client {
-                        continue;
-                    }
+                if items.streaming(&item_id).is_some() {
                     let event = ReasoningContentDeltaEvent {
                         thread_id: sess.thread_id.to_string(),
                         turn_id: turn_context.sub_id.clone(),
-                        item_id: active.id(),
+                        item_id: item_id.to_string(),
                         delta,
                         summary_index,
                     };
                     sess.send_event(&turn_context, EventMsg::ReasoningContentDelta(event))
                         .await;
-                } else {
-                    error_or_panic("ReasoningSummaryDelta without active item".to_string());
                 }
             }
-            ResponseEvent::ReasoningSummaryPartAdded { summary_index } => {
+            ResponseEvent::ReasoningSummaryPartAdded {
+                item_id,
+                summary_index,
+            } => {
                 if uses_sequential_cutoff_reasoning_summaries {
                     continue;
                 }
-                if let Some(active) = active_item.as_ref() {
-                    if !active_item_is_streaming_to_client {
-                        continue;
-                    }
+                if items.streaming(&item_id).is_some() {
                     let event =
                         EventMsg::AgentReasoningSectionBreak(AgentReasoningSectionBreakEvent {
-                            item_id: active.id(),
+                            item_id: item_id.to_string(),
                             summary_index,
                         });
                     sess.send_event(&turn_context, event).await;
-                } else {
-                    error_or_panic("ReasoningSummaryPartAdded without active item".to_string());
                 }
             }
             ResponseEvent::ReasoningSummaryDone {
@@ -3290,12 +3225,10 @@ async fn try_run_sampling_request(
                 if !uses_sequential_cutoff_reasoning_summaries {
                     continue;
                 }
-                let Some(active) = active_item.as_ref() else {
+                let Some(_) = items.streaming(&item_id) else {
                     continue;
                 };
-                if !active_item_is_streaming_to_client || active.id() != item_id {
-                    continue;
-                }
+                let item_id = item_id.to_string();
                 if summary_index > 0 {
                     sess.send_event(
                         &turn_context,
@@ -3317,24 +3250,20 @@ async fn try_run_sampling_request(
                     .await;
             }
             ResponseEvent::ReasoningContentDelta {
+                item_id,
                 delta,
                 content_index,
             } => {
-                if let Some(active) = active_item.as_ref() {
-                    if !active_item_is_streaming_to_client {
-                        continue;
-                    }
+                if items.streaming(&item_id).is_some() {
                     let event = ReasoningRawContentDeltaEvent {
                         thread_id: sess.thread_id.to_string(),
                         turn_id: turn_context.sub_id.clone(),
-                        item_id: active.id(),
+                        item_id: item_id.to_string(),
                         delta,
                         content_index,
                     };
                     sess.send_event(&turn_context, EventMsg::ReasoningRawContentDelta(event))
                         .await;
-                } else {
-                    error_or_panic("ReasoningRawContentDelta without active item".to_string());
                 }
             }
         }
@@ -3345,8 +3274,8 @@ async fn try_run_sampling_request(
     flush_assistant_text_segments_all(
         &sess,
         &turn_context,
-        plan_mode_state.as_mut(),
-        &mut assistant_message_stream_parsers,
+        items.plan.as_mut(),
+        &mut items.parsers,
     )
     .await;
 
@@ -3384,7 +3313,7 @@ async fn try_run_sampling_request(
         }
     }
 
-    outcome.map_err(|error| unfinished.fail(error, plan_mode_state.as_ref()))
+    outcome.map_err(|error| items.fail(error))
 }
 
 pub(crate) fn get_last_assistant_message_from_turn<'a>(
