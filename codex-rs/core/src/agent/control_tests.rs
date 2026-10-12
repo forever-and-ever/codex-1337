@@ -1524,14 +1524,30 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
     db.accept_farm_request(parent_thread_id, &historical_id)
         .await
         .expect("historical acceptance");
-    wait_for_live_thread_spawn_children(
-        &harness.control,
-        parent_thread_id,
-        &[worker_thread_id, sibling_thread_id],
-    )
-    .await;
-    wait_for_live_thread_spawn_children(&harness.control, worker_thread_id, &[reviewer_thread_id])
-        .await;
+    // The failed farm may evict an idle resident before it rejects creation.
+    // Residency is disposable; the open family and its authority must survive.
+    for (parent, mut expected) in [
+        (parent_thread_id, vec![worker_thread_id, sibling_thread_id]),
+        (worker_thread_id, vec![reviewer_thread_id]),
+    ] {
+        let mut children = db
+            .list_thread_spawn_children_with_status(
+                parent,
+                codex_state::DirectionalThreadSpawnEdgeStatus::Open,
+            )
+            .await
+            .expect("durable open child list");
+        children.sort_by_key(std::string::ToString::to_string);
+        expected.sort_by_key(std::string::ToString::to_string);
+        assert_eq!(children, expected);
+    }
+    for child in [worker_thread_id, reviewer_thread_id, sibling_thread_id] {
+        harness
+            .control
+            .runtime
+            .ensure_agent_known(child)
+            .expect("idle eviction preserves family authority");
+    }
 
     let report = harness
         .manager
