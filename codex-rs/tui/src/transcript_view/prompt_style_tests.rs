@@ -56,7 +56,6 @@ fn prompt_margin_and_blank_background_survive_resize_without_changing_copy() {
     let style = Style::default().on_dark_gray();
     let initial_lines = styled_prompt_lines(&cell, /*width*/ 60, style);
     let mut layout = TextLayout::new(initial_lines, /*width*/ 60);
-    let expected_copy = format!("\n{message}\n");
 
     for (name, width) in [
         ("prompt_margin_wide", 60),
@@ -78,7 +77,7 @@ fn prompt_margin_and_blank_background_survive_resize_without_changing_copy() {
 
         assert_eq!(
             (layout.text(), layout.row_count()),
-            (expected_copy.as_str(), fresh_lines.len()),
+            (message, fresh_lines.len()),
         );
         assert_eq!(actual, expected);
         assert_eq!(
@@ -95,11 +94,11 @@ fn prompt_margin_and_blank_background_survive_resize_without_changing_copy() {
     // The last source character on the first body row precedes the reserved column.
     assert_eq!(
         (
-            layout.position_at(/*row*/ 1, /*column*/ 58),
-            layout.position_at(/*row*/ 1, /*column*/ 59),
-            layout.position_at(/*row*/ 2, /*column*/ 2),
+            layout.position_at(/*row*/ 0, /*column*/ 58),
+            layout.position_at(/*row*/ 0, /*column*/ 59),
+            layout.position_at(/*row*/ 1, /*column*/ 2),
         ),
-        (57, 58, 58),
+        (56, 57, 57),
     );
 }
 

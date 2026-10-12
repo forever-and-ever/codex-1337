@@ -110,7 +110,7 @@ fn pinned_prompt_matches_the_original_prompt_style() {
 
         assert_eq!(
             &actual.content[..usize::from(width)],
-            &expected.content[usize::from(width)..usize::from(width * 2)]
+            &expected.content[..usize::from(width)]
         );
         assert_eq!(view.area.y, 1);
     }

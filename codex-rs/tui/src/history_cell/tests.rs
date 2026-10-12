@@ -2166,7 +2166,7 @@ fn user_history_cell_wraps_and_prefixes_each_line_snapshot() {
         remote_image_urls: Vec::new(),
     };
 
-    // Small width to force wrapping more clearly. Effective wrap width is width-2 due to the ▌ prefix and trailing space.
+    // Reserve the two-column marker and one-column right margin before wrapping.
     let width: u16 = 12;
     let lines = cell.display_lines(width);
     let rendered = render_lines(&lines).join("\n");
@@ -2373,7 +2373,7 @@ fn user_history_cell_trims_trailing_blank_message_lines() {
         .rev()
         .take_while(|line| line.trim().is_empty())
         .count();
-    assert_eq!(trailing_blank_count, 1);
+    assert_eq!(trailing_blank_count, 0);
     assert!(rendered.iter().any(|line| line.contains("line one")));
 }
 
@@ -2397,7 +2397,7 @@ fn user_history_cell_trims_trailing_blank_message_lines_with_text_elements() {
         .rev()
         .take_while(|line| line.trim().is_empty())
         .count();
-    assert_eq!(trailing_blank_count, 1);
+    assert_eq!(trailing_blank_count, 0);
     assert!(rendered.iter().any(|line| line.contains("tokenized")));
 }
 
