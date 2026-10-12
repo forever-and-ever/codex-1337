@@ -483,7 +483,7 @@ impl ThreadComposerState {
             messages
                 .into_iter()
                 .map(|message| ChatWidget::composer_state_from_user_message(message, Vec::new()))
-                .chain(std::iter::once(self)),
+                .chain(self.has_content().then_some(self)),
         )
     }
 
