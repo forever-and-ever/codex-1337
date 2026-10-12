@@ -137,14 +137,8 @@ async fn cloud_preference_preserves_aliases_reads_and_executor_fallback() -> Tes
                     (section.id().to_string(), snapshot)
                 })
                 .collect();
-            let executor_body = snapshots["skills"]["body"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
-            let cloud_body = snapshots["cloud_skills"]["body"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
+            let executor_body = fresh_catalog(&sections, "skills");
+            let cloud_body = fresh_catalog(&sections, "cloud_skills");
             for index in 0..3 {
                 let listing = format!("- demo:s{index}:");
                 assert_eq!(executor_body.contains(&listing), ready && !cloud_enabled);

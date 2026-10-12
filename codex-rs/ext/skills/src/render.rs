@@ -13,6 +13,7 @@ use crate::catalog::SkillCatalogEntry;
 use crate::catalog::SkillSourceKind;
 use crate::catalog_prompt::SkillPromptKind;
 use crate::catalog_prompt::render_available_skills_body;
+use crate::catalog_wording::locator_kind;
 use crate::fragments::AvailableSkillsInstructions;
 use crate::host_aliases::shared_host_alias_roots;
 
@@ -195,7 +196,7 @@ struct SkillLine<'a> {
     name: &'a str,
     description: Cow<'a, str>,
     locator: String,
-    locator_kind: &'static str,
+    locator_kind: Option<&'static str>,
 }
 
 impl<'a> SkillLine<'a> {
@@ -217,12 +218,7 @@ impl<'a> SkillLine<'a> {
             name: entry.name.as_str(),
             description: truncate_catalog_skill_description(description),
             locator,
-            locator_kind: match &entry.authority.kind {
-                SkillSourceKind::Host => "file",
-                SkillSourceKind::Executor => "executor package",
-                SkillSourceKind::Cloud => "cloud package",
-                SkillSourceKind::Custom(_) => "custom resource",
-            },
+            locator_kind: locator_kind(&entry.authority.kind),
         }
     }
 
@@ -257,12 +253,14 @@ impl<'a> SkillLine<'a> {
 
     fn render_with_description(&self, description: &str) -> String {
         let name = self.name;
-        let locator = self.locator.as_str();
-        let locator_kind = self.locator_kind;
+        let locator = match self.locator_kind {
+            Some(locator_kind) => Cow::Owned(format!("{locator_kind}: {}", self.locator)),
+            None => Cow::Borrowed(self.locator.as_str()),
+        };
         if description.is_empty() {
-            format!("- {name}: ({locator_kind}: {locator})")
+            format!("- {name}: ({locator})")
         } else {
-            format!("- {name}: {description} ({locator_kind}: {locator})")
+            format!("- {name}: {description} ({locator})")
         }
     }
 }
@@ -477,6 +475,8 @@ pub(crate) struct RenderedSkillCatalogs {
 #[path = "render_dedup.rs"]
 mod dedup;
 pub(crate) use dedup::PreparedSkillCatalog;
+#[path = "render_muster.rs"]
+mod muster;
 
 impl AvailableSkillsRender {
     /// Count the metadata charged by the allocator, including aliases and omission notices.

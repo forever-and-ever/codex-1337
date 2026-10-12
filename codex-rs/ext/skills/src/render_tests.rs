@@ -186,12 +186,12 @@ fn ordering_follows_render_policy() {
             SkillPromptKind::Unaliased,
             &[],
             &[
-                "- system-zeta: Description. (file: /skills/system-zeta/SKILL.md)".to_string(),
-                "- admin-alpha: Description. (file: /skills/admin-alpha/SKILL.md)".to_string(),
-                "- repo-alpha: Description. (file: /skills/repo-alpha-a/SKILL.md)".to_string(),
-                "- repo-alpha: Description. (file: /skills/repo-alpha-z/SKILL.md)".to_string(),
-                "- repo-zeta: Description. (file: /skills/repo-zeta/SKILL.md)".to_string(),
-                "- user-alpha: Description. (file: /skills/user-alpha/SKILL.md)".to_string(),
+                "- system-zeta: Description. (/skills/system-zeta/SKILL.md)".to_string(),
+                "- admin-alpha: Description. (/skills/admin-alpha/SKILL.md)".to_string(),
+                "- repo-alpha: Description. (/skills/repo-alpha-a/SKILL.md)".to_string(),
+                "- repo-alpha: Description. (/skills/repo-alpha-z/SKILL.md)".to_string(),
+                "- repo-zeta: Description. (/skills/repo-zeta/SKILL.md)".to_string(),
+                "- user-alpha: Description. (/skills/user-alpha/SKILL.md)".to_string(),
             ],
         )
     );
@@ -201,12 +201,12 @@ fn ordering_follows_render_policy() {
             SkillPromptKind::Unaliased,
             &[],
             &[
-                "- repo-zeta: Description. (file: /skills/repo-zeta/SKILL.md)".to_string(),
-                "- user-alpha: Description. (file: /skills/user-alpha/SKILL.md)".to_string(),
-                "- system-zeta: Description. (file: /skills/system-zeta/SKILL.md)".to_string(),
-                "- admin-alpha: Description. (file: /skills/admin-alpha/SKILL.md)".to_string(),
-                "- repo-alpha: Description. (file: /skills/repo-alpha-z/SKILL.md)".to_string(),
-                "- repo-alpha: Description. (file: /skills/repo-alpha-a/SKILL.md)".to_string(),
+                "- repo-zeta: Description. (/skills/repo-zeta/SKILL.md)".to_string(),
+                "- user-alpha: Description. (/skills/user-alpha/SKILL.md)".to_string(),
+                "- system-zeta: Description. (/skills/system-zeta/SKILL.md)".to_string(),
+                "- admin-alpha: Description. (/skills/admin-alpha/SKILL.md)".to_string(),
+                "- repo-alpha: Description. (/skills/repo-alpha-z/SKILL.md)".to_string(),
+                "- repo-alpha: Description. (/skills/repo-alpha-a/SKILL.md)".to_string(),
             ],
         )
     );
@@ -247,8 +247,8 @@ fn description_selection_follows_render_policy() {
             SkillPromptKind::Unaliased,
             &[],
             &[
-                "- fallback: fallback description (file: /skills/fallback/SKILL.md)".to_string(),
-                "- shortened: full description (file: /skills/shortened/SKILL.md)".to_string(),
+                "- fallback: fallback description (/skills/fallback/SKILL.md)".to_string(),
+                "- shortened: full description (/skills/shortened/SKILL.md)".to_string(),
             ],
         )
     );
@@ -258,8 +258,8 @@ fn description_selection_follows_render_policy() {
             SkillPromptKind::Unaliased,
             &[],
             &[
-                "- shortened: short description (file: /skills/shortened/SKILL.md)".to_string(),
-                "- fallback: fallback description (file: /skills/fallback/SKILL.md)".to_string(),
+                "- shortened: short description (/skills/shortened/SKILL.md)".to_string(),
+                "- fallback: fallback description (/skills/fallback/SKILL.md)".to_string(),
             ],
         )
     );
@@ -334,11 +334,11 @@ fn host_only_prompts_preserve_existing_behavior_with_and_without_aliases() {
     insta::assert_snapshot!(unaliased.body(), @r###"
 
     ## Skills
-    A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `executor package` locators are owned by their execution environment, `cloud package` locators are opaque package identifiers, and `custom resource` locators use their provider's access mechanism.
+    A skill is a `SKILL.md` source of instructions. Entries give each skill's name, description, and source locator: a plain path is a `file` on the host filesystem, an `executor package` is owned by its execution environment, a `cloud package` is an opaque package identifier, and a `custom resource` uses its provider's access mechanism.
     ### Available skills
-    - alpha: Alpha skill. (file: /Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/alpha/SKILL.md)
-    - beta: Beta skill. (file: /Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/beta/SKILL.md)
-    - gamma: Gamma skill. (file: /Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/gamma/SKILL.md)
+    - alpha: Alpha skill. (/Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/alpha/SKILL.md)
+    - beta: Beta skill. (/Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/beta/SKILL.md)
+    - gamma: Gamma skill. (/Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root/gamma/SKILL.md)
     ### How to use skills
     - Discovery: The list above is the skills available in this session (name + description + source locator). `file` entries live on the host filesystem, `executor package` and `cloud package` entries are accessed directly through `skills.read`, and `custom resource` entries use their provider's access mechanism.
     - Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
@@ -369,13 +369,13 @@ fn host_only_prompts_preserve_existing_behavior_with_and_without_aliases() {
     insta::assert_snapshot!(aliased.body(), @r###"
 
     ## Skills
-    A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and a short path that can be expanded into an absolute path using the skill roots table.
+    A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, description, and short path; expand the path's alias from the skill roots table.
     ### Skill roots
     - `r0` = `/Users/test/.codex/plugins/cache/openai-curated/host-plugin/1.0.0/skills-with-a-long-shared-root`
     ### Available skills
-    - alpha: Alpha skill. (file: r0/alpha/SKILL.md)
-    - beta: Beta skill. (file: r0/beta/SKILL.md)
-    - gamma: Gamma skill. (file: r0/gamma/SKILL.md)
+    - alpha: Alpha skill. (r0/alpha/SKILL.md)
+    - beta: Beta skill. (r0/beta/SKILL.md)
+    - gamma: Gamma skill. (r0/gamma/SKILL.md)
     ### How to use skills
     - Discovery: The list above is the skills available in this session (name + description + short path). Skill bodies live on disk at the listed paths after expanding the matching alias from `### Skill roots`.
     - Trigger rules: If the user names a skill (with `$SkillName` or plain text) OR the task clearly matches a skill's description shown above, you must use that skill for that turn. Multiple mentions mean use them all. Do not carry skills across turns unless re-mentioned.
@@ -421,7 +421,7 @@ fn path_aliases_are_used_without_budget_pressure_when_they_reduce_prompt_size() 
     .expect("catalog should render");
 
     assert!(fragment.body().contains("### Skill roots"));
-    assert!(fragment.body().contains("(file: r0/alpha/SKILL.md)"));
+    assert!(fragment.body().contains("(r0/alpha/SKILL.md)"));
 }
 
 #[test]
@@ -475,8 +475,8 @@ fn path_aliases_retain_every_skill_under_budget_pressure() {
     let body = fragment.body();
 
     assert!(body.contains(&format!("- `r0` = `{root}`")));
-    assert!(body.contains("(file: r0/skill-0/SKILL.md)"));
-    assert!(body.contains("(file: r0/skill-11/SKILL.md)"));
+    assert!(body.contains("(r0/skill-0/SKILL.md)"));
+    assert!(body.contains("(r0/skill-11/SKILL.md)"));
     assert!(body.contains("Skill bodies live on disk at the listed paths after expanding"));
     assert!(!body.contains("additional skills omitted"));
 }
@@ -617,7 +617,7 @@ fn mixed_catalogs_keep_absolute_authority_aware_rendering_under_budget_pressure(
     let body = fragment.body();
 
     assert!(!body.contains("### Skill roots"));
-    assert!(body.contains(&format!("(file: {root}/skill-0/SKILL.md)")));
+    assert!(body.contains(&format!("({root}/skill-0/SKILL.md)")));
     assert!(body.contains("(executor package: executor-skill)"));
     assert!(body.contains("For a `file` entry, open the listed path."));
     assert!(!body.contains("additional skills omitted"));
@@ -773,7 +773,7 @@ fn mixed_catalogs_alias_all_skill_sources_under_budget_pressure() {
     assert!(
         host.skill_lines
             .iter()
-            .any(|line| line.contains("(file: r0/host-0/SKILL.md)"))
+            .any(|line| line.contains("(r0/host-0/SKILL.md)"))
     );
     assert_eq!(
         (
@@ -1027,7 +1027,7 @@ fn catalog_report_counts_partial_description_truncation() {
         )],
         warnings: Vec::new(),
     };
-    let expected_line = "- partial: abcd (file: /skills/partial/SKILL.md)";
+    let expected_line = "- partial: abcd (/skills/partial/SKILL.md)";
     let budget = SkillMetadataBudget::Characters(metadata_line_cost(
         SkillMetadataBudget::Characters(usize::MAX),
         expected_line,

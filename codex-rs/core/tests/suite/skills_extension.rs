@@ -53,6 +53,8 @@ use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SKILLS_INSTRUCTIONS_CLOSE_TAG;
+use codex_protocol::protocol::SKILLS_INSTRUCTIONS_OPEN_TAG;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::TurnSettingsUpdate;
@@ -257,11 +259,11 @@ impl SkillProvider for CatalogSkillProvider {
 }
 
 const FULL_CATALOG_CONTEXT_WINDOW: i64 = 40_000;
-const SHORTENING_CONTEXT_WINDOW: i64 = 12_000;
+const SHORTENING_CONTEXT_WINDOW: i64 = 11_000;
 const EXECUTOR_OMITTING_CONTEXT_WINDOW: i64 = 2_000;
-const HOST_OMITTING_CONTEXT_WINDOW: i64 = 2_000;
+const HOST_OMITTING_CONTEXT_WINDOW: i64 = 1_800;
 const MIXED_EXECUTOR_OMITTING_CONTEXT_WINDOW: i64 = 2_000;
-const MIXED_HOST_OMITTING_CONTEXT_WINDOW: i64 = 6_000;
+const MIXED_HOST_OMITTING_CONTEXT_WINDOW: i64 = 5_700;
 const HOST_CATALOG: [(&str, &str); 4] = [
     (
         "host-alpha",
@@ -2131,14 +2133,14 @@ async fn production_turn_aliases_catalogs_with_separate_cloud_budget() -> Result
             "model request should include the {alias} skill root: {developer_text}"
         );
     }
-    for (source, alias, prefix, suffix) in [
-        ("executor package", "e0", "executor", ""),
-        ("cloud package", "c0", "cloud", ""),
-        ("file", "r0", "host", "/SKILL.md"),
+    for (marker, alias, prefix, suffix) in [
+        ("executor package: ", "e0", "executor", ""),
+        ("cloud package: ", "c0", "cloud", ""),
+        ("", "r0", "host", "/SKILL.md"),
     ] {
         for name in ["search", "review", "summarize"] {
             assert!(
-                developer_text.contains(&format!("{source}: {alias}/{prefix}-{name}{suffix}")),
+                developer_text.contains(&format!("({marker}{alias}/{prefix}-{name}{suffix})")),
                 "model request should retain the aliased {prefix}-{name} skill: {developer_text}"
             );
         }
@@ -2394,7 +2396,7 @@ async fn production_turn_shares_catalog_budget_across_host_and_executor_sections
 
     assert_shortened_descriptions(&host_lines, &HOST_CATALOG);
     assert_shortened_descriptions(&executor_lines, &EXECUTOR_CATALOG);
-    assert!(metadata_cost(&combined_lines) <= 240);
+    assert!(metadata_cost(&combined_lines) <= 220);
 
     Ok(())
 }
@@ -2455,17 +2457,17 @@ async fn production_turn_keeps_full_host_only_catalog_when_it_fits() -> Result<(
 
     assert_full_descriptions(&host_lines, &HOST_CATALOG);
     assert!(host_catalog.contains("### Skill roots"));
-    assert!(host_catalog.contains("(file: r0/host-alpha/SKILL.md)"));
+    assert!(host_catalog.contains("(r0/host-alpha/SKILL.md)"));
 
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn production_turn_preserves_host_alias_root_order_across_turns() -> Result<()> {
+async fn production_turn_keeps_host_aliases_and_amends_catalog_changes() -> Result<()> {
     let server = responses::start_mock_server().await;
     let response = responses::mount_sse_sequence(
         &server,
-        ["resp-1", "resp-2"]
+        ["resp-1", "resp-2", "resp-3", "resp-4"]
             .into_iter()
             .map(|response_id| {
                 sse(vec![
@@ -2485,18 +2487,20 @@ async fn production_turn_preserves_host_alias_root_order_across_turns() -> Resul
     let first_root_path = long_parent.join("first-discovered-skills-root-with-long-shared-prefix");
     let second_root_path =
         long_parent.join("second-discovered-skills-root-with-long-shared-prefix");
+    let write_skill = |root: &std::path::Path, name: &str, description: &str| {
+        let skill_dir = root.join(name);
+        std::fs::create_dir_all(&skill_dir)?;
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: {description}\n---\n\n# body\n"),
+        )
+    };
     for (root, prefix) in [
         (&first_root_path, "z-first"),
         (&second_root_path, "a-second"),
     ] {
         for index in 0..6 {
-            let name = format!("{prefix}-{index:02}");
-            let skill_dir = root.join(&name);
-            std::fs::create_dir_all(&skill_dir)?;
-            std::fs::write(
-                skill_dir.join("SKILL.md"),
-                format!("---\nname: {name}\ndescription: d\n---\n\n# body\n"),
-            )?;
+            write_skill(root, &format!("{prefix}-{index:02}"), "d")?;
         }
     }
     let first_root = AbsolutePathBuf::try_from(std::fs::canonicalize(&first_root_path)?)?;
@@ -2519,7 +2523,17 @@ async fn production_turn_preserves_host_alias_root_order_across_turns() -> Resul
     test.submit_turn("Inspect the available skills.").await?;
     test.submit_turn("Inspect the available skills again.")
         .await?;
+    // Edit, install, and uninstall skills, then let discovery see the changes.
+    write_skill(&first_root_path, "z-first-01", "changed")?;
+    write_skill(&first_root_path, "z-first-06", "d")?;
+    std::fs::remove_dir_all(second_root_path.join("a-second-05"))?;
+    test.thread_manager
+        .skills_service()
+        .set_extra_roots(vec![first_root.clone(), second_root.clone()]);
+    test.submit_turn("Inspect the changed skills.").await?;
+    test.submit_turn("Inspect the skills once more.").await?;
 
+    // Every request keeps the opening catalog and its alias table.
     let expected_alias_lines = vec![
         format!(
             "- `r0` = `{}`",
@@ -2531,8 +2545,8 @@ async fn production_turn_preserves_host_alias_root_order_across_turns() -> Resul
         ),
     ];
     let expected_skill_lines = vec![
-        "- a-second-00: d (file: r1/a-second-00/SKILL.md)".to_string(),
-        "- z-first-00: d (file: r0/z-first-00/SKILL.md)".to_string(),
+        "- a-second-00: d (r1/a-second-00/SKILL.md)".to_string(),
+        "- z-first-00: d (r0/z-first-00/SKILL.md)".to_string(),
     ];
     let actual = response
         .requests()
@@ -2557,11 +2571,37 @@ async fn production_turn_preserves_host_alias_root_order_across_turns() -> Resul
 
     assert_eq!(
         actual,
-        vec![
-            (expected_alias_lines.clone(), expected_skill_lines.clone()),
-            (expected_alias_lines, expected_skill_lines),
-        ]
+        vec![(expected_alias_lines, expected_skill_lines); 4]
     );
+
+    // Unchanged catalogs add nothing; a changed one appends only its differences, quoted with
+    // unaliased paths.
+    let requests = response.requests();
+    let skills_texts = |index: usize| {
+        requests[index]
+            .message_input_texts("developer")
+            .into_iter()
+            .filter(|text| text.starts_with(SKILLS_INSTRUCTIONS_OPEN_TAG))
+            .collect::<Vec<_>>()
+    };
+    let skill_path = |root: &AbsolutePathBuf, name: &str| {
+        format!(
+            "{}/{name}/SKILL.md",
+            root.to_string_lossy().replace('\\', "/")
+        )
+    };
+    let catalog = skills_texts(0);
+    assert_eq!(catalog.len(), 1);
+    assert_eq!(skills_texts(1), catalog);
+    let mut amended = catalog;
+    amended.push(format!(
+        "{SKILLS_INSTRUCTIONS_OPEN_TAG}\n## Host skills update\nSkills not named below are unchanged.\n### Added skills\n- z-first-06: d ({})\n### Changed skills\n- z-first-01: changed ({})\n### Removed skills\n- a-second-05: ({})\n{SKILLS_INSTRUCTIONS_CLOSE_TAG}",
+        skill_path(&first_root, "z-first-06"),
+        skill_path(&first_root, "z-first-01"),
+        skill_path(&second_root, "a-second-05"),
+    ));
+    assert_eq!(skills_texts(2), amended);
+    assert_eq!(skills_texts(3), amended);
     Ok(())
 }
 
@@ -2637,7 +2677,7 @@ async fn production_turn_uses_provider_host_catalog_and_core_snapshot_injection(
     assert_eq!(
         cutover_skill_lines,
         vec![format!(
-            "- {skill_name}: {provider_description} (file: {})",
+            "- {skill_name}: {provider_description} ({})",
             skill_resource.replace('\\', "/")
         )]
     );
@@ -3229,7 +3269,9 @@ async fn production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_r
         .unwrap_or_else(|| {
             panic!("pending request should advertise cloud skill: {first_developer_text}")
         });
-    let ready_developer_text = requests[1].message_input_texts("developer").join("\n");
+    // Rebalancing changes only the cloud budget, never the cloud catalog, so its rebalanced
+    // text first appears in the catalogs that compaction installs.
+    let ready_developer_text = requests[4].message_input_texts("developer").join("\n");
     let ready_line = ready_developer_text
         .lines()
         .rfind(|line| line.starts_with("- cloud-search:"))
@@ -3254,11 +3296,10 @@ async fn production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_r
         assert_eq!(
             cloud_lines,
             match index {
-                0 => vec![expected_line],
-                1..=3 => vec![expected_line, ready_line],
+                0..=3 => vec![expected_line],
                 _ => vec![ready_line],
             },
-            "request {index} should only append cloud text when rebalancing prevents omissions",
+            "request {index} should show cloud text again only in a fresh context",
         );
         assert_eq!(
             developer_texts
@@ -3287,7 +3328,7 @@ async fn production_turn_keeps_rebalanced_catalogs_stable_after_compaction_and_r
             "cloud_skills_across_executor_readiness"
         },
         context_snapshot::format_request_history_snapshot(
-            "Cloud skills rebalance once to retain every executor skill. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.",
+            "Cloud skills rebalance once to retain every executor skill without announcing the unchanged cloud catalog again. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.",
             &requests,
             &ContextSnapshotOptions::default()
                 .rewrite_known_segments()

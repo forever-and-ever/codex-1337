@@ -397,7 +397,7 @@ async fn user_turn_selects_symlinked_skill_by_advertised_discovery_path() -> Res
         .and_then(|line| line.strip_prefix("- `"))
         .and_then(|line| line.split_once("` = ").map(|(alias, _)| alias))
         .expect("skill catalog should alias the advertised discovery root");
-    let advertised_path = format!("(file: {discovery_root_alias}/linked-demo/SKILL.md)");
+    let advertised_path = format!("({discovery_root_alias}/linked-demo/SKILL.md)");
     assert!(
         developer_texts
             .iter()

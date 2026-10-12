@@ -1,6 +1,7 @@
 mod aliases;
 pub mod catalog;
 mod catalog_prompt;
+mod catalog_wording;
 mod config;
 mod dynamic_skill_selector;
 mod extension;
@@ -17,6 +18,7 @@ pub mod provider;
 mod render;
 mod render_observability;
 mod required;
+mod roster;
 mod selection;
 mod shadow_selection_experiment;
 mod skills_extension_state;
@@ -25,7 +27,6 @@ mod state;
 mod telemetry;
 mod tools;
 mod warnings;
-mod world_state;
 mod world_state_catalogs;
 
 pub use config::SkillsExtensionConfig;

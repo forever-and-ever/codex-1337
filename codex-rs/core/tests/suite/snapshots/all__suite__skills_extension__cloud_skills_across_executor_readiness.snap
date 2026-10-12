@@ -1,9 +1,9 @@
 ---
 source: core/tests/suite/skills_extension.rs
-assertion_line: 3282
-expression: "context_snapshot::format_request_history_snapshot(\"Cloud skills rebalance once to retain every executor skill. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+assertion_line: 3323
+expression: "context_snapshot::format_request_history_snapshot(\"Cloud skills rebalance once to retain every executor skill without announcing the unchanged cloud catalog again. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.\",\n&requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
 ---
-Scenario: Cloud skills rebalance once to retain every executor skill. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.
+Scenario: Cloud skills rebalance once to retain every executor skill without announcing the unchanged cloud catalog again. Post-turn compaction installs both catalogs and their allocation before resume; the saved catalogs remain visible while the executor reconnects.
 
 ## Window 1
 Settings:
@@ -55,9 +55,8 @@ Settings:
 05:function_call_output:{"environment_id":"skills-executor","status":"ready"}
 06:message/user:
     <ENVIRONMENT_CONTEXT>
-07:message/developer[2]:
-    [01] <SKILLS_INSTRUCTIONS>
-    [02] <SKILLS_INSTRUCTIONS>
+07:message/developer:
+    <SKILLS_INSTRUCTIONS>
 -- request 3 (turn) --
 08:message/user:
     Inspect the available skills again.
@@ -101,9 +100,8 @@ Settings: relative to window 1
 05:function_call_output:{"environment_id":"skills-executor","status":"ready"}
 06:message/user:
     <ENVIRONMENT_CONTEXT>
-07:message/developer[2]:
-    [01] <SKILLS_INSTRUCTIONS>
-    [02] <SKILLS_INSTRUCTIONS>
+07:message/developer:
+    <SKILLS_INSTRUCTIONS>
 08:message/user:
     Inspect the available skills again.
 09:message/user:
