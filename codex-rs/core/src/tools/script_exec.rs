@@ -45,7 +45,7 @@ pub(crate) enum ExecutionMode {
         invocation: ShellInvocation,
         shell_mode: UnifiedExecShellMode,
     },
-    Script(ScriptLanguage),
+    Script,
 }
 
 impl ExecutionMode {
@@ -67,7 +67,7 @@ impl ExecutionMode {
                     )
                     .await
             }
-            Self::Script(_) => {
+            Self::Script => {
                 policy
                     .create_exec_approval_requirement_for_script(request, platform)
                     .await
@@ -81,14 +81,7 @@ impl ExecutionMode {
                 invocation,
                 shell_mode,
             } => Some((invocation, shell_mode)),
-            Self::Script(_) => None,
-        }
-    }
-
-    pub(crate) fn tool_name(&self) -> &'static str {
-        match self {
-            Self::Shell { .. } => "exec_command",
-            Self::Script(language) => language.name(),
+            Self::Script => None,
         }
     }
 }

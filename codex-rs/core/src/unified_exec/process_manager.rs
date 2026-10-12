@@ -717,7 +717,6 @@ impl UnifiedExecProcessManager {
                 ProcessStatus::Alive {
                     exit_code,
                     process_id,
-                    ..
                 } => (Some(process_id), exit_code),
                 ProcessStatus::Exited { exit_code, entry } => {
                     if let Err(message) =
@@ -1073,7 +1072,6 @@ impl UnifiedExecProcessManager {
             ProcessStatus::Alive {
                 exit_code,
                 process_id,
-                ..
             } => (Some(process_id), exit_code),
             ProcessStatus::Exited { exit_code, entry } => {
                 if let Err(message) =
@@ -1148,7 +1146,6 @@ impl UnifiedExecProcessManager {
         } else {
             ProcessStatus::Alive {
                 exit_code,
-                call_id: entry.call_id.clone(),
                 process_id,
             }
         }
@@ -1882,7 +1879,6 @@ impl UnifiedExecProcessManager {
 enum ProcessStatus {
     Alive {
         exit_code: Option<i32>,
-        call_id: String,
         process_id: i32,
     },
     Exited {

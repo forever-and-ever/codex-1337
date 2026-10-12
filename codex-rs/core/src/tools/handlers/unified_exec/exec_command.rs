@@ -275,10 +275,9 @@ impl ExecCommandHandler {
             .await;
         }
         let (command, execution) = match &prepared {
-            PreparedExec::Script { language, .. } => (
-                language.command(&args.cmd),
-                ExecutionMode::Script(*language),
-            ),
+            PreparedExec::Script { language, .. } => {
+                (language.command(&args.cmd), ExecutionMode::Script)
+            }
             PreparedExec::Shell => {
                 let shell_mode =
                     shell_mode_for_environment(&turn.unified_exec_shell_mode, environment.as_ref());
