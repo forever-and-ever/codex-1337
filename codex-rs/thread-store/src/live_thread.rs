@@ -29,6 +29,10 @@ use crate::ThreadStoreResult;
 use crate::UpdateThreadMetadataParams;
 use crate::thread_metadata_sync::ThreadMetadataSync;
 
+mod agent_mail;
+pub use agent_mail::AgentMailCommit;
+pub use agent_mail::AgentMailPersistence;
+
 /// Handle for an active thread's persistence lifecycle.
 ///
 /// `LiveThread` keeps lifecycle decisions with the caller while delegating storage details to
@@ -222,25 +226,7 @@ impl LiveThread {
         if items.is_empty() {
             return Ok(());
         }
-        let update = self
-            .metadata_sync
-            .lock()
-            .await
-            .observe_appended_items(items.as_slice());
-        if let Some(update) = update {
-            self.thread_store
-                .record_thread_metadata(UpdateThreadMetadataParams {
-                    thread_id: self.thread_id,
-                    patch: update.patch.clone(),
-                    include_archived: true,
-                })
-                .await?;
-            self.metadata_sync
-                .lock()
-                .await
-                .mark_pending_update_applied(&update);
-        }
-        Ok(())
+        self.sync_appended_metadata(&items).await
     }
 
     async fn persist_appended_items(

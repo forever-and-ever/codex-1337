@@ -2164,65 +2164,87 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     spoofed.content = "different sender payload".into();
     assert!(session.receive_accepted_agent_mail(&spoofed).await.is_err());
 
-    // Deterministic cut: the writer committed, but its turn waiter was cancelled
-    // before live insertion and inbox acknowledgment. Preserve the stored envelope,
-    // including input ordering and provenance, rather than preparing it again.
-    session.agent_mail_admission_started(&record.id).await;
-    let mut canonical = ResponseItemEnvelope::new(communication.to_model_input_item());
-    canonical.item.set_turn_id_if_missing(&turn_context.sub_id);
-    canonical.metadata = Some(CodexHarnessMetadata {
-        user_input_order: Some(37),
-        inherited_user_message: true,
-        ..Default::default()
-    });
+    // Transfer ownership while settings persistence is blocked, then cancel
+    // only the waiter. The finite runtime task must still commit A before a
+    // later history writer B; metadata failure after commitment is not failure
+    // of canonical admission.
     session
+        .set_agent_mail_append_fault(super::agent_mail::AgentMailAppendFault::MetadataAfterCommit);
+    let settings = super::thread_settings::acquire_persistence_lock(&session).await;
+    let owned_session = Arc::clone(&session);
+    let owned_turn = Arc::clone(&turn_context);
+    let owned_mail = communication.clone();
+    let caller = tokio::spawn(async move {
+        owned_session
+            .record_accepted_agent_mail(&owned_turn, owned_turn.model_info(), &owned_mail)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while session.pending_agent_mail_admissions() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let mut later = communication.clone();
+    later.id = Some(ResponseItemId::new("amsg"));
+    later.content = "later live input".into();
+    let later_session = Arc::clone(&session);
+    let later_turn = Arc::clone(&turn_context);
+    let later_mail = later.clone();
+    let later_writer = tokio::spawn(async move {
+        later_session
+            .record_inter_agent_communication(&later_turn, later_turn.model_info(), later_mail)
+            .await;
+    });
+    drop(settings);
+    later_writer.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while session.pending_agent_mail_admissions() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    session.check_agent_mail_task_start().await.unwrap();
+    let admitted = session.clone_history().await;
+    assert_eq!(
+        admitted
+            .raw_items()
+            .filter_map(ResponseItem::id)
+            .collect::<Vec<_>>(),
+        vec![
+            communication.id.as_ref().unwrap(),
+            later.id.as_ref().unwrap()
+        ],
+    );
+    assert!(
+        admitted.annotated_items()[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .user_input_order
+            .is_some()
+    );
+    let committed = session
         .live_thread()
         .unwrap()
-        .append_items(&[
-            RolloutItem::InterAgentCommunicationMetadata {
-                trigger_turn: false,
-            },
-            RolloutItem::ResponseItem(canonical.clone()),
-        ])
+        .load_history(true)
         .await
         .unwrap();
-    assert!(session.clone_history().await.raw_items().next().is_none());
-    assert!(matches!(
-        db.thread_queue()
-            .agent_mail(session.thread_id, &record.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .state,
-        codex_state::AgentMailState::Pending(_)
-    ));
-    // Later queued input must not hide a cancelled admission from reconciliation.
-    let mut later = communication.clone();
-    later.id = None;
-    later.content = "later queued input".into();
-    session
-        .input_queue
-        .enqueue_mailbox_communication(later.clone(), Default::default())
-        .await;
-    let acceptance = session.agent_mail.acceptance.lock().await;
-    assert!(session.recover_accepted_agent_mail_locked().await.unwrap());
-    drop(acceptance);
-    assert_eq!(
-        session.clone_history().await.annotated_items(),
-        &[canonical.clone()]
-    );
-    let queued = session.input_queue.drain_mailbox().await;
-    assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].communication, later);
-    session
-        .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
-        .await
-        .unwrap();
-    session.recover_accepted_agent_mail().await.unwrap();
-    assert_eq!(
-        session.clone_history().await.annotated_items(),
-        &[canonical.clone()]
-    );
+    let canonical = committed
+        .items
+        .iter()
+        .find_map(|item| match item {
+            RolloutItem::ResponseItem(envelope) if envelope.id() == communication.id.as_ref() => {
+                Some(envelope)
+            }
+            _ => None,
+        })
+        .expect("owned admission committed canonical envelope");
+    assert_eq!(canonical, &admitted.annotated_items()[0]);
     session
         .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &communication)
         .await
@@ -2332,58 +2354,172 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         .await
         .unwrap();
 
-    let live_history = session.clone_history().await;
-    let live_items = raw_history_items(&live_history);
-    let [live_item] = live_items.as_slice() else {
-        panic!("expected exactly one live history item");
-    };
-    let live_item_id = live_item
-        .id()
-        .expect("live agent message should have an item id")
-        .to_string();
-    assert!(live_item_id.starts_with("amsg_"));
-
-    session.flush_rollout().await.expect("rollout should flush");
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+    // Canonical past admission is not current model-context membership.
+    // A replacement checkpoint intentionally omits C. Ordinary resume replay,
+    // followed by inbox reconciliation, must never resurrect C.
+    let mut compacted_mail = communication.clone();
+    compacted_mail.id = None;
+    compacted_mail.content = "mail removed by compaction".into();
+    let compacted_id = ResponseItemId::new("amsg_mail");
+    db.thread_queue()
+        .accept_agent_mail(
+            &compacted_id,
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "compacted origin",
+            &digest,
+            &serde_json::to_string(&compacted_mail).unwrap(),
+        )
         .await
-        .expect("read rollout history")
-    else {
-        panic!("expected resumed rollout history");
-    };
-    let persisted_item_id = resumed.history.iter().find_map(|item| match item {
-        RolloutItem::ResponseItem(item)
-            if matches!(&item.item, ResponseItem::AgentMessage { .. }) =>
-        {
-            item.id()
-        }
-        _ => None,
-    });
+        .unwrap();
+    compacted_mail.id = Some(compacted_id.clone());
+    let replacement = session.clone_history().await.annotated_items().to_vec();
+    let checkpoint = serde_json::from_value(json!({
+        "message": "checkpoint excluding compacted mail",
+        "replacement_history": replacement,
+    }))
+    .unwrap();
+    session
+        .live_thread()
+        .unwrap()
+        .append_items(&[
+            RolloutItem::ResponseItem(ResponseItemEnvelope::new(
+                compacted_mail.to_model_input_item(),
+            )),
+            RolloutItem::Compacted(checkpoint),
+        ])
+        .await
+        .unwrap();
+    let saved = session
+        .live_thread()
+        .unwrap()
+        .load_history(true)
+        .await
+        .unwrap();
+    session
+        .apply_rollout_reconstruction(&turn_context, &saved.items)
+        .await;
+    session.recover_accepted_agent_mail().await.unwrap();
+    assert!(
+        !session
+            .clone_history()
+            .await
+            .raw_items()
+            .any(|item| item.id() == Some(&compacted_id))
+    );
     assert_eq!(
-        persisted_item_id.map(ResponseItemId::as_str),
-        Some(live_item_id.as_str())
+        db.thread_queue()
+            .agent_mail(session.thread_id, &compacted_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Admitted
     );
 
-    let (resumed_session, _resumed_turn_context, _rx) =
+    // An actual canonical append may commit before returning an uncertain error.
+    // Contract-inject that boundary, not a live filesystem/provider failure.
+    let mut uncertain = communication.clone();
+    uncertain.id = None;
+    uncertain.content = "uncertain canonical outcome".into();
+    let uncertain_id = ResponseItemId::new("amsg_mail");
+    db.thread_queue()
+        .accept_agent_mail(
+            &uncertain_id,
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "uncertain origin",
+            &digest,
+            &serde_json::to_string(&uncertain).unwrap(),
+        )
+        .await
+        .unwrap();
+    uncertain.id = Some(uncertain_id.clone());
+    session
+        .set_agent_mail_append_fault(super::agent_mail::AgentMailAppendFault::UncertainAfterCommit);
+    assert!(
+        session
+            .record_accepted_agent_mail(&turn_context, turn_context.model_info(), &uncertain,)
+            .await
+            .is_err()
+    );
+    let blocked = session
+        .check_agent_mail_task_start()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(blocked.contains("Unload/reload or resume"));
+    assert!(session.recover_accepted_agent_mail().await.is_err());
+    assert!(matches!(
+        db.thread_queue()
+            .agent_mail(session.thread_id, &uncertain_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Pending(_)
+    ));
+    assert!(
+        !session
+            .clone_history()
+            .await
+            .raw_items()
+            .any(|item| item.id() == Some(&uncertain_id))
+    );
+
+    // A fresh session uses the same ordinary initial-history reconstruction as
+    // production resume. It does not inherit the uncertain live-runtime fence.
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read saved rollout")
+    else {
+        panic!("expected resumed rollout")
+    };
+    let (mut resumed_session, _resumed_turn_context, _rx) =
         make_session_and_context_with_auth_and_config_and_rx(
             CodexAuth::from_api_key("Test API Key"),
             Vec::new(),
-            |config| {
-                config.multi_agent_v2.wait_agent_batch_window_ms =
-                    std::num::NonZeroU64::new(60_000);
-            },
+            |_| {},
         )
         .await;
+    let resumed_mut = Arc::get_mut(&mut resumed_session).expect("unique resumed fixture");
+    resumed_mut.thread_id = session.thread_id;
+    resumed_mut.services.state_db = Some(reopened.clone());
+    resumed_mut.services.live_thread = session.services.live_thread.clone();
+    resumed_mut.services.thread_store = Arc::clone(&session.services.thread_store);
+    resumed_mut
+        .services
+        .local_agent_runtime
+        .register_session_root(session.thread_id, None);
     resumed_session
         .record_initial_history(InitialHistory::Resumed(resumed))
         .await;
+    resumed_session.check_agent_mail_task_start().await.unwrap();
+    resumed_session.recover_accepted_agent_mail().await.unwrap();
+    resumed_session.recover_accepted_agent_mail().await.unwrap();
     let resumed_history = resumed_session.clone_history().await;
-    let resumed_items = raw_history_items(&resumed_history);
-    let [resumed_item] = resumed_items.as_slice() else {
-        panic!("expected exactly one resumed history item");
-    };
     assert_eq!(
-        resumed_item.id().map(ResponseItemId::as_str),
-        Some(live_item_id.as_str())
+        resumed_history
+            .raw_items()
+            .filter_map(ResponseItem::id)
+            .collect::<Vec<_>>(),
+        vec![
+            communication.id.as_ref().unwrap(),
+            later.id.as_ref().unwrap(),
+            &uncertain_id
+        ],
+    );
+    assert_eq!(
+        reopened
+            .thread_queue()
+            .agent_mail(session.thread_id, &uncertain_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Admitted
     );
 }
 

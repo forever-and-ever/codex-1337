@@ -291,6 +291,19 @@ impl Session {
         input: Vec<TurnInput>,
         task: T,
     ) {
+        if let Err(error) = self.check_agent_mail_task_start().await {
+            let mut active = self.active_turn.lock().await;
+            if active.as_ref().is_some_and(|turn| turn.task.is_none()) {
+                *active = None;
+            }
+            drop(active);
+            self.send_event(
+                &turn_context,
+                EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
+            )
+            .await;
+            return;
+        }
         self.activate_plugin_selection(&turn_context).await;
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.

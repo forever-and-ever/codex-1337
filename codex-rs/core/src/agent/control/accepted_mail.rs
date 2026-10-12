@@ -165,6 +165,18 @@ impl LocalAgentControl {
 }
 
 impl LocalAgentRuntime {
+    /// Nonblocking acquisition avoids a queued writer / caller-owned reader inversion.
+    /// Acquire before registering an admission task that session teardown will drain.
+    pub(crate) fn agent_mail_admission_permit(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        Arc::clone(&self.lifecycle).try_read_owned().map_err(|_| {
+            CodexErr::InvalidRequest(
+                "agent family lifecycle is changing; accepted mail retained for recovery".into(),
+            )
+        })
+    }
+
     pub(crate) fn agent_mail_family_root(&self) -> Option<ThreadId> {
         self.registry.agent_id_for_path(&AgentPath::root())
     }
