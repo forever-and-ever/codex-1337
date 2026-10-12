@@ -2,6 +2,7 @@
 
 use codex_api::ApiError;
 use codex_api::TransportError;
+use codex_api::anthropic::AnthropicStreamError;
 use serde_json::Value;
 use serde_json::json;
 
@@ -77,6 +78,19 @@ impl Diagnostics {
             }
             ApiError::Api { status, message } => json!({"kind":"terminal_rejection",
                 "http_status":status.as_u16(),"message":self.text(message)}),
+            ApiError::AnthropicStream { progress, source } => {
+                let kind = match source {
+                    AnthropicStreamError::Transport(_) | AnthropicStreamError::IdleTimeout(_) => {
+                        "uncertain_transport"
+                    }
+                    AnthropicStreamError::Truncated => "uncertain_truncation",
+                    AnthropicStreamError::MalformedSse(_) => {
+                        "local_stream_validation_outcome_unknown"
+                    }
+                };
+                json!({"kind":kind,"progress":format!("{progress:?}"),
+                    "message":"Anthropic stream error; upstream detail omitted"})
+            }
             ApiError::NativeStream(message) => {
                 if let Some((kind, text)) = message
                     .strip_prefix("Anthropic ")

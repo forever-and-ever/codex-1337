@@ -2416,6 +2416,7 @@ fn websocket_error_detail(err: &ApiError) -> String {
             format!("handshake API error: {status} {message}")
         }
         ApiError::Stream(message) => format!("handshake stream error: {message}"),
+        ApiError::AnthropicStream { .. } => "handshake error: Anthropic stream error".to_string(),
         ApiError::ContentFilter
         | ApiError::ContextWindowExceeded
         | ApiError::NativeStream(_)

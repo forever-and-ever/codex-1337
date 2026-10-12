@@ -19,6 +19,7 @@ use codex_api::AuthProvider;
 use codex_api::Provider;
 use codex_api::ResponseEvent;
 use codex_api::RetryConfig;
+use codex_api::anthropic::AnthropicStreamError;
 use codex_api::anthropic_function_input_schema;
 use codex_api::encode_anthropic_request;
 use codex_client::EncodedJsonBody;
@@ -258,11 +259,10 @@ async fn replay(case: &Case, request: &AnthropicRequest, chunks: Vec<Vec<u8>>) -
             Err(failure) => {
                 terminal_seen = true;
                 terminal = match &failure {
-                    ApiError::NativeStream(message)
-                        if message == "Anthropic stream truncated before message_stop" =>
-                    {
-                        "truncated"
-                    }
+                    ApiError::AnthropicStream {
+                        source: AnthropicStreamError::Truncated,
+                        ..
+                    } => "truncated",
                     _ => "error",
                 };
                 error = Some(failure.to_string());

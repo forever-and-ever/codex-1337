@@ -76,6 +76,7 @@ pub fn telemetry_api_error_message(error: &ApiError) -> String {
         ApiError::Api { status, .. } => format!("api error {}", status.as_u16()),
         ApiError::Stream(err) => err.to_string(),
         ApiError::NativeStream(_) => "native stream error".to_string(),
+        ApiError::AnthropicStream { .. } => "Anthropic stream error".to_string(),
         ApiError::ContentFilter => {
             "Incomplete response returned, reason: content_filter".to_string()
         }
@@ -104,6 +105,8 @@ mod tests {
     use super::telemetry_transport_error_message;
     use codex_api::ApiError;
     use codex_api::TransportError;
+    use codex_api::anthropic::AnthropicStreamError;
+    use codex_api::anthropic::AnthropicStreamProgress;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
@@ -163,6 +166,15 @@ mod tests {
                 retry_after: None,
             }),
             "rate limit exceeded"
+        );
+        assert_eq!(
+            telemetry_api_error_message(&ApiError::AnthropicStream {
+                progress: AnthropicStreamProgress::PartialOutput,
+                source: AnthropicStreamError::Transport(TransportError::Network(
+                    "private upstream diagnostic".to_string()
+                ),),
+            }),
+            "Anthropic stream error"
         );
     }
 
