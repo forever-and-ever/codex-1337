@@ -3287,7 +3287,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 );
                 let child_store_guard = child_store.lock().await;
                 futures::FutureExt::now_or_never(app.open_agent_picker_and_settle(&mut app_server))
-                    .expect("opening the agent picker waited for the app server");
+                    .expect("opening the agent picker waited for the app server")?;
                 drop(child_store_guard);
                 insta::assert_snapshot!(
                     render_bottom_popup(&app.chat_widget, /*width*/ 80)
@@ -3309,7 +3309,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 app.chat_widget
                     .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
                 futures::FutureExt::now_or_never(app.open_agent_picker_and_settle(&mut app_server))
-                    .expect("reopening the agent picker waited for the app server");
+                    .expect("reopening the agent picker waited for the app server")?;
                 assert_eq!(
                     requests
                         .lock()

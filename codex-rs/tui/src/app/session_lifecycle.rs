@@ -12,7 +12,6 @@ use super::*;
 use crate::app_server_session::source_agent_path;
 use crate::app_server_session::thread_blocks_direct_input;
 use crate::chatwidget::ThreadInputStateRestoreMode;
-use std::collections::HashSet;
 
 #[derive(Clone, Copy)]
 pub(super) enum ThreadAttachPresentation {
