@@ -3634,7 +3634,8 @@ async fn approve_mode_skips_guardian_in_every_permission_mode() {
 #[tokio::test]
 async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
     let (session, turn_context) = crate::session::tests::make_session_and_context().await;
-    let review_context = GuardianReviewContext::from(Arc::new(turn_context));
+    let step_context = Arc::new(StepContext::for_test(Arc::new(turn_context)));
+    let cancellation = CancellationToken::new();
     let invocation = McpInvocation {
         server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
         tool: "write_record".to_string(),
@@ -3652,7 +3653,8 @@ async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
             "call",
             &invocation,
             metadata.clone(),
-            review_context.clone(),
+            Arc::clone(&step_context),
+            &cancellation,
         );
         std::future::pending::<()>().await;
     });
@@ -3661,7 +3663,8 @@ async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
         "other-call",
         &invocation,
         metadata.clone(),
-        review_context.clone(),
+        Arc::clone(&step_context),
+        &cancellation,
     );
     assert_eq!(
         session
@@ -3684,7 +3687,8 @@ async fn approval_metadata_is_released_when_the_invocation_future_is_dropped() {
         "next-call",
         &invocation,
         metadata,
-        review_context,
+        step_context,
+        &cancellation,
     );
     let registry = session.mcp_tool_approval_metadata.lock().unwrap();
     let mut keys = registry.keys().cloned().collect::<Vec<_>>();

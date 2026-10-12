@@ -1601,8 +1601,8 @@ async fn v2_family_survives_unload_until_idle_subtree_retirement() {
         .await
         .expect_err("historical source must not restore old retirement authority");
     assert!(matches!(
-        error,
-        CodexErr::InvalidRequest(message) if message == "Only retained descendants may be retired."
+        error.details(),
+        CodexErrorDetails::InvalidRequest(message) if message == "Only retained descendants may be retired."
     ));
     assert!(resumed_manager.get_thread(worker_thread_id).await.is_ok());
 }

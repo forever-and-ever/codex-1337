@@ -3,6 +3,8 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
+use super::transcript_splice::SpliceShape;
+use super::transcript_splice::TranscriptSplice;
 use super::*;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
 use crate::app_server_session::thread_items_page_params;
