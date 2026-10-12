@@ -19,9 +19,12 @@ use wiremock::MockServer;
 
 fn sse_incomplete() -> String {
     responses::sse(vec![
+        responses::ev_message_item_added("committed", ""),
         responses::ev_assistant_message("committed", "Retain this completed message."),
         responses::ev_message_item_added("unfinished", ""),
         responses::ev_output_text_delta("Discard this unfinished text."),
+        responses::ev_message_item_added("unfinished-next", ""),
+        responses::ev_output_text_delta("Discard this overlapping item too."),
     ])
 }
 
@@ -101,7 +104,7 @@ async fn retries_on_early_close() {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-    assert_eq!(discarded, ["unfinished"]);
+    assert_eq!(discarded, ["unfinished", "unfinished-next"]);
 
     let requests = server.requests().await;
     assert_eq!(
@@ -114,6 +117,7 @@ async fn retries_on_early_close() {
     let input = retried["input"].to_string();
     assert!(input.contains("Retain this completed message."));
     assert!(!input.contains("Discard this unfinished text."));
+    assert!(!input.contains("Discard this overlapping item too."));
 
     server.shutdown().await;
 }

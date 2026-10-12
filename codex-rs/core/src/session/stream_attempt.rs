@@ -1,6 +1,11 @@
 use super::*;
 use codex_protocol::StreamItemsDiscardedEvent;
 
+use std::collections::BTreeSet;
+
+#[derive(Default)]
+pub(super) struct UnfinishedItems(BTreeSet<String>);
+
 pub(super) struct SamplingFailure {
     pub(super) error: CodexErr,
     pub(super) unfinished: Vec<String>,
@@ -15,23 +20,35 @@ impl From<CodexErr> for SamplingFailure {
     }
 }
 
-impl SamplingFailure {
-    pub(super) fn capture(
-        error: CodexErr,
-        active: Option<&TurnItem>,
-        plan: Option<&PlanModeStreamState>,
-    ) -> Self {
-        let mut unfinished = Vec::new();
-        if let Some(item @ (TurnItem::AgentMessage(_) | TurnItem::Reasoning(_))) = active {
-            unfinished.push(item.id());
+impl UnfinishedItems {
+    pub(super) fn started(&mut self, item: &TurnItem) {
+        if matches!(item, TurnItem::AgentMessage(_) | TurnItem::Reasoning(_)) {
+            self.0.insert(item.id());
         }
+    }
+
+    pub(super) fn completed(&mut self, item: &ResponseItem) {
+        if let Some(id) = item.id() {
+            self.0.remove(id.as_str());
+        }
+    }
+
+    pub(super) fn fail(
+        self,
+        error: CodexErr,
+        plan: Option<&PlanModeStreamState>,
+    ) -> SamplingFailure {
+        let Self(mut unfinished) = self;
         if let Some(plan) = plan
             && plan.plan_item_state.started
             && !plan.plan_item_state.completed
         {
-            unfinished.push(plan.plan_item_state.item_id.clone());
+            unfinished.insert(plan.plan_item_state.item_id.clone());
         }
-        Self { error, unfinished }
+        SamplingFailure {
+            error,
+            unfinished: unfinished.into_iter().collect(),
+        }
     }
 }
 

@@ -2699,6 +2699,8 @@ async fn try_run_sampling_request(
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
     let mut active_item: Option<TurnItem> = None;
+    // Delta attribution is singular; unfinished item lifetimes may overlap.
+    let mut unfinished = stream_attempt::UnfinishedItems::default();
     let mut active_tool_argument_diff_consumer: Option<(
         String,
         Box<dyn ToolArgumentDiffConsumer>,
@@ -2798,6 +2800,7 @@ async fn try_run_sampling_request(
             }
             ResponseEvent::OutputItemDone(mut item) => {
                 assign_missing_streamed_response_item_id(&mut item, active_item.as_ref());
+                unfinished.completed(&item);
                 thought.observe(&item);
                 members.observe(&item);
                 sess.reserve_assistant_message_order(&turn_context, &item)
@@ -2987,6 +2990,7 @@ async fn try_run_sampling_request(
                         seeded_item_id = Some(item_id);
                     }
                     if stream_item_to_client {
+                        unfinished.started(&turn_item);
                         if let Some(state) = plan_mode_state.as_mut()
                             && matches!(turn_item, TurnItem::AgentMessage(_))
                         {
@@ -3380,15 +3384,7 @@ async fn try_run_sampling_request(
         }
     }
 
-    outcome.map_err(|error| {
-        SamplingFailure::capture(
-            error,
-            active_item
-                .as_ref()
-                .filter(|_| active_item_is_streaming_to_client),
-            plan_mode_state.as_ref(),
-        )
-    })
+    outcome.map_err(|error| unfinished.fail(error, plan_mode_state.as_ref()))
 }
 
 pub(crate) fn get_last_assistant_message_from_turn<'a>(
