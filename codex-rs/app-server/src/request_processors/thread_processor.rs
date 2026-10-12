@@ -1191,6 +1191,7 @@ impl ThreadRequestProcessor {
             base_instructions,
             developer_instructions,
             dynamic_tools,
+            tool_policy,
             selected_capability_roots,
             mock_experimental_field: _mock_experimental_field,
             experimental_raw_events,
@@ -1204,6 +1205,11 @@ impl ThreadRequestProcessor {
             daybreak_enabled,
             environments,
         } = params;
+        if tool_policy.is_some() && ephemeral != Some(true) {
+            return Err(invalid_request(
+                "toolPolicy requires an ephemeral thread; its startup ceiling is not persisted",
+            ));
+        }
         if matches!(
             history_mode,
             Some(codex_app_server_protocol::ThreadHistoryMode::Paginated)
@@ -1283,6 +1289,7 @@ impl ThreadRequestProcessor {
                 config,
                 typesafe_overrides,
                 dynamic_tools,
+                tool_policy,
                 selected_capability_roots.unwrap_or_default(),
                 history_mode.map(Into::into),
                 session_start_source,
@@ -1367,6 +1374,7 @@ impl ThreadRequestProcessor {
         config_overrides: Option<HashMap<String, serde_json::Value>>,
         typesafe_overrides: ConfigOverrides,
         dynamic_tools: Option<Vec<DynamicToolSpec>>,
+        tool_policy: Option<codex_app_server_protocol::ToolPolicyCeiling>,
         selected_capability_roots: Vec<SelectedCapabilityRoot>,
         history_mode: Option<ThreadHistoryMode>,
         session_start_source: Option<codex_app_server_protocol::ThreadStartSource>,
@@ -1518,6 +1526,9 @@ impl ThreadRequestProcessor {
                 .then_some(ThreadHistoryMode::Paginated)
         });
         let mut thread_extension_init = ExtensionDataInit::new();
+        if let Some(tool_policy) = tool_policy {
+            thread_extension_init.insert(tool_policy);
+        }
         if !selected_capability_roots.is_empty() {
             thread_extension_init.insert(selected_capability_roots);
         }
@@ -1597,6 +1608,7 @@ impl ThreadRequestProcessor {
                 });
             }
         };
+        let tool_policy = thread.tool_policy_ceiling();
         let session_telemetry = thread.session_telemetry();
         session_telemetry.record_startup_phase(
             "thread_start_create_thread",
@@ -1706,6 +1718,7 @@ impl ThreadRequestProcessor {
 
         let response = ThreadStartResponse {
             thread: thread.clone(),
+            tool_policy,
             disabled_plugin_ids: config_snapshot.disabled_plugin_ids,
             model: config_snapshot.model,
             model_provider: config_snapshot.model_provider_id,

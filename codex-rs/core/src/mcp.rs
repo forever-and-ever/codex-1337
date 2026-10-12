@@ -169,6 +169,9 @@ impl McpManager {
         ready_selected_capability_roots: &[SelectedCapabilityRoot],
         executor_capability_discovery: Option<&ExecutorCapabilityDiscoverySnapshot>,
     ) -> McpRuntimeProjection {
+        if let Some(projection) = crate::tool_policy::empty_mcp_projection(config, thread_init) {
+            return projection;
+        }
         let mut context = McpServerContributionContext::for_step(
             config,
             thread_init,

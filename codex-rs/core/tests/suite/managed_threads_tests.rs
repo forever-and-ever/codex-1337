@@ -271,9 +271,20 @@ async fn startup_allowlist_controls_advertising_and_execution(
     options
         .thread_extension_init
         .insert(SessionIsolation::Isolated);
+    if tools.is_empty() {
+        options
+            .thread_extension_init
+            .insert(codex_protocol::tool_policy::ToolPolicyCeiling::NoTools);
+    }
     options.thread_extension_init.insert(ToolPolicy {
-        allowed_tools: Some(tools.clone()),
-        ..Default::default()
+        allowed_tools: Some(if tools.is_empty() {
+            vec![ToolName::plain("update_plan")]
+        } else {
+            tools.clone()
+        }),
+        require_managed_sandbox: tools.is_empty(),
+        require_unified_exec: true,
+        expose_additional_permissions: false,
     });
     let cancelled = CancellationToken::new();
     let tasks = TaskTracker::new();
@@ -281,6 +292,15 @@ async fn startup_allowlist_controls_advertising_and_execution(
         .thread_manager
         .start_thread_until(options, cancelled.clone().cancelled_owned(), &tasks)
         .await?;
+    let captured = agent
+        .thread
+        .thread_extension_data()
+        .get::<ToolPolicy>()
+        .expect("captured startup policy");
+    assert_eq!(captured.allowed_tools, Some(tools.clone()));
+    assert_eq!(captured.require_managed_sandbox, tools.is_empty());
+    assert!(captured.require_unified_exec);
+    assert!(!captured.expose_additional_permissions);
     // Replacing extension state after startup must not change the captured ceiling.
     agent.thread.thread_extension_data().insert(ToolPolicy {
         allowed_tools: Some(vec![ToolName::plain("exec_command")]),
