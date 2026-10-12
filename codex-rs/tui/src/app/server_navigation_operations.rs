@@ -4,6 +4,8 @@ use super::*;
 
 use futures::FutureExt;
 
+#[path = "server_agent_discovery.rs"]
+mod discovery;
 #[path = "server_thread_selection.rs"]
 mod selection;
 
@@ -28,6 +30,7 @@ struct PendingNavigation {
 
 enum NavigationIntent {
     Picker,
+    Discover(discovery::DiscoveryIntent),
     Select(SelectStage),
     Transitioning,
     PickerDefaults(Box<PickerPreparation>),
@@ -56,6 +59,7 @@ enum NavigationReceipt {
     PickerDefaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
     Picker(Result<AppServerSession, String>),
     PickerClosed,
+    Discovered(discovery::DiscoveryReceipt),
     Selected(selection::SelectionReceipt),
 }
 
@@ -120,7 +124,8 @@ impl NavigationOwner {
             && !matches!(operation.state, LaneState::Queued)
             && !matches!(
                 operation.intent,
-                NavigationIntent::PickerDefaults(_)
+                NavigationIntent::Discover(_)
+                    | NavigationIntent::PickerDefaults(_)
                     | NavigationIntent::Select(
                         SelectStage::Liveness { .. } | SelectStage::Fallback(_)
                     )
@@ -199,6 +204,11 @@ impl App {
         {
             let thread_id = *thread_id;
             self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        if matches!(operation.intent, NavigationIntent::Discover(_)) {
+            self.dispatch_discovery(server, &mut operation);
             self.server_operations.navigation.current = Some(operation);
             return;
         }
@@ -304,6 +314,11 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Discovered(receipt) if matching => {
+                self.finish_discovery(tui, server, operation, receipt)
+                    .await?;
+            }
+            NavigationReceipt::Discovered(_) => {}
             NavigationReceipt::Selected(receipt) => {
                 self.finish_selection_operation(tui, server, operation, matching, receipt)
                     .await?;

@@ -1032,9 +1032,9 @@ impl App {
     #[cfg(test)]
     pub(in crate::app) async fn settle_navigation(
         &mut self,
+        tui: &mut tui::Tui,
         server: &mut AppServerSession,
     ) -> Result<()> {
-        let mut tui = crate::tui::test_support::make_test_tui()?;
         tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.navigation.is_empty() {
                 tokio::select! {
@@ -1044,7 +1044,7 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.expect("server receipt channel open");
-                        self.handle_server_completion(&mut tui, server, completion).await?;
+                        self.handle_server_completion(tui, server, completion).await?;
                     }
                 }
             }
@@ -1061,6 +1061,15 @@ impl App {
         thread_id: ThreadId,
     ) -> Result<()> {
         self.select_agent_thread(tui, server, thread_id).await?;
-        self.settle_navigation(server).await
+        self.settle_navigation(tui, server).await
+    }
+    #[cfg(test)]
+    pub(in crate::app) async fn open_agent_picker_and_settle(
+        &mut self,
+        server: &mut AppServerSession,
+    ) -> Result<()> {
+        self.open_agent_picker(server).await;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        self.settle_navigation(&mut tui, server).await
     }
 }

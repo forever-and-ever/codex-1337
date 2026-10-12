@@ -280,11 +280,7 @@ impl App {
         };
         config.service_tier = self.chat_widget.configured_service_tier();
         // Config reads and folder consent can overlap work from another client.
-        if !self
-            .backfill_loaded_subagent_threads(app_server)
-            .await
-            .completed
-        {
+        if !self.backfill_loaded_subagent_threads(app_server).await {
             return self.working_directory_error("Cannot check agent status.");
         }
         ids.extend(

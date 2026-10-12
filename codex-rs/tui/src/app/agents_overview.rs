@@ -889,12 +889,7 @@ impl App {
             }
             // A new session has no descendants. Scanning every loaded thread here
             // adds a serial round trip per agent before the composer can render.
-            if !is_new_session
-                && !self
-                    .backfill_loaded_subagent_threads(app_server)
-                    .await
-                    .completed
-            {
+            if !is_new_session && !self.backfill_loaded_subagent_threads(app_server).await {
                 self.backfill_loaded_subagent_threads(app_server).await;
             }
             for thread_id in previous_thread_ids {

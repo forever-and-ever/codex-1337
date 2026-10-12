@@ -1357,7 +1357,7 @@ async fn selected_side_thread_close_is_handled_by_foreground_event_owner() -> Re
         .expect("thread closure should remain queued for the foreground loop");
     app.handle_active_thread_event(&mut tui, &mut app_server, event)
         .await?;
-    app.settle_navigation(&mut app_server).await?;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
 
     assert_eq!(app.active_thread_id, Some(primary_thread_id));
     assert!(!app.side_threads.contains_key(&side_thread_id));
@@ -2417,7 +2417,9 @@ async fn archived_untracked_threads_do_not_appear_in_agent_picker() -> Result<()
         app.thread_event_channels[&archived_thread_id].attachment(),
         ThreadEventAttachment::ReplayOnly
     );
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
     let archived_picker = render_bottom_popup(&app.chat_widget, /*width*/ 80);
     app.handle_app_server_event(
         &app_server,
@@ -2457,7 +2459,9 @@ async fn open_agent_picker_keeps_missing_threads_for_replay() -> Result<()> {
     app.thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(app.thread_event_channels.contains_key(&thread_id), true);
     assert_eq!(
@@ -2492,7 +2496,9 @@ async fn open_agent_picker_preserves_cached_metadata_for_replay_threads() -> Res
         /*is_closed*/ true,
     );
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(app.thread_event_channels.contains_key(&thread_id), true);
     assert_eq!(
@@ -2532,7 +2538,9 @@ async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -
         },
     );
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     let mut expected_entry = AgentPickerThreadEntry {
         agent_nickname: None,
@@ -2565,7 +2573,9 @@ async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -
     )
     .await?;
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(app.agent_navigation.get(&thread_id), Some(&expected_entry));
     app.enqueue_thread_notification(thread_id, turn_started_notification(thread_id, "turn-1"))
@@ -2578,7 +2588,9 @@ async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -
     app.agent_navigation
         .note_status(thread_id, codex_app_server_protocol::ThreadStatus::Idle);
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     expected_entry.is_running = false;
     assert_eq!(app.agent_navigation.get(&thread_id), Some(&expected_entry));
@@ -2589,7 +2601,9 @@ async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -
             is_running_hint: true,
         });
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     expected_entry.is_running = false;
     assert_eq!(app.agent_navigation.get(&thread_id), Some(&expected_entry));
@@ -2602,7 +2616,9 @@ async fn open_agent_picker_preserves_authoritative_status_across_turn_replay() -
         },
     );
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     expected_entry.is_running = true;
     assert_eq!(app.agent_navigation.get(&thread_id), Some(&expected_entry));
@@ -2641,7 +2657,9 @@ async fn open_agent_picker_keeps_live_status_with_completed_replay_snapshot() ->
     );
     assert!(!app.agent_navigation.is_parent_owned(thread_id));
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(
         app.agent_navigation.get(&thread_id),
@@ -2675,7 +2693,9 @@ async fn open_agent_picker_selects_path_backed_agent() -> Result<()> {
             is_running_hint: true,
         });
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_app_snapshot!(
         "path_backed_agent_picker",
@@ -2714,7 +2734,9 @@ async fn open_agent_picker_refreshes_replay_only_path_backed_liveness() -> Resul
             is_running_hint: true,
         });
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(
         app.agent_navigation.get(&thread_id),
@@ -2744,7 +2766,9 @@ async fn open_agent_picker_prunes_terminal_metadata_only_threads() -> Result<()>
         Some("worker".to_string()),
         /*is_closed*/ false,
     );
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(app.agent_navigation.get(&thread_id), None);
     assert!(app.agent_navigation.is_empty());
@@ -2769,7 +2793,9 @@ async fn open_agent_picker_marks_terminal_read_errors_closed() -> Result<()> {
         /*is_closed*/ false,
     );
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
 
     assert_eq!(
         app.agent_navigation.get(&thread_id),
@@ -2809,7 +2835,9 @@ fn open_agent_picker_marks_loaded_threads_open() -> Result<()> {
         app.thread_event_channels
             .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
 
-        Box::pin(app.open_agent_picker(&mut app_server)).await;
+        Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+            .await
+            .expect("picker metadata receipts");
 
         assert_eq!(
             app.agent_navigation.get(&thread_id),
@@ -2953,11 +2981,8 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             });
         app.thread_event_channels.remove(&child_thread_ids[1]);
         let backfill = app.backfill_loaded_subagent_threads(&mut app_server).await;
-        assert!(backfill.completed);
-        assert_eq!(
-            backfill.refreshed_thread_ids,
-            child_thread_ids.iter().copied().collect()
-        );
+        assert!(backfill);
+        assert!(child_thread_ids.iter().all(|id| app.agent_navigation.get(id).is_some()));
         assert_eq!(
             app.agent_navigation.get(&child_thread_ids[0]),
             Some(&AgentPickerThreadEntry {
@@ -3002,11 +3027,11 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         root_store.lock().await.set_active_turn_id("root-turn".to_string());
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))).await;
-    app.settle_navigation(&mut app_server).await?;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
         assert_eq!(root_store.lock().await.pending_interrupt_turn_id, None);
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
-    app.settle_navigation(&mut app_server).await?;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(root_thread_id));
 
         let resumed = Box::pin(app_server.resume_thread(
@@ -3063,7 +3088,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert_eq!(source.can_accept_direct_input, Some(false));
         Box::pin(app.handle_key_event(&mut tui, &mut app_server,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))).await;
-    app.settle_navigation(&mut app_server).await?;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
         assert_eq!(app.current_displayed_thread_id(), Some(fork_id));
         Ok(())
     }))
@@ -3184,10 +3209,9 @@ async fn refresh_agent_picker_thread_liveness_prunes_closed_metadata_only_thread
         /*is_closed*/ false,
     );
 
-    let is_available =
-        Box::pin(app.refresh_agent_picker_thread_liveness(&mut app_server, thread_id)).await;
-
-    assert!(!is_available);
+    app.open_agent_picker(&mut app_server).await;
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
     assert_eq!(app.agent_navigation.get(&thread_id), None);
     assert!(!app.thread_event_channels.contains_key(&thread_id));
     Ok(())
@@ -3376,7 +3400,9 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
     );
     app.set_agent_picker_thread_visibility(archived_thread_id, AgentPickerThreadVisibility::Hidden);
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
     assert_snapshot!(render_bottom_popup(&app.chat_widget, /*width*/ 80), @"
           Enable subagents?
     › As  Subagents are disabled in this TUI session.
@@ -4137,7 +4163,9 @@ async fn open_agent_picker_allows_existing_agent_threads_when_feature_is_disable
     app.thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
 
-    Box::pin(app.open_agent_picker(&mut app_server)).await;
+    Box::pin(app.open_agent_picker_and_settle(&mut app_server))
+        .await
+        .expect("picker metadata receipts");
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 

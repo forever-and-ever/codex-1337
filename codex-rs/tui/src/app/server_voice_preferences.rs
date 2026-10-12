@@ -171,13 +171,26 @@ impl App {
                 }
                 Err(error) => self.chat_widget.add_error_message(error),
             },
-            (VoicePreferenceOperation::Confirm { cwd, voice, write }, VoicePreferenceReceipt::Confirmed(result)) => {
-                match result {
-                    Ok(effective) if effective == Some(*voice) => self.chat_widget.add_info_message(format!("Voice preference saved and confirmed for {}. Current conversation settings were not changed.", cwd.display()), None),
-                    Ok(_) => self.chat_widget.add_error_message(format!("Voice preference was saved but not applied for {}: {}", cwd.display(), super::super::config_persistence::overridden_write_message(write))),
-                    Err(error) => self.chat_widget.add_error_message(format!("Voice settings for {}: {error}", cwd.display())),
-                }
-            }
+            (
+                VoicePreferenceOperation::Confirm { cwd, voice, write },
+                VoicePreferenceReceipt::Confirmed(result),
+            ) => match result {
+                Ok(effective) if effective == Some(*voice) => self.chat_widget.add_info_message(
+                    format!(
+                        "Voice preference saved and confirmed for {}.",
+                        cwd.display()
+                    ),
+                    None,
+                ),
+                Ok(_) => self.chat_widget.add_error_message(format!(
+                    "Voice preference was saved but not applied for {}: {}",
+                    cwd.display(),
+                    super::super::config_persistence::overridden_write_message(write)
+                )),
+                Err(error) => self
+                    .chat_widget
+                    .add_error_message(format!("Voice settings for {}: {error}", cwd.display())),
+            },
             (_, VoicePreferenceReceipt::Saved(_)) => {
                 unreachable!("acknowledged preference write must advance to confirmation")
             }

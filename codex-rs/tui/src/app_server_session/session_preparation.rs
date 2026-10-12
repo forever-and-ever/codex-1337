@@ -11,6 +11,42 @@ pub(crate) async fn read_thread(
     history::preparation::read_thread(policy, handle, thread_id, false).await
 }
 
+pub(crate) async fn loaded_observations(
+    policy: RequestPolicy,
+    handle: &AppServerRequestHandle,
+    root: ThreadId,
+) -> Result<Vec<(ThreadId, Result<codex_app_server_protocol::Thread>)>> {
+    let response: codex_app_server_protocol::ThreadLoadedListResponse = request(
+        policy,
+        handle,
+        codex_app_server_protocol::ClientRequest::ThreadLoadedList {
+            request_id: codex_app_server_protocol::RequestId::String(format!(
+                "tui-discover-{}",
+                uuid::Uuid::new_v4()
+            )),
+            params: codex_app_server_protocol::ThreadLoadedListParams {
+                cursor: None,
+                limit: None,
+            },
+        },
+    )
+    .await?;
+    let mut observations = Vec::new();
+    for id in response.data {
+        let thread_id = match ThreadId::from_string(&id) {
+            Ok(id) => id,
+            Err(error) => {
+                tracing::warn!(%error, "ignoring invalid loaded thread id");
+                continue;
+            }
+        };
+        if thread_id != root {
+            observations.push((thread_id, read_thread(policy, handle, thread_id).await));
+        }
+    }
+    Ok(observations)
+}
+
 pub(crate) struct HydratedThread {
     pub(crate) thread: Thread,
     pub(crate) history: Result<()>,

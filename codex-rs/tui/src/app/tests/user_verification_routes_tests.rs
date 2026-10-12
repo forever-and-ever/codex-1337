@@ -136,7 +136,7 @@ async fn side_toggle_surfaces_pending_verification_from_an_inactive_thread() -> 
 
         app.toggle_side_conversation(&mut tui, &mut app_server)
             .await?;
-        app.settle_navigation(&mut app_server).await?;
+        app.settle_navigation(&mut tui, &mut app_server).await?;
         assert_eq!(app.active_thread_id, Some(primary_thread_id));
         assert!(app.chat_widget.has_active_view());
         assert!(
