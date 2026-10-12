@@ -214,7 +214,7 @@ async fn managed_force_shutdown_exits_with_active_work(accepted_mail: bool) -> R
     wait_for_requests(&mock, /*count*/ 1).await?;
     #[cfg(unix)]
     if accepted_mail {
-        use codex_utils_absolute_path::AsAbsolutePath;
+        use core_test_support::PathExt;
 
         let root = codex_protocol::ThreadId::from_string(&thread.thread.id)?;
         // Freeze the old runtime at the acceptance/admission cut. Commit the same
@@ -225,7 +225,9 @@ async fn managed_force_shutdown_exits_with_active_work(accepted_mail: bool) -> R
         let db = codex_state::StateRuntime::init(sqlite.clone(), "mock_provider".into()).await?;
         let id = codex_protocol::ResponseItemId::new("amsg_mail");
         let mail = codex_protocol::protocol::InterAgentCommunication::new(
-            codex_protocol::AgentPath::root().join("worker")?,
+            codex_protocol::AgentPath::root()
+                .join("worker")
+                .expect("valid worker path"),
             codex_protocol::AgentPath::root(),
             Vec::new(),
             "crash-safe worker mail".into(),
