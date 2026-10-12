@@ -10,6 +10,7 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
 use codex_app_server_protocol::ThreadItem;
+use codex_protocol::CensusCount;
 use codex_protocol::PreambleChange;
 use codex_protocol::PreamblePart;
 use codex_protocol::PreambleSection;
@@ -91,7 +92,7 @@ impl PreambleCell {
         }
     }
 
-    fn tokens(&self) -> u64 {
+    fn tokens(&self) -> CensusCount {
         self.parts.iter().map(|part| part.tokens).sum()
     }
 
@@ -105,14 +106,20 @@ impl PreambleCell {
             }
             .bold(),
         );
-        if let Some(change) = &self.change {
-            let (after, before) = (self.tokens(), change.previous_tokens);
-            let delta = if after >= before {
-                format!("+{}", count(after - before))
-            } else {
-                format!("-{}", count(before - after))
-            };
-            heading.push_span(format!(" · changed {delta}").dim());
+        match (self.tokens(), &self.change) {
+            (CensusCount::Omitted(_), _) => {
+                heading.push_span(" · count incomplete".dim());
+            }
+            (CensusCount::Counted(after), Some(change)) => {
+                let before = change.previous_tokens;
+                let delta = if after >= before {
+                    format!("+{}", count(after - before))
+                } else {
+                    format!("-{}", count(before - after))
+                };
+                heading.push_span(format!(" · changed {delta}").dim());
+            }
+            (CensusCount::Counted(_), None) => {}
         }
         heading
     }
@@ -169,7 +176,7 @@ impl PreambleCell {
         }
         if let Some(reported) = self.reported_input_tokens {
             lines.push(row(
-                reported,
+                CensusCount::Counted(reported),
                 /*depth*/ 0,
                 "reported input of the whole request, conversation included".dim(),
             ));
@@ -207,7 +214,7 @@ enum Entry<'a> {
     Part(&'a PreamblePart),
     Group {
         name: &'a str,
-        total: u64,
+        total: CensusCount,
         members: Vec<&'a PreamblePart>,
     },
 }
@@ -223,7 +230,7 @@ fn entries<'a>(parts: &[&'a PreamblePart]) -> Vec<Entry<'a>> {
         }
     }
     for (name, mut members) in groups {
-        members.sort_by_key(|member| std::cmp::Reverse(member.tokens));
+        members.sort_by_key(|member| std::cmp::Reverse(count_order(member.tokens)));
         let total = members.iter().map(|member| member.tokens).sum();
         entries.push(Entry::Group {
             name,
@@ -232,19 +239,35 @@ fn entries<'a>(parts: &[&'a PreamblePart]) -> Vec<Entry<'a>> {
         });
     }
     entries.sort_by_key(|entry| {
-        std::cmp::Reverse(match entry {
+        std::cmp::Reverse(count_order(match entry {
             Entry::Part(part) => part.tokens,
             Entry::Group { total, .. } => *total,
-        })
+        }))
     });
     entries
 }
 
-fn row(tokens: u64, depth: usize, label: ratatui::text::Span<'static>) -> Line<'static> {
-    Line::from(vec![
-        format!("{:>9}  {}", count(tokens), "  ".repeat(depth)).dim(),
+// Uncounted rows sort separately; they are not zero-sized sources.
+fn count_order(tokens: CensusCount) -> (bool, u64) {
+    match tokens {
+        CensusCount::Counted(tokens) => (false, tokens),
+        CensusCount::Omitted(_) => (true, 0),
+    }
+}
+
+fn row(tokens: CensusCount, depth: usize, label: ratatui::text::Span<'static>) -> Line<'static> {
+    let (count, omission) = match tokens {
+        CensusCount::Counted(tokens) => (count(tokens), None),
+        CensusCount::Omitted(_) => ("uncounted".into(), Some(" (census work limit)".dim())),
+    };
+    let mut line = Line::from(vec![
+        format!("{count:>9}  {}", "  ".repeat(depth)).dim(),
         label,
-    ])
+    ]);
+    if let Some(omission) = omission {
+        line.push_span(omission);
+    }
+    line
 }
 
 fn count(tokens: u64) -> String {
@@ -317,7 +340,7 @@ impl HistoryCell for PreambleCell {
     }
 
     fn activity_header_tokens(&self) -> Option<u64> {
-        Some(self.tokens())
+        self.tokens().counted()
     }
 
     fn activity_header(&self) -> Option<ActivityHeader> {

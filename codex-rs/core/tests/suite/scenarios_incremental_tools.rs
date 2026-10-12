@@ -201,11 +201,11 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
         preambles[0]
             .parts
             .iter()
-            .any(|part| part.section == codex_protocol::PreambleSection::Tools && part.tokens > 0)
+            .any(|part| part.section == codex_protocol::PreambleSection::Tools && matches!(part.tokens, codex_protocol::CensusCount::Counted(tokens) if tokens > 0))
     );
     assert!(preambles[0].parts.iter().any(|part| part.section
         == codex_protocol::PreambleSection::Instructions
-        && part.tokens > 0));
+        && matches!(part.tokens, codex_protocol::CensusCount::Counted(tokens) if tokens > 0)));
     let catalogs = rollout
         .iter()
         .filter_map(|line| match &line.item {

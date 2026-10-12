@@ -7,6 +7,8 @@ mod agent_path;
 pub mod auth;
 mod preamble;
 
+pub use preamble::CensusCount;
+pub use preamble::CensusOmission;
 pub use preamble::ContextSource;
 
 pub use preamble::ContextInventory;

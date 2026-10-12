@@ -44,9 +44,14 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
     });
     bodies.push(sse_completed("done"));
     let responses = mount_sse_sequence(&server, bodies).await;
+    // Accounting must refuse this whole BPE piece without cutting the actual
+    // request or the immutable inspection source across the replacement window.
+    let census_payload = "x".repeat(256 * 1024 + 1);
+    let configured_payload = census_payload.clone();
     let test = step_settings_test()
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
+            config.base_instructions = Some(configured_payload.clone());
             config.model_auto_compact_token_limit = Some(200_000);
             config
                 .features
@@ -83,10 +88,28 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    let inventory = test
+        .codex
+        .context_inventory()
+        .await
+        .map_err(anyhow::Error::msg)?;
+    assert!(inventory.sources.iter().any(|source| matches!(
+        source,
+        codex_protocol::ContextSource::Prompt { text, .. } if text == &census_payload
+    )));
+    assert!(inventory.parts.iter().any(|part|
+        part.section == codex_protocol::PreambleSection::Instructions
+            && part.tokens == codex_protocol::CensusCount::Omitted(
+                codex_protocol::CensusOmission::WorkLimit
+            )
+    ));
     test.codex.shutdown_and_wait().await?;
 
     let requests = responses.requests();
     assert_eq!(requests.len(), 4);
+    for request in &requests {
+        assert_eq!(request.instructions_text(), census_payload);
+    }
     // Live requests are append-only. The compactor alone sees a materialized
     // instruction view, and its replacement window starts from that same full value.
     let first = serde_json::to_string(&requests[0].input())?;
@@ -129,18 +152,36 @@ async fn compaction_preserves_updated_summary(mode: CompactionMode) -> Result<()
         .collect::<Vec<_>>();
     assert_eq!(preambles.len(), 2);
     assert_ne!(preambles[0].window_id, preambles[1].window_id);
-    assert!(
-        preambles[0]
-            .raw
-            .as_ref()
-            .is_some_and(|raw| raw.contains(OLD) && !raw.contains(CURRENT))
-    );
-    assert!(
-        preambles[1]
-            .raw
-            .as_ref()
-            .is_some_and(|raw| raw.contains(CURRENT) && !raw.contains(OLD))
-    );
+    for preamble in &preambles {
+        assert!(preamble.raw.is_none());
+        assert!(preamble.sources.iter().any(|source| matches!(
+            source,
+            codex_protocol::ContextSource::Prompt { text, .. } if text == &census_payload
+        )));
+        assert!(preamble.parts.iter().any(|part|
+            part.section == codex_protocol::PreambleSection::Instructions
+                && part.tokens == codex_protocol::CensusCount::Omitted(
+                    codex_protocol::CensusOmission::WorkLimit
+                )
+        ));
+        assert!(preamble.parts.iter().any(|part|
+            part.section == codex_protocol::PreambleSection::Tools
+                && matches!(part.tokens, codex_protocol::CensusCount::Counted(tokens) if tokens > 0)
+        ));
+        assert!(matches!(
+            preamble.parts.iter().map(|part| part.tokens).sum::<codex_protocol::CensusCount>(),
+            codex_protocol::CensusCount::Omitted(codex_protocol::CensusOmission::WorkLimit)
+        ));
+    }
+    let has_instruction = |preamble: &codex_protocol::PreambleItem, present: &str, absent: &str| {
+        preamble.sources.iter().any(|source| matches!(
+            source,
+            codex_protocol::ContextSource::Prompt { text, .. }
+                if text.contains(present) && !text.contains(absent)
+        ))
+    };
+    assert!(has_instruction(preambles[0], OLD, CURRENT));
+    assert!(has_instruction(preambles[1], CURRENT, OLD));
     let checkpoint = items
         .iter()
         .skip_while(|line| !matches!(line.item, RolloutItem::Compacted(_)))

@@ -11,26 +11,25 @@ fn part(section: PreambleSection, group: Option<&str>, label: &str, tokens: u64)
         section,
         group: group.map(str::to_string),
         label: label.to_string(),
-        tokens,
+        tokens: codex_protocol::CensusCount::Counted(tokens),
     }
 }
 
 #[test]
-fn preamble_discloses_parts_largest_first() {
+fn preamble_discloses_parts_largest_first() -> anyhow::Result<()> {
     use PreambleSection::Context;
-    use PreambleSection::Instructions;
     use PreambleSection::Tools;
     let cell = PreambleCell::from_item(ThreadItem::Preamble {
         id: "preamble:turn:response".to_string(),
         response_id: "response".to_string(),
         completed_at_ms: 0,
         parts: vec![
-            part(
-                Instructions,
-                /*group*/ None,
-                "Base instructions",
-                /*tokens*/ 7_412,
-            ),
+            serde_json::from_value(serde_json::json!({
+                "section": "instructions",
+                "group": null,
+                "label": "Base instructions",
+                "tokens": 7412
+            }))?,
             part(
                 Tools,
                 Some("exec"),
@@ -51,6 +50,14 @@ fn preamble_discloses_parts_largest_first() {
                 /*tokens*/ 1_904,
             ),
             part(Tools, /*group*/ None, "web_search", /*tokens*/ 21),
+            PreamblePart {
+                section: Tools,
+                group: Some("exec".into()),
+                label: "large declaration".into(),
+                tokens: codex_protocol::CensusCount::Omitted(
+                    codex_protocol::CensusOmission::WorkLimit,
+                ),
+            },
             part(
                 Context,
                 /*group*/ None,
@@ -86,4 +93,5 @@ fn preamble_discloses_parts_largest_first() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("preamble_expanded", text);
+    Ok(())
 }

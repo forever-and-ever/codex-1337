@@ -1,9 +1,12 @@
 //! Initial special context, recorded once per context window with its raw contents.
-//! Counts are local o200k estimates; later changes are step-admission arrivals.
+//! Counts are local o200k accounting with explicit work-limit omissions;
+//! later changes are step-admission arrivals. Raw sources and model input are never cut.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use codex_protocol::CensusCount;
+use codex_protocol::CensusOmission;
 use codex_protocol::PreambleItem;
 use codex_protocol::PreamblePart;
 use codex_protocol::PreambleSection;
@@ -249,21 +252,22 @@ pub(super) fn census(
     tools: &PreambleTools<'_>,
     context: Vec<InjectedText>,
 ) -> Vec<PreamblePart> {
+    let mut budget = CensusBudget::new();
     let mut parts = vec![PreamblePart {
         section: PreambleSection::Instructions,
         group: None,
         label: "Base instructions".to_string(),
-        tokens: count_o200k_text(instructions),
+        tokens: budget.count(instructions),
     }];
     match tools {
         PreambleTools::Direct(tools) => {
             for spec in tools.iter() {
-                census_tool(spec, &mut parts);
+                census_tool(spec, &mut parts, &mut budget);
             }
         }
         PreambleTools::History(tools) => {
             for spec in tools.iter() {
-                census_declaration(spec, &mut parts);
+                census_declaration(spec, &mut parts, &mut budget);
             }
         }
     }
@@ -272,13 +276,13 @@ pub(super) fn census(
             section: PreambleSection::Context,
             group: None,
             label: context_label(&text),
-            tokens: count_o200k_text(&text),
+            tokens: budget.count(&text),
         });
     }
     parts
 }
 
-fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>) {
+fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>, budget: &mut CensusBudget) {
     match spec {
         ToolSpec::Namespace(namespace) => {
             let group = Some(namespace.name.as_str());
@@ -286,7 +290,7 @@ fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>) {
                 parts.push(tool_part(
                     group,
                     "namespace description",
-                    count_o200k_text(&namespace.description),
+                    budget.count(&namespace.description),
                 ));
             }
             for tool in &namespace.tools {
@@ -294,7 +298,7 @@ fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>) {
                     ResponsesApiNamespaceTool::Function(tool) => &tool.name,
                     ResponsesApiNamespaceTool::Custom(tool) => &tool.name,
                 };
-                parts.push(tool_part(group, name, serialized_tokens(tool)));
+                parts.push(tool_part(group, name, budget.serialized(tool)));
             }
         }
         ToolSpec::Freeform(tool) if tool.name == codex_code_mode::PUBLIC_TOOL_NAME => {
@@ -303,6 +307,7 @@ fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>) {
                 &tool.description,
                 &tool.format.definition,
                 parts,
+                budget,
             );
         }
         ToolSpec::Function(_)
@@ -310,12 +315,12 @@ fn census_tool(spec: &ToolSpec, parts: &mut Vec<PreamblePart>) {
         | ToolSpec::ToolSearch { .. }
         | ToolSpec::WebSearch { .. } => {
             let (group, label) = mcp_group(spec.name());
-            parts.push(tool_part(group, label, serialized_tokens(spec)));
+            parts.push(tool_part(group, label, budget.serialized(spec)));
         }
     }
 }
 
-fn census_declaration(spec: &Value, parts: &mut Vec<PreamblePart>) {
+fn census_declaration(spec: &Value, parts: &mut Vec<PreamblePart>, budget: &mut CensusBudget) {
     let kind = spec["type"].as_str().unwrap_or_default();
     let name = spec["name"].as_str().unwrap_or(kind);
     let description = spec["description"].as_str().unwrap_or_default();
@@ -325,7 +330,7 @@ fn census_declaration(spec: &Value, parts: &mut Vec<PreamblePart>) {
             parts.push(tool_part(
                 group,
                 "namespace description",
-                count_o200k_text(description),
+                budget.count(description),
             ));
         }
         if let Some(tools) = spec["tools"].as_array() {
@@ -333,7 +338,7 @@ fn census_declaration(spec: &Value, parts: &mut Vec<PreamblePart>) {
                 parts.push(tool_part(
                     group,
                     tool["name"].as_str().unwrap_or_default(),
-                    serialized_tokens(tool),
+                    budget.serialized(tool),
                 ));
             }
         }
@@ -343,27 +348,34 @@ fn census_declaration(spec: &Value, parts: &mut Vec<PreamblePart>) {
             description,
             spec["format"]["definition"].as_str().unwrap_or_default(),
             parts,
+            budget,
         );
     } else {
         let (group, label) = mcp_group(name);
-        parts.push(tool_part(group, label, serialized_tokens(spec)));
+        parts.push(tool_part(group, label, budget.serialized(spec)));
     }
 }
 
 /// Attributes the Code Mode `exec` description to the nested tools it declares.
-fn census_exec(executor: &str, description: &str, grammar: &str, parts: &mut Vec<PreamblePart>) {
+fn census_exec(
+    executor: &str,
+    description: &str,
+    grammar: &str,
+    parts: &mut Vec<PreamblePart>,
+    budget: &mut CensusBudget,
+) {
     let (guidance, sections) = exec_sections(description);
     parts.push(tool_part(
         Some(executor),
         "guidance and grammar",
-        count_o200k_text(guidance) + count_o200k_text(grammar),
+        budget.count(guidance) + budget.count(grammar),
     ));
     for (name, text) in sections {
         let (group, label) = mcp_group(name);
         parts.push(tool_part(
             Some(group.unwrap_or(executor)),
             label,
-            count_o200k_text(text),
+            budget.count(text),
         ));
     }
 }
@@ -414,7 +426,7 @@ fn mcp_group(name: &str) -> (Option<&str>, &str) {
         })
 }
 
-fn tool_part(group: Option<&str>, label: &str, tokens: u64) -> PreamblePart {
+fn tool_part(group: Option<&str>, label: &str, tokens: CensusCount) -> PreamblePart {
     PreamblePart {
         section: PreambleSection::Tools,
         group: group.map(str::to_string),
@@ -423,8 +435,80 @@ fn tool_part(group: Option<&str>, label: &str, tokens: u64) -> PreamblePart {
     }
 }
 
-fn serialized_tokens(value: &impl Serialize) -> u64 {
-    serde_json::to_string(value).map_or(0, |json| count_o200k_text(&json))
+// These admission ceilings bound optional census input, not total raw-source
+// capture or a wall-clock SLA. Both Preamble and /context use the same budget.
+const CENSUS_BYTES: usize = 256 * 1024;
+const CENSUS_CALLS: usize = 1024;
+
+struct CensusBudget {
+    bytes: usize,
+    calls: usize,
+}
+
+impl CensusBudget {
+    fn new() -> Self {
+        Self {
+            bytes: CENSUS_BYTES,
+            calls: CENSUS_CALLS,
+        }
+    }
+
+    fn count(&mut self, text: &str) -> CensusCount {
+        if text.is_empty() {
+            return CensusCount::Counted(0);
+        }
+        if text.len() > self.bytes || self.calls == 0 {
+            return CensusCount::Omitted(CensusOmission::WorkLimit);
+        }
+        self.bytes -= text.len();
+        self.calls -= 1;
+        CensusCount::Counted(count_o200k_text(text))
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "tool declarations serialize as UTF-8 JSON; only our bounded writer may refuse"
+    )]
+    fn serialized(&mut self, value: &impl Serialize) -> CensusCount {
+        if self.bytes == 0 || self.calls == 0 {
+            return CensusCount::Omitted(CensusOmission::WorkLimit);
+        }
+        let mut writer = CensusWriter {
+            bytes: Vec::new(),
+            limit: self.bytes,
+        };
+        match serde_json::to_writer(&mut writer, value) {
+            Ok(()) => {
+                self.count(std::str::from_utf8(&writer.bytes).expect("JSON serialization is UTF-8"))
+            }
+            Err(error) if error.io_error_kind() == Some(std::io::ErrorKind::FileTooLarge) => {
+                // Serialization spent this admission. Repeated oversized tools
+                // must not each get another full-sized scratch serialization.
+                self.bytes = 0;
+                CensusCount::Omitted(CensusOmission::WorkLimit)
+            }
+            Err(error) => panic!("tool declaration serialization failed: {error}"),
+        }
+    }
+}
+
+struct CensusWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl std::io::Write for CensusWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.limit - self.bytes.len() {
+            return Err(std::io::ErrorKind::FileTooLarge.into());
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Injected fragments open with a tag or a heading; anything else shows its first line.

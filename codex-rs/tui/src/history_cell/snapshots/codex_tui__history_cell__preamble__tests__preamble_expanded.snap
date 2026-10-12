@@ -2,11 +2,12 @@
 source: tui/src/history_cell/preamble_tests.rs
 expression: text
 ---
-• Context census (legacy) · changed +1,774
+• Context census (legacy) · count incomplete
       7,412  Instructions
       7,412    Base instructions
-      6,068  Tools
-      3,532    exec (2)
+  uncounted  Tools (census work limit)
+  uncounted    exec (3) (census work limit)
+  uncounted      large declaration (census work limit)
       3,120      guidance and grammar
         412      apply_patch
       2,515    mcp__depot (2)

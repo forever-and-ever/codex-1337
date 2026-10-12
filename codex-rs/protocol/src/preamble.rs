@@ -59,6 +59,49 @@ pub enum ContextSource {
     },
 }
 
+/// Local o200k accounting, or an explicit refusal to spend unbounded census work.
+/// Numeric captures from older clients remain valid counted values.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, TS, JsonSchema)]
+#[serde(untagged)]
+#[ts(untagged)]
+pub enum CensusCount {
+    Counted(#[ts(type = "number")] u64),
+    Omitted(CensusOmission),
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, TS, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum CensusOmission {
+    WorkLimit,
+}
+
+impl CensusCount {
+    pub fn counted(self) -> Option<u64> {
+        match self {
+            Self::Counted(tokens) => Some(tokens),
+            Self::Omitted(_) => None,
+        }
+    }
+}
+
+impl std::ops::Add for CensusCount {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        match (self, rhs) {
+            (Self::Counted(left), Self::Counted(right)) => Self::Counted(left + right),
+            (Self::Omitted(reason), _) | (_, Self::Omitted(reason)) => Self::Omitted(reason),
+        }
+    }
+}
+
+impl std::iter::Sum for CensusCount {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::Counted(0), std::ops::Add::add)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, TS, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
@@ -67,8 +110,7 @@ pub struct PreamblePart {
     /// The MCP server or tool namespace a tool belongs to.
     pub group: Option<String>,
     pub label: String,
-    #[ts(type = "number")]
-    pub tokens: u64,
+    pub tokens: CensusCount,
 }
 
 #[derive(
