@@ -68,7 +68,7 @@ impl App {
                 if archive {
                     tokio::time::timeout(
                         ACK_TIMEOUT,
-                        handle.request::<codex_app_server_protocol::ThreadArchiveResponse>(
+                        handle.request_typed::<codex_app_server_protocol::ThreadArchiveResponse>(
                             codex_app_server_protocol::ClientRequest::ThreadArchive {
                                 request_id: codex_app_server_protocol::RequestId::String(format!(
                                     "tui-cleanup-archive-{id}"

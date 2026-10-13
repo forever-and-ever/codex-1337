@@ -349,8 +349,24 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
         std::fs::write(&requirements, "allowed_approval_policies = [\"never\"]")?;
         app.loader_overrides.system_requirements_path = Some(requirements.to_path_buf());
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.change_working_directory_and_settle(&mut tui, &mut server, destination.clone())
+        app.change_working_directory(&mut tui, &mut server, destination.clone())
             .await;
+        if preserve_history {
+            // A confirmation can arrive while /cd is preparing its replacement. Retiring
+            // the pending selection must not revoke the unchanged permission authority.
+            let settings = next_thread_settings_updated(&mut server, source).await;
+            app.enqueue_thread_notification(
+                source,
+                ServerNotification::ThreadSettingsUpdated(settings),
+            )
+            .await?;
+            assert!(
+                !app.agents_overview
+                    .requested_permission_profiles
+                    .contains_key(&source)
+            );
+        }
+        app.settle_navigation(&mut tui, &mut server).await?;
         assert_ne!(app.chat_widget.thread_id(), Some(source));
         assert_eq!(
             (&app.config.cwd, app.config.permissions.permission_profile()),

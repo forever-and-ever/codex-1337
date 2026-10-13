@@ -24,11 +24,66 @@ pub(in crate::app) enum DirectoryHistory {
 }
 
 #[derive(Clone)]
+enum DirectoryPermissions {
+    Configured {
+        profile: RuntimePermissionProfileOverride,
+        approval_policy: AskForApproval,
+        approvals_reviewer: ApprovalsReviewer,
+    },
+    Selected(PermissionProfileSelection),
+}
+
+impl DirectoryPermissions {
+    fn selection(&self) -> Option<&PermissionProfileSelection> {
+        match self {
+            Self::Selected(selection) => Some(selection),
+            Self::Configured { .. } => None,
+        }
+    }
+
+    fn matches(&self, config: &Config, pending: Option<&PermissionProfileSelection>) -> bool {
+        match (self, pending) {
+            (Self::Selected(expected), Some(actual)) => {
+                expected.profile_id == actual.profile_id
+                    && expected.approval_policy == actual.approval_policy
+                    && expected.approvals_reviewer == actual.approvals_reviewer
+            }
+            // Confirmation retires the request without changing its effective authority.
+            (Self::Selected(expected), None) => {
+                config
+                    .permissions
+                    .active_permission_profile()
+                    .is_some_and(|active| active.id == expected.profile_id)
+                    && expected.approval_policy.is_none_or(|policy| {
+                        config.permissions.approval_policy.value() == policy.to_core()
+                    })
+                    && expected
+                        .approvals_reviewer
+                        .is_none_or(|reviewer| config.approvals_reviewer == reviewer)
+            }
+            (
+                Self::Configured {
+                    profile,
+                    approval_policy,
+                    approvals_reviewer,
+                },
+                None,
+            ) => {
+                profile.matches_config(config)
+                    && config.permissions.approval_policy.value() == approval_policy.to_core()
+                    && config.approvals_reviewer == *approvals_reviewer
+            }
+            (Self::Configured { .. }, Some(_)) => false,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct DirectoryInput {
     origin: OperationOrigin,
     source_cwd: AbsolutePathBuf,
     cwd: AbsolutePathBuf,
-    selected_profile: Option<PermissionProfileSelection>,
+    permissions: DirectoryPermissions,
     input: Option<crate::chatwidget::ThreadInputState>,
     latest_turn_id: Option<String>,
     history: DirectoryHistory,
@@ -218,7 +273,17 @@ impl App {
             origin: OperationOrigin::Thread { thread_id, store },
             source_cwd: self.config.cwd.clone(),
             cwd,
-            selected_profile,
+            permissions: match selected_profile {
+                Some(selection) => DirectoryPermissions::Selected(selection),
+                None => {
+                    let config = self.chat_widget.config_ref();
+                    DirectoryPermissions::Configured {
+                        profile: RuntimePermissionProfileOverride::from_config(config),
+                        approval_policy: config.permissions.approval_policy.value().into(),
+                        approvals_reviewer: config.approvals_reviewer,
+                    }
+                }
+            },
             input: self.chat_widget.capture_thread_input_state(),
             latest_turn_id,
             history,
@@ -355,11 +420,12 @@ impl App {
             || self.chat_widget.config_ref().cwd != input.source_cwd
             || !self.chat_widget.can_change_working_directory(thread_id)
             || self.pending_server_profiles.contains_key(&thread_id)
-            || self
-                .agents_overview
-                .requested_permission_profiles
-                .get(&thread_id)
-                != input.selected_profile.as_ref()
+            || !input.permissions.matches(
+                self.chat_widget.config_ref(),
+                self.agents_overview
+                    .requested_permission_profiles
+                    .get(&thread_id),
+            )
             || !self
                 .thread_event_channels
                 .get(&thread_id)
@@ -414,7 +480,7 @@ impl App {
         context: DirectoryContext,
     ) -> Result<DirectoryReady, String> {
         let DirectoryContext { input, mut config } = context;
-        let selected_profile = &input.selected_profile;
+        let selected_profile = input.permissions.selection();
         let cwd = &input.cwd;
         let scope = if config.active_project.is_untrusted() {
             RuntimePolicyOverrideScope::ExplicitOnly
@@ -618,7 +684,7 @@ impl App {
                         &ready.context.config,
                         ThreadStartChoice::Configured(None),
                     )
-                    .with_selected_profile(ready.context.input.selected_profile.as_ref()),
+                    .with_selected_profile(ready.context.input.permissions.selection()),
             ),
             DirectoryHistory::Fork => Acquisition::Fork(server.prepare_fork_thread(
                 RequestPolicy::Interactive,
@@ -628,7 +694,7 @@ impl App {
                 None,
                 None,
                 crate::app_server_session::ForkGoalContinuation::DeferUntilNextTurn,
-                ready.context.input.selected_profile.as_ref(),
+                ready.context.input.permissions.selection(),
                 None,
             )),
         };
@@ -642,7 +708,6 @@ impl App {
 
     async fn detach_directory_source(
         &mut self,
-        server: &AppServerSession,
         operation: PendingNavigation,
         handle: AppServerRequestHandle,
         replacement: Box<DirectoryReplacement>,
@@ -814,13 +879,15 @@ impl App {
                 if matching =>
             {
                 match result {
-                    Ok(Some(defaults)) => crate::projectless::apply_defaults(
-                        &mut context.config,
-                        &self.harness_overrides,
-                        server,
-                        &self.environment_manager,
-                        &defaults,
-                    ),
+                    Ok(Some(defaults)) => {
+                        crate::projectless::apply_defaults(
+                            &mut context.config,
+                            &self.harness_overrides,
+                            server,
+                            &self.environment_manager,
+                            &defaults,
+                        );
+                    }
                     Ok(None) => {}
                     Err(error) => {
                         self.working_directory_error(format!("Cannot read defaults: {error}"));
@@ -886,7 +953,7 @@ impl App {
                         let session = &started.session;
                         let config = &ready.context.config;
                         let permissions_match =
-                            if let Some(selected) = &ready.context.input.selected_profile {
+                            if let Some(selected) = ready.context.input.permissions.selection() {
                                 session
                                     .active_permission_profile
                                     .as_ref()
@@ -925,7 +992,6 @@ impl App {
                             );
                         } else {
                             self.detach_directory_source(
-                                server,
                                 operation,
                                 handle,
                                 Box::new(DirectoryReplacement {
@@ -1028,7 +1094,7 @@ impl App {
                             local_settings: settings,
                             keymap,
                             cwd: cwd.clone(),
-                            selected_profile: context.input.selected_profile,
+                            selected_profile: context.input.permissions.selection().cloned(),
                         },
                     )
                     .await;
