@@ -209,20 +209,27 @@ impl ChatWidget {
                 self.on_turn_diff(notification.diff)
             }
             ServerNotification::TurnPlanUpdated(notification) => {
-                self.on_plan_update(UpdatePlanArgs {
-                    explanation: notification.explanation,
-                    plan: notification
-                        .plan
-                        .into_iter()
-                        .map(|step| UpdatePlanItemArg {
-                            step: step.step,
-                            status: match step.status {
-                                TurnPlanStepStatus::Pending => UpdatePlanItemStatus::Pending,
-                                TurnPlanStepStatus::InProgress => UpdatePlanItemStatus::InProgress,
-                                TurnPlanStepStatus::Completed => UpdatePlanItemStatus::Completed,
-                            },
-                        })
-                        .collect(),
+                self.on_plan_update(codex_protocol::plan_update::PlanUpdateEvent {
+                    call_id: notification.call_id,
+                    update: UpdatePlanArgs {
+                        explanation: notification.explanation,
+                        plan: notification
+                            .plan
+                            .into_iter()
+                            .map(|step| UpdatePlanItemArg {
+                                step: step.step,
+                                status: match step.status {
+                                    TurnPlanStepStatus::Pending => UpdatePlanItemStatus::Pending,
+                                    TurnPlanStepStatus::InProgress => {
+                                        UpdatePlanItemStatus::InProgress
+                                    }
+                                    TurnPlanStepStatus::Completed => {
+                                        UpdatePlanItemStatus::Completed
+                                    }
+                                },
+                            })
+                            .collect(),
+                    },
                 })
             }
             ServerNotification::HookStarted(notification) => {

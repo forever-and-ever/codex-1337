@@ -40,13 +40,16 @@ fn reasoning_copy_joins_soft_wraps_and_retains_the_existing_rendering() {
 fn plan_copy_retains_checkboxes_but_omits_wrapping_gutters() {
     let note = "Preserve the existing behavior while simplifying the transcript renderer.";
     let step = "Replace the terminal scrollback path with an owned transcript viewport.";
-    let cell = crate::history_cell::new_plan_update(UpdatePlanArgs {
-        explanation: Some(note.to_owned()),
-        plan: vec![PlanItemArg {
-            step: step.to_owned(),
-            status: StepStatus::Completed,
-        }],
-    });
+    let cell = crate::history_cell::new_plan_update(
+        UpdatePlanArgs {
+            explanation: Some(note.to_owned()),
+            plan: vec![PlanItemArg {
+                step: step.to_owned(),
+                status: StepStatus::Completed,
+            }],
+        }
+        .into(),
+    );
     let width = 38;
     let lines = cell.display_hyperlink_lines(width);
     let layout = TextLayout::new(lines.clone(), width);
@@ -70,6 +73,7 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
         options: None,
     };
     let cell = RequestUserInputResultCell {
+        call_id: Some("question-call".into()),
         questions: vec![
             ToolRequestUserInputQuestion {
                 id: "behavior".to_owned(),

@@ -54,7 +54,7 @@ use crate::models::WebSearchAction;
 use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crate::parse_command::ParsedCommand;
-use crate::plan_tool::UpdatePlanArgs;
+use crate::plan_update::PlanUpdateEvent;
 use crate::request_permissions::RequestPermissionsEvent;
 use crate::request_permissions::RequestPermissionsResponse;
 use crate::request_user_input::RequestUserInputResponse;
@@ -1550,7 +1550,7 @@ pub enum EventMsg {
     /// List of voices supported by realtime conversation streams.
     RealtimeConversationListVoicesResponse(RealtimeConversationListVoicesResponseEvent),
 
-    PlanUpdate(UpdatePlanArgs),
+    PlanUpdate(PlanUpdateEvent),
 
     TurnAborted(TurnAbortedEvent),
 

@@ -905,6 +905,7 @@ impl RequestUserInputOverlay {
         );
         self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
             history_cell::RequestUserInputResultCell {
+                call_id: Some(self.request.item_id.clone()),
                 questions: self.request.questions.clone(),
                 answers,
                 interrupted: false,
@@ -924,6 +925,7 @@ impl RequestUserInputOverlay {
         );
         self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
             history_cell::RequestUserInputResultCell {
+                call_id: Some(self.request.item_id.clone()),
                 questions: self.request.questions.clone(),
                 answers,
                 interrupted: false,
@@ -1748,7 +1750,7 @@ mod tests {
 
     #[test]
     fn queued_requests_are_fifo() {
-        let (tx, _rx) = test_sender();
+        let (tx, mut rx) = test_sender();
         let mut overlay = RequestUserInputOverlay::new(
             request_event("turn-1", vec![question_with_options("q1", "First")]),
             tx,
@@ -1756,10 +1758,9 @@ mod tests {
             /*enhanced_keys_supported*/ false,
             /*disable_paste_burst*/ false,
         );
-        overlay.try_consume_user_input_request(request_event(
-            "turn-2",
-            vec![question_with_options("q2", "Second")],
-        ));
+        let mut second = request_event("turn-2", vec![question_with_options("q2", "Second")]);
+        second.item_id = "call-2".into();
+        overlay.try_consume_user_input_request(second);
         overlay.try_consume_user_input_request(request_event(
             "turn-3",
             vec![question_with_options("q3", "Third")],
@@ -1770,6 +1771,14 @@ mod tests {
 
         overlay.submit_answers();
         assert_eq!(overlay.request.turn_id, "turn-3");
+        // The queued prompt's turn and question IDs do not identify its tool invocation.
+        let receipts = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::InsertHistoryCell(cell) => Some(cell.outer_call_id().map(str::to_owned)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(receipts, vec![Some("call-1".into()), Some("call-2".into())]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use super::markdown_render_cache::MarkdownRenderCache;
 use super::*;
 use crate::style::accent_color;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
+use codex_protocol::plan_update::PlanUpdateEvent;
 
 /// Transient active-cell representation of the mutable tail of a proposed-plan stream.
 ///
@@ -54,10 +55,11 @@ impl HistoryCell for StreamingPlanTailCell {
     }
 }
 /// Render a user‑friendly plan update styled like a checkbox todo list.
-pub(crate) fn new_plan_update(update: UpdatePlanArgs) -> PlanUpdateCell {
+pub(crate) fn new_plan_update(event: PlanUpdateEvent) -> PlanUpdateCell {
+    let PlanUpdateEvent { call_id, update } = event;
     let UpdatePlanArgs { explanation, plan } = update;
     PlanUpdateCell {
-        activity_id: format!("plan:{}", uuid::Uuid::new_v4()),
+        call_id,
         explanation,
         plan,
     }
@@ -212,7 +214,7 @@ impl HistoryCell for ProposedPlanStreamCell {
 
 #[derive(Debug)]
 pub(crate) struct PlanUpdateCell {
-    activity_id: String,
+    call_id: Option<String>,
     explanation: Option<String>,
     plan: Vec<PlanItemArg>,
 }
@@ -224,7 +226,14 @@ impl HistoryCell for PlanUpdateCell {
         )))
     }
     fn activity_ids(&self) -> Vec<String> {
-        vec![self.activity_id.clone()]
+        self.call_id.iter().map(|id| format!("plan:{id}")).collect()
+    }
+    fn outer_call_id(&self) -> Option<&str> {
+        self.call_id.as_deref()
+    }
+
+    fn activity_argument_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.display_hyperlink_lines(width)
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<super::ActivityDisclosure> {
