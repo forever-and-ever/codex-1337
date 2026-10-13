@@ -117,11 +117,15 @@ fn unfinished_and_rejected_patches_keep_their_outcome() {
     .collect::<Vec<_>>()
     .join("\n");
 
-    insta::assert_snapshot!(rendered, @"
-    • Patch application in progress
-    • Patch application declined
-    ✘ Failed to apply patch
-    ");
+    for heading in [
+        "• Patch application pending",
+        "• Patch application declined",
+        "✘ Failed to apply patch",
+    ] {
+        assert!(rendered.contains(heading), "{rendered}");
+    }
+    assert_eq!(rendered.matches("main.rs (+1, -0) — requested").count(), 3);
+    assert!(!rendered.contains("Edited"));
 }
 
 #[test]

@@ -21,8 +21,25 @@ fn compact_patches_retain_full_changes_and_failure_details() {
         ]),
         Path::new("."),
     );
-    let failure = new_patch_apply_failure("first\nsecond\nthird\nfourth diagnostic".into());
-    let missing = new_patch_apply_failure(String::new());
+    let failure = patch_apply_cells(
+        "failed".into(),
+        HashMap::from([(
+            PathBuf::from("new.txt"),
+            FileChange::Add {
+                content: "requested\n".into(),
+            },
+        )]),
+        Path::new("."),
+        PatchApplyStatus::Failed,
+    )
+    .remove(0);
+    let missing = patch_apply_cells(
+        "empty-failed".into(),
+        HashMap::new(),
+        Path::new("."),
+        PatchApplyStatus::Failed,
+    )
+    .remove(0);
     let mut snapshots = Vec::new();
     let compact: Vec<_> = patches
         .iter()
@@ -86,19 +103,4 @@ fn viewed_image_narrow_summary() {
         "/workspace/very-long-screenshot-name.png",
     ));
     insta::assert_snapshot!(cell.display_lines(/*width*/ 32)[0].to_string());
-}
-
-#[test]
-fn failed_patch_keeps_diagnostics_beyond_the_legacy_preview() {
-    let diagnostics = (1..=12)
-        .map(|line| format!("diagnostic line {line}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let cell = new_patch_apply_failure(diagnostics.clone());
-    assert_eq!(
-        cell.raw_lines(),
-        std::iter::once(Line::from("Failed to apply patch"))
-            .chain(diagnostics.lines().map(|line| Line::from(line.to_owned())))
-            .collect::<Vec<_>>()
-    );
 }

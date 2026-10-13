@@ -8,7 +8,6 @@ use crate::app_server_approval_conversions::file_update_changes_to_display;
 use crate::history_cell;
 use crate::history_cell::PlainHistoryCell;
 use crate::multi_agents;
-use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::WebSearchAction;
 use codex_protocol::ThreadId;
@@ -48,38 +47,16 @@ pub(super) fn cells(
             id,
             changes,
             status,
-        } => match status {
-            PatchApplyStatus::Completed if !changes.is_empty() => {
-                cells.extend(
-                    history_cell::new_patch_events(
-                        file_update_changes_to_display(changes),
-                        cwd.as_path(),
-                    )
-                    .into_iter()
-                    .map(|cell| {
-                        Arc::new(cell.with_activity_id(id.clone()))
-                            as Arc<dyn history_cell::HistoryCell>
-                    }),
-                );
-            }
-            PatchApplyStatus::Completed => {}
-            PatchApplyStatus::Failed => {
-                cells.push(Arc::new(history_cell::new_patch_apply_failure(
-                    String::new(),
-                )));
-            }
-            PatchApplyStatus::InProgress | PatchApplyStatus::Declined => {
-                let message = if status == PatchApplyStatus::Declined {
-                    "Patch application declined"
-                } else {
-                    "Patch application in progress"
-                };
-                cells.push(Arc::new(history_cell::new_info_event(
-                    message.to_string(),
-                    /*hint*/ None,
-                )));
-            }
-        },
+        } => cells.extend(
+            history_cell::patch_apply_cells(
+                id,
+                file_update_changes_to_display(changes),
+                cwd.as_path(),
+                status,
+            )
+            .into_iter()
+            .map(|cell| Arc::new(cell) as Arc<dyn history_cell::HistoryCell>),
+        ),
         ThreadItem::WebSearch(item) => cells.push(Arc::new(history_cell::new_web_search_call(
             item.id,
             item.query,

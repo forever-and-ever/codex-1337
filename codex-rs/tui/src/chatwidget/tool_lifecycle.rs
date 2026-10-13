@@ -13,8 +13,13 @@ impl ChatWidget {
         id: String,
         changes: HashMap<PathBuf, FileChange>,
     ) {
-        for cell in history_cell::new_patch_events(changes, &self.config.cwd) {
-            self.add_to_history(cell.with_activity_id(id.clone()));
+        for cell in history_cell::patch_apply_cells(
+            id,
+            changes,
+            &self.config.cwd,
+            codex_app_server_protocol::PatchApplyStatus::InProgress,
+        ) {
+            self.add_to_history(cell);
         }
     }
 
@@ -196,16 +201,21 @@ impl ChatWidget {
     }
 
     pub(crate) fn handle_file_change_completed_now(&mut self, item: CompletedItem) {
-        let ThreadItem::FileChange { id, status, .. } = item.item else {
+        let ThreadItem::FileChange {
+            id,
+            changes,
+            status,
+        } = item.item
+        else {
             return;
         };
-        // If the patch was successful, just let the "Edited" block stand.
-        // Otherwise, add a failure block.
-        if matches!(status, codex_app_server_protocol::PatchApplyStatus::Failed) {
-            self.add_to_history(history_cell::ToolItemCell::new(
-                id,
-                history_cell::new_patch_apply_failure(String::new()),
-            ));
+        for cell in history_cell::patch_apply_cells(
+            id,
+            file_update_changes_to_display(changes),
+            &self.config.cwd,
+            status,
+        ) {
+            self.add_to_history(cell);
         }
     }
 
