@@ -349,7 +349,10 @@ impl App {
                                         matches!(
                                             other,
                                             OperationLane::Thread(_) | OperationLane::Realtime(_)
-                                        ) && predecessor.active.order < lane.active.order
+                                        ) && (predecessor.active.order < lane.active.order
+                                            // Navigation can transfer an older admission into this
+                                            // lane after unrelated work has already been sent.
+                                            || !matches!(predecessor.state, LaneState::Queued))
                                     },
                                 )
                         }
