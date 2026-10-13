@@ -27,6 +27,7 @@ summary reopened
   HH:MM [+] Preamble                                 1000
 
 raw explicitly opened
+  HH:MM [-] Preamble                                 1000
                       700  Instructions
                       700    Base instructions
                       300  Context
@@ -42,6 +43,7 @@ raw explicitly opened
   HH:MM [+] Preamble                                 1000
 
 narrow raw
+  HH:MM [-] Preamble                1000
                       700  Instructions
                       700    Base
                 instructions
@@ -65,9 +67,8 @@ narrow raw
                       300    AGENTS.md /
                 repo
 
-        [+]     Raw Context
-
 wide raw
+  HH:MM [-] Preamble                                 1000
                       700  Instructions
                       700    Base instructions
                       300  Context
@@ -89,6 +90,7 @@ wide raw
         [+]     Raw Context
 
 raw retained across parent fold
+  HH:MM [-] Preamble                                 1000
                       700  Instructions
                       700    Base instructions
                       300  Context

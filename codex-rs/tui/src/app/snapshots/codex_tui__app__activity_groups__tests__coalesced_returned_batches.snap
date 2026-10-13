@@ -8,9 +8,12 @@ Exploration ordinary=false expanded=false
                       Read first.rs (whole file)
                   • Command
                       Read nested.rs (whole file)
+        [+]         Result
+        [+]         Result
         [+]   • Called (Code Mode τνμβ)  20
                   • Command
                       Read second.rs (whole file)
+        [+]         Result
 
 Exploration ordinary=false expanded=true
 [-]   • Called (Code Mode εμογ)  1280
@@ -20,7 +23,7 @@ Exploration ordinary=false expanded=true
                       Read nested.rs (whole file)
         [+]         Result
         [+]         Result
-        [-]   • Called (Code Mode τνμβ)  20
+        [+]   • Called (Code Mode τνμβ)  20
                   • Command
                       Read second.rs (whole file)
         [+]         Result
@@ -29,8 +32,11 @@ Computer ordinary=false expanded=false
 [+]   • Called (Code Mode εμογ)  1280
                   • Inspect first
                   • Inspect nested
+        [+]         Result
+        [+]         Result
         [+]   • Called (Code Mode τνμβ)  20
                   • Inspect second
+        [+]         Result
 
 Computer ordinary=false expanded=true
 [-]   • Called (Code Mode εμογ)  1280
@@ -38,16 +44,19 @@ Computer ordinary=false expanded=true
                   • cua_repl.js({"title":"Inspect nested"})
         [+]         Result
         [+]         Result
-        [-]   • Called (Code Mode τνμβ)  20
-                  • cua_repl.js({"title":"Inspect second"})
+        [+]   • Called (Code Mode τνμβ)  20
+                  • Inspect second
         [+]         Result
 
 Exploration ordinary=true expanded=false
 [+]   • Called (Code Mode εμογ)  1280
                   • Command cargo check
                   • Command cargo check
+        [+]         Result
+        [+]         Result
         [+]   • Called (Code Mode τνμβ)  20
                   • Command cargo check
+        [+]         Result
 
 Exploration ordinary=true expanded=true
 [-]   • Called (Code Mode εμογ)  1280
@@ -55,6 +64,6 @@ Exploration ordinary=true expanded=true
                   • Command cargo check
         [+]         Result
         [+]         Result
-        [-]   • Called (Code Mode τνμβ)  20
+        [+]   • Called (Code Mode τνμβ)  20
                   • Command cargo check
         [+]         Result

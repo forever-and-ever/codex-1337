@@ -414,7 +414,7 @@ impl TranscriptView {
         }
         // Source offsets only survive an unchanged cell. Regrouped/retired live entries resolve
         // through their member IDs and anchor at their header, never a stale positional index.
-        let anchor = previous_top
+        let mut anchor = previous_top
             .and_then(|(key, top_ids, offset, row_bias)| {
                 let unchanged = cells.iter().position(|cell| EntryKey::cell(cell) == key);
                 let top = unchanged.or_else(|| self.canonical_activity_index(cells, &top_ids))?;
@@ -454,10 +454,17 @@ impl TranscriptView {
             ids: activity_ids,
             target,
         });
-        self.position = Position::Reading(anchor);
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;
+        if anchor.index == index
+            && let Some(layout) = self.current_layout(cells, index)
+        {
+            // Offset zero is the first selectable byte, not a synthetic Feed header.
+            // Keep that header and its controls in view when reshaping its body.
+            anchor.row_bias = layout.row_for_offset(0) as isize;
+        }
+        self.position = Position::Reading(anchor);
         if matched {
             self.invalidate_held_search();
         }

@@ -197,6 +197,14 @@ async fn displaced_tool_calls_complete_once_and_disclosure_navigation_rejoins_cu
         KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE),
         &app.transcript_cells,
     );
+    // Independent Result folds follow the completed calls. Start at the first control rather
+    // than assuming F4's last control leaves the group's header in view.
+    for code in [KeyCode::Home, KeyCode::Right] {
+        app.transcript_view.handle_key(
+            KeyEvent::new(code, KeyModifiers::NONE),
+            &app.transcript_cells,
+        );
+    }
     let completed = render(&mut app);
     let text = completed
         .content

@@ -126,15 +126,18 @@ impl TextLayout {
         for line in rows.lines.iter().rev() {
             layout = layout.with_leading_row(line.clone());
         }
-        layout.disclosure = true;
-        layout.disclosure_controls.push(DisclosureControl {
-            target: rows.fold.clone(),
-            label: if rows.unfolded { "[-]" } else { "[+]" }.into(),
-            source_offset: 0,
-            row: 0,
-            placement: DisclosurePlacement::Fold,
-        });
-        if let Some(control) = &rows.control {
+        if let Some((target, unfolded)) = &rows.fold {
+            layout.disclosure = true;
+            layout.disclosure_controls.push(DisclosureControl {
+                target: target.clone(),
+                label: if *unfolded { "[-]" } else { "[+]" }.into(),
+                source_offset: 0,
+                row: 0,
+                placement: DisclosurePlacement::Fold,
+            });
+        }
+        for control in &rows.controls {
+            layout.disclosure = true;
             layout.disclosure_controls.push(DisclosureControl {
                 target: control.target.clone(),
                 label: String::new(),

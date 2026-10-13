@@ -67,7 +67,7 @@ impl DynamicToolCallCell {
         let mut arguments = plain_hyperlink_lines(data.argument_lines());
         super::output_provenance::mark_lines(
             &mut arguments,
-            super::output_provenance::OutputProvenance::Client,
+            super::output_provenance::OutputProvenance::Formatted,
         );
         lines.extend(adaptive_wrap_hyperlink_lines(
             &arguments,

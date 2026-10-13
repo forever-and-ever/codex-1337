@@ -213,7 +213,7 @@ pub(crate) fn command_parts(
                         last.push_span(connector.dim());
                     }
                     let mut detail = plain_hyperlink_lines(source_lines);
-                    mark_lines(&mut detail, OutputProvenance::Client);
+                    mark_lines(&mut detail, OutputProvenance::Formatted);
                     lines.extend(prefix_hyperlink_lines(
                         detail,
                         crate::transcript_geometry::CHILD_PREFIX.into(),

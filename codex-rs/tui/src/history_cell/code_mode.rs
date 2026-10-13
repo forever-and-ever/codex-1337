@@ -396,15 +396,14 @@ impl CodeModeCell {
         format!("{}:js", self.identity())
     }
 
-    /// The script as rows nested under the block's title, highlighted and marked as the
-    /// client's view of it rather than captured output.
+    /// Model-authored source, syntax-highlighted without claiming it is returned tool output.
     pub(crate) fn script_lines(&self) -> Option<Vec<HyperlinkLine>> {
         let script = self.script()?.trim_end_matches(['\r', '\n']);
         let mut lines = plain_hyperlink_lines(crate::render::highlight::highlight_code_to_lines(
             script,
             "javascript",
         ));
-        mark_lines(&mut lines, OutputProvenance::Client);
+        mark_lines(&mut lines, OutputProvenance::Formatted);
         Some(prefix_hyperlink_lines(
             lines,
             crate::transcript_geometry::CHILD_PREFIX.into(),
@@ -476,12 +475,7 @@ impl CodeModeCell {
         let block_expanded = expanded.contains(&self.identity());
         let nested_width = width.saturating_sub(crate::transcript_geometry::CHILD_INDENT);
         for member in self.members() {
-            if !block_expanded && member.as_any().is::<ToolOutputCell>() {
-                continue;
-            }
-            let parts = if block_expanded
-                && let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>()
-            {
+            let parts = if let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>() {
                 let mut parts = super::activity_parts::ActivityParts::default();
                 output.append_result_parts(&mut parts, nested_width, expanded, mode);
                 Some(parts)
@@ -625,6 +619,7 @@ impl HistoryCell for CodeModeCell {
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
         self.members()
             .iter()
+            .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
             .any(|cell| {
                 cell.has_nested_details(
                     width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),

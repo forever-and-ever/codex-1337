@@ -110,6 +110,9 @@ impl ToolOutputCell {
         expanded: &std::collections::HashSet<String>,
         mode: OutputMode,
     ) {
+        if self.readable.is_empty() {
+            return;
+        }
         let id = format!("result:{}", self.id());
         let open = expanded.contains(&id);
         parts.controls.push(super::activity_parts::PartControl {

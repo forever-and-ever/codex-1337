@@ -131,7 +131,7 @@ pub(super) fn activity_layout(
         part.line += lead;
         layout = layout.with_part_control(part);
     }
-    if expanded && let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
+    if let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
         let offset = layout.line_offset(lead) + header.source_offset;
         layout = layout.with_output_controls(offset, mode);
     }
@@ -374,8 +374,10 @@ impl TranscriptView {
                         output_mode,
                     ) {
                     ActivityTranscriptLines {
-                        output_mode: (expanded && cell.has_formatted_output())
-                            .then_some(output_mode),
+                        output_mode: ((expanded
+                            || cell.activity_disclosure(content_width).is_none())
+                            && cell.has_formatted_output())
+                        .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
                         preface: Vec::new(),
                         activity: crate::transcript_geometry::clock_lines(parts.lines, timestamp),
@@ -392,8 +394,10 @@ impl TranscriptView {
                         cell.compact_hyperlink_lines(content_width)
                     };
                     ActivityTranscriptLines {
-                        output_mode: (expanded && cell.has_formatted_output())
-                            .then_some(output_mode),
+                        output_mode: ((expanded
+                            || cell.activity_disclosure(content_width).is_none())
+                            && cell.has_formatted_output())
+                        .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
                         preface: Vec::new(),
                         activity: crate::transcript_geometry::clock_lines(activity, timestamp),
@@ -527,6 +531,7 @@ impl TranscriptView {
                     header,
                     bills,
                     expanded_parts,
+                    output_mode,
                     width,
                 ));
             }

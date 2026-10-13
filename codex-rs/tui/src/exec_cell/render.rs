@@ -435,7 +435,7 @@ impl HistoryCell for ExecCell {
         for call in self.iter_calls() {
             let script = strip_bash_lc_and_escape(&call.command);
             let mut detail = plain_hyperlink_lines(highlight_bash_to_lines(&script));
-            mark_lines(&mut detail, OutputProvenance::Client);
+            mark_lines(&mut detail, OutputProvenance::Formatted);
             lines.extend(adaptive_wrap_hyperlink_lines(
                 &detail,
                 RtOptions::new(usize::from(width))

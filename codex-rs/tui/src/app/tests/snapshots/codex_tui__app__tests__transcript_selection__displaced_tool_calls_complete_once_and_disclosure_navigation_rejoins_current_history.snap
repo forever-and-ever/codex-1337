@@ -6,11 +6,11 @@ completed batch
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 12 },
     content: [
-        "        [+]   • Execution (Code Mode βανζ)  128                                 ",
+        "              • Execution (Code Mode βανζ)  128                                 ",
         "                  • tools.inspect({"path":"same"})                              ",
         "                  • tools.inspect({"path":"same"})                              ",
-        "                                                                                ",
-        "                                                                                ",
+        "        [-]         Result                                                      ",
+        "                      model-visible batch                                       ",
         "                                                                                ",
         "                                                                                ",
         "                                                                                ",
@@ -21,8 +21,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -35,5 +33,7 @@ Buffer {
         x: 19, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 34, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 49, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
+        x: 11, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

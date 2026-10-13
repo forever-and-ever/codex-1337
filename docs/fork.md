@@ -19,7 +19,9 @@ qualified forms.
   initially closed Raw Context fold. Older mixed captures
   retain a legacy label rather than guessed section boundaries. User messages are
   blue, assistant prose green, inter-agent prose yellow-green, and other incoming
-  context purple. Human-only headings, summaries, notices and diagnostic decoration
+  context purple. Disclosed tool-call source also uses purple; syntax highlighting
+  and source formatting do not make it human-only decoration. Human-only headings,
+  summaries, notices and diagnostic decoration
   use the terminal's default background, never grey or reverse video. Author
   color does not determine context inclusion. `/context` opens a read-only Context
   snapshot of retained special material, including superseded copies and amendments;

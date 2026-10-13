@@ -69,9 +69,8 @@ pub(super) struct TextLayout {
 #[derive(Clone)]
 pub(super) struct HeaderRows {
     pub(super) lines: Vec<Line<'static>>,
-    pub(super) fold: FoldTarget,
-    pub(super) unfolded: bool,
-    pub(super) control: Option<HeaderControl>,
+    pub(super) fold: Option<(FoldTarget, bool)>,
+    pub(super) controls: Vec<HeaderControl>,
 }
 
 /// A control drawn in a header row's own text, such as a Code Mode title's `[js]`.

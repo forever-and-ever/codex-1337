@@ -44,8 +44,8 @@ fn message(id: &str, text: &str) -> Arc<dyn HistoryCell> {
     Arc::new(cell)
 }
 
-/// A finished Code Mode block that kept its script, with the one call the script made.
-fn script_block(exec: &str) -> Arc<dyn HistoryCell> {
+/// A finished Code Mode block with optional nested activity and exact returned text.
+fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<dyn HistoryCell> {
     let fact = |suffix: &str, event| {
         ThreadItem::CodeMode(CodeModeItem {
             id: format!("code-mode:{exec}:{suffix}"),
@@ -80,26 +80,38 @@ fn script_block(exec: &str) -> Arc<dyn HistoryCell> {
     };
     reduce(fact("start", CodeModeEvent::Started {
         call_id: exec.into(),
-        script: Some(
-            "const status = await tools.exec_command({ cmd: \"git status\" });\ntext(status.output);\n".into(),
-        ),
+        script: Some(command.map_or_else(
+            || "text(\"only emitted text\");".into(),
+            |command| format!("const status = await tools.exec_command({{ cmd: {command:?} }});\ntext(status.output);\n"),
+        )),
     }));
-    reduce(ThreadItem::CommandExecution {
-        sandbox_type: None,
-        model_context: None,
-        id: "call-status".into(),
-        plugin_id: None,
-        script_path: None,
-        command: "git status".into(),
-        cwd: cwd.clone().into(),
-        process_id: None,
-        source: CommandExecutionSource::Agent,
-        status: codex_app_server_protocol::CommandExecutionStatus::Completed,
-        command_actions: Vec::new(),
-        aggregated_output: Some("clean\n".into()),
-        exit_code: Some(0),
-        duration_ms: Some(0),
-    });
+    if let Some(command) = command {
+        reduce(ThreadItem::CommandExecution {
+            sandbox_type: None,
+            model_context: None,
+            id: "call-status".into(),
+            plugin_id: None,
+            script_path: None,
+            command: command.into(),
+            cwd: cwd.clone().into(),
+            process_id: None,
+            source: CommandExecutionSource::Agent,
+            status: codex_app_server_protocol::CommandExecutionStatus::Completed,
+            command_actions: Vec::new(),
+            aggregated_output: Some("clean\n".into()),
+            exit_code: Some(0),
+            duration_ms: Some(0),
+        });
+    }
+    if let Some(output) = output {
+        reduce(ThreadItem::FunctionCallOutput {
+            id: format!("{exec}-output"),
+            call_id: Some(exec.into()),
+            name: "exec".into(),
+            namespace: None,
+            output: codex_protocol::models::FunctionCallOutputBody::Text(output.into()),
+        });
+    }
     reduce(fact(
         "end",
         CodeModeEvent::Finished {
@@ -190,7 +202,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             remote_image_urls: Vec::new(),
             spoken: false,
         }),
-        script_block("exec-1"),
+        script_block("exec-1", Some("git status"), None),
         message("msg-4", "No step billed this reply."),
     ];
     let mut view = TranscriptView::default();
@@ -382,4 +394,114 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert_eq!(view.disclosure.expanded, manual);
     assert!(!screen(&mut view, &cells, "search cancelled", 80).contains("<instructions>"));
     insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
+    // An output-only Code Mode execution has no nested command to carry its Result row.
+    // A genuinely empty revision stays open without an inert parent fold, including after a
+    // previously meaningful parent fold was closed. Its script control remains independent.
+    let exec = "source-only";
+    let mut cells = vec![script_block(
+        exec,
+        None,
+        Some(r#"{"message":"only emitted text"}"#),
+    )];
+    let mut view = TranscriptView::default();
+    view.record_step_admission(step("source-step", &[exec], &[], Admission::Pending));
+    let script = FoldTarget::Part(
+        cells[0]
+            .as_any()
+            .downcast_ref::<crate::history_cell::CodeModeCell>()
+            .unwrap()
+            .script_fold(),
+    );
+    let result = FoldTarget::Part(format!("result:{exec}-output"));
+    let buffer = crate::transcript_view::tests::render(&mut view, &cells, 104, 20);
+    let shown = crate::transcript_view::tests::text(&buffer);
+    assert!(shown.contains("Result"));
+    assert!(!shown.contains("only emitted text"));
+    assert!(view.focus_fold(&cells, 0, result));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let buffer = crate::transcript_view::tests::render(&mut view, &cells, 104, 20);
+    assert!(crate::transcript_view::tests::text(&buffer).contains("only emitted text"));
+    let formatted = FoldTarget::OutputMode(crate::history_cell::output_provenance::OutputMode::Fmt);
+    assert!(view.focus_fold(&cells, 0, formatted.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    for width in [104, 40, 80] {
+        crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+        let layout = view.current_layout(&cells, 0).unwrap();
+        assert!(layout.fold_targets().contains(&formatted));
+        assert!(layout.text().contains("only emitted text"));
+        for (label, capture) in [
+            ("[Raw]", "{\"message\":\"only emitted text\"}"),
+            ("[Fmt]", "{\n  \"message\": \"only emitted text\"\n}"),
+        ] {
+            let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+            let shown = crate::transcript_view::tests::text(&buffer);
+            let (row, line) = shown
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(label))
+                .unwrap_or_else(|| panic!("{label} at width {width}:\n{shown}"));
+            let offset = line.find(label).unwrap();
+            let column = unicode_width::UnicodeWidthStr::width(&line[..offset]) as u16 + 1;
+            assert!(view.toggle_disclosure_at(&cells, column, row as u16));
+            assert!(
+                view.current_layout(&cells, 0)
+                    .unwrap()
+                    .text()
+                    .contains(capture)
+            );
+        }
+    }
+    let parent = view
+        .current_layout(&cells, 0)
+        .unwrap()
+        .fold_targets()
+        .into_iter()
+        .find(|target| matches!(target, FoldTarget::Part(id) if id.starts_with("feed:")))
+        .unwrap();
+    assert!(view.focus_fold(&cells, 0, parent.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+
+    cells[0] = script_block(exec, None, Some(""));
+    for width in [104, 80] {
+        crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+        let layout = view.current_layout(&cells, 0).unwrap();
+        assert!(!layout.fold_targets().contains(&parent));
+        assert!(layout.fold_targets().contains(&script));
+    }
+    assert!(view.focus_fold(&cells, 0, script.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    crate::terminal_palette::with_test_default_colors(
+        crate::terminal_probe::DefaultColors {
+            fg: (220, 220, 220),
+            bg: (20, 20, 20),
+        },
+        || {
+            for width in [104, 40, 80] {
+                let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+                let shown = crate::transcript_view::tests::text(&buffer);
+                let (row, line) = shown
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| line.contains("text("))
+                    .unwrap_or_else(|| panic!("script at width {width}:\n{shown}"));
+                let column = line.find("text(").unwrap();
+                assert_eq!(
+                    buffer[(column as u16, row as u16)].bg,
+                    crate::style::context_message_style().bg.unwrap(),
+                );
+                assert!(
+                    view.current_layout(&cells, 0)
+                        .unwrap()
+                        .fold_targets()
+                        .contains(&script)
+                );
+                assert!(
+                    view.current_layout(&cells, 0)
+                        .unwrap()
+                        .text()
+                        .contains("only emitted text")
+                );
+            }
+        },
+    );
 }

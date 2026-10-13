@@ -310,7 +310,7 @@ impl McpToolCallCell {
             ) {
                 super::output_provenance::mark_lines(
                     &mut invocation,
-                    super::output_provenance::OutputProvenance::Client,
+                    super::output_provenance::OutputProvenance::Formatted,
                 );
             }
             let body_lines = adaptive_wrap_hyperlink_lines(&invocation, opts);

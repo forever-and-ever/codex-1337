@@ -31,7 +31,7 @@ impl ExecCell {
             let script = strip_bash_lc_and_escape(&call.command);
             let highlighted_script = highlight_bash_to_lines(&script);
             let mut invocation = plain_hyperlink_lines(highlighted_script);
-            mark_lines(&mut invocation, provenance);
+            mark_lines(&mut invocation, OutputProvenance::Formatted);
             let cmd_display = adaptive_wrap_hyperlink_lines(
                 &invocation,
                 RtOptions::new(width as usize)

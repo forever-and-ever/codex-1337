@@ -1891,13 +1891,11 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         );
         for expanded in [false, true] {
             if expanded {
-                app.transcript_view
-                    .handle_key(KeyEvent::new(KeyCode::F(4), KeyModifiers::NONE), &expected);
-                for _ in &expected {
+                // Navigate to the first activity, not through a fixed number of now-independent
+                // Result folds. Opening the activity must still leave those captures closed.
+                for code in [KeyCode::F(4), KeyCode::Home, KeyCode::Right] {
                     app.transcript_view
-                        .handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &expected);
-                    app.transcript_view
-                        .handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &expected);
+                        .handle_key(KeyEvent::new(code, KeyModifiers::NONE), &expected);
                 }
                 app.transcript_view.clear_activity_focus();
             }

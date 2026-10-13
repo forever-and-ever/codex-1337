@@ -226,8 +226,21 @@ pub(super) struct Header {
     /// The item's steps it bills.
     steps: Vec<usize>,
     title: Title,
-    pub(super) unfolded: bool,
+    disclosure: HeaderDisclosure,
     pub(super) spacious: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum HeaderDisclosure {
+    FixedOpen,
+    Expanded,
+    Collapsed,
+}
+
+impl HeaderDisclosure {
+    fn unfolded(self) -> bool {
+        self != Self::Collapsed
+    }
 }
 
 /// What a steps header shows as its title.
@@ -401,7 +414,9 @@ impl FeedIndex {
 
     pub(super) fn seat(
         &self,
+        cells: &[Arc<dyn HistoryCell>],
         index: usize,
+        width: u16,
         expanded: &HashSet<String>,
         elided: &dyn Fn(usize) -> bool,
     ) -> Seat {
@@ -409,13 +424,20 @@ impl FeedIndex {
             return Seat::LOOSE;
         };
         let item = &self.items[member.item];
-        let unfolded = item.unfolded(expanded);
+        let disclosure = if !self.foldable(item, cells, width, elided) {
+            HeaderDisclosure::FixedOpen
+        } else if item.unfolded(expanded) {
+            HeaderDisclosure::Expanded
+        } else {
+            HeaderDisclosure::Collapsed
+        };
+        let unfolded = disclosure.unfolded();
         let header = |scope: Vec<usize>, steps: Vec<usize>, title: Title| Header {
             item: member.item,
             scope,
             steps,
             title,
-            unfolded,
+            disclosure,
             spacious: item.spacious(),
         };
         if !matches!(item.kind, Kind::Steps { .. }) {
@@ -441,6 +463,62 @@ impl FeedIndex {
             .find(|plan| plan.site == index)
             .map(|plan| header(plan.scope, plan.steps, plan.title));
         Seat { header, content }
+    }
+
+    /// A title and independent source handles alone do not earn a parent fold.
+    fn foldable(
+        &self,
+        item: &Item,
+        cells: &[Arc<dyn HistoryCell>],
+        width: u16,
+        elided: &dyn Fn(usize) -> bool,
+    ) -> bool {
+        if !matches!(item.kind, Kind::Steps { calls: true }) || item.steps.len() > 1 {
+            return true;
+        }
+        let content_width =
+            crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
+        let (title_width, _) = header_columns(width);
+        // Independent source/result folds must not make the parent's affordance move or
+        // force materialization of their potentially large captures during seat lookup.
+        let compact = HashSet::new();
+        for segment in &item.segments {
+            let plans = self.plans(item, segment, true, elided);
+            if plans.len() != self.plans(item, segment, false, elided).len() {
+                return true;
+            }
+            for &index in segment {
+                let Some(Role::Member(member)) = self.roles.get(index) else {
+                    continue;
+                };
+                if elided(index) || !item.shows(member, true) || item.shows(member, false) {
+                    continue;
+                }
+                if !plans.iter().any(|plan| plan.title == Title::Owned(index)) {
+                    return true;
+                }
+                let Some(cell) = cells.get(index) else {
+                    continue;
+                };
+                if cell.activity_disclosure(content_width).is_some()
+                    || title_row(cell.as_ref(), &compact, width)
+                        .is_some_and(|title| line_width(&title) > title_width)
+                {
+                    return true;
+                }
+                let mut lines = cell
+                    .output_parts(content_width, 0, &compact, OutputMode::Raw)
+                    .map_or_else(
+                        || cell.compact_hyperlink_lines(content_width),
+                        |parts| parts.lines,
+                    );
+                behead(&mut lines);
+                if !lines.is_empty() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The headers of one segment of a steps item, in order.
@@ -621,14 +699,15 @@ impl FeedIndex {
     }
 
     /// A header's rows: clock, fold, title and figures, then the rest of a title it owns,
-    /// wrapped under itself while unfolded. An unfolded Code Mode title ends in `[js]`, the
-    /// control that shows the block's script.
+    /// wrapped under itself while unfolded. Source and Raw/Fmt controls remain independent
+    /// of whether the header has a meaningful parent fold.
     pub(super) fn header_rows(
         &self,
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
         expanded: &HashSet<String>,
+        mode: OutputMode,
         width: u16,
     ) -> HeaderRows {
         use crate::transcript_geometry::CLOCK_COLUMNS;
@@ -646,41 +725,66 @@ impl FeedIndex {
             });
         let (title_width, reach) = header_columns(width);
         let mut title = self.title(cells, header, expanded, width);
-        let script = match header.title {
-            Title::Owned(index) if header.unfolded => cells
-                .get(index)
-                .and_then(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
-                .filter(|block| block.script().is_some())
-                .map(CodeModeCell::script_fold),
+        let owner = match header.title {
+            Title::Owned(index) if header.disclosure.unfolded() => cells.get(index),
             _ => None,
         };
-        if let Some(fold) = &script {
+        let mut handles = Vec::new();
+        if let Some(block) = owner
+            .and_then(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
+            .filter(|block| block.script().is_some())
+        {
+            let fold = block.script_fold();
+            let selected = expanded.contains(&fold);
+            handles.push((FoldTarget::Part(fold), "[js]", selected));
+        }
+        if owner.is_some_and(|cell| cell.has_formatted_output()) {
+            for (choice, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
+                handles.push((FoldTarget::OutputMode(choice), label, mode == choice));
+            }
+        }
+        for (_, label, selected) in &handles {
             title.push_span(" ");
-            title.push_span(if expanded.contains(fold) {
-                Span::styled("[js]", crate::style::accent_style().underlined())
+            title.push_span(if *selected {
+                Span::styled(*label, crate::style::accent_style().underlined())
             } else {
-                "[js]".dim()
+                (*label).dim()
             });
         }
         let titles = match header.title {
             // Wrapped as the activity wraps its own rows: a command never splits at a hyphen.
-            Title::Owned(_) if header.unfolded => crate::wrapping::adaptive_wrap_lines(
-                [title],
-                crate::wrapping::RtOptions::new(title_width)
-                    .word_splitter(textwrap::WordSplitter::NoHyphenation),
-            ),
+            Title::Owned(_) if header.disclosure.unfolded() => {
+                crate::wrapping::adaptive_wrap_lines(
+                    [title],
+                    crate::wrapping::RtOptions::new(title_width)
+                        .word_splitter(textwrap::WordSplitter::NoHyphenation),
+                )
+            }
             _ => vec![truncate_line_with_ellipsis_if_overflow(title, title_width)],
         };
-        // `[js]` ends the title, so it ends the title's last row.
-        let control = script.map(|fold| {
-            let row = titles.len().saturating_sub(1);
-            let end = TITLE_COLUMN + titles.last().map_or(0, line_width) as u16;
-            HeaderControl {
-                row,
-                columns: end.saturating_sub(4)..end,
-                target: FoldTarget::Part(fold),
-            }
-        });
+        // Controls are a known suffix, not text searched for in a possibly identical title.
+        // Walk that suffix backwards across wrapped rows without creating selectable bytes.
+        let mut row = titles.len().saturating_sub(1);
+        let mut end = titles.last().map_or(0, line_width);
+        let mut controls: Vec<_> = handles
+            .into_iter()
+            .rev()
+            .filter_map(|(target, label, _)| {
+                while end < label.len() && row > 0 {
+                    row -= 1;
+                    end = line_width(&titles[row]);
+                }
+                let start = end.checked_sub(label.len())?;
+                let control = HeaderControl {
+                    row,
+                    columns: TITLE_COLUMN + start as u16..TITLE_COLUMN + end as u16,
+                    target,
+                };
+                end = start.saturating_sub(1);
+                Some(control)
+            })
+            .collect();
+        controls.reverse();
         let mut titles = titles.into_iter();
         let first = titles.next().unwrap_or_default();
         let used = line_width(&first);
@@ -715,9 +819,9 @@ impl FeedIndex {
         }));
         HeaderRows {
             lines,
-            fold: self.fold_target(header),
-            unfolded: header.unfolded,
-            control,
+            fold: (header.disclosure != HeaderDisclosure::FixedOpen)
+                .then(|| (self.fold_target(header), header.disclosure.unfolded())),
+            controls,
         }
     }
 
@@ -1139,9 +1243,24 @@ impl TranscriptView {
             return Seat::LOOSE;
         }
         self.refresh_feed(cells, index);
-        self.feed.seat(index, &self.disclosure.expanded, &|index| {
-            self.elides_cell(cells, index)
-        })
+        let seat = self.feed.seat(
+            cells,
+            index,
+            self.area.width.max(1),
+            &self.disclosure.expanded,
+            &|index| self.elides_cell(cells, index),
+        );
+        if let Some(Header {
+            item,
+            disclosure: HeaderDisclosure::FixedOpen,
+            ..
+        }) = &seat.header
+        {
+            self.disclosure
+                .expanded
+                .remove(&self.feed.items[*item].fold_mark);
+        }
+        seat
     }
 
     /// The seat as last indexed, without refreshing; loose if the index is stale.
@@ -1153,9 +1272,13 @@ impl TranscriptView {
         {
             return Seat::LOOSE;
         }
-        self.feed.seat(index, &self.disclosure.expanded, &|index| {
-            self.elides_cell(cells, index)
-        })
+        self.feed.seat(
+            cells,
+            index,
+            self.area.width.max(1),
+            &self.disclosure.expanded,
+            &|index| self.elides_cell(cells, index),
+        )
     }
 
     pub(super) fn refresh_feed(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) {
