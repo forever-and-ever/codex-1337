@@ -104,7 +104,8 @@ impl App {
         server: &mut AppServerSession,
         completion: &ControlCompletion,
     ) -> Result<()> {
-        if completion.epoch != self.server_operations.epoch
+        if self.reconnect.offline
+            || completion.epoch != self.server_operations.epoch
             || completion.scope != OperationScope::Connection
             || !matches!(
                 &completion.outcome,
