@@ -375,9 +375,19 @@ impl App {
                     DirectoryEffect::Acquire(Acquisition::Fork(plan)) => {
                         DirectoryOutcome::Acquired(plan.run().await)
                     }
-                    DirectoryEffect::Detach(plan) => DirectoryOutcome::Detached(
-                        match tokio::time::timeout(ACK_TIMEOUT, detach::send(&handle, id, &plan))
-                            .await
+                    DirectoryEffect::Detach(mut plan) => DirectoryOutcome::Detached(
+                        match tokio::time::timeout(ACK_TIMEOUT, async {
+                            let primary = detach::DetachPlan {
+                                targets: vec![plan.targets.remove(0)],
+                                voice: plan.voice.take(),
+                            };
+                            let mut results = detach::send(&handle, id, &primary).await;
+                            if results.iter().all(|result| result.result.is_ok()) {
+                                results.extend(detach::send(&handle, id, &plan).await);
+                            }
+                            results
+                        })
+                        .await
                         {
                             Ok(results) => detach::DetachReceipt::Complete(results),
                             Err(_) => detach::DetachReceipt::BudgetExpired,
@@ -729,6 +739,9 @@ impl App {
                 destination: Some(target),
             })
             .await;
+        // Replace only the captured open graph, not closed or replay-only cached rows.
+        plan.targets
+            .retain(|entry| input.tracked.contains(&entry.thread_id));
         // /cd replaces the whole captured local task graph, including parked blanks.
         for &thread_id in &input.tracked {
             if thread_id != target
@@ -750,6 +763,13 @@ impl App {
             self.directory_cleanup(operation, handle, source, target, input.history, Vec::new());
             return;
         }
+        // The old primary remains usable if its unsubscribe is rejected. Do not detach
+        // the rest of its graph until that prerequisite is confirmed.
+        plan.targets.sort_by_key(|entry| entry.thread_id != source);
+        assert_eq!(
+            plan.targets.first().map(|entry| entry.thread_id),
+            Some(source)
+        );
         let effect = DirectoryEffect::Detach(plan.clone());
         self.server_operations.navigation.current = Some(self.continue_directory_effect(
             operation,
