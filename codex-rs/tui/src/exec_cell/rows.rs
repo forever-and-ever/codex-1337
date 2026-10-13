@@ -88,14 +88,16 @@ impl ExecCall {
 /// One heading for a command group, retaining failures and declined execution separately.
 pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHeader) {
     let active = cells.iter().any(|cell| cell.is_active());
-    let mut outcomes = cells
+    let (failed, declined) = cells
         .iter()
         .flat_map(|cell| cell.iter_calls())
-        .filter_map(|call| call.output.as_ref().map(|output| output.outcome));
-    let failed = outcomes
-        .clone()
-        .any(|outcome| matches!(outcome, CommandOutcome::Exited(code) if code != 0));
-    let declined = outcomes.any(|outcome| outcome == CommandOutcome::Declined);
+        .filter_map(|call| call.output.as_ref().map(|output| output.outcome))
+        .fold((false, false), |(failed, declined), outcome| {
+            (
+                failed || matches!(outcome, CommandOutcome::Exited(code) if code != 0),
+                declined || outcome == CommandOutcome::Declined,
+            )
+        });
     let marker = if active {
         activity_indicator(
             cells.iter().find_map(|cell| cell.active_start_time()),

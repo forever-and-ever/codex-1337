@@ -1840,11 +1840,16 @@ async fn plan_update_renders_history_cell() {
             update: update.clone(),
         });
     }
-    let cells = drain_insert_history(&mut rx);
+    let cells = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(cell),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(cells.len(), 2);
     assert_eq!(cells[0].outer_call_id(), Some("plan-call-1"));
     assert_eq!(cells[1].outer_call_id(), Some("plan-call-2"));
-    let blob = lines_to_single_string(cells.last().unwrap());
+    let blob = lines_to_single_string(&cells.last().unwrap().display_lines(80));
     assert!(
         blob.contains("Updated Plan"),
         "missing plan header: {blob:?}"
