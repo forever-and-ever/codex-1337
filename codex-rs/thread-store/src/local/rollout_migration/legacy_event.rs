@@ -124,6 +124,7 @@ pub(super) fn user_message_item(
             .map(|path| UserInput::LocalAudio { path }),
     );
     Ok(TurnItem::UserMessage(UserMessageItem {
+        source_response_item_id: None,
         id: next_item_id()?,
         client_id: event.client_id,
         content,

@@ -150,6 +150,7 @@ async fn review_start_runs_review_turn_and_emits_code_review_item(
     assert_eq!(
         turn.items,
         vec![ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: turn_id.clone(),
             client_id: None,
             content: vec![V2UserInput::Text {
@@ -259,6 +260,7 @@ async fn review_start_exec_approval_item_id_matches_command_execution_item() -> 
         assert_eq!(
             turn.items,
             vec![ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: turn_id.clone(),
                 client_id: None,
                 content: vec![V2UserInput::Text {
@@ -443,6 +445,7 @@ async fn review_start_with_detached_delivery_returns_new_thread_id() -> Result<(
     assert_eq!(
         turn.items,
         vec![ThreadItem::UserMessage {
+source_response_item_id: None,
             id: turn.id.clone(),
             client_id: None,
             content: vec![V2UserInput::Text {

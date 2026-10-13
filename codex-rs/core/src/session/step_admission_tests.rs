@@ -16,6 +16,33 @@ fn apportion_measures_splits_and_releases() {
         admitted.arrivals[0].source,
         codex_protocol::step_admission::ArrivalSource::Captured { blocks: original },
     );
+    // Missing aliases on the nearest actual user cannot be crossed in either direction.
+    let user = |id: Option<&str>| {
+        serde_json::from_value::<ResponseItem>(serde_json::json!({
+            "type": "message", "id": id, "role": "user",
+            "content": [{"type": "input_text", "text": "question"}],
+        }))
+        .unwrap()
+    };
+    let context = || {
+        serde_json::from_value::<ResponseItem>(serde_json::json!({
+            "type": "message", "role": "developer",
+            "content": [{"type": "input_text", "text": "context"}],
+        }))
+        .unwrap()
+    };
+    assert_eq!(
+        arrival_placement(&[context(), user(None), user(Some("farther"))], 0),
+        None
+    );
+    assert_eq!(
+        arrival_placement(&[user(Some("farther")), user(None), context()], 2),
+        None
+    );
+    assert_eq!(
+        arrival_placement(&[user(Some("earlier")), context(), user(None)], 1),
+        None
+    );
     use AdmissionPrecision::Apportioned;
     use AdmissionPrecision::Disturbed;
     use AdmissionPrecision::Exact;

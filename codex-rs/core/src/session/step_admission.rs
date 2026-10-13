@@ -154,6 +154,7 @@ impl ResponseMembers {
 #[derive(Debug)]
 struct Incoming {
     kind: ArrivalKind,
+    source_index: usize,
     source: codex_protocol::step_admission::ArrivalSource,
     label: String,
 }
@@ -290,10 +291,21 @@ impl Session {
             let announced = mark.announced;
             mark.announced = announced.max(arrivals.len());
             let fresh = arrivals.into_iter().enumerate().skip(announced);
-            (mark.item.response_id.clone(), fresh.collect::<Vec<_>>())
+            (
+                mark.item.response_id.clone(),
+                fresh
+                    .map(|(index, incoming)| {
+                        (
+                            index,
+                            arrival_placement(&prompt.input, start + incoming.source_index),
+                            incoming,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
         };
         let announced_at_ms = crate::turn_timing::now_unix_timestamp_ms();
-        for (index, incoming) in arrivals {
+        for (index, placement, incoming) in arrivals {
             if incoming.kind == ArrivalKind::User {
                 continue;
             }
@@ -305,6 +317,7 @@ impl Session {
                 source: incoming.source,
                 label: incoming.label,
                 text: None,
+                placement,
             };
             self.emit_step_item(
                 &step_context.turn,
@@ -330,6 +343,57 @@ impl Session {
     }
 }
 
+/// Human transcript alias only; history preparation remains the owner of model item IDs.
+pub(super) fn user_response_item_id(
+    items: &[codex_history::ResponseItemEnvelope],
+) -> Option<codex_protocol::ResponseItemId> {
+    items.iter().find_map(|envelope| {
+        let ResponseItem::Message {
+            id,
+            internal_chat_message_metadata_passthrough: Some(metadata),
+            ..
+        } = &envelope.item
+        else {
+            return None;
+        };
+        metadata
+            .content_item_kinds
+            .as_ref()
+            .filter(|kinds| {
+                !kinds.is_empty() && kinds.iter().all(|kind| kind.0.starts_with("user."))
+            })
+            .and(id.clone())
+    })
+}
+
+fn arrival_placement(
+    items: &[ResponseItem],
+    prompt_index: usize,
+) -> Option<codex_protocol::step_admission::ArrivalPlacement> {
+    use codex_protocol::step_admission::{ArrivalPlacement, ArrivalSide};
+    let user_id = |item: &ResponseItem| match item {
+        ResponseItem::Message {
+            id, role, content, ..
+        } if role == "user" && !content.iter().all(is_contextual_user_fragment) => Some(id.clone()),
+        _ => None,
+    };
+    if let Some(user_response_item_id) = items[prompt_index + 1..].iter().find_map(user_id) {
+        return user_response_item_id.map(|user_response_item_id| ArrivalPlacement {
+            user_response_item_id,
+            side: ArrivalSide::Before,
+        });
+    }
+    items[..prompt_index]
+        .iter()
+        .rev()
+        .find_map(user_id)
+        .flatten()
+        .map(|user_response_item_id| ArrivalPlacement {
+            user_response_item_id,
+            side: ArrivalSide::After,
+        })
+}
+
 /// One arrival's id, shared by its announcement and its step's seal.
 fn arrival_id(response_id: &str, index: usize) -> String {
     format!("arrival:{response_id}:{index}")
@@ -339,7 +403,7 @@ fn arrival_id(response_id: &str, index: usize) -> String {
 /// response's own items count as its re-sent output.
 fn admit(items: &[ResponseItem]) -> Admitted {
     let mut admitted = Admitted::default();
-    for item in items {
+    for (source_index, item) in items.iter().enumerate() {
         match item {
             ResponseItem::Message { role, .. } if role == "assistant" => {}
             ResponseItem::Message { role, content, .. } => {
@@ -359,6 +423,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                     ArrivalKind::Injection
                 };
                 admitted.arrivals.push(Incoming {
+                    source_index,
                     kind,
                     source: codex_protocol::step_admission::ArrivalSource::Captured { blocks },
                     label,
@@ -367,6 +432,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
             ResponseItem::AgentMessage {
                 author, content, ..
             } => admitted.arrivals.push(Incoming {
+                source_index,
                 kind: ArrivalKind::InterAgent,
                 source: content
                     .iter()
@@ -387,6 +453,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
             }),
             ResponseItem::AdditionalTools { tools, .. } => {
                 admitted.arrivals.push(Incoming {
+                    source_index,
                     kind: ArrivalKind::Injection,
                     label: "Additional tools".to_string(),
                     source: serde_json::to_string(tools)
@@ -397,6 +464,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                 })
             }
             ResponseItem::ConfigurationUpdate { .. } => admitted.arrivals.push(Incoming {
+                source_index,
                 kind: ArrivalKind::Injection,
                 label: "Configuration update".to_string(),
                 source: codex_protocol::step_admission::ArrivalSource::Unavailable,
@@ -405,6 +473,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
             | ResponseItem::NativeCompaction { .. }
             | ResponseItem::ContextCompaction { .. }
             | ResponseItem::CompactionTrigger {} => admitted.arrivals.push(Incoming {
+                source_index,
                 kind: ArrivalKind::Injection,
                 label: "Compaction".to_string(),
                 source: codex_protocol::step_admission::ArrivalSource::Unavailable,

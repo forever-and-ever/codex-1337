@@ -1876,6 +1876,7 @@ async fn assert_thread_fork_freezes_active_paginated_turn_as_interrupted(
             thread_id: source_id,
             turn_id: "active-turn".to_string(),
             item: CoreTurnItem::UserMessage(UserMessageItem {
+                source_response_item_id: None,
                 id: id.to_string(),
                 client_id: None,
                 content: vec![codex_protocol::user_input::UserInput::Text {

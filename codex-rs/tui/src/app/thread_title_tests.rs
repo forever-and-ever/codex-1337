@@ -736,6 +736,7 @@ fn truncates_generated_titles_without_splitting_unicode() {
 
 fn title_user_message(id: &str, text: &str) -> ThreadItem {
     ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: id.to_string(),
         client_id: None,
         content: vec![UserInput::Text {

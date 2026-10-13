@@ -807,6 +807,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         /*config*/ None,
         &|_| crate::multi_agents::AgentMetadata::default(),
     ));
+    assert_prompt_arrival_ordering().await;
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
         app.transcript_cells = thread_items_to_transcript_cells(
@@ -836,6 +837,179 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         }
         app.transcript_cells.splice(0..0, page);
         assert_eq!(describe(&app.transcript_cells), expected, "split={split}");
+    }
+}
+
+async fn assert_prompt_arrival_ordering() {
+    use codex_app_server_protocol::{
+        ArrivalItem, ItemCompletedNotification, ServerNotification, UserInput,
+    };
+    use codex_protocol::ResponseItemId;
+    use codex_protocol::step_admission::{
+        ArrivalKind, ArrivalPlacement, ArrivalSide, ArrivalSource,
+    };
+
+    let (mut app, mut rx, _op_rx) = crate::app::tests::make_test_app_with_channels().await;
+    let thread = ThreadId::new();
+    app.chat_widget
+        .handle_thread_session(crate::app::tests::test_thread_session(
+            thread,
+            app.config.cwd.to_path_buf(),
+        ));
+    while rx.try_recv().is_ok() {}
+    let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+    let drain = |app: &mut App,
+                 rx: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+                 tui: &mut crate::tui::Tui| {
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(tui, cell),
+                AppEvent::BindUserPrompt { identity, .. } => {
+                    app.bind_user_prompt_identity(tui, identity)
+                }
+                _ => {}
+            }
+        }
+    };
+    app.chat_widget
+        .submit_user_message_as_plain_user_turn("one".into());
+    drain(&mut app, &mut rx, &mut tui);
+    let client_id = app
+        .transcript_cells
+        .iter()
+        .find_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::UserHistoryCell>()
+                .and_then(|user| user.prompt_identity.client_id.clone())
+        })
+        .expect("optimistic prompt identity");
+    let user = |name: &str, client_id| ThreadItem::UserMessage {
+        id: format!("ui-{name}"),
+        client_id,
+        source_response_item_id: Some(ResponseItemId::from_server(format!("msg-{name}"))),
+        content: vec![UserInput::Text {
+            text: name.into(),
+            text_elements: Vec::new(),
+        }],
+    };
+    let arrival = |id: &str, anchor: Option<&str>, side: ArrivalSide, response: &str| {
+        ThreadItem::Arrival(ArrivalItem {
+            id: id.into(),
+            response_id: response.into(),
+            announced_at_ms: 0,
+            kind: ArrivalKind::Injection,
+            label: id.into(),
+            text: None,
+            source: ArrivalSource::Captured {
+                blocks: vec![id.into()],
+            },
+            placement: anchor.map(|name| ArrivalPlacement {
+                user_response_item_id: ResponseItemId::from_server(format!("msg-{name}")),
+                side,
+            }),
+        })
+    };
+    // A second prompt is accepted before the first prompt's delayed announcements.
+    // Peer batches need no global clock: keep their persisted source order even if
+    // a history replacement between batches changed all sampled prompt indices.
+    let items = vec![
+        user("one", Some(client_id)),
+        arrival("legacy-between", None, ArrivalSide::After, "old"),
+        user("two", None),
+        arrival("before-one-a", Some("one"), ArrivalSide::Before, "parent"),
+        arrival("before-one-b", Some("one"), ArrivalSide::Before, "parent"),
+        arrival("after-one-a", Some("one"), ArrivalSide::After, "old"),
+        arrival("before-two", Some("two"), ArrivalSide::Before, "old"),
+        arrival("after-one-b", Some("one"), ArrivalSide::After, "new"),
+        arrival("after-two-a", Some("two"), ArrivalSide::After, "new"),
+        arrival("after-two-b", Some("two"), ArrivalSide::After, "new"),
+        arrival("legacy-end", None, ArrivalSide::Before, "new"),
+        arrival("missing-source", Some("absent"), ArrivalSide::Before, "new"),
+    ];
+    let paint = |app: &mut App| {
+        let area = ratatui::layout::Rect::new(0, 0, 90, 4);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        app.transcript_view
+            .render(area, &mut buffer, &app.transcript_cells);
+        buffer
+    };
+    let mut held = None;
+    for (index, item) in items.iter().enumerate() {
+        app.chat_widget.handle_server_notification(
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: thread.to_string(),
+                turn_id: "turn".into(),
+                item: item.clone(),
+                completed_at_ms: 0,
+            }),
+            None,
+        );
+        drain(&mut app, &mut rx, &mut tui);
+        if index == 2 {
+            paint(&mut app);
+            app.transcript_view.jump_to_entry(&app.transcript_cells, 0);
+            held = Some(paint(&mut app));
+        }
+    }
+    assert_eq!(
+        Some(paint(&mut app)),
+        held,
+        "reading snapshot stays stationary during relocation"
+    );
+    app.transcript_view.jump_to_latest();
+    let labels = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
+            .iter()
+            .filter_map(|cell| {
+                if let Some(user) = cell
+                    .as_any()
+                    .downcast_ref::<history_cell::UserHistoryCell>()
+                {
+                    Some(user.message.clone())
+                } else {
+                    cell.as_any()
+                        .downcast_ref::<history_cell::ArrivalCell>()
+                        .map(|arrival| arrival.id().to_string())
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        "before-one-a",
+        "before-one-b",
+        "one",
+        "legacy-between",
+        "after-one-a",
+        "before-two",
+        "after-one-b",
+        "two",
+        "after-two-a",
+        "after-two-b",
+        "legacy-end",
+        "missing-source",
+    ];
+    assert_eq!(labels(&app.transcript_cells), expected);
+    assert_eq!(labels(&project(&app, &items)), expected);
+    let retained = app.transcript_cells.clone();
+    app.reconcile_prompt_order(&mut tui);
+    assert!(
+        retained
+            .iter()
+            .zip(&app.transcript_cells)
+            .all(|(a, b)| Arc::ptr_eq(a, b))
+    );
+    for split in 0..=items.len() {
+        let mut paged = make_test_app().await;
+        paged.transcript_cells = project(&paged, &items[split..]);
+        let mut prefix = project(&paged, &items[..split]);
+        prefix.append(&mut paged.transcript_cells);
+        paged.transcript_cells = prefix;
+        paged.reconcile_prompt_order(&mut tui);
+        assert_eq!(
+            labels(&paged.transcript_cells),
+            expected,
+            "page split {split}"
+        );
     }
 }
 

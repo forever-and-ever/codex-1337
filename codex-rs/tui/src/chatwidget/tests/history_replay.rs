@@ -99,6 +99,7 @@ async fn replayed_failed_turns_preserve_overload_warnings_between_retries() {
     let error_message = "Selected model is at capacity. Please try a different model.";
     let failed_turn = |turn_id: &str, item_id: &str| AppServerTurn {
         items: vec![AppServerThreadItem::UserMessage {
+            source_response_item_id: None,
             id: item_id.to_string(),
             client_id: None,
             content: vec![AppServerUserInput::Text {
@@ -404,6 +405,7 @@ async fn replayed_nested_review_prompts_do_not_render_or_seed_composer_history()
     let review_hint = "current changes";
     let review_prompt = "Review the current code changes (staged, unstaged, and untracked files).";
     let user_message = |id: &str, text: &str| AppServerThreadItem::UserMessage {
+        source_response_item_id: None,
         id: id.to_string(),
         client_id: None,
         content: vec![AppServerUserInput::Text {
@@ -1031,6 +1033,7 @@ async fn prompt_edit_stops_streaming_without_submitting_queued_input() {
                 questions: None,
             },
             AppServerThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "voice-steer".to_string(),
                 client_id: None,
                 content: vec![UserInput::Text {

@@ -92,6 +92,24 @@ pub struct Arrival {
     pub tokens: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub enum ArrivalSide {
+    Before,
+    After,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+/// Human placement relative to the nearest actual user in the sampled prompt.
+/// This is a relation, not a globally comparable sampling index or timestamp.
+pub struct ArrivalPlacement {
+    pub user_response_item_id: crate::ResponseItemId,
+    pub side: ArrivalSide,
+}
+
 /// Context written after a step's results by neither the step nor its model, announced when
 /// the next request reads it. User input is not announced: it has its own item.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS, JsonSchema)]
@@ -112,6 +130,9 @@ pub struct ArrivalItem {
     #[serde(default)]
     #[ts(optional, as = "Option<_>")]
     pub source: ArrivalSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub placement: Option<ArrivalPlacement>,
 }
 
 /// Exact readable text blocks, a client declaration representation, or unavailable evidence.

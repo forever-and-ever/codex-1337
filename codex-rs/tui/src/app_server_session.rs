@@ -3537,6 +3537,7 @@ mod tests {
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: vec![
                         codex_app_server_protocol::ThreadItem::UserMessage {
+                            source_response_item_id: None,
                             id: "user-1".to_string(),
                             client_id: None,
                             content: vec![codex_app_server_protocol::UserInput::Text {

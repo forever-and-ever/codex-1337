@@ -158,6 +158,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     // Cells arrive as the server announces them: each Thought after its response's members.
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
         Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             message: "Fix the failing test".into(),
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),
@@ -168,6 +169,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         Arc::new(exec),
         thought("resp-1"),
         Arc::new(ArrivalCell::new(ArrivalItem {
+            placement: None,
             id: "arrival:resp-1:0".into(),
             response_id: "resp-1".into(),
             announced_at_ms: CLOCK_MS,
@@ -181,6 +183,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         message("msg-2", "Fixed the parser."),
         thought("resp-2"),
         Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             message: "Thanks".into(),
             text_elements: Vec::new(),
             local_image_paths: Vec::new(),

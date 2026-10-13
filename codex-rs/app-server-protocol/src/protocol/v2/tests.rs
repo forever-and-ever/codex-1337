@@ -3124,6 +3124,7 @@ fn network_requirements_serializes_canonical_and_legacy_fields() {
 #[test]
 fn core_turn_item_into_thread_item_converts_supported_variants() {
     let user_item = TurnItem::UserMessage(UserMessageItem {
+        source_response_item_id: None,
         id: "user-1".to_string(),
         client_id: Some("client-message-1".to_string()),
         content: vec![
@@ -3161,6 +3162,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     assert_eq!(
         ThreadItem::from(user_item),
         ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "user-1".to_string(),
             client_id: Some("client-message-1".to_string()),
             content: vec![

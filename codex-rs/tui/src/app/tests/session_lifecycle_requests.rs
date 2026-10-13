@@ -1276,6 +1276,7 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
         .collect::<Result<Vec<_>, _>>()?;
     let user_item = |id: &str, text: &str| {
         TurnItem::UserMessage(UserMessageItem {
+            source_response_item_id: None,
             id: id.to_string(),
             client_id: None,
             content: vec![CoreUserInput::Text {

@@ -50,6 +50,7 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "earlier-user".to_string(),
                 client_id: None,
                 content: vec![AppServerUserInput::Text {

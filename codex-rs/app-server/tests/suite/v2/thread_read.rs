@@ -660,6 +660,7 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
                     thread_id,
                     "turn-1",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "user-1".to_string(),
                         client_id: None,
                         content: vec![
@@ -678,6 +679,7 @@ async fn thread_search_occurrences_reads_paginated_projection() -> Result<()> {
                     thread_id,
                     "turn-1",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "steer-1".to_string(),
                         client_id: None,
                         content: vec![codex_protocol::user_input::UserInput::Text {
@@ -1758,6 +1760,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                     thread_id,
                     "turn-1",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "user-1".to_string(),
                         client_id: None,
                         content: Vec::new(),
@@ -1767,6 +1770,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                     thread_id,
                     "turn-1",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "steer-1".to_string(),
                         client_id: None,
                         content: Vec::new(),
@@ -1790,6 +1794,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                     thread_id,
                     "turn-1",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "steer-1".to_string(),
                         client_id: Some("updated-steer".to_string()),
                         content: Vec::new(),
@@ -1801,6 +1806,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                     thread_id,
                     "turn-2",
                     CoreTurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "user-2".to_string(),
                         client_id: None,
                         content: Vec::new(),
@@ -1822,11 +1828,13 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         root_turn_id: None,
         items: vec![
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user-1".to_string(),
                 client_id: None,
                 content: Vec::new(),
             },
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "steer-1".to_string(),
                 client_id: Some("updated-steer".to_string()),
                 content: Vec::new(),
@@ -1851,6 +1859,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         id: "turn-2".to_string(),
         root_turn_id: None,
         items: vec![ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "user-2".to_string(),
             client_id: None,
             content: Vec::new(),
@@ -2016,6 +2025,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
             root_turn_id: None,
             items: vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "user-1".to_string(),
                     client_id: None,
                     content: Vec::new(),
@@ -2087,6 +2097,7 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         vec![ThreadItemEntry {
             turn_id: "turn-1".to_string(),
             item: ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user-1".to_string(),
                 client_id: None,
                 content: Vec::new(),

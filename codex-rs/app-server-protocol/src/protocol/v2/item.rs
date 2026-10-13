@@ -250,6 +250,9 @@ pub enum ThreadItem {
     UserMessage {
         id: String,
         client_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        source_response_item_id: Option<codex_protocol::ResponseItemId>,
         content: Vec<UserInput>,
     },
     #[serde(rename_all = "camelCase")]
@@ -947,6 +950,7 @@ impl From<CoreTurnItem> for ThreadItem {
             CoreTurnItem::UserMessage(user) => ThreadItem::UserMessage {
                 id: user.id,
                 client_id: user.client_id,
+                source_response_item_id: user.source_response_item_id,
                 content: user.content.into_iter().map(UserInput::from).collect(),
             },
             CoreTurnItem::HookPrompt(hook_prompt) => ThreadItem::HookPrompt {

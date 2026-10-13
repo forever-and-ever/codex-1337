@@ -68,6 +68,7 @@ pub(super) async fn completed_history_app(
         })];
         let items = [
             TurnItem::UserMessage(UserMessageItem {
+                source_response_item_id: None,
                 id: format!("prompt-{index}"),
                 client_id: None,
                 content: vec![CoreUserInput::Text {

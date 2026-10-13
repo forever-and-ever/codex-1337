@@ -294,7 +294,10 @@ impl ChatWidget {
                 ));
             }
             ThreadItem::UserMessage {
-                content, client_id, ..
+                content,
+                client_id,
+                source_response_item_id,
+                ..
             } => {
                 if let Some(replies) = crate::async_question_reply::parse_input(&content) {
                     let ids = replies
@@ -310,6 +313,7 @@ impl ChatWidget {
                     client_id.as_deref(),
                     from_replay,
                     &turn_id,
+                    source_response_item_id.as_ref(),
                 );
             }
             ThreadItem::AgentMessage {

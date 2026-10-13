@@ -1075,6 +1075,7 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
             "# Context from my IDE setup:\n\n## Open tabs:\n- lib.rs: src/lib.rs\n\n## My request for Codex:\n{reply}"
         );
         let item = AppServerThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "answer".into(),
             client_id: None,
             content: vec![UserInput::Text {
@@ -1139,7 +1140,7 @@ async fn distinct_async_question_replies_with_identical_text_both_render() {
             text_elements: Vec::new(),
         }];
         chat.on_committed_user_message(
-            &items, /*client_id*/ None, /*from_replay*/ false, "turn",
+            &items, /*client_id*/ None, /*from_replay*/ false, "turn", None,
         );
     }
     let history = drain_insert_history(&mut rx);

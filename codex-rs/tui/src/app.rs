@@ -255,6 +255,7 @@ mod pets;
 mod platform_actions;
 mod plugin_mentions;
 mod presentation;
+mod prompt_order;
 mod provider_models;
 mod transcript_splice;
 pub(crate) use provider_models::ProviderModelChoice;

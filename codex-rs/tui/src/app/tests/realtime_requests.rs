@@ -58,6 +58,7 @@ fn test_agent_message(id: &str, text: &str) -> ThreadItem {
 
 fn test_user_message(id: &str, text: &str) -> ThreadItem {
     ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: id.into(),
         client_id: None,
         content: vec![UserInput::Text {
@@ -854,6 +855,7 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
     );
     let items = [
         ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "user-item".into(),
             client_id: None,
             content: vec![UserInput::Text {
@@ -933,6 +935,7 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
         .collect(),
     );
     let user_item = |id: &str, text: &str| ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: id.into(),
         client_id: None,
         content: vec![UserInput::Text {

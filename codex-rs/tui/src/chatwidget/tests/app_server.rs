@@ -816,6 +816,7 @@ async fn live_app_server_user_message_item_completed_does_not_duplicate_rendered
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user-1".to_string(),
                 client_id: None,
                 content: vec![AppServerUserInput::Text {
@@ -840,6 +841,7 @@ async fn live_app_server_user_message_omits_unsupported_media() {
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user-1".to_string(),
                 client_id: None,
                 content: vec![

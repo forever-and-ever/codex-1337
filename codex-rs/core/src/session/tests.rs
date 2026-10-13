@@ -1799,6 +1799,7 @@ async fn record_response_item_and_emit_turn_item_emits_hook_prompt_lifecycle() {
 async fn item_completion_without_a_start_uses_completion_timestamp() {
     let (session, turn_context, rx) = make_session_and_context_with_rx().await;
     let item = TurnItem::UserMessage(UserMessageItem {
+        source_response_item_id: None,
         id: "missing-start".to_string(),
         client_id: None,
         content: Vec::new(),

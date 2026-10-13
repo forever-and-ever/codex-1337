@@ -101,6 +101,7 @@ impl UserMessageItem {
         }
         let file_id_details = trim_trailing_default_image_details(file_id_details);
         UserMessageEvent {
+            source_response_item_id: self.source_response_item_id.clone(),
             client_id: self.client_id.clone(),
             message: self.message(),
             images: Some(self.image_urls()),

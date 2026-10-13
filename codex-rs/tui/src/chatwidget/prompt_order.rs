@@ -1,0 +1,42 @@
+use super::{ChatWidget, UserMessageDisplay};
+use crate::app_event::AppEvent;
+use crate::history_cell;
+use crate::prompt_order::UserPromptIdentity;
+
+impl ChatWidget {
+    pub(super) fn on_identified_user_message_display(
+        &mut self,
+        display: UserMessageDisplay,
+        identity: UserPromptIdentity,
+    ) {
+        self.transcript.last_status_copy_targets = None;
+        self.last_rendered_user_message_display = Some(display.clone());
+        self.last_rendered_user_message_client_id = None;
+        if !display.message.trim().is_empty()
+            || !display.text_elements.is_empty()
+            || !display.local_images.is_empty()
+            || !display.remote_image_urls.is_empty()
+        {
+            let mut cell = history_cell::new_user_prompt(
+                display.message,
+                display.text_elements,
+                display.local_images,
+                display.remote_image_urls,
+            );
+            cell.prompt_identity = identity;
+            self.add_to_history(cell);
+        }
+    }
+
+    pub(super) fn bind_user_prompt(&self, identity: UserPromptIdentity) {
+        if identity.client_id.is_some()
+            && identity.source_response_item_id.is_some()
+            && let Some(thread_id) = self.thread_id
+        {
+            self.app_event_tx.send(AppEvent::BindUserPrompt {
+                thread_id,
+                identity,
+            });
+        }
+    }
+}

@@ -283,9 +283,13 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
             },
         ]),
     ).await?;
-    wait_for_event(&forked.thread, |event|
+    let mut fork_items = Vec::new();
+    wait_for_event(&forked.thread, |event| {
+        if let EventMsg::ItemCompleted(event) = event {
+            fork_items.push(event.item.clone());
+        }
         matches!(event, EventMsg::TurnComplete(_))
-    ).await;
+    }).await;
     let fork_requests = mock.requests();
     assert_eq!(fork_requests.len(), 5);
     assert_eq!(fork_requests[4].inputs_of_type("additional_tools"), changed);
@@ -298,6 +302,23 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
         item["content"][0]["text"] == "Side question."
     ).expect("side question");
     assert!(boundary < question);
+    let user_source = fork_items.iter().find_map(|item| match item {
+        codex_protocol::items::TurnItem::UserMessage(user) => user.source_response_item_id.as_ref(),
+        _ => None,
+    }).expect("human receipt links to canonical input");
+    assert_eq!(fork_input[question]["id"].as_str(), Some(user_source.as_str()));
+    let arrivals = fork_items.iter().filter_map(|item| match item {
+        codex_protocol::items::TurnItem::Arrival(arrival) => Some(arrival),
+        _ => None,
+    }).collect::<Vec<_>>();
+    let interruption = arrivals.iter().find(|arrival| match &arrival.source {
+        codex_protocol::step_admission::ArrivalSource::Captured { blocks } =>
+            blocks.iter().any(|block| block.contains("<turn_aborted>")),
+        _ => false,
+    }).expect("fork boundary is announced");
+    let placement = interruption.placement.as_ref().expect("exact prompt anchor");
+    assert_eq!(&placement.user_response_item_id, user_source);
+    assert_eq!(placement.side, codex_protocol::step_admission::ArrivalSide::Before);
     Ok(())
     })
     .await

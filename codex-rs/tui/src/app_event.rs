@@ -1191,6 +1191,10 @@ pub(crate) enum AppEvent {
     FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    BindUserPrompt {
+        thread_id: ThreadId,
+        identity: crate::prompt_order::UserPromptIdentity,
+    },
     CodeModeTranscript {
         thread_id: ThreadId,
         admission: crate::code_mode_transcript::Admission,

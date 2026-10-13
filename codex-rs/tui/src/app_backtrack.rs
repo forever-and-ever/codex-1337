@@ -738,6 +738,7 @@ mod tests {
             root_turn_id: None,
             items: (0..user_messages)
                 .map(|index| ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: format!("user-{index}"),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -973,6 +974,7 @@ mod tests {
         let review_child_turn = Turn {
             items: (0..2)
                 .map(|index| ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: format!("review-prompt-{index}"),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -1022,6 +1024,7 @@ mod tests {
     fn backtrack_revert_before_turn_id_restores_canonical_mention_bindings() {
         let mut selected_turn = turn("turn-2", TurnStatus::Completed, /*user_messages*/ 1);
         selected_turn.items = vec![ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "selected-prompt".to_string(),
             client_id: None,
             content: vec![
@@ -1117,6 +1120,7 @@ mod tests {
         assert!(!has_backtrack_target(&cells));
 
         cells.push(Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             spoken: false,
             message: "hello".to_string(),
             text_elements: Vec::new(),

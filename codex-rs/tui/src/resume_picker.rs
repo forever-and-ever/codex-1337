@@ -6426,6 +6426,7 @@ session_picker_view = "dense"
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![
                     ThreadItem::UserMessage {
+                        source_response_item_id: None,
                         id: String::from("user-1"),
                         client_id: None,
                         content: vec![codex_app_server_protocol::UserInput::Text {

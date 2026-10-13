@@ -424,6 +424,7 @@ use self::transcript::TranscriptState;
 mod turn_lifecycle;
 mod turn_runtime;
 use self::turn_lifecycle::TurnLifecycleState;
+mod prompt_order;
 mod usage;
 mod user_messages;
 mod working_directory;
@@ -1312,7 +1313,12 @@ impl ChatWidget {
         client_id: Option<&str>,
         from_replay: bool,
         turn_id: &str,
+        source_response_item_id: Option<&codex_protocol::ResponseItemId>,
     ) {
+        let identity = crate::prompt_order::UserPromptIdentity {
+            client_id: client_id.map(str::to_string),
+            source_response_item_id: source_response_item_id.cloned(),
+        };
         if let Some(input) = realtime::realtime_delegation_input(items) {
             if !from_replay && self.should_hide_realtime_delegation(turn_id) {
                 return;
@@ -1322,7 +1328,13 @@ impl ChatWidget {
                 text: input,
                 text_elements: Vec::new(),
             }];
-            self.on_committed_user_message(&projected, client_id, from_replay, turn_id);
+            self.on_committed_user_message(
+                &projected,
+                client_id,
+                from_replay,
+                turn_id,
+                source_response_item_id,
+            );
             return;
         }
         let display = Self::user_message_display_from_inputs(items);
@@ -1339,13 +1351,14 @@ impl ChatWidget {
                     mention_bindings: mention_bindings_from_user_inputs(items, &display.message),
                     pending_pastes: Vec::new(),
                 });
-            self.on_user_message_display(display);
+            self.on_identified_user_message_display(display, identity.clone());
             return;
         }
 
         // Servers may omit media from receipts, so prefer the submission identity.
         if client_id.is_some() && self.last_rendered_user_message_client_id.as_deref() == client_id
         {
+            self.bind_user_prompt(identity);
             return;
         }
 
@@ -1363,7 +1376,7 @@ impl ChatWidget {
                 self.refresh_pending_input_preview();
                 let pending_display =
                     user_message_display_for_history(pending.user_message, &pending.history_record);
-                self.on_user_message_display(pending_display);
+                self.on_identified_user_message_display(pending_display, identity.clone());
                 // Later receipts carry the wire media, which may differ from the local attachment.
                 self.last_rendered_user_message_display = Some(display);
                 self.last_rendered_user_message_client_id = Some(pending.client_id);
@@ -1371,13 +1384,14 @@ impl ChatWidget {
                 tracing::warn!(
                     "pending steer matched receipt but queue was empty when rendering committed user message"
                 );
-                self.on_user_message_display(display);
+                self.on_identified_user_message_display(display, identity.clone());
             }
         } else if !self.review.is_review_mode
             && self.last_rendered_user_message_display.as_ref() != Some(&display)
         {
-            self.on_user_message_display(display);
+            self.on_identified_user_message_display(display, identity.clone());
         }
+        self.bind_user_prompt(identity);
         if let Some(client_id) = client_id
             && self.input_queue.queued_user_messages.iter().any(|message| {
                 matches!(&message.delivery, MessageDelivery::Unconfirmed(Some(id)) if id == client_id)
@@ -1389,21 +1403,7 @@ impl ChatWidget {
     }
 
     fn on_user_message_display(&mut self, display: UserMessageDisplay) {
-        self.transcript.last_status_copy_targets = None;
-        self.last_rendered_user_message_display = Some(display.clone());
-        self.last_rendered_user_message_client_id = None;
-        if !display.message.trim().is_empty()
-            || !display.text_elements.is_empty()
-            || !display.local_images.is_empty()
-            || !display.remote_image_urls.is_empty()
-        {
-            self.add_to_history(history_cell::new_user_prompt(
-                display.message,
-                display.text_elements,
-                display.local_images,
-                display.remote_image_urls,
-            ));
-        }
+        self.on_identified_user_message_display(display, Default::default());
     }
 
     /// Exit the UI immediately without waiting for shutdown.

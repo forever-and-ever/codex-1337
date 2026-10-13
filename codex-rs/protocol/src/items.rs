@@ -92,6 +92,10 @@ pub struct UserMessageItem {
     #[ts(optional)]
     pub client_id: Option<String>,
     pub content: Vec<UserInput>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    /// Canonical prompt source alias for human chronology, not a model-input field.
+    pub source_response_item_id: Option<crate::ResponseItemId>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema)]
@@ -558,6 +562,7 @@ impl UserMessageItem {
         Self {
             id: new_item_id(),
             client_id: None,
+            source_response_item_id: None,
             content: content.to_vec(),
         }
     }

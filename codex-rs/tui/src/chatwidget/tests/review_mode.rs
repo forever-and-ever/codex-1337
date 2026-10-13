@@ -183,6 +183,7 @@ async fn live_app_server_review_prompt_item_is_not_rendered() {
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "review-prompt".to_string(),
                 client_id: None,
                 content: vec![AppServerUserInput::Text {
@@ -469,6 +470,7 @@ async fn identical_steer_receipts_only_acknowledge_the_matching_submission() {
     ] {
         chat.handle_thread_item(
             AppServerThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: client_id.to_string(),
                 client_id: Some(client_id.to_string()),
                 content: vec![UserInput::Text {

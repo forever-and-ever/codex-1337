@@ -339,6 +339,7 @@ fn append_thread_items(
         }
     }
     flush_computer(&mut pending, cells);
+    crate::prompt_order::normalize(cells);
 }
 
 /// Project one item without changing the active widget or its turn lifecycle.
@@ -364,6 +365,7 @@ fn item_to_cells(
         ThreadItem::UserMessage {
             id,
             client_id,
+            source_response_item_id,
             content,
         } => {
             if content.iter().any(|input| {
@@ -379,7 +381,8 @@ fn item_to_cells(
             }
             let item = UserMessageItem {
                 id,
-                client_id,
+                client_id: client_id.clone(),
+                source_response_item_id: source_response_item_id.clone(),
                 content: content
                     .into_iter()
                     .map(codex_app_server_protocol::UserInput::into_core)
@@ -394,6 +397,10 @@ fn item_to_cells(
             };
             cells.push(Arc::new(UserHistoryCell {
                 spoken: false,
+                prompt_identity: crate::prompt_order::UserPromptIdentity {
+                    client_id,
+                    source_response_item_id,
+                },
                 message: reply_text.unwrap_or(message),
                 text_elements,
                 local_image_paths: item.local_image_paths(),
