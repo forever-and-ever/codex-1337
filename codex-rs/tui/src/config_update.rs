@@ -202,6 +202,21 @@ pub(crate) async fn read_remote_project_trust(
     cwd: &Path,
     host: ProjectTrustHost,
 ) -> Result<Option<RemoteProjectTrust>> {
+    read_remote_project_trust_with_policy(
+        crate::app_server_session::session_preparation::RequestPolicy::Unbounded,
+        request_handle,
+        cwd,
+        host,
+    )
+    .await
+}
+
+pub(crate) async fn read_remote_project_trust_with_policy(
+    policy: crate::app_server_session::session_preparation::RequestPolicy,
+    request_handle: AppServerRequestHandle,
+    cwd: &Path,
+    host: ProjectTrustHost,
+) -> Result<Option<RemoteProjectTrust>> {
     let cwd_string = cwd
         .to_str()
         .ok_or_else(|| {
@@ -212,13 +227,17 @@ pub(crate) async fn read_remote_project_trust(
         Some(cwd) => cwd,
         None => {
             let request_id = RequestId::String(format!("tui-environment-info-{}", Uuid::new_v4()));
-            let environment: EnvironmentInfoResponse = request_handle
-                .request_typed(ClientRequest::EnvironmentInfo {
-                    request_id,
-                    params: EnvironmentInfoParams {
-                        environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
+            let environment: EnvironmentInfoResponse =
+                crate::app_server_session::session_preparation::request(
+                    policy,
+                    &request_handle,
+                    ClientRequest::EnvironmentInfo {
+                        request_id,
+                        params: EnvironmentInfoParams {
+                            environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
+                        },
                     },
-                })
+                )
                 .await
                 .wrap_err("environment/info failed while resolving remote project trust")?;
             environment
@@ -231,16 +250,19 @@ pub(crate) async fn read_remote_project_trust(
     let cwd_uri = cwd;
     let cwd = cwd_uri.inferred_native_path_string();
     let request_id = RequestId::String(format!("tui-project-trust-read-{}", Uuid::new_v4()));
-    let response: JsonValue = request_handle
-        .request_typed(ClientRequest::ConfigRead {
+    let response: JsonValue = crate::app_server_session::session_preparation::request(
+        policy,
+        &request_handle,
+        ClientRequest::ConfigRead {
             request_id,
             params: ConfigReadParams {
                 include_layers: true,
                 cwd: Some(cwd.clone()),
             },
-        })
-        .await
-        .wrap_err("config/read failed while checking remote project trust")?;
+        },
+    )
+    .await
+    .wrap_err("config/read failed while checking remote project trust")?;
     let project_layers = response
         .get("layers")
         .and_then(JsonValue::as_array)

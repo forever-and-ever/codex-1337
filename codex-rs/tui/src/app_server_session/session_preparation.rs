@@ -105,7 +105,7 @@ pub(crate) enum RequestPolicy {
     Interactive,
 }
 
-pub(in crate::app_server_session) async fn request<T: serde::de::DeserializeOwned>(
+pub(crate) async fn request<T: serde::de::DeserializeOwned>(
     policy: RequestPolicy,
     handle: &codex_app_server_client::AppServerRequestHandle,
     request: ClientRequest,

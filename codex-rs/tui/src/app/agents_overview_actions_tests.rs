@@ -668,7 +668,7 @@ async fn hidden_task_stays_hidden_through_activity_and_seed_until_explicit_resum
         Vec::<ThreadId>::new()
     );
     assert_eq!(app.primary_thread_id, Some(id));
-    app.resume_target_session(
+    app.resume_target_session_and_settle(
         &mut tui,
         &mut app_server,
         SessionTarget {

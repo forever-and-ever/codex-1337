@@ -220,7 +220,7 @@ async fn same_thread_retry_keeps_subscription_and_restores_draft() -> Result<()>
     app.harness_overrides.cwd = Some(app.config.cwd.to_path_buf());
     requests.lock().expect("request recorder lock").clear();
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.resume_target_session(
+    app.resume_target_session_and_settle(
         &mut tui,
         &mut app_server,
         crate::resume_picker::SessionTarget {
@@ -3274,7 +3274,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 app.harness_overrides.cwd = Some(app.config.cwd.to_path_buf());
 
                 let control = app
-                    .resume_target_session(
+                    .resume_target_session_and_settle(
                         &mut tui,
                         &mut app_server,
                         crate::resume_picker::SessionTarget {

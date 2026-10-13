@@ -110,7 +110,7 @@ sandbox = "unelevated"
         .await?;
     tui.pause_events();
     app.launch_cwd = source.path().to_path_buf();
-    app.resume_target_session(
+    app.resume_target_session_and_settle(
         &mut tui,
         &mut server,
         SessionTarget {

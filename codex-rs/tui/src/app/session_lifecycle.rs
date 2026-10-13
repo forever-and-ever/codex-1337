@@ -819,167 +819,30 @@ impl App {
         }
         if self.windows_sandbox_blocks_thread_switch() {
             self.chat_widget.add_info_message(
-                "Finish Windows sandbox setup before switching threads.".to_string(),
-                /*hint*/ None,
+                "Finish Windows sandbox setup before switching threads.".into(),
+                None,
             );
             return Ok(AppRunControl::Continue);
         }
-
         if self.reject_pending_permission_root_switch() {
             return Ok(AppRunControl::Continue);
         }
-        let (mut resume_config, local_settings) = match self
-            .resume_config_for_target(tui, app_server, &target_session)
-            .await
-        {
-            Ok(config) => config,
-            Err(control) => return Ok(control),
-        };
-        if let Err(error) = self.apply_runtime_policy_overrides(
-            &mut resume_config,
-            RuntimePolicyOverrideScope::ExplicitOnly,
-        ) {
-            self.add_session_picker_error(format!("{error:#}"));
-            return Ok(AppRunControl::Continue);
-        }
-        let permission_overrides = self.resume_permission_overrides(&resume_config);
-
-        if let Some(history_mode) = target_session.history_mode {
-            app_server.remember_thread_history_mode(target_session.thread_id, history_mode);
-        }
-        let resumed = app_server
-            .resume_thread_with_permission_overrides(
-                &local_settings,
-                resume_config.clone(),
-                target_session.thread_id,
-                self.resume_model_settings(),
-                permission_overrides,
-            )
-            .await;
-        let mut history_notice = None;
-        let (resumed, read_only) = match resumed {
-            Ok(resumed) => (resumed, false),
-            Err(err) if crate::app_server_session::is_active_writer_error(&err) => match app_server
-                .read_thread_for_viewing(&resume_config, &local_settings, target_session.thread_id)
-                .await
-            {
-                Ok((thread, notice)) => {
-                    history_notice = notice;
-                    (thread, true)
-                }
-                Err(read_err) => {
-                    self.add_session_picker_error(format!(
-                        "Failed to view thread open elsewhere: {read_err:#}"
-                    ));
-                    return Ok(AppRunControl::Continue);
-                }
-            },
-            Err(err) => {
-                let path_display = target_session.display_label();
-                self.add_session_picker_error(format!(
-                    "Failed to resume session from {path_display}: {err:#}"
-                ));
-                return Ok(AppRunControl::Continue);
-            }
-        };
-        let resumed_thread_id = resumed.session.thread_id;
-        let resumed_turn_running = resumed
-            .turns
-            .last()
-            .is_some_and(|turn| turn.status == TurnStatus::InProgress);
-        let retained_input = ((self.chat_widget.is_external_writer_view()
-            || self.thread_unavailable(resumed_thread_id))
-            && self.chat_widget.thread_id() == Some(resumed_thread_id))
-        .then(|| self.chat_widget.capture_thread_input_state())
-        .flatten();
-        self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))
-            .await;
-        self.local_settings = local_settings;
-        self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
-        self.config = resume_config;
-        tui.set_notification_settings(&self.local_settings.tui.notification_settings);
-        self.file_search
-            .update_search_dir(self.config.cwd.to_path_buf());
-        match self
-            .replace_chat_widget_with_app_server_thread(
-                tui,
-                resumed,
-                ThreadAttachPresentation::SessionLineage,
-                /*initial_user_message*/ None,
-            )
-            .await
-        {
-            Ok(()) => {
-                if !read_only
-                    && self
-                        .runtime_permission_profile_override
-                        .as_ref()
-                        .is_some_and(|profile| {
-                            profile.turn_override
-                                == RuntimePermissionProfileTurnOverride::LegacySandbox
-                                && profile.matches_config(self.chat_widget.config_ref())
-                        })
-                {
-                    self.runtime_permission_profile_override =
-                        Some(RuntimePermissionProfileOverride::from_restored_config(
-                            self.chat_widget.config_ref(),
-                        ));
-                }
-                if let Some(mut input) = retained_input {
-                    input.agent_turn_running = resumed_turn_running;
-                    input.task_running = resumed_turn_running;
-                    self.chat_widget.restore_thread_input_state(
-                        Some(input),
-                        ThreadInputStateRestoreMode {
-                            preserve_in_flight_turn: resumed_turn_running && !read_only,
-                        },
-                    );
-                }
-                if read_only {
-                    self.ensure_thread_channel(resumed_thread_id)
-                        .mark_external_writer();
-                    self.chat_widget.show_external_writer_thread();
-                    if let Some(notice) = history_notice {
-                        self.chat_widget
-                            .add_info_message(notice.to_string(), /*hint*/ None);
-                    }
-                }
-                self.backfill_loaded_subagent_threads(app_server).await;
-                if matches!(
-                    self.runtime_approval_policy_override,
-                    Some(RuntimeApprovalPolicyOverride::Restored(_))
-                ) {
-                    self.runtime_approval_policy_override = None;
-                }
-                if self
-                    .runtime_permission_profile_override
-                    .as_ref()
-                    .is_some_and(|profile| {
-                        profile.turn_override == RuntimePermissionProfileTurnOverride::Preserve
-                    })
-                {
-                    self.runtime_permission_profile_override = None;
-                }
-                if !read_only {
-                    self.replay_agents_overview_requests(app_server, resumed_thread_id)
-                        .await;
-                }
-                if !read_only {
-                    self.maybe_prompt_resume_paused_goal_after_resume(
-                        app_server,
-                        resumed_thread_id,
-                    )
-                    .await;
-                }
-            }
-            Err(err) => {
-                self.add_session_picker_error(format!(
-                    "Failed to attach to resumed app-server thread: {err}"
-                ));
-            }
-        }
-
+        self.enqueue_session_resume(app_server, target_session);
         Ok(AppRunControl::Continue)
+    }
+
+    #[cfg(test)]
+    pub(super) async fn resume_target_session_and_settle(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        target: SessionTarget,
+    ) -> Result<AppRunControl> {
+        let control = self.resume_target_session(tui, server, target).await?;
+        if matches!(control, AppRunControl::Continue) {
+            self.settle_navigation(tui, server).await?;
+        }
+        Ok(control)
     }
 }
 

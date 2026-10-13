@@ -3713,7 +3713,7 @@ async fn remote_resume_rejects_explicit_permission_override() -> Result<()> {
         &app.harness_overrides
     ));
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    app.resume_target_session(
+    app.resume_target_session_and_settle(
         &mut tui,
         &mut server,
         SessionTarget {
@@ -8257,7 +8257,7 @@ async fn remote_resume_current_cwd_rejection_snapshot() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
     let control = app
-        .resume_target_session(
+        .resume_target_session_and_settle(
             &mut tui,
             &mut app_server,
             crate::resume_picker::SessionTarget {
@@ -8301,7 +8301,7 @@ async fn remote_exec_resume_current_cwd_is_rejected() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
     let control = app
-        .resume_target_session(
+        .resume_target_session_and_settle(
             &mut tui,
             &mut app_server,
             crate::resume_picker::SessionTarget {
@@ -8340,7 +8340,7 @@ async fn in_app_resume_session_cwd_without_metadata_is_non_fatal() -> Result<()>
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
     let control = app
-        .resume_target_session(
+        .resume_target_session_and_settle(
             &mut tui,
             &mut app_server,
             crate::resume_picker::SessionTarget {
@@ -8419,7 +8419,7 @@ async fn remote_resume_keeps_server_only_cwd_out_of_local_config() -> Result<()>
         RuntimePermissionProfileOverride::from_restored_config(&prior_config),
     );
 
-    let control = Box::pin(app.resume_target_session(
+    let control = Box::pin(app.resume_target_session_and_settle(
         &mut tui,
         &mut app_server,
         crate::resume_picker::SessionTarget {
@@ -8577,7 +8577,7 @@ async fn in_app_resume_uses_configured_or_explicit_cwd() -> Result<()> {
         let mut tui = crate::tui::test_support::make_test_tui()?;
 
         let control = app
-            .resume_target_session(
+            .resume_target_session_and_settle(
                 &mut tui,
                 app_server,
                 crate::resume_picker::SessionTarget {
@@ -8720,8 +8720,12 @@ async fn remembered_current_cwd_stays_at_launch_across_in_app_resumes() -> Resul
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
     for target_session in targets {
-        let control =
-            Box::pin(app.resume_target_session(&mut tui, &mut app_server, target_session)).await?;
+        let control = Box::pin(app.resume_target_session_and_settle(
+            &mut tui,
+            &mut app_server,
+            target_session,
+        ))
+        .await?;
 
         assert!(matches!(control, AppRunControl::Continue));
         assert!(!crate::session_resume::cwds_differ(

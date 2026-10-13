@@ -8,7 +8,9 @@ use super::Step;
 use super::run_onboarding_screen;
 use crate::AppServerTarget;
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::session_preparation::{RequestPolicy, read_thread};
 use crate::config_update::ProjectTrustHost;
+use crate::config_update::RemoteProjectTrust;
 use crate::config_update::read_remote_project_trust;
 use crate::legacy_core::config::Config;
 use crate::onboarding::trust_directory::TrustCancelAction;
@@ -16,16 +18,14 @@ use crate::onboarding::trust_directory::TrustDirectorySelection;
 use crate::onboarding::trust_directory::TrustDirectoryWidget;
 use crate::startup_draft::StartupDraftPump;
 use crate::tui::Tui;
-use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::RequestId;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::Thread;
-use codex_app_server_protocol::ThreadReadParams;
-use codex_app_server_protocol::ThreadReadResponse;
+use codex_protocol::ThreadId;
 use codex_protocol::config_types::TrustLevel;
 use color_eyre::eyre::Result;
 use std::collections::VecDeque;
 use std::path::Path;
-use uuid::Uuid;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct DirectoryTrustOptions<'a> {
@@ -33,76 +33,100 @@ pub(crate) struct DirectoryTrustOptions<'a> {
     pub cancel: Option<TrustCancelAction>,
 }
 
-pub(crate) async fn check_directory_trust(
-    tui: &mut Tui,
-    app_server: &AppServerSession,
-    config: &Config,
-    target: &AppServerTarget,
-    cwd: &Path,
-    options: DirectoryTrustOptions<'_>,
-    mut startup_draft: Option<&mut StartupDraftPump>,
-) -> Result<OnboardingResult> {
-    let DirectoryTrustOptions {
-        resumed_thread,
-        cancel,
-    } = options;
-    let connected = !matches!(target, AppServerTarget::Embedded);
-    let mut consent = OnboardingResult::default();
-    // Another client can load the saved task while consent is pending. Check both folders.
-    let saved_cwd = resumed_thread
-        .filter(|thread| {
-            matches!(target, AppServerTarget::LocalDaemon { .. }) && thread.cwd.as_path() != cwd
-        })
-        .map(|thread| thread.cwd.as_path());
-    let mut pending_cwds: VecDeque<_> = std::iter::once(cwd)
-        .chain(saved_cwd)
-        .map(Path::to_path_buf)
-        .collect();
-    let mut checked_cwds = Vec::new();
-    while let Some(cwd) = pending_cwds.pop_front() {
-        if checked_cwds.contains(&cwd) {
-            continue;
-        }
-        checked_cwds.push(cwd.clone());
-        let cwd = cwd.as_path();
-        let host = if !target.uses_remote_workspace() {
-            ProjectTrustHost::Local
-        } else {
-            ProjectTrustHost::Remote
-        };
-        let lookup = read_remote_project_trust(app_server.request_handle(), cwd, host);
-        let project = if let Some(draft) = startup_draft.as_deref_mut() {
-            draft.run_until(tui, lookup).await??
-        } else {
-            lookup.await?
-        };
+pub(crate) struct DirectoryTrustPreparation {
+    target: AppServerTarget,
+    resumed_thread: Option<ThreadId>,
+    cancel: Option<TrustCancelAction>,
+    active_untrusted: bool,
+    pending_cwds: VecDeque<PathBuf>,
+    checked_cwds: Vec<PathBuf>,
+    consent: OnboardingResult,
+}
 
-        let Some(project) = project else {
-            continue;
-        };
-        // Remote connections retain the existing behavior for saved untrusted folders.
-        if target.uses_remote_workspace() && project.trust_level == Some(TrustLevel::Untrusted) {
-            continue;
+impl DirectoryTrustPreparation {
+    pub(crate) fn new(
+        config: &Config,
+        target: &AppServerTarget,
+        cwd: &Path,
+        options: DirectoryTrustOptions<'_>,
+    ) -> Result<Self> {
+        let saved_cwd = options
+            .resumed_thread
+            .filter(|thread| {
+                matches!(target, AppServerTarget::LocalDaemon { .. }) && thread.cwd.as_path() != cwd
+            })
+            .map(|thread| thread.cwd.to_path_buf());
+        Ok(Self {
+            target: target.clone(),
+            resumed_thread: options
+                .resumed_thread
+                .map(|thread| ThreadId::from_string(&thread.id))
+                .transpose()?,
+            cancel: options.cancel,
+            active_untrusted: config.active_project.is_untrusted(),
+            pending_cwds: std::iter::once(cwd.to_path_buf())
+                .chain(saved_cwd)
+                .collect(),
+            checked_cwds: Vec::new(),
+            consent: OnboardingResult::default(),
+        })
+    }
+
+    pub(crate) fn next_cwd(&mut self) -> Option<PathBuf> {
+        while let Some(cwd) = self.pending_cwds.pop_front() {
+            if !self.checked_cwds.contains(&cwd) {
+                self.checked_cwds.push(cwd.clone());
+                return Some(cwd);
+            }
         }
-        if cancel == Some(TrustCancelAction::CurrentTask)
+        None
+    }
+
+    pub(crate) fn host(&self) -> ProjectTrustHost {
+        if self.target.uses_remote_workspace() {
+            ProjectTrustHost::Remote
+        } else {
+            ProjectTrustHost::Local
+        }
+    }
+
+    pub(crate) fn accept_project(
+        &self,
+        project: Option<RemoteProjectTrust>,
+    ) -> Result<Option<RemoteProjectTrust>> {
+        let Some(project) = project else {
+            return Ok(None);
+        };
+        if self.target.uses_remote_workspace() && project.trust_level == Some(TrustLevel::Untrusted)
+        {
+            return Ok(None);
+        }
+        if self.cancel == Some(TrustCancelAction::CurrentTask)
             && project.trust_level == Some(TrustLevel::Untrusted)
-            && !config.active_project.is_untrusted()
+            && !self.active_untrusted
         {
             color_eyre::eyre::bail!(
                 "Folder trust changed. Reopen the destination with its restricted settings."
             );
         }
+        Ok(Some(project))
+    }
+
+    pub(crate) async fn prompt(
+        &self,
+        tui: &mut Tui,
+        handle: AppServerRequestHandle,
+        project: RemoteProjectTrust,
+    ) -> Result<OnboardingResult> {
+        let connected = !matches!(self.target, AppServerTarget::Embedded);
         let remote_trust_key =
             connected.then(|| project.trust_target.to_string_lossy().into_owned());
-        if let Some(draft) = startup_draft.as_deref_mut() {
-            draft.flush_pending_events(tui).await?;
-        }
         let screen = OnboardingScreen {
             request_frame: tui.frame_requester(),
             steps: vec![Step::TrustDirectory(TrustDirectoryWidget {
                 restricted: project.trust_level == Some(TrustLevel::Untrusted),
-                existing_task: connected && resumed_thread.is_some(),
-                cancel: cancel.unwrap_or(if connected {
+                existing_task: connected && self.resumed_thread.is_some(),
+                cancel: self.cancel.unwrap_or(if connected {
                     TrustCancelAction::AgentsOverview
                 } else {
                     TrustCancelAction::Quit
@@ -119,38 +143,75 @@ pub(crate) async fn check_directory_trust(
             is_done: false,
             should_exit: false,
         };
-        let result = run_onboarding_screen(
-            screen,
-            Some(app_server.request_handle()),
-            /*app_server*/ None,
-            tui,
-        )
-        .await?;
+        let result = run_onboarding_screen(screen, Some(handle), None, tui).await?;
         tui.terminal.clear()?;
         tui.frame_requester().schedule_frame();
+        Ok(result)
+    }
+
+    pub(crate) fn note_consent(&mut self, result: OnboardingResult) -> Option<OnboardingResult> {
         if result.should_exit {
+            return Some(result);
+        }
+        self.consent.directory_trust_persisted |= result.directory_trust_persisted;
+        None
+    }
+
+    pub(crate) fn recheck_thread(&self) -> Option<ThreadId> {
+        matches!(self.target, AppServerTarget::LocalDaemon { .. })
+            .then_some(self.resumed_thread)
+            .flatten()
+    }
+
+    pub(crate) fn note_latest_cwd(&mut self, cwd: PathBuf) {
+        self.pending_cwds.push_back(cwd);
+    }
+
+    pub(crate) fn finish(self) -> OnboardingResult {
+        self.consent
+    }
+}
+
+pub(crate) async fn check_directory_trust(
+    tui: &mut Tui,
+    app_server: &AppServerSession,
+    config: &Config,
+    target: &AppServerTarget,
+    cwd: &Path,
+    options: DirectoryTrustOptions<'_>,
+    mut startup_draft: Option<&mut StartupDraftPump>,
+) -> Result<OnboardingResult> {
+    let mut preparation = DirectoryTrustPreparation::new(config, target, cwd, options)?;
+    while let Some(cwd) = preparation.next_cwd() {
+        let lookup =
+            read_remote_project_trust(app_server.request_handle(), &cwd, preparation.host());
+        let project = if let Some(draft) = startup_draft.as_deref_mut() {
+            draft.run_until(tui, lookup).await??
+        } else {
+            lookup.await?
+        };
+        let Some(project) = preparation.accept_project(project)? else {
+            continue;
+        };
+        if let Some(draft) = startup_draft.as_deref_mut() {
+            draft.flush_pending_events(tui).await?;
+        }
+        let result = preparation
+            .prompt(tui, app_server.request_handle(), project)
+            .await?;
+        if let Some(result) = preparation.note_consent(result) {
             return Ok(result);
         }
-        consent.directory_trust_persisted |= result.directory_trust_persisted;
-        if matches!(target, AppServerTarget::LocalDaemon { .. })
-            && let Some(thread) = resumed_thread
-        {
-            // Another client may have reopened this task in a different folder during consent.
-            let request_handle = app_server.request_handle();
-            let recheck = request_handle.request_typed(ClientRequest::ThreadRead {
-                request_id: RequestId::String(format!("tui-trust-recheck-{}", Uuid::new_v4())),
-                params: ThreadReadParams {
-                    thread_id: thread.id.clone(),
-                    include_turns: false,
-                },
-            });
-            let latest: ThreadReadResponse = if let Some(draft) = startup_draft.as_deref_mut() {
+        if let Some(thread_id) = preparation.recheck_thread() {
+            let handle = app_server.request_handle();
+            let recheck = read_thread(RequestPolicy::Unbounded, &handle, thread_id);
+            let latest = if let Some(draft) = startup_draft.as_deref_mut() {
                 draft.run_until(tui, recheck).await??
             } else {
                 recheck.await?
             };
-            pending_cwds.push_back(latest.thread.cwd.to_path_buf());
+            preparation.note_latest_cwd(latest.cwd.to_path_buf());
         }
     }
-    Ok(consent)
+    Ok(preparation.finish())
 }

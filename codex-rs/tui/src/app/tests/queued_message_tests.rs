@@ -728,6 +728,58 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // A real resource-producing resume is retained after cancellation. The same target
     // cannot reacquire, but an unrelated target must still dispatch its liveness read.
     // Admission order intentionally exceeds epoch: these are different coordinates.
+    // Resume owns trust metadata before acquisition; a withheld lookup must leave the
+    // old conversation/draft usable, and cancellation must not dispatch a resume.
+    let config_reads_before_resume = recorded_params(&requests, "config/read").len();
+    let resume_cwd_override = app
+        .harness_overrides
+        .cwd
+        .replace(app.config.cwd.to_path_buf());
+    let resume_draft = recovered_message(&mut app);
+    app.resume_target_session(
+        &mut tui,
+        &mut server,
+        crate::resume_picker::SessionTarget {
+            path: None,
+            thread_id,
+            cwd: Some(app.config.cwd.to_path_buf()),
+            history_mode: None,
+        },
+    )
+    .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "config/read").len() == config_reads_before_resume {
+            tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(&mut tui, &mut server, completion.expect("owned resume metadata receipt")).await?;
+                }
+                _ = tokio::task::yield_now() => {}
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
+    assert_eq!(app.current_displayed_thread_id(), visible_before);
+    assert_eq!(recovered_message(&mut app), resume_draft);
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    let pending = match app.server_operations.preview(visible_before).navigation {
+        Some(crate::bottom_pane::NavigationPreview::Preparing { id }) => id,
+        preview => panic!("expected owned resume metadata: {preview:?}"),
+    };
+    app.handle_submission_event(
+        &server,
+        super::super::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+    )
+    .await;
+    app.harness_overrides.cwd = resume_cwd_override;
+    assert!(app.server_operations.is_empty());
+    assert!(recorded_params(&requests, "thread/resume").is_empty());
+
     let acquisition_x = server.start_thread(&app.config).await?.session.thread_id;
     let acquisition_y = server.start_thread(&app.config).await?.session.thread_id;
     let resumes_for = |id: ThreadId| {

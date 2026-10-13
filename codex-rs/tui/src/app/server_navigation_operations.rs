@@ -10,6 +10,8 @@ mod cleanup;
 mod discovery;
 #[path = "server_fresh_navigation.rs"]
 mod fresh;
+#[path = "server_resume_navigation.rs"]
+mod resume;
 #[path = "server_thread_selection.rs"]
 mod selection;
 use cleanup::CleanupContinuation;
@@ -48,6 +50,7 @@ enum NavigationIntent {
         next: CleanupContinuation,
     },
     Uncertain(Vec<ThreadId>),
+    Resume(resume::ResumeStage),
 }
 
 struct PickerPreparation {
@@ -75,6 +78,7 @@ enum NavigationReceipt {
     Selected(selection::SelectionReceipt),
     Fresh(fresh::FreshReceipt),
     Cleaned(Result<(), String>),
+    Resumed(resume::ResumeReceipt),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -111,6 +115,7 @@ impl NavigationOwner {
                 && match &operation.intent {
                     NavigationIntent::Select(stage) => stage.thread_id() == thread_id,
                     NavigationIntent::Fresh(stage) => stage.fences_thread(thread_id),
+                    NavigationIntent::Resume(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Cleanup {
                         thread_id: target,
                         fences,
@@ -155,6 +160,7 @@ impl NavigationOwner {
         if let Some(operation) = self.current.take()
             && !matches!(operation.state, LaneState::Queued)
             && !matches!(&operation.intent, NavigationIntent::Fresh(stage) if stage.is_read_only())
+            && !matches!(&operation.intent, NavigationIntent::Resume(stage) if stage.is_read_only())
             && !matches!(
                 operation.intent,
                 NavigationIntent::Discover(_)
@@ -322,6 +328,7 @@ impl App {
         };
         let thread_target = match &operation.intent {
             NavigationIntent::Select(stage) => Some(stage.thread_id()),
+            NavigationIntent::Resume(stage) => Some(stage.thread_id()),
             _ => None,
         };
         let thread_blocked = thread_target.is_some_and(|thread_id| {
@@ -339,6 +346,11 @@ impl App {
         {
             let thread_id = *thread_id;
             self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        if matches!(operation.intent, NavigationIntent::Resume(_)) {
+            self.dispatch_session_resume(server, &mut operation);
             self.server_operations.navigation.current = Some(operation);
             return;
         }
@@ -434,6 +446,10 @@ impl App {
                 !matches!(completion.receipt, NavigationReceipt::Cleaned(_)),
                 "subscription cleanup lost its owner"
             );
+            assert!(
+                !matches!(&completion.receipt, NavigationReceipt::Resumed(receipt) if receipt.requires_owner()),
+                "resume acquisition lost its owner"
+            );
             // Only canceled read-only work can finish without a retained owner.
             assert!(
                 !matches!(&completion.receipt, NavigationReceipt::Fresh(receipt) if receipt.requires_owner()),
@@ -461,6 +477,14 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Resumed(receipt) => {
+                let control = self
+                    .finish_resume_navigation(tui, server, operation, matching, receipt)
+                    .await?;
+                self.drive_server_operations(server);
+                self.refresh_submission_preview();
+                return Ok(control);
+            }
             NavigationReceipt::Cleaned(result) => {
                 self.finish_navigation_cleanup(server, operation, matching, result)
             }

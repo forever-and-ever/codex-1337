@@ -2222,7 +2222,7 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
     // The picker must also abort when a session-only choice violates destination policy.
     std::fs::write(&requirements, "allowed_approval_policies = [\"never\"]\n")?;
     app.harness_overrides.approval_policy = Some(codex_protocol::protocol::AskForApproval::Never);
-    Box::pin(app.resume_target_session(
+    Box::pin(app.resume_target_session_and_settle(
         &mut tui,
         &mut app_server,
         SessionTarget {
