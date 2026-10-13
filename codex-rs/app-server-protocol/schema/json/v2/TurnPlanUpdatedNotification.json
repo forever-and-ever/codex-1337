@@ -26,6 +26,12 @@
     }
   },
   "properties": {
+    "callId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "explanation": {
       "type": [
         "string",

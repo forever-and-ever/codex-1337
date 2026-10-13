@@ -11871,6 +11871,7 @@ class TurnPlanUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    call_id: Annotated[str | None, Field(alias="callId")] = None
     explanation: str | None = None
     plan: list[TurnPlanStep]
     thread_id: Annotated[str, Field(alias="threadId")]
