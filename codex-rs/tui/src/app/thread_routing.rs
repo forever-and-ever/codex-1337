@@ -102,12 +102,7 @@ impl App {
             return;
         };
         let input_state = self.chat_widget.capture_thread_input_state();
-        // Retained tasks outlive the channel reset; refresh their fallback at the final handoff.
-        if let Some(retained) = self.agents_overview.input_states.get_mut(&active_id)
-            && let Some(input) = &input_state
-        {
-            *retained = input.clone();
-        }
+        self.refresh_retained_thread_input(active_id, input_state.as_ref());
         let recap_progress = self.recap.progress();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();

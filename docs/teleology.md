@@ -524,6 +524,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_event_buffer.rs`: durable-approvals-and-queues
+- `codex-rs/tui/src/app/thread_routing.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/async_question_reply.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/bottom_pane/chat_composer_history.rs`: key-doctrine
 - `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`: async-questions-never-auto-answered
@@ -702,5 +703,4 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/server_directory_navigation.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_fork_navigation.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_navigation_permissions.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/thread_routing.rs`: durable-approvals-and-queues
 - `codex-rs/core/src/agent/control/farm_reservation.rs`: server-hosted-agents

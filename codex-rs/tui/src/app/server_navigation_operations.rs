@@ -240,6 +240,19 @@ impl App {
         }
     }
 
+    pub(in crate::app) fn refresh_retained_thread_input(
+        &mut self,
+        thread_id: ThreadId,
+        input: Option<&crate::chatwidget::ThreadInputState>,
+    ) {
+        // Retained tasks outlive the channel reset; refresh their fallback at the final handoff.
+        if let Some(retained) = self.agents_overview.input_states.get_mut(&thread_id)
+            && let Some(input) = input
+        {
+            *retained = input.clone();
+        }
+    }
+
     pub(super) fn cancel_pending_navigation(&mut self, id: Uuid) {
         if self
             .server_operations

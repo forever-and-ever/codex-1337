@@ -193,9 +193,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         );
     } else {
         assert!(recorded_params(&requests, "turn/start").is_empty());
-        assert!(!app.server_operations.lanes.contains_key(
-            &crate::app::turn_submissions::OperationLane::Thread(source_thread_id)
-        ));
+        assert!(app.server_operations.is_empty());
     }
     let question = request_user_input_request(source_thread_id, "source-turn", "question");
     app.handle_app_server_event(
