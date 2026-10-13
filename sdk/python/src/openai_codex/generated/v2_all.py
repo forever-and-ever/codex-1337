@@ -423,6 +423,11 @@ class ArrivalKind(Enum):
     user = "user"
 
 
+class ArrivalSide(Enum):
+    before = "before"
+    after = "after"
+
+
 class LegacyArrivalSource(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5880,30 +5885,6 @@ class ThreadInjectItemsResponse(BaseModel):
     )
 
 
-class ArrivalThreadItem(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    announced_at_ms: Annotated[
-        int,
-        Field(alias="announcedAtMs", description="When the request that reads it was dispatched."),
-    ]
-    id: str
-    kind: ArrivalKind
-    label: str
-    response_id: Annotated[
-        str, Field(alias="responseId", description="The response whose step admits it.")
-    ]
-    source: Annotated[ArrivalSource | None, Field()] = {"kind": "legacy"}
-    text: Annotated[
-        str | None,
-        Field(
-            description="Legacy flattened text, without captured block boundaries or provenance."
-        ),
-    ] = None
-    type: Annotated[Literal["arrival"], Field(title="ArrivalThreadItemType")]
-
-
 class HookPromptThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7669,6 +7650,14 @@ class Arrival(BaseModel):
     kind: ArrivalKind
     label: str
     tokens: Annotated[int, Field(ge=0)]
+
+
+class ArrivalPlacement(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    side: ArrivalSide
+    user_response_item_id: Annotated[str, Field(alias="userResponseItemId")]
 
 
 class BrowserUseConfig(BaseModel):
@@ -11228,6 +11217,31 @@ class ThreadGoalUpdatedNotification(BaseModel):
     turn_id: Annotated[str | None, Field(alias="turnId")] = None
 
 
+class ArrivalThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    announced_at_ms: Annotated[
+        int,
+        Field(alias="announcedAtMs", description="When the request that reads it was dispatched."),
+    ]
+    id: str
+    kind: ArrivalKind
+    label: str
+    placement: ArrivalPlacement | None = None
+    response_id: Annotated[
+        str, Field(alias="responseId", description="The response whose step admits it.")
+    ]
+    source: Annotated[ArrivalSource | None, Field()] = {"kind": "legacy"}
+    text: Annotated[
+        str | None,
+        Field(
+            description="Legacy flattened text, without captured block boundaries or provenance."
+        ),
+    ] = None
+    type: Annotated[Literal["arrival"], Field(title="ArrivalThreadItemType")]
+
+
 class UserMessageThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11235,6 +11249,7 @@ class UserMessageThreadItem(BaseModel):
     client_id: Annotated[str | None, Field(alias="clientId")] = None
     content: list[UserInput]
     id: str
+    source_response_item_id: Annotated[str | None, Field(alias="sourceResponseItemId")] = None
     type: Annotated[Literal["userMessage"], Field(title="UserMessageThreadItemType")]
 
 

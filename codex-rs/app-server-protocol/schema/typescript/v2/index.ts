@@ -57,6 +57,8 @@ export type { AppsReadResponse } from "./AppsReadResponse";
 export type { Arrival } from "./Arrival";
 export type { ArrivalItem } from "./ArrivalItem";
 export type { ArrivalKind } from "./ArrivalKind";
+export type { ArrivalPlacement } from "./ArrivalPlacement";
+export type { ArrivalSide } from "./ArrivalSide";
 export type { ArrivalSource } from "./ArrivalSource";
 export type { AskForApproval } from "./AskForApproval";
 export type { AsyncUserInputQuestion } from "./AsyncUserInputQuestion";

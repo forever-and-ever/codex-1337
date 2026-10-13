@@ -766,6 +766,29 @@
         }
       ]
     },
+    "ArrivalPlacement": {
+      "description": "Human placement relative to the nearest actual user in the sampled prompt. This is a relation, not a globally comparable sampling index or timestamp.",
+      "properties": {
+        "side": {
+          "$ref": "#/definitions/ArrivalSide"
+        },
+        "userResponseItemId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "side",
+        "userResponseItemId"
+      ],
+      "type": "object"
+    },
+    "ArrivalSide": {
+      "enum": [
+        "before",
+        "after"
+      ],
+      "type": "string"
+    },
     "ArrivalSource": {
       "description": "Exact readable text blocks, a client declaration representation, or unavailable evidence.",
       "oneOf": [
@@ -8862,6 +8885,16 @@
             "label": {
               "type": "string"
             },
+            "placement": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ArrivalPlacement"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "responseId": {
               "description": "The response whose step admits it.",
               "type": "string"
@@ -8918,6 +8951,12 @@
             },
             "id": {
               "type": "string"
+            },
+            "sourceResponseItemId": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "type": {
               "enum": [
