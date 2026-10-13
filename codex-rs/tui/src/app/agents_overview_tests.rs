@@ -3204,7 +3204,8 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         );
         assert_eq!(
             app.chat_widget.queued_user_message_texts(),
-            vec!["Keep this on the source"]
+            vec!["Keep this on the source"],
+            "cached_primary={cached_primary}"
         );
         let retained = app.agents_overview.input_states[&source].clone();
         let mut ready = None;

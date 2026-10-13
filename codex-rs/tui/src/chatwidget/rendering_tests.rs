@@ -272,22 +272,26 @@ async fn external_writer_fork_progress_restores_the_previous_view() {
         let previous = render_frame(&widget, /*width*/ 60);
         widget.fork_in_progress = true;
         let frame = render_frame(&widget, /*width*/ 60);
-        let rows = frame
-            .content
-            .chunks(usize::from(frame.area.width))
-            .map(|row| {
-                row.iter()
-                    .map(ratatui::buffer::Cell::symbol)
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>();
-        insta::assert_snapshot!(
-            "fork_pending",
-            rows.iter()
-                .map(|row| row.trim_end())
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
+        if locked {
+            let rows = frame
+                .content
+                .chunks(usize::from(frame.area.width))
+                .map(|row| {
+                    row.iter()
+                        .map(ratatui::buffer::Cell::symbol)
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>();
+            insta::assert_snapshot!(
+                "fork_pending",
+                rows.iter()
+                    .map(|row| row.trim_end())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        } else {
+            assert_eq!(frame, previous);
+        }
         widget.fork_in_progress = false;
         assert_eq!(render_frame(&widget, /*width*/ 60), previous);
     }
