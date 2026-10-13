@@ -112,6 +112,7 @@ pub(super) enum ResumeStage {
     },
     Hooks(Box<ResumeContext>),
     Acquiring(Box<ResumeContext>),
+    RestoringBlank(Box<ResumeContext>),
     Viewing(Box<ResumeContext>),
     Detaching {
         ready: Box<ResumeReady>,
@@ -137,6 +138,7 @@ impl ResumeStage {
             | Self::Trust { context, .. }
             | Self::Hooks(context)
             | Self::Acquiring(context)
+            | Self::RestoringBlank(context)
             | Self::Viewing(context) => context.target.thread_id,
             Self::Detaching { ready, .. } => ready.started.session.thread_id,
             Self::Following { thread_id, .. } | Self::Goal(thread_id) => *thread_id,
@@ -529,7 +531,7 @@ impl App {
             if let ResumePurpose::Overview { thread, .. } = &context.purpose {
                 started.session.thread_name.clone_from(&thread.name);
             }
-            operation.intent = NavigationIntent::Resume(ResumeStage::Acquiring(context));
+            operation.intent = NavigationIntent::Resume(ResumeStage::RestoringBlank(context));
             self.spawn_resume_effect(
                 operation,
                 server.request_handle(),
@@ -634,7 +636,7 @@ impl App {
                     )),
                 }
             }
-            (ResumeStage::Acquiring(context), ResumeOutcome::Cached(started)) if matching => {
+            (ResumeStage::RestoringBlank(context), ResumeOutcome::Cached(started)) if matching => {
                 self.detach_for_resume(
                     server,
                     operation,
@@ -646,7 +648,7 @@ impl App {
                 )
                 .await;
             }
-            (ResumeStage::Acquiring(_), ResumeOutcome::Cached(_)) => {}
+            (ResumeStage::RestoringBlank(_), ResumeOutcome::Cached(_)) => {}
             (ResumeStage::Config(target), ResumeOutcome::Begin) if matching => {
                 self.refresh_in_memory_config_from_disk_best_effort("resuming a thread")
                     .await;
