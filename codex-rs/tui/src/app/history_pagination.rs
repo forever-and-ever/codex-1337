@@ -120,6 +120,7 @@ impl App {
         if !inserted.is_empty() {
             self.join_older_activity_group(tui, inserted.end, &turns);
         }
+        self.reconcile_prompt_order(tui);
         merge_older_turns(&mut store.lock().await.turns, turns);
         self.scrollback_has_older_history = app_server.has_older_history(thread_id);
         if self.backtrack.overlay_preview_active

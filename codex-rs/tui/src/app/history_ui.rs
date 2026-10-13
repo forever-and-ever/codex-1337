@@ -178,6 +178,11 @@ impl App {
         self.transcript_cells.push(cell.clone());
         let deferred = tui.is_owned_screen() || self.native_history.insert(&cell);
         self.render_inserted_history_cell(tui, &cell, deferred);
+        if cell.as_any().is::<history_cell::UserHistoryCell>()
+            || cell.as_any().is::<history_cell::ArrivalCell>()
+        {
+            self.reconcile_prompt_order(tui);
+        }
         // A committed cell can unblock a settled /usage card that was waiting
         // behind a transient active cell or a provisional stream tail.
         self.chat_widget.request_pending_usage_output_insertion();

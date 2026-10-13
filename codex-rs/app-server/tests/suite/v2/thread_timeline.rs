@@ -110,6 +110,7 @@ async fn timeline_pages_mix_items_and_resolve_the_opening_realtime_session() -> 
                     thread_id,
                     turn_id: "turn-1".to_string(),
                     item: TurnItem::UserMessage(UserMessageItem {
+                        source_response_item_id: None,
                         id: "user-1".to_string(),
                         client_id: None,
                         content: vec![UserInput::Text {

@@ -111,6 +111,7 @@ pub(crate) fn queue_fixture_realtime_speech(
 
 fn user_item(text: &str) -> ThreadItem {
     ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: format!("user-{text}"),
         client_id: None,
         content: vec![UserInput::Text {

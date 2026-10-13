@@ -15,6 +15,7 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
         items: item_ids
             .iter()
             .map(|id| ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: id.to_string(),
                 client_id: None,
                 content: Vec::new(),
@@ -52,6 +53,7 @@ fn overlapping_history_keeps_live_turn_state_and_newer_items() {
 
 fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
     Arc::new(UserHistoryCell {
+        prompt_identity: Default::default(),
         spoken: false,
         message: message.to_string(),
         text_elements: Vec::new(),
@@ -105,6 +107,7 @@ async fn hidden_last_item_keeps_turn_groups_and_completion_boundaries() {
             },
             computer("older-call"),
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "hidden".to_string(),
                 client_id: None,
                 content: vec![UserInput::Text {

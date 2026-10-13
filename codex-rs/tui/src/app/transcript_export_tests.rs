@@ -21,6 +21,7 @@ fn markdown_transcript_preserves_messages_and_formats_activity() {
     assert!(render_markdown_transcript(&[]).is_err());
     let user = |message: &str, local_image_paths| {
         Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             spoken: false,
             message: message.to_string(),
             text_elements: Vec::new(),
@@ -70,6 +71,7 @@ fn markdown_transcript_preserves_messages_and_formats_activity() {
         )),
         Arc::new(crate::history_cell::ArrivalCell::new(
             codex_protocol::step_admission::ArrivalItem {
+                placement: None,
                 id: "arrival".into(),
                 response_id: "response".into(),
                 announced_at_ms: 0,
@@ -92,6 +94,7 @@ fn markdown_transcript_preserves_messages_and_formats_activity() {
 #[test]
 fn transcript_export_excludes_hidden_review_prompts_and_nested_duplicates() {
     let user = |id: &str, text: &str| ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: id.to_string(),
         client_id: None,
         content: vec![UserInput::Text {

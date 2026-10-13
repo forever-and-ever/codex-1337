@@ -538,6 +538,7 @@ impl ThreadHistoryBuilder {
         self.push_item_in_current_turn(ThreadItem::UserMessage {
             id,
             client_id: payload.client_id.clone(),
+            source_response_item_id: payload.source_response_item_id.clone(),
             content,
         });
     }
@@ -2016,6 +2017,7 @@ mod tests {
         assert_eq!(
             first.items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-1".into(),
                 client_id: None,
                 content: vec![
@@ -2059,6 +2061,7 @@ mod tests {
         assert_eq!(
             second.items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-4".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
@@ -2199,6 +2202,7 @@ mod tests {
         let local_audio_path = PathBuf::from("/tmp/local.wav");
         let events = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_response_item_id: None,
                 client_id: None,
                 message: "inspect these".into(),
                 images: Some(vec!["https://example.com/image.png".into()]),
@@ -2220,6 +2224,7 @@ mod tests {
         assert_eq!(
             turns[0].items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-1".into(),
                 client_id: None,
                 content: vec![
@@ -2271,6 +2276,7 @@ mod tests {
         assert_eq!(
             turns[0].items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-1".into(),
                 client_id: None,
                 content: vec![
@@ -2317,6 +2323,7 @@ mod tests {
                 thread_id,
                 turn_id: turn_id.to_string(),
                 item: CoreTurnItem::UserMessage(CoreUserMessageItem {
+                    source_response_item_id: None,
                     id: "user-item-id".to_string(),
                     client_id: None,
                     content: Vec::new(),
@@ -2345,6 +2352,7 @@ mod tests {
         assert_eq!(
             turns[0].items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-1".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
@@ -2668,6 +2676,9 @@ mod tests {
                 item: CoreTurnItem::UserMessage(CoreUserMessageItem {
                     id: "user-item-id".to_string(),
                     client_id: Some("client-message-1".to_string()),
+                    source_response_item_id: Some(codex_protocol::ResponseItemId::from_server(
+                        "canonical-user".into(),
+                    )),
                     content: vec![codex_protocol::user_input::UserInput::Text {
                         text: "hello".into(),
                         text_elements: Vec::new(),
@@ -2677,6 +2688,9 @@ mod tests {
             }),
             EventMsg::UserMessage(UserMessageEvent {
                 client_id: Some("client-message-1".to_string()),
+                source_response_item_id: Some(codex_protocol::ResponseItemId::from_server(
+                    "canonical-user".into(),
+                )),
                 message: "hello".into(),
                 images: None,
                 text_elements: Vec::new(),
@@ -2706,6 +2720,9 @@ mod tests {
             vec![ThreadItem::UserMessage {
                 id: "item-1".into(),
                 client_id: Some("client-message-1".to_string()),
+                source_response_item_id: Some(codex_protocol::ResponseItemId::from_server(
+                    "canonical-user".into()
+                )),
                 content: vec![UserInput::Text {
                     text: "hello".into(),
                     text_elements: Vec::new(),
@@ -2814,6 +2831,7 @@ mod tests {
                 items_view: TurnItemsView::Full,
                 items: vec![
                     ThreadItem::UserMessage {
+source_response_item_id: None,
                         id: "item-1".into(),
                         client_id: None,
                         content: vec![UserInput::Text {
@@ -2955,6 +2973,7 @@ mod tests {
         assert_eq!(
             first_turn.items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-1".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
@@ -2981,6 +3000,7 @@ mod tests {
         assert_eq!(
             second_turn.items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-3".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
@@ -3068,6 +3088,7 @@ mod tests {
             turns[0].items,
             vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -3089,6 +3110,7 @@ mod tests {
             turns[1].items,
             vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-3".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -3203,6 +3225,7 @@ mod tests {
             turns[0].items,
             vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -3211,6 +3234,7 @@ mod tests {
                     }],
                 },
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-2".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -4109,6 +4133,7 @@ mod tests {
         assert_eq!(
             turns[1].items[0],
             ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "item-2".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
@@ -4304,6 +4329,7 @@ mod tests {
             snapshot.items,
             vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -4376,6 +4402,7 @@ mod tests {
             snapshot.items,
             vec![
                 ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -4549,6 +4576,7 @@ mod tests {
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
+                        source_response_item_id: None,
                         id: "item-1".into(),
                         client_id: None,
                         content: vec![UserInput::Text {
@@ -4575,6 +4603,7 @@ mod tests {
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
+                        source_response_item_id: None,
                         id: "item-2".into(),
                         client_id: None,
                         content: vec![UserInput::Text {
@@ -5004,6 +5033,7 @@ mod tests {
                 duration_ms: None,
                 items_view: TurnItemsView::Full,
                 items: vec![ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -5125,6 +5155,7 @@ mod tests {
                 root_turn_id: None,
                 items_view: TurnItemsView::Full,
                 items: vec![ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "item-1".into(),
                     client_id: None,
                     content: vec![UserInput::Text {
@@ -5398,6 +5429,7 @@ mod tests {
                 changed_items: vec![ThreadHistoryItemChange {
                     turn_id: "rollout-0".into(),
                     item: ThreadItem::UserMessage {
+                        source_response_item_id: None,
                         id: "item-1".into(),
                         client_id: Some("client-message-1".into()),
                         content: vec![UserInput::Text {

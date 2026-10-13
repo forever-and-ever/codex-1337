@@ -1490,6 +1490,7 @@ impl TurnRequestProcessor {
             Vec::new()
         } else {
             vec![ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: turn_id.clone(),
                 client_id: None,
                 content: vec![V2UserInput::Text {

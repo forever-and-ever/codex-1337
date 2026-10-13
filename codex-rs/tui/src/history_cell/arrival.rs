@@ -35,6 +35,10 @@ impl ArrivalCell {
         &self.0.response_id
     }
 
+    pub(crate) fn placement(&self) -> Option<&codex_protocol::step_admission::ArrivalPlacement> {
+        self.0.placement.as_ref()
+    }
+
     fn heading(&self) -> Line<'static> {
         let label = sanitize_user_text(self.0.label.as_str().into()).replace(['\n', '\t'], " ");
         let (kind, joint) = match self.0.kind {

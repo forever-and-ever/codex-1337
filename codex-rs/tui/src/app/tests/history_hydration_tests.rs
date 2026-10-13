@@ -72,6 +72,7 @@ async fn history_fixture(
                 started_at_ms: None,
                 completed_at_ms: 0,
                 item: TurnItem::UserMessage(UserMessageItem {
+                    source_response_item_id: None,
                     id: format!("item-{index}-{item}"),
                     client_id: None,
                     content: vec![CoreUserInput::Text {

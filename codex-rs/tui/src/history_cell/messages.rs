@@ -13,13 +13,14 @@ use crate::wrapping::url_preserving_wrap_options;
 use crate::wrapping::word_wrap_line_with_source;
 use std::borrow::Cow;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct UserHistoryCell {
     pub message: String,
     pub text_elements: Vec<TextElement>,
     pub local_image_paths: Vec<PathBuf>,
     pub remote_image_urls: Vec<String>,
     pub(crate) spoken: bool,
+    pub(crate) prompt_identity: crate::prompt_order::UserPromptIdentity,
 }
 
 /// Remove CSI sequences and control characters, preserving tabs and newlines.
@@ -765,6 +766,7 @@ pub(crate) fn new_user_prompt(
         local_image_paths,
         remote_image_urls,
         spoken: false,
+        prompt_identity: Default::default(),
     }
 }
 

@@ -5031,6 +5031,8 @@ impl Session {
             )
             .await;
         let mut user_message_item = UserMessageItem::new(input);
+        user_message_item.source_response_item_id =
+            step_admission::user_response_item_id(&prepared_items);
         apply_prepared_image_file_ids(
             &mut user_message_item,
             &prepared_items,

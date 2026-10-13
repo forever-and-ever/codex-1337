@@ -146,6 +146,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
             turn_id: "farm-turn".into(),
             completed_at_ms: 0,
             item: ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: text.into(),
                 client_id: None,
                 content: vec![codex_app_server_protocol::UserInput::Text {

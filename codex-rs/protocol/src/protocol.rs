@@ -2589,6 +2589,10 @@ pub enum UserMessageImageKind {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct UserMessageEvent {
+    /// Human chronology alias retained through legacy-event history reconstruction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_response_item_id: Option<crate::ResponseItemId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     pub message: String,

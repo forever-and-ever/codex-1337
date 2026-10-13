@@ -11,6 +11,7 @@ fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
         items: item_ids
             .iter()
             .map(|id| ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: id.to_string(),
                 client_id: None,
                 content: Vec::new(),

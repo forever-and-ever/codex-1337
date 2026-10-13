@@ -377,6 +377,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         ),
     ] {
         let mut encoded = serde_json::to_value(ArrivalItem {
+            placement: None,
             id: "arrival-provenance".into(),
             response_id: "response".into(),
             announced_at_ms: 0,
@@ -545,6 +546,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     raw: String::new(),
                 });
             let arrival = crate::history_cell::ArrivalCell::new(ArrivalItem {
+                placement: None,
                 id: "provenance-definitions".into(),
                 response_id: "response".into(),
                 announced_at_ms: 0,

@@ -1042,6 +1042,7 @@ async fn enqueue_primary_thread_session_replays_turns_before_initial_prompt_subm
             "turn-1",
             TurnStatus::Completed,
             vec![ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user-1".to_string(),
                 client_id: None,
                 content: vec![AppServerUserInput::Text {
@@ -1937,6 +1938,7 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
                         turn_id: "turn-1".into(),
                         completed_at_ms: 0,
                         item: ThreadItem::UserMessage {
+                            source_response_item_id: None,
                             id: "accepted".into(),
                             client_id: Some(client_id),
                             content: vec![UserInput::Text {
@@ -5730,6 +5732,7 @@ async fn side_thread_snapshot_hides_forked_parent_transcript() {
         "parent-turn",
         TurnStatus::Completed,
         vec![ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "parent-user".to_string(),
             client_id: None,
             content: vec![AppServerUserInput::Text {
@@ -6349,6 +6352,7 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
 
     let user_cell = |text: &str| -> Arc<dyn HistoryCell> {
         Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             spoken: false,
             message: text.to_string(),
             text_elements: Vec::new(),
@@ -7037,6 +7041,7 @@ async fn app_server_thread_replacement_clears_previous_transcript_before_replay(
                 "next-turn",
                 TurnStatus::Completed,
                 vec![ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "next-user".to_string(),
                     client_id: None,
                     content: vec![AppServerUserInput::Text {
@@ -7123,6 +7128,7 @@ async fn snapshot_thread_switch_discards_queued_previous_history() -> Result<()>
                 "next-turn",
                 TurnStatus::Completed,
                 vec![ThreadItem::UserMessage {
+                    source_response_item_id: None,
                     id: "next-user".to_string(),
                     client_id: None,
                     content: vec![AppServerUserInput::Text {
@@ -8067,6 +8073,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
                      remote_image_urls: Vec<String>|
      -> Arc<dyn HistoryCell> {
         Arc::new(UserHistoryCell {
+            prompt_identity: Default::default(),
             spoken: false,
             message: text.to_string(),
             text_elements,
@@ -8825,6 +8832,7 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
                 thread_id: ThreadId::from_string(&source_thread_id)?,
                 turn_id: turn_id.to_string(),
                 item: TurnItem::UserMessage(UserMessageItem {
+                    source_response_item_id: None,
                     id: format!("user-{turn_id}"),
                     client_id: None,
                     content,
@@ -9225,6 +9233,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
+                        source_response_item_id: None,
                         id: "user-1".to_string(),
                         client_id: None,
                         content: vec![AppServerUserInput::Text {
@@ -9244,6 +9253,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: vec![
                         ThreadItem::UserMessage {
+                            source_response_item_id: None,
                             id: "user-2".to_string(),
                             client_id: None,
                             content: vec![AppServerUserInput::Text {
@@ -9397,6 +9407,7 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
         "turn-1",
         TurnStatus::Completed,
         vec![ThreadItem::UserMessage {
+            source_response_item_id: None,
             id: "user-1".to_string(),
             client_id: None,
             content: vec![AppServerUserInput::Text {
@@ -10236,6 +10247,7 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     app.chat_widget
         .apply_external_edit("draft prompt".to_string());
     app.transcript_cells = vec![Arc::new(UserHistoryCell {
+        prompt_identity: Default::default(),
         spoken: false,
         message: "old message".to_string(),
         text_elements: Vec::new(),

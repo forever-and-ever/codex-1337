@@ -255,6 +255,7 @@ fn projects_failed_turn_completion_as_snapshot() {
 fn projects_completed_canonical_turn_items() {
     let thread_id = ThreadId::default();
     let user_item = TurnItem::UserMessage(UserMessageItem {
+        source_response_item_id: None,
         id: "user-1".to_string(),
         client_id: None,
         content: vec![UserInput::Text {
@@ -299,6 +300,7 @@ fn projects_completed_canonical_turn_items() {
 #[test]
 fn projects_optional_completed_item_lifecycle_timestamps() {
     let item = TurnItem::UserMessage(UserMessageItem {
+        source_response_item_id: None,
         id: "user-1".to_string(),
         client_id: None,
         content: Vec::new(),

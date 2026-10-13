@@ -76,6 +76,7 @@ async fn refreshed_active_reasoning_accepts_later_deltas_and_complete_summary() 
                     thread_id: thread_id.to_string(),
                     turn_id: turn.id.clone(),
                     item: ThreadItem::UserMessage {
+source_response_item_id: None,
                         id: "voice-handoff".into(),
                         client_id: None,
                         content: vec![AppServerUserInput::Text {
@@ -252,6 +253,7 @@ fn buffered_replay_keeps_unfinished_and_unrelated_deltas_in_order() {
 fn evicted_voice_delegation_marker_still_suppresses_private_replay() {
     let mut store = ThreadEventStore::new(/*capacity*/ 2);
     let voice_request = ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: "user".into(),
         client_id: None,
         content: vec![codex_app_server_protocol::UserInput::Text {
@@ -364,6 +366,7 @@ fn saved_voice_turn_suppresses_reasoning_without_hiding_typed_reasoning() {
         content: vec!["private raw reasoning".into()],
     };
     let voice_request = ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: "voice-request".into(),
         client_id: None,
         content: vec![codex_app_server_protocol::UserInput::Text {
@@ -407,6 +410,7 @@ fn snapshot_keeps_typed_output_before_voice_handoff_in_the_same_turn() {
         delivery: None,
     };
     let marker = ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: "voice".into(),
         client_id: None,
         content: vec![codex_app_server_protocol::UserInput::Text {
@@ -473,6 +477,7 @@ fn snapshot_keeps_typed_item_completed_after_voice_handoff() {
         delivery: None,
     };
     let marker = ThreadItem::UserMessage {
+        source_response_item_id: None,
         id: "voice".into(),
         client_id: None,
         content: vec![codex_app_server_protocol::UserInput::Text {
@@ -526,6 +531,7 @@ async fn evicted_voice_marker_survives_widget_snapshot_for_late_reasoning() {
             turn_id: "voice-turn".into(),
             started_at_ms: 0,
             item: ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "user".into(),
                 client_id: None,
                 content: vec![codex_app_server_protocol::UserInput::Text {

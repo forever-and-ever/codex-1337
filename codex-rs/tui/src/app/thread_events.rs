@@ -1118,6 +1118,7 @@ mod tests {
             thread_id: thread_id.clone(),
             turn_id: turn_id.clone(),
             item: ThreadItem::UserMessage {
+                source_response_item_id: None,
                 id: "voice-marker".into(),
                 client_id: None,
                 content: vec![UserInput::Text {
