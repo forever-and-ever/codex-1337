@@ -345,7 +345,7 @@ impl App {
         ) {
             Ok(plan) => plan,
             Err(error) => {
-                self.add_session_picker_error(format!("Unable to check folder trust: {error}"));
+                self.add_agents_overview_error(format!("Unable to check folder trust: {error}"));
                 return Ok(AppRunControl::Continue);
             }
         };
@@ -385,7 +385,7 @@ impl App {
                     context.config = config;
                 }
                 Err(error) => {
-                    self.add_session_picker_error(format!(
+                    self.add_agents_overview_error(format!(
                         "Failed to reload trusted folder settings: {error}"
                     ));
                     return Ok(());
@@ -417,7 +417,7 @@ impl App {
         let decision = match choose_startup_hooks_review(tui, &context.config, hooks, None).await {
             Ok(decision) => decision,
             Err(error) => {
-                self.add_session_picker_error(format!("Unable to review folder hooks: {error}"));
+                self.add_agents_overview_error(format!("Unable to review folder hooks: {error}"));
                 return Ok(());
             }
         };
@@ -498,7 +498,7 @@ impl App {
                 &mut context.config,
                 RuntimePolicyOverrideScope::ExplicitOnly,
             ) {
-                self.add_session_picker_error(format!("{error:#}"));
+                self.add_agents_overview_error(format!("{error:#}"));
                 return;
             }
             if matches!(context.purpose, ResumePurpose::Overview { .. })
@@ -711,7 +711,7 @@ impl App {
                             .begin_resume_trust(server, operation, context, Some(&thread))
                             .await;
                     }
-                    Err(error) => self.add_session_picker_error(format!(
+                    Err(error) => self.add_agents_overview_error(format!(
                         "Unable to check resumed folder: {error:#}"
                     )),
                 }
@@ -722,7 +722,7 @@ impl App {
                 let project = match result.and_then(|project| plan.accept_project(project)) {
                     Ok(project) => project,
                     Err(error) => {
-                        self.add_session_picker_error(format!(
+                        self.add_agents_overview_error(format!(
                             "Unable to check folder trust: {error}"
                         ));
                         return Ok(AppRunControl::Continue);
@@ -744,7 +744,7 @@ impl App {
                             return Ok(AppRunControl::Continue);
                         }
                         Err(error) => {
-                            self.add_session_picker_error(format!(
+                            self.add_agents_overview_error(format!(
                                 "Unable to check folder trust: {error}"
                             ));
                             return Ok(AppRunControl::Continue);
@@ -787,7 +787,7 @@ impl App {
                 match result {
                     Ok(thread) => plan.note_latest_cwd(thread.cwd.to_path_buf()),
                     Err(error) => {
-                        self.add_session_picker_error(format!(
+                        self.add_agents_overview_error(format!(
                             "Unable to check resumed folder: {error}"
                         ));
                         return Ok(AppRunControl::Continue);
@@ -806,7 +806,7 @@ impl App {
                             .await?
                     }
                     Err(error) => self
-                        .add_session_picker_error(format!("Unable to load folder hooks: {error}")),
+                        .add_agents_overview_error(format!("Unable to load folder hooks: {error}")),
                 }
             }
             (ResumeStage::Acquiring(context), ResumeOutcome::Acquired(prepared)) => {
@@ -826,7 +826,7 @@ impl App {
                                 .is_err_and(crate::app_server_session::is_active_writer_error))
                         && let Err(error) = &result
                     {
-                        self.add_session_picker_error(format!(
+                        self.add_agents_overview_error(format!(
                             "Failed to resume session from {}: {error:#}",
                             context.target.display_label()
                         ));
@@ -896,7 +896,7 @@ impl App {
                         )
                         .await
                     }
-                    Err(error) => self.add_session_picker_error(format!(
+                    Err(error) => self.add_agents_overview_error(format!(
                         "Failed to view thread open elsewhere: {error:#}"
                     )),
                 }
@@ -1009,7 +1009,7 @@ impl App {
                 }
             }
             (stage, ResumeOutcome::Terminated) => {
-                self.add_session_picker_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
+                self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 match stage {
                     ResumeStage::Acquiring(context) if same_epoch => self
                         .retain_navigation_uncertainty(
@@ -1124,7 +1124,7 @@ impl App {
             )
             .await
         {
-            self.add_session_picker_error(format!(
+            self.add_agents_overview_error(format!(
                 "Failed to attach to resumed app-server thread: {error}"
             ));
             if !read_only && self.chat_widget.thread_id() != Some(thread_id) {

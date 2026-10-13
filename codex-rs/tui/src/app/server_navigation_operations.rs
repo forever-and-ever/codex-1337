@@ -528,7 +528,7 @@ impl App {
                 self.server_operations.navigation.current = Some(operation);
             }
             NavigationReceipt::PickerDefaults(Err(error)) if matching => {
-                self.add_session_picker_error(format!(
+                self.add_agents_overview_error(format!(
                     "Failed to read session picker defaults: {error}"
                 ));
                 self.chat_widget.maybe_send_next_queued_input();
@@ -561,7 +561,7 @@ impl App {
                             .apply_resume_picker_selection(tui, server, selection)
                             .await;
                     }
-                    Err(error) => self.add_session_picker_error(format!(
+                    Err(error) => self.add_agents_overview_error(format!(
                         "Failed to open session picker: {error}"
                     )),
                 }
@@ -572,7 +572,7 @@ impl App {
                 self.server_operations.navigation.retired.push(operation);
             }
             NavigationReceipt::Picker(Err(error)) if matching => {
-                self.add_session_picker_error(format!(
+                self.add_agents_overview_error(format!(
                     "Failed to start TUI session picker: {error}"
                 ));
                 self.chat_widget.maybe_send_next_queued_input();

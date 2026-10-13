@@ -82,24 +82,4 @@ impl App {
         tui.frame_requester().schedule_frame();
         Ok(AppRunControl::Continue)
     }
-
-    pub(super) fn add_session_picker_error(&mut self, message: String) {
-        if self
-            .chat_widget
-            .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
-            .is_some()
-        {
-            self.chat_widget.show_selection_view(SelectionViewParams {
-                title: Some("Unable to resume session".to_string()),
-                subtitle: Some(message.clone()),
-                items: vec![SelectionItem {
-                    name: "Return to command center".to_string(),
-                    dismiss_on_select: true,
-                    ..Default::default()
-                }],
-                ..SelectionViewParams::picker()
-            });
-        }
-        self.chat_widget.add_error_message(message);
-    }
 }

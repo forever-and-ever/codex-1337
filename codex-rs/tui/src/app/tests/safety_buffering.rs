@@ -308,7 +308,8 @@ stream_max_retries = 0
     );
     // Receive the real commit while another thread is visible, with no replay capacity.
     if via_overview {
-        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, other_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, other_id))
+            .await?;
     } else {
         Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, other_id)).await?;
         app.thread_event_channels[&thread_id]
@@ -384,7 +385,12 @@ stream_max_retries = 0
         }
     }
     if via_overview {
-        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(
+            &mut tui,
+            &mut app_server,
+            thread_id,
+        ))
+        .await?;
     } else {
         Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
     }

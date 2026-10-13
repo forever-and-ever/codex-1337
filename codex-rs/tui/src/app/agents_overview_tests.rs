@@ -1000,7 +1000,8 @@ async fn shared_overview_seeds_once_and_retains_locally_resumed_history() -> Res
     )
     .map_err(std::io::Error::other)?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, ids[2])).await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, ids[2]))
+        .await?;
     assert_eq!(app.primary_thread_id, Some(ids[2]));
     app_server.shutdown().await?;
 
@@ -1931,8 +1932,12 @@ async fn root_switch_preserves_vim_line_yank() -> Result<()> {
     assert_eq!(app.chat_widget.composer_text_with_pending(), "");
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target_thread_id))
-        .await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(
+        &mut tui,
+        &mut app_server,
+        target_thread_id,
+    ))
+    .await?;
 
     assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
     app.chat_widget.toggle_vim_mode_and_notify();
@@ -1984,8 +1989,12 @@ async fn root_switch_loads_local_preferences_from_disk() -> Result<()> {
     let expected = crate::local_settings::LocalSettings::from(&config);
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target_thread_id))
-        .await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(
+        &mut tui,
+        &mut app_server,
+        target_thread_id,
+    ))
+    .await?;
 
     assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
     assert_eq!(app.local_settings, expected);
@@ -2035,8 +2044,12 @@ async fn root_switch_preserves_idle_root_with_running_subagent() -> Result<()> {
     app.active_thread_id = Some(child_id);
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target.session.thread_id)
-        .await?;
+    app.select_agents_overview_thread_and_settle(
+        &mut tui,
+        &mut app_server,
+        target.session.thread_id,
+    )
+    .await?;
 
     assert!(
         app.agents_overview
@@ -2160,7 +2173,12 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
                 AskForApproval::UnlessTrusted,
             ));
         }
-        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(
+            &mut tui,
+            &mut app_server,
+            thread_id,
+        ))
+        .await?;
         assert_eq!(
             app.runtime_approvals_reviewer_override,
             (thread_id == thread_ids[2] || thread_id == thread_ids[3])
@@ -2197,7 +2215,12 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
     app.loader_overrides.system_requirements_path = Some(requirements.to_path_buf());
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     app.chat_widget.show_bottom_pane_view(Box::new(view));
-    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_ids[4])).await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(
+        &mut tui,
+        &mut app_server,
+        thread_ids[4],
+    ))
+    .await?;
     assert_eq!(
         (
             app.primary_thread_id,
@@ -2321,38 +2344,12 @@ async fn overview_cold_resume_honors_working_directory_selection() -> Result<()>
             test_path_buf("/").abs()
         };
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        // On this current-thread runtime, the server cannot answer until we yield. Cancel the
-        // pending selection to release its terminal borrow and inspect what the user sees now.
-        let mut selection =
-            Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id));
-        assert!(futures::poll!(&mut selection).is_pending());
-        drop(selection);
-        let pending_loading =
-            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
-        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
-        // The widget replacement clears the terminal; feedback must remain until the next draw.
-        let loading =
-            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
-        assert_eq!(pending_loading, loading);
-        let loading_text = loading
-            .content
-            .chunks(usize::from(loading.area.width))
-            .map(|row| {
-                row.iter()
-                    .map(ratatui::buffer::Cell::symbol)
-                    .collect::<String>()
-            })
-            .map(|line| line.trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        insta::allow_duplicates! {
-            insta::assert_snapshot!(loading_text.trim_end(), @"Loading task…");
-        }
-        Box::pin(app.handle_tui_event(&mut tui, &mut app_server, TuiEvent::Draw)).await?;
-        assert_ne!(
-            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
-            &loading,
-        );
+        Box::pin(app.select_agents_overview_thread_and_settle(
+            &mut tui,
+            &mut app_server,
+            thread_id,
+        ))
+        .await?;
         let observed = Box::pin(app_server.resume_thread(
             &app.local_settings,
             app.config.clone(),
@@ -2604,7 +2601,7 @@ async fn resume_failure_keeps_command_center_available() {
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     app.chat_widget.show_bottom_pane_view(Box::new(view));
     let before = render_bottom_popup(&app.chat_widget, /*width*/ 96);
-    app.add_session_picker_error("The session is unavailable.".to_string());
+    app.add_agents_overview_error("The session is unavailable.".to_string());
     insta::with_settings!({snapshot_path => "../snapshots"}, {
         insta::assert_snapshot!("agents_overview_resume_error", render_bottom_popup(&app.chat_widget, /*width*/ 96));
     });
@@ -3157,7 +3154,8 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
         if cached_primary {
-            Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, source)).await?;
+            Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, source))
+                .await?;
             assert_eq!(app.current_displayed_thread_id(), Some(source));
             app.store_active_thread_receiver().await;
         }

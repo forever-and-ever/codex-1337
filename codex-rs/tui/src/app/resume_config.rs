@@ -50,7 +50,7 @@ impl App {
             && server.remote_cwd_override().is_none()
             && matches!(mode, Some(ResumeCwdMode::Current))
         {
-            self.add_session_picker_error(
+            self.add_agents_overview_error(
                 "`tui.resume_cwd = \"current\"` requires `--cd` when using a remote workspace"
                     .into(),
             );
@@ -102,7 +102,7 @@ impl App {
                     return Err(AppRunControl::Exit(ExitReason::UserRequested));
                 }
                 Err(error) => {
-                    self.add_session_picker_error(format!(
+                    self.add_agents_overview_error(format!(
                         "Failed to determine working directory for resume: {error}"
                     ));
                     return Err(AppRunControl::Continue);
@@ -119,7 +119,7 @@ impl App {
             .rebuild_config_for_resume_or_fallback(&current, destination)
             .await
             .map_err(|error| {
-                self.add_session_picker_error(format!(
+                self.add_agents_overview_error(format!(
                     "Failed to rebuild configuration for resume: {error}"
                 ));
                 AppRunControl::Continue
@@ -160,7 +160,7 @@ impl App {
         )
         .await
         .map_err(|error| {
-            self.add_session_picker_error(format!("Unable to check folder trust: {error}"));
+            self.add_agents_overview_error(format!("Unable to check folder trust: {error}"));
             AppRunControl::Continue
         })?;
         if result.should_exit {
@@ -190,7 +190,7 @@ impl App {
             )
             .await
             .map_err(|error| {
-                self.add_session_picker_error(format!(
+                self.add_agents_overview_error(format!(
                     "Failed to reload trusted folder settings: {error}"
                 ));
                 AppRunControl::Continue
@@ -216,7 +216,7 @@ impl App {
                     }
                     .await
                     .map_err(|error| {
-                        self.add_session_picker_error(format!(
+                        self.add_agents_overview_error(format!(
                             "Unable to load folder hooks: {error}"
                         ));
                         AppRunControl::Continue
@@ -233,7 +233,7 @@ impl App {
                 )
                 .await
                 .map_err(|error| {
-                    self.add_session_picker_error(format!(
+                    self.add_agents_overview_error(format!(
                         "Unable to review folder hooks: {error}"
                     ));
                     AppRunControl::Continue

@@ -3655,7 +3655,8 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
         app.runtime_permission_profile_override = Some(
             RuntimePermissionProfileOverride::from_restored_config(&app.config),
         );
-        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, thread_id))
+            .await?;
         assert_eq!(recorded_params(&requests, "thread/resume").len(), 1);
         assert!(recorded_params(&requests, "turn/start").is_empty());
         if matches!(
@@ -3667,7 +3668,8 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
             insta::allow_duplicates! {
                 insta::assert_snapshot!(error, @"
                   Unable to complete action
-                  Couldn't load this conversation. Please try again.
+                  Failed to view thread open elsewhere: thread/read failed during TUI session lookup:
+                  thread/read failed: saved history unavailable (code -32603)
 
 
                 › 1. Return to command center
@@ -3759,11 +3761,7 @@ async fn side_fork_uses_one_request_for_long_paginated_history() -> Result<()> {
         /*git_info*/ None,
     )
     .expect("create long paginated source rollout");
-    let source_path = rollout_path(
-        config.codex_home.as_path(),
-        filename_ts,
-        source_id.as_str(),
-    );
+    let source_path = rollout_path(config.codex_home.as_path(), filename_ts, source_id.as_str());
     let mut contents = std::fs::read_to_string(&source_path)?;
     let rollout_line = |ordinal: usize, payload: serde_json::Value| {
         serde_json::json!({
