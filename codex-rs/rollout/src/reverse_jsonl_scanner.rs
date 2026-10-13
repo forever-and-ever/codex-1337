@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use crate::RolloutLine;
 
+mod record_capture;
+
 const READ_CHUNK_SIZE: usize = 64 * 1024;
 
 #[derive(Debug)]
@@ -26,6 +28,7 @@ pub struct ReverseJsonlScanner<R> {
     chunk_position: usize,
     chunk: Vec<u8>,
     record_reversed: Vec<u8>,
+    record_capture: Option<Vec<u8>>,
     max_record_bytes: Option<usize>,
     discarding_oversized_record: bool,
 }
@@ -57,6 +60,7 @@ where
             chunk_position: 0,
             chunk: vec![0; READ_CHUNK_SIZE],
             record_reversed: Vec::new(),
+            record_capture: None,
             max_record_bytes: None,
             discarding_oversized_record: false,
         })
@@ -155,6 +159,7 @@ where
                 Err(error) => ScanOutcome::Rejected(error),
             })
         };
+        self.capture_record();
         self.record_reversed.clear();
         outcome
     }

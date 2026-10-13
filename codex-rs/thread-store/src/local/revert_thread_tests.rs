@@ -113,6 +113,69 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         .shutdown_thread(thread_id)
         .await
         .expect("close source writer");
+    // A failed append was newline-terminated on reopen, then durably retried with the same
+    // ordinal and a new timestamp. Reconciliation must prove the retry, never skip bad mail.
+    let original = std::fs::read_to_string(&original_path).expect("read canonical source");
+    let mut retried = String::new();
+    for line in original.lines() {
+        if line.contains(mail[0].id.as_ref().expect("mail identity").as_str()) {
+            let (_, item) = line.split_once(",\"ordinal\":").expect("paginated record");
+            let partial =
+                format!("{{\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"ordinal\":{item}");
+            let partial = &partial[..partial.len() - 10];
+            retried.push_str(partial);
+            retried.push('\n');
+            retried.push_str(partial);
+            retried.push('\n');
+        }
+        retried.push_str(line);
+        retried.push('\n');
+    }
+    let ids: Vec<_> = mail
+        .iter()
+        .map(|mail| mail.id.clone().expect("mail ID"))
+        .collect();
+    let conflicting = retried.replacen("retained canonical mail", "conflicting canonical mail", 1);
+    std::fs::write(&original_path, &conflicting).expect("write conflicting partial attempt");
+    assert!(
+        store
+            .find_accepted_agent_mail(thread_id, &ids)
+            .await
+            .is_err(),
+        "unmatched malformed accepted mail must remain fail-closed"
+    );
+    std::fs::write(&original_path, &retried).expect("write exact partial retry");
+    let recovered = store
+        .find_accepted_agent_mail(thread_id, &ids)
+        .await
+        .expect("reconcile an exact adjacent retry without storage repair");
+    assert_eq!(recovered.len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(&original_path).expect("read preserved source"),
+        retried
+    );
+    assert_eq!(
+        state_db
+            .thread_queue()
+            .pending_agent_mail(thread_id)
+            .await
+            .expect("read untouched acceptance obligations")
+            .len(),
+        3
+    );
+
+    // The injected historical bytes precede projection in the real failure. Rebuild this
+    // fixture's disposable projection so its saved byte cutoffs describe those same bytes.
+    super::super::thread_history::delete_thread(&store, thread_id)
+        .await
+        .expect("drop fixture projection with old byte offsets");
+    super::super::thread_history_materialization::materialize_to_sqlite(
+        &store,
+        thread_id,
+        &original_path,
+    )
+    .await
+    .expect("rebuild projection over partial retries");
     codex_rollout::state_db::reconcile_rollout(
         Some(state_db.as_ref()),
         original_path.as_path(),
@@ -162,10 +225,6 @@ async fn revert_keeps_thread_id_and_hides_suffix_across_repeated_reverts() {
         Some(vec![home.path().join("workspace")])
     );
     assert_eq!(turn_ids(&store, thread_id).await, vec!["turn-1"]);
-    let ids: Vec<_> = mail
-        .iter()
-        .map(|communication| communication.id.clone().expect("accepted ID"))
-        .collect();
     for id in &ids[..2] {
         assert_eq!(
             state_db
