@@ -330,7 +330,7 @@ pub fn build_exec_tool_description_for(
             if nested_description.is_empty() {
                 nested_tool_sections.push(heading);
             } else {
-                nested_tool_sections.push(format!("{}\n{nested_description}", heading));
+                nested_tool_sections.push(format!("{heading}\n{nested_description}"));
             }
         }
 

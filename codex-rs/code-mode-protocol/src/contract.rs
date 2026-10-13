@@ -18,14 +18,14 @@ pub(crate) fn render(tool: &ToolDefinition) -> String {
         CodeModeToolKind::Freeform => "input). Input is a raw string, not a JSON envelope.",
     });
     if let Some(input) = &tool.input_schema {
-        text.push_str("\n");
+        text.push('\n');
         text.push_str(&schema("Parameters", input));
     }
     if let Some(output) = &tool.output_schema {
         if crate::discovery::mcp_structured_content_schema(Some(output)).is_some() {
             text.push_str("\nReturns: MCP result: content blocks; optional structuredContent, isError and _meta. Inspect isError; use describe_tool(name, {detail: \"output\"}) for the declared result fields.");
         } else {
-            text.push_str("\n");
+            text.push('\n');
             text.push_str(&schema("Returns", output));
         }
     } else {
