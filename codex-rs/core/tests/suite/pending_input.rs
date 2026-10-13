@@ -654,8 +654,10 @@ enum WaitWake {
     Mail,
     Steer,
     Disabled,
+    TimedOut,
 }
 
+#[test_case(WaitWake::TimedOut; "timeout_clamping")]
 #[test_case(WaitWake::Mail; "released_mail")]
 #[test_case(WaitWake::Steer; "user_steer")]
 #[test_case(WaitWake::Disabled; "disabled_batching")]
@@ -671,7 +673,11 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
                 WAIT_CALL_ID,
                 "wrangler_agents",
                 "wait_agent",
-                r#"{"timeout_ms":10000}"#,
+                if matches!(wake, WaitWake::TimedOut) {
+                    r#"{"timeout_ms":1}"#
+                } else {
+                    r#"{"timeout_ms":10000}"#
+                },
             )),
             chunk(ev_completed("resp-1")),
         ],
@@ -685,9 +691,13 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
                 .features
                 .enable(Feature::MultiAgentV2)
                 .expect("enable V2 agents");
-            config.multi_agent_v2.min_wait_timeout_ms = 0;
+            config.multi_agent_v2.min_wait_timeout_ms = if matches!(wake, WaitWake::TimedOut) {
+                5
+            } else {
+                0
+            };
             config.multi_agent_v2.wait_agent_batch_window_ms = match wake {
-                WaitWake::Disabled => None,
+                WaitWake::Disabled | WaitWake::TimedOut => None,
                 WaitWake::Mail | WaitWake::Steer => NonZeroU64::new(60_000),
             };
         })
@@ -701,11 +711,35 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
     })
     .await;
     match wake {
+        WaitWake::TimedOut => {}
         WaitWake::Steer => steer_user_input(codex, STEER_PROMPT).await,
         WaitWake::Mail | WaitWake::Disabled => {
             enqueue_queue_only_agent_mail(codex, "first child message").await
         }
     }
+    let completed = wait_for_event(codex, |event| {
+        matches!(event,
+        EventMsg::ItemCompleted(event) if matches!(&event.item,
+            codex_protocol::items::TurnItem::CollabAgentToolCall(item) if item.id == WAIT_CALL_ID))
+    })
+    .await;
+    let EventMsg::ItemCompleted(event) = completed else {
+        unreachable!()
+    };
+    let codex_protocol::items::TurnItem::CollabAgentToolCall(item) = event.item else {
+        unreachable!()
+    };
+    let completion = item.wait_completion.expect("observed wait outcome");
+    assert_eq!(
+        completion.outcome,
+        if matches!(wake, WaitWake::Steer) {
+            codex_protocol::agent_wait::AgentWaitOutcome::Steered
+        } else if matches!(wake, WaitWake::TimedOut) {
+            codex_protocol::agent_wait::AgentWaitOutcome::TimedOut
+        } else {
+            codex_protocol::agent_wait::AgentWaitOutcome::MailboxActivity
+        }
+    );
     tokio::time::timeout(Duration::from_secs(5), wait_for_turn_complete(codex))
         .await
         .expect("released mail must not incur a second batching window");
@@ -727,7 +761,10 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
         .iter()
         .filter(|item| item["type"] == "agent_message")
         .collect::<Vec<_>>();
-    assert_eq!(mail.len(), usize::from(!matches!(wake, WaitWake::Steer)));
+    assert_eq!(
+        mail.len(),
+        usize::from(matches!(wake, WaitWake::Mail | WaitWake::Disabled))
+    );
     if let Some(mail) = mail.first() {
         assert!(mail.to_string().contains("first child message"));
     }
@@ -737,8 +774,10 @@ async fn wait_agent_wake_preserves_mail_and_steers(wake: WaitWake) {
         json!({
             "message": if matches!(wake, WaitWake::Steer) {
                 "Wait interrupted by new input."
+            } else if matches!(wake, WaitWake::TimedOut) {
+                "Wait timed out.\n\nRequested timeout of 1ms was clamped to the minimum of 5ms."
             } else { "Wait completed." },
-            "timed_out": false,
+            "timed_out": matches!(wake, WaitWake::TimedOut),
         })
     );
     server.shutdown().await;

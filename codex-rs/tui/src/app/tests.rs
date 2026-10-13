@@ -2294,6 +2294,7 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::new(),
             },
         }),
@@ -2331,6 +2332,7 @@ async fn collab_receiver_notification_does_not_cache_not_found_thread() {
                 prompt: Some("hello".to_string()),
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     receiver_thread_id.to_string(),
                     codex_app_server_protocol::CollabAgentState {
@@ -9351,6 +9353,7 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
                             prompt: None,
                             model: None,
                             reasoning_effort: None,
+                            wait_completion: None,
                             agents_states: HashMap::new(),
                         },
                     },

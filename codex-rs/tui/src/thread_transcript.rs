@@ -64,7 +64,9 @@ fn push_activity_cell(cells: &mut TranscriptCells, cell: Arc<dyn HistoryCell>) {
         }
         return;
     }
-    if let Some((range, replacements)) = crate::history_cell::reconcile_code_mode(cells, &cell) {
+    if let Some((range, replacements)) = crate::history_cell::reconcile_agent_wait(cells, &cell)
+        .or_else(|| crate::history_cell::reconcile_code_mode(cells, &cell))
+    {
         cells.splice(range, replacements);
     } else if crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref()).is_some() {
         let reconciliation = crate::history_cell::reconcile_tool_calls(cells, &cell);
@@ -322,12 +324,14 @@ fn append_thread_items(
                             continue;
                         }
                         if let Some((range, replacements)) =
-                            crate::history_cell::reconcile_code_mode(cells, &cell).or_else(|| {
-                                crate::history_cell::ToolOutputGroup::attach(
-                                    cells,
-                                    Arc::clone(&cell),
-                                )
-                            })
+                            crate::history_cell::reconcile_agent_wait(cells, &cell)
+                                .or_else(|| crate::history_cell::reconcile_code_mode(cells, &cell))
+                                .or_else(|| {
+                                    crate::history_cell::ToolOutputGroup::attach(
+                                        cells,
+                                        Arc::clone(&cell),
+                                    )
+                                })
                         {
                             cells.splice(range, replacements);
                         } else {

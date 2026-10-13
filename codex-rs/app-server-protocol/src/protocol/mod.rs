@@ -1,6 +1,7 @@
 // Module declarations for the app-server protocol namespace.
 // Exposes protocol pieces used by `lib.rs` via `pub use protocol::common::*;`.
 
+mod agent_wait_history;
 pub mod code_mode;
 pub mod common;
 pub mod event_mapping;

@@ -693,6 +693,7 @@ impl ChatWidget {
                 model,
                 reasoning_effort,
                 agents_states,
+                wait_completion,
             } => self.on_collab_agent_tool_call(
                 ThreadItem::CollabAgentToolCall {
                     id,
@@ -704,6 +705,7 @@ impl ChatWidget {
                     model,
                     reasoning_effort,
                     agents_states,
+                    wait_completion,
                 },
                 /*timestamp*/ None,
             ),

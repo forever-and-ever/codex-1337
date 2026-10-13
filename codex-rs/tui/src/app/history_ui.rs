@@ -112,7 +112,8 @@ impl App {
         }
         let is_session_header = cell.as_any().is::<history_cell::SessionInfoCell>();
         if let Some((range, replacements)) =
-            history_cell::reconcile_code_mode(&self.transcript_cells, &cell)
+            history_cell::reconcile_agent_wait(&self.transcript_cells, &cell)
+                .or_else(|| history_cell::reconcile_code_mode(&self.transcript_cells, &cell))
         {
             let retained = self.transcript_cells[range.clone()]
                 .iter()

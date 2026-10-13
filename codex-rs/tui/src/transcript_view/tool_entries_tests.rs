@@ -1238,11 +1238,10 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     }
     insta::assert_snapshot!("empty_return_measurements", examples.join("\n\n"));
 
-    // Live revisions replace the transient wait by call identity, just as resumed history
-    // does. The completion's raw capture survives while its entire presentation retires.
+    // Wait wake evidence survives lifecycle revision without becoming output authority.
     use codex_app_server_protocol::CollabAgentTool;
     use codex_app_server_protocol::CollabAgentToolCallStatus;
-    let wait_item = |status| ThreadItem::CollabAgentToolCall {
+    let wait_item = |status, wait_completion| ThreadItem::CollabAgentToolCall {
         id: "agent-wait".into(),
         tool: CollabAgentTool::Wait,
         status,
@@ -1251,6 +1250,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         prompt: None,
         model: None,
         reasoning_effort: None,
+        wait_completion,
         agents_states: Default::default(),
     };
     let cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
@@ -1266,7 +1266,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         let cell = Arc::new(crate::history_cell::ToolItemCell::new(
             "agent-wait".into(),
             crate::multi_agents::tool_call_history_cell(
-                &wait_item(status.clone()),
+                &wait_item(status.clone(), None),
                 /*cached_spawn_request*/ None,
                 |_| crate::multi_agents::AgentMetadata::default(),
             )
@@ -1284,8 +1284,8 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             /*thread_id*/ None,
             &cwd,
             [
-                wait_item(CollabAgentToolCallStatus::InProgress),
-                wait_item(status.clone()),
+                wait_item(CollabAgentToolCallStatus::InProgress, None),
+                wait_item(status.clone(), None),
             ],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
@@ -1298,13 +1298,51 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         );
         if status == CollabAgentToolCallStatus::Completed {
             assert!(!tests::text(&buffer).contains("waiting"));
-            assert!(
-                retained[1]
-                    .raw_lines()
-                    .iter()
-                    .any(|line| line.to_string().contains("Finished waiting"))
-            );
+            assert!(retained[1].raw_lines().is_empty());
+            assert!(tests::text(&buffer).contains("outcome unavailable"));
         }
     }
     insta::assert_snapshot!("agent_wait_lifecycle", stages.join("\n\n"));
+    use codex_protocol::agent_wait::{AgentWaitCompletion, AgentWaitOutcome};
+    for (status, outcome, label) in [
+        (
+            CollabAgentToolCallStatus::Completed,
+            AgentWaitOutcome::TimedOut,
+            "no updates before timeout",
+        ),
+        (
+            CollabAgentToolCallStatus::Completed,
+            AgentWaitOutcome::MailboxActivity,
+            "updates available",
+        ),
+        (
+            CollabAgentToolCallStatus::Completed,
+            AgentWaitOutcome::Steered,
+            "new input arrived",
+        ),
+        (
+            CollabAgentToolCallStatus::Failed,
+            AgentWaitOutcome::TimedOut,
+            "Agent wait failed",
+        ),
+        (
+            CollabAgentToolCallStatus::Interrupted,
+            AgentWaitOutcome::TimedOut,
+            "Agent wait interrupted",
+        ),
+    ] {
+        let item = wait_item(
+            status,
+            Some(AgentWaitCompletion {
+                outcome,
+                elapsed_ms: 1234,
+            }),
+        );
+        let cell = crate::multi_agents::tool_call_history_cell(&item, None, |_| Default::default())
+            .unwrap();
+        let heading = cell.display_lines(120)[0].to_string();
+        assert!(heading.contains(label), "{heading}");
+        assert!(!heading.contains("task completed"));
+        assert!(cell.raw_lines().is_empty());
+    }
 }

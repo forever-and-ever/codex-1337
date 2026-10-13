@@ -1694,6 +1694,281 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         }
     }
     insta::assert_snapshot!("coalesced_returned_batches", snapshots.join("\n\n"));
+
+    // Exact call ownership must survive both transport direction and every page split,
+    // while the capture has its own output-item identity and initially closed disclosure.
+    use codex_app_server_protocol::{CollabAgentTool, CollabAgentToolCallStatus};
+    use codex_protocol::agent_wait::{AgentWaitCompletion, AgentWaitOutcome};
+    let wait = |status| ThreadItem::CollabAgentToolCall {
+        id: "wait-p".into(),
+        tool: CollabAgentTool::Wait,
+        status,
+        sender_thread_id: ThreadId::default().to_string(),
+        receiver_thread_ids: Vec::new(),
+        prompt: None,
+        model: None,
+        reasoning_effort: None,
+        agents_states: Default::default(),
+        wait_completion: Some(AgentWaitCompletion {
+            outcome: AgentWaitOutcome::TimedOut,
+            elapsed_ms: 50,
+        }),
+    };
+    let captured = r#"{"message":"Wait timed out.","timed_out":true}"#;
+    let result = ThreadItem::FunctionCallOutput {
+        id: "wait-output".into(),
+        call_id: Some("wait-p".into()),
+        name: "wait_agent".into(),
+        namespace: Some("wrangler_agents".into()),
+        output: FunctionCallOutputBody::Text(captured.into()),
+    };
+    // A nested wait retains its human outcome even when JS discards its return.
+    // The outer capture is not evidence that the nested result was model-visible.
+    let (app, _, _) = crate::app::tests::make_test_app_with_channels().await;
+    let owner = codex_app_server_protocol::CodeModeOwner {
+        thread_id: ThreadId::default(),
+        exec_call_id: "outer-exec".into(),
+        cell_id: None,
+        started_at_ms: 0,
+    };
+    let scoped = |item| {
+        ThreadItem::CodeModeOwned(codex_app_server_protocol::CodeModeOwned::new(
+            owner.clone(),
+            Box::new(item),
+        ))
+    };
+    let scoped_cells = project(
+        &app,
+        &[
+            scoped(wait(CollabAgentToolCallStatus::Completed)),
+            scoped(ThreadItem::FunctionCallOutput {
+                id: "outer-output".into(),
+                call_id: Some("outer-exec".into()),
+                name: "exec".into(),
+                namespace: None,
+                output: FunctionCallOutputBody::Text("JS kept only this".into()),
+            }),
+            scoped(wait(CollabAgentToolCallStatus::InProgress)),
+        ],
+    );
+    assert_eq!(scoped_cells.len(), 1);
+    let block = scoped_cells[0]
+        .as_any()
+        .downcast_ref::<history_cell::CodeModeCell>()
+        .unwrap();
+    let nested = block
+        .members()
+        .iter()
+        .find(|cell| crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref()).is_some())
+        .unwrap();
+    assert!(
+        nested.display_lines(120)[0]
+            .to_string()
+            .contains("no updates before timeout")
+    );
+    assert!(nested.raw_lines().is_empty());
+    assert!(
+        !block
+            .raw_lines()
+            .iter()
+            .any(|line| line.to_string().contains(captured))
+    );
+    let external = project(&app, std::slice::from_ref(&result)).pop().unwrap();
+    assert!(history_cell::reconcile_agent_wait(&scoped_cells, &external).is_none());
+    let no_owner = history_cell::ToolOutputCell::from_output(
+        "old-output",
+        None,
+        "wait_agent",
+        Some("wrangler_agents"),
+        &FunctionCallOutputBody::Text(captured.into()),
+    )
+    .unwrap();
+    assert_eq!(no_owner.outer_call_id(), None);
+    for namespace in [None, Some("legacy")] {
+        let legacy = history_cell::ToolOutputCell::from_output(
+            "legacy-result",
+            Some("unknown-call"),
+            "wait_agent",
+            namespace,
+            &FunctionCallOutputBody::Text(captured.into()),
+        )
+        .unwrap();
+        assert!(
+            legacy.display_lines(120)[0]
+                .to_string()
+                .contains("wait_agent")
+        );
+        assert!(!legacy.is_agent_wait());
+        let legacy = Arc::new(legacy) as Arc<dyn HistoryCell>;
+        assert!(history_cell::reconcile_agent_wait(&scoped_cells, &legacy).is_none());
+    }
+    assert!(
+        no_owner.display_lines(120)[0]
+            .to_string()
+            .contains("wrangler_agents.wait_agent")
+    );
+    assert!(
+        history_cell::ToolOutputCell::from_output(
+            "other",
+            None,
+            "wait",
+            None,
+            &FunctionCallOutputBody::Text(captured.into())
+        )
+        .is_none()
+    );
+    for result_first in [false, true] {
+        let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+        tui.set_owned_screen(true).unwrap();
+        let start = wait(CollabAgentToolCallStatus::InProgress);
+        let end = wait(CollabAgentToolCallStatus::Completed);
+        let unrelated = call("unrelated-q", ActivityKind::Exploration, "completed");
+        let items = if result_first {
+            vec![
+                result.clone(),
+                unrelated.clone(),
+                start.clone(),
+                end,
+                result.clone(),
+                start,
+            ]
+        } else {
+            vec![
+                start.clone(),
+                unrelated.clone(),
+                end,
+                result.clone(),
+                result.clone(),
+                start,
+            ]
+        };
+        let current = turn(items);
+        let expected = project(&app, &current.items);
+        assert_eq!(expected.len(), 2);
+        let wait_group = expected
+            .iter()
+            .find(|cell| cell.activity_ids().contains(&"agent-wait:wait-p".into()))
+            .unwrap();
+        assert!(
+            wait_group.compact_hyperlink_lines(120)[0]
+                .line
+                .to_string()
+                .contains("no updates before timeout")
+        );
+        assert_eq!(
+            wait_group
+                .activity_ids()
+                .iter()
+                .filter(|id| id.starts_with("output:"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            wait_group
+                .raw_lines()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            captured
+        );
+        let mut expanded = wait_group
+            .activity_ids()
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let parts = wait_group
+            .output_parts(
+                120,
+                0,
+                &expanded,
+                history_cell::output_provenance::OutputMode::Raw,
+            )
+            .unwrap();
+        assert_eq!(parts.controls.len(), 1);
+        assert_eq!(parts.controls[0].id, "result:wait-output");
+        assert!(!parts.controls[0].expanded);
+        assert!(
+            !parts
+                .lines
+                .iter()
+                .any(|line| line.line.to_string().contains(captured))
+        );
+        expanded.insert("result:wait-output".into());
+        let parts = wait_group
+            .output_parts(
+                120,
+                0,
+                &expanded,
+                history_cell::output_provenance::OutputMode::Raw,
+            )
+            .unwrap();
+        let copied = parts
+            .lines
+            .iter()
+            .filter_map(|line| line.source.as_ref())
+            .filter(|source| {
+                source.output_provenance
+                    == history_cell::output_provenance::OutputProvenance::Captured
+            })
+            .map(|source| source.text.as_ref())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(copied, captured);
+        for item in &current.items {
+            app.chat_widget.handle_server_notification(
+                codex_app_server_protocol::ServerNotification::ItemCompleted(
+                    codex_app_server_protocol::ItemCompletedNotification {
+                        thread_id: ThreadId::default().to_string(),
+                        turn_id: current.id.clone(),
+                        item: item.clone(),
+                        completed_at_ms: 0,
+                    },
+                ),
+                None,
+            );
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    app.insert_history_cell(&mut tui, cell);
+                }
+            }
+        }
+        app.chat_widget
+            .add_to_history(history_cell::PlainHistoryCell::new(vec!["Answer".into()]));
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                app.insert_history_cell(&mut tui, cell);
+            }
+        }
+        assert_eq!(
+            rendered(&app.transcript_cells[..app.transcript_cells.len() - 1]),
+            rendered(&expected)
+        );
+        for split in 1..current.items.len() {
+            let older = project(&app, &current.items[..split]);
+            let boundary = older.len();
+            app.transcript_cells = older
+                .into_iter()
+                .chain(project(&app, &current.items[split..]))
+                .collect();
+            app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
+            assert_eq!(
+                rendered(&app.transcript_cells),
+                rendered(&expected),
+                "wait result_first={result_first} split={split}"
+            );
+        }
+        assert_eq!(
+            rendered(&project(&app, &[unrelated])),
+            rendered(
+                &expected
+                    .iter()
+                    .filter(|cell| !cell.activity_ids().contains(&"agent-wait:wait-p".into()))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            )
+        );
+    }
 }
 
 #[tokio::test]

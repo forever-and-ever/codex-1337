@@ -113,6 +113,31 @@
       ],
       "type": "string"
     },
+    "AgentWaitCompletion": {
+      "properties": {
+        "elapsedMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "outcome": {
+          "$ref": "#/definitions/AgentWaitOutcome"
+        }
+      },
+      "required": [
+        "elapsedMs",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "AgentWaitOutcome": {
+      "enum": [
+        "timedOut",
+        "mailboxActivity",
+        "steered"
+      ],
+      "type": "string"
+    },
     "Arrival": {
       "properties": {
         "id": {
@@ -2276,6 +2301,16 @@
               ],
               "title": "CollabAgentToolCallThreadItemType",
               "type": "string"
+            },
+            "waitCompletion": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AgentWaitCompletion"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [

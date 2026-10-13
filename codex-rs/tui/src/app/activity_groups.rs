@@ -14,7 +14,9 @@ impl App {
         boundary: usize,
         turns: &[Turn],
     ) {
-        if let Some((range, replacements)) = history_cell::reunite_code_mode(&self.transcript_cells)
+        if let Some((range, replacements)) =
+            history_cell::reunite_agent_wait(&self.transcript_cells)
+                .or_else(|| history_cell::reunite_code_mode(&self.transcript_cells))
         {
             let retained = self.transcript_cells[range.clone()]
                 .iter()

@@ -78,6 +78,7 @@ impl ToolExecutor<ToolInvocation> for Handler {
             analytics.track_collab_tool_call(
                 turn_id,
                 CollabAgentToolCallItem {
+                    wait_completion: None,
                     id: call_id,
                     tool: CollabAgentTool::SpawnAgent,
                     status,

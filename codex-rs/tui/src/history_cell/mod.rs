@@ -122,6 +122,9 @@ const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
 
 mod activity_details;
 mod activity_lifecycle;
+mod agent_wait_projection;
+pub(crate) use agent_wait_projection::reconcile_agent_wait;
+pub(crate) use agent_wait_projection::reunite_agent_wait;
 pub(crate) mod activity_preview;
 mod approvals;
 mod arrival;

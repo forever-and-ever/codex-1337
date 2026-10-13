@@ -243,6 +243,7 @@ async fn buffered_tool_events_preserve_attribution_or_drop_it_on_queue_overflow(
             turn_id: "turn-1".to_string(),
             completed_at_ms: 2,
             item: ThreadItem::CollabAgentToolCall {
+                wait_completion: None,
                 id: "item".to_string(),
                 tool: CollabAgentTool::SendMessage,
                 status: CollabAgentToolCallStatus::Failed,

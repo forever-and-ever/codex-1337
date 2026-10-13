@@ -3421,11 +3421,44 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         prompt: Some("continue".to_string()),
         model: None,
         reasoning_effort: None,
+        wait_completion: None,
         agents_states: [(receiver_thread_id, CoreAgentStatus::Completed(None))]
             .into_iter()
             .collect(),
     });
 
+    for outcome in [
+        codex_protocol::agent_wait::AgentWaitOutcome::TimedOut,
+        codex_protocol::agent_wait::AgentWaitOutcome::MailboxActivity,
+        codex_protocol::agent_wait::AgentWaitOutcome::Steered,
+    ] {
+        let mut wait = collab_item.clone();
+        let completion = codex_protocol::agent_wait::AgentWaitCompletion {
+            outcome,
+            elapsed_ms: 1234,
+        };
+        let TurnItem::CollabAgentToolCall(call) = &mut wait else {
+            unreachable!()
+        };
+        call.tool = CoreCollabAgentTool::Wait;
+        call.wait_completion = Some(completion.clone());
+        let persisted = serde_json::to_value(&wait).unwrap();
+        let parsed = serde_json::from_value::<TurnItem>(persisted.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), persisted);
+        crate::protocol::agent_wait_history::assert_wait_history_retains_completion(wait.clone());
+        let wire = serde_json::to_value(ThreadItem::from(wait)).unwrap();
+        assert_eq!(
+            wire["waitCompletion"],
+            serde_json::to_value(&completion).unwrap()
+        );
+        assert_eq!(wire["waitCompletion"]["elapsedMs"], 1234);
+    }
+    let wire = serde_json::to_value(ThreadItem::from(collab_item.clone())).unwrap();
+    assert!(wire.get("waitCompletion").is_none());
+    assert_eq!(
+        serde_json::from_value::<ThreadItem>(wire).unwrap(),
+        ThreadItem::from(collab_item.clone())
+    );
     assert_eq!(
         ThreadItem::from(collab_item),
         ThreadItem::CollabAgentToolCall {
@@ -3437,6 +3470,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             prompt: Some("continue".to_string()),
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: [(
                 receiver_thread_id.to_string(),
                 CollabAgentState {

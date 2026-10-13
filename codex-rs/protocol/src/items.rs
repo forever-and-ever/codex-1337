@@ -378,6 +378,9 @@ pub struct CollabAgentToolCallItem {
     pub reasoning_effort: Option<ReasoningEffortConfig>,
     #[serde(default)]
     pub agents_states: HashMap<ThreadId, AgentStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub wait_completion: Option<crate::agent_wait::AgentWaitCompletion>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq, Eq)]

@@ -964,6 +964,7 @@ impl ThreadHistoryBuilder {
             prompt: Some(payload.prompt.clone()),
             model: Some(payload.model.clone()),
             reasoning_effort: Some(payload.reasoning_effort.clone()),
+            wait_completion: None,
             agents_states: HashMap::new(),
         };
         self.upsert_item_in_current_turn(item);
@@ -999,6 +1000,7 @@ impl ThreadHistoryBuilder {
             prompt: Some(payload.prompt.clone()),
             model: Some(payload.model.clone()),
             reasoning_effort: Some(payload.reasoning_effort.clone()),
+            wait_completion: None,
             agents_states,
         });
     }
@@ -1016,6 +1018,7 @@ impl ThreadHistoryBuilder {
             prompt: Some(payload.prompt.clone()),
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: HashMap::new(),
         };
         self.upsert_item_in_current_turn(item);
@@ -1040,6 +1043,7 @@ impl ThreadHistoryBuilder {
             prompt: Some(payload.prompt.clone()),
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: [(receiver_id, received_status)].into_iter().collect(),
         });
     }
@@ -1076,6 +1080,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: HashMap::new(),
         };
         self.upsert_item_in_current_turn(item);
@@ -1111,6 +1116,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states,
         });
     }
@@ -1128,6 +1134,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: HashMap::new(),
         };
         self.upsert_item_in_current_turn(item);
@@ -1154,6 +1161,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states,
         });
     }
@@ -1171,6 +1179,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: HashMap::new(),
         };
         self.upsert_item_in_current_turn(item);
@@ -1200,6 +1209,7 @@ impl ThreadHistoryBuilder {
             prompt: None,
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states,
         });
     }
@@ -1723,7 +1733,9 @@ impl TurnItemIndex {
             None => items.iter().position(|existing| existing.id() == item.id()),
         };
         if let Some(index) = existing_index {
-            items[index] = item;
+            if !super::agent_wait_history::retain_wait(&items[index], &item) {
+                items[index] = item;
+            }
             &items[index]
         } else {
             let index = items.len();
@@ -4754,6 +4766,7 @@ mod tests {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: [(
                     "00000000-0000-0000-0000-000000000002".into(),
                     CollabAgentState {
@@ -4814,6 +4827,7 @@ mod tests {
                 prompt: Some("inspect the repo".into()),
                 model: Some("gpt-5.4-mini".into()),
                 reasoning_effort: Some(codex_protocol::openai_models::ReasoningEffort::Medium),
+                wait_completion: None,
                 agents_states: [(
                     "00000000-0000-0000-0000-000000000002".into(),
                     CollabAgentState {
@@ -4886,6 +4900,7 @@ mod tests {
                 prompt: Some("new task".into()),
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: [(
                     receiver.to_string(),
                     CollabAgentState {

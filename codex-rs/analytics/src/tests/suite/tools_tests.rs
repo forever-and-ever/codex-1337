@@ -372,6 +372,7 @@ async fn collaborator_tool_events_keep_response_ids_when_completion_races_sampli
             )
             .await;
         let item = ThreadItem::CollabAgentToolCall {
+            wait_completion: None,
             id: "call-1".into(),
             tool: CollabAgentTool::SendMessage,
             status: CollabAgentToolCallStatus::Failed,
