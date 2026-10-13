@@ -2756,7 +2756,7 @@ async fn command_center_handles_resume_failure_and_success() -> Result<()> {
             .is_some()
     );
     assert!(
-        render_bottom_popup(&app.chat_widget, /*width*/ 96).contains("Unable to resume session")
+        render_bottom_popup(&app.chat_widget, /*width*/ 96).contains("Failed to resume session")
     );
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

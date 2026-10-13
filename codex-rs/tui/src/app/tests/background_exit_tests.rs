@@ -566,11 +566,17 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
 #[tokio::test]
 async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Result<()> {
     let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
-    let side_thread_id = prepare_running_local_daemon(&mut app)?;
+    prepare_local_daemon_thread(&mut app)?;
     let (mut app_server, mut tui) =
         prepare_background_exit_test(&app, &mut app_event_rx, &mut op_rx).await?;
     let started = app_server.start_thread(&app.config).await?;
     let parent_thread_id = started.session.thread_id;
+    let side = app_server.start_thread(&app.config).await?;
+    let side_thread_id = side.session.thread_id;
+    app.active_thread_id = Some(side_thread_id);
+    app.chat_widget.handle_thread_session(side.session);
+    app.chat_widget
+        .handle_server_notification(turn_started_notification(side_thread_id, "turn-1"), None);
     app.primary_thread_id = Some(parent_thread_id);
     app.side_threads
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
@@ -591,6 +597,7 @@ async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Res
     assert_eq!(app.active_thread_id, Some(parent_thread_id));
     assert!(!app.side_threads.contains_key(&side_thread_id));
     assert!(op_rx.try_recv().is_err());
+    app_server.shutdown().await?;
     Ok(())
 }
 

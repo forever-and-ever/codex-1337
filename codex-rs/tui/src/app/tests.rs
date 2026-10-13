@@ -6152,7 +6152,11 @@ async fn background_side_cleanup_removes_local_state_and_ignores_late_events() -
     let mut app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
     let parent_thread_id = ThreadId::new();
-    let side_thread_id = ThreadId::new();
+    let side_thread_id = app_server
+        .start_thread(&app.config)
+        .await?
+        .session
+        .thread_id;
     app.active_thread_id = Some(parent_thread_id);
     app.side_threads
         .insert(side_thread_id, SideThreadState::new(parent_thread_id));
@@ -6203,6 +6207,7 @@ async fn background_side_cleanup_removes_local_state_and_ignores_late_events() -
         )
         .expect("approval resolution should serialize");
     assert_eq!(resolution, None);
+    app_server.shutdown().await?;
     Ok(())
 }
 

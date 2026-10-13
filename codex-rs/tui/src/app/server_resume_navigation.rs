@@ -1190,7 +1190,11 @@ impl App {
                     self.chat_widget.config_ref(),
                 ));
         }
-        if let Some(mut input) = retained_input {
+        // Resume admission does not switch widgets. Restore the destination only after
+        // installation succeeds, keeping its saved input available on failure.
+        if let Some(mut input) =
+            retained_input.or(self.agents_overview.input_states.remove(&thread_id))
+        {
             input.agent_turn_running = running;
             input.task_running = running;
             self.chat_widget.restore_thread_input_state(
@@ -1199,6 +1203,9 @@ impl App {
                     preserve_in_flight_turn: running && !read_only,
                 },
             );
+        }
+        if !read_only {
+            self.chat_widget.maybe_send_next_queued_input();
         }
         if let ResumePresentation::ReadOnly(notice) = &ready.presentation {
             self.ensure_thread_channel(thread_id).mark_external_writer();

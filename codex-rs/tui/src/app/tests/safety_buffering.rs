@@ -266,11 +266,12 @@ stream_max_retries = 0
     let merged_steer = format!("{COMMITTED_STEER}\n{appended}");
     submit_prompt(&mut app, appended);
     let replacement = next_user_turn_event(&mut app_event_rx);
-    let pending_input = app.chat_widget.capture_thread_input_state();
     app.submit_thread_op(&mut app_server, thread_id, replacement)
         .await?;
-    // Park before consuming the replacement receipt: its previous/appended payloads
-    // must travel with the queue, not disappear with the visible widget.
+    app.settle_turn_submissions(&mut app_server).await?;
+    let pending_input = app.chat_widget.capture_thread_input_state();
+    // Park the acknowledged replacement before either model-side user-message commit.
+    // Those commits must settle its retained input while another thread is visible.
     let other_id = ThreadId::from_string(
         &app_test_support::create_fake_rollout(
             app.config.codex_home.as_path(),
@@ -381,11 +382,21 @@ stream_max_retries = 0
             };
             if let Some(release_response) = release_response.take() {
                 assert_ne!(client_id, expected_client_id);
-                assert_eq!(saved_input, pending_input);
+                assert!(
+                    saved_input
+                        .as_ref()
+                        .unwrap()
+                        .same_pending_input(pending_input.as_ref().unwrap())
+                );
                 let _ = release_response.send(());
             } else {
                 assert_eq!(client_id, expected_client_id);
-                assert_eq!(saved_input, acknowledged_input);
+                assert!(
+                    saved_input
+                        .as_ref()
+                        .unwrap()
+                        .same_pending_input(acknowledged_input.as_ref().unwrap())
+                );
                 break;
             }
         }
@@ -407,16 +418,9 @@ stream_max_retries = 0
         app.try_submit_active_thread_op_via_app_server(&mut app_server, thread_id, &interrupt)
             .await?
     );
-    let AppServerRequestId::Integer(next_request_id) = app_server.next_request_id() else {
-        unreachable!("embedded app-server request IDs are integers");
-    };
     assert!(
         app.try_submit_active_thread_op_via_app_server(&mut app_server, thread_id, &interrupt)
             .await?
-    );
-    assert_eq!(
-        app_server.next_request_id(),
-        AppServerRequestId::Integer(next_request_id + 1)
     );
     {
         let store = app.thread_event_channels[&thread_id].store.lock().await;

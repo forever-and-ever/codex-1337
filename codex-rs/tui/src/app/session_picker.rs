@@ -1,7 +1,6 @@
 //! In-app session picker transitions, preserving per-thread input and the view on cancellation.
 
 use super::*;
-use crate::chatwidget::ThreadInputStateRestoreMode;
 
 impl App {
     pub(super) async fn open_resume_picker(
@@ -43,19 +42,6 @@ impl App {
                 {
                     return Ok(AppRunControl::Exit(reason));
                 }
-                if switching_threads
-                    && self.current_displayed_thread_id() == Some(thread_id)
-                    && let Some(input_state) = self.agents_overview.input_states.remove(&thread_id)
-                {
-                    let preserve_in_flight_turn =
-                        self.active_turn_id_for_thread(thread_id).await.is_some();
-                    self.chat_widget.restore_thread_input_state(
-                        Some(input_state),
-                        ThreadInputStateRestoreMode {
-                            preserve_in_flight_turn,
-                        },
-                    );
-                }
                 if self.active_thread_id == Some(thread_id)
                     && self
                         .chat_widget
@@ -77,7 +63,9 @@ impl App {
             SessionSelection::Fork(_) => {}
         }
 
-        self.chat_widget.maybe_send_next_queued_input();
+        if self.server_operations.navigation.current.is_none() {
+            self.chat_widget.maybe_send_next_queued_input();
+        }
         // Leaving alt-screen may blank the inline viewport; force a redraw either way.
         tui.frame_requester().schedule_frame();
         Ok(AppRunControl::Continue)

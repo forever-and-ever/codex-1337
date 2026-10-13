@@ -309,6 +309,13 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
     )
     .await?;
     app.settle_turn_submissions(&mut session).await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !app.reconnect.offline {
+            let event = session.next_event().await.expect("disconnect event");
+            app.handle_app_server_event(&session, event).await;
+        }
+    })
+    .await?;
     assert_eq!(
         (app.voice_owner_thread_id(), app.active_thread_id),
         (None, None)

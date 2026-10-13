@@ -232,7 +232,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                         "thread/turns/list" if changed_child_permissions && child_opened && previous_thread.is_some_and(|id| request.params.as_ref().unwrap()["threadId"] == id.to_string()) => Some(json!({"result": {"data": [test_turn("saved", TurnStatus::InProgress, Vec::new())], "nextCursor": null}})),
                         "thread/turns/list" => Some(json!({"result": {"data": [], "nextCursor": null}})),
                         "thread/goal/get" => Some(json!({"result": {"goal": null}})),
-                        "thread/unsubscribe" => Some(json!({"result": {}})),
+                        "thread/unsubscribe" => Some(json!({"result": {"status": "unsubscribed"}})),
                         "config/read" if request.params.as_ref().unwrap()["includeLayers"] == true => Some(json!({"result": {"config": {"projects": {"/tmp/project": {"trust_level": "trusted"}}}, "layers": []}})),
                         "config/read" => Some(json!({"error": {"code": -32601, "message": "unknown method config/read"}})),
                         "thread/read" if request.params.as_ref().unwrap()["threadId"] == child.to_string() => Some(json!({"result": {"thread": child_thread}})),

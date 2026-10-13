@@ -1128,7 +1128,10 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
             recorded_params(&requests, "turn/interrupt"),
             vec![serde_json::json!({"threadId": side_id.to_string(), "turnId": ""})]
         );
-        assert!(app.chat_widget.composer_is_empty());
+        assert_eq!(
+            app.chat_widget.composer_text_with_pending(),
+            "Unsent archived draft"
+        );
         assert_eq!(
             recorded_params(&requests, "thread/archive"),
             vec![serde_json::json!({"threadId": thread_id.to_string()})]
