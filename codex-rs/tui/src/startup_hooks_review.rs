@@ -42,6 +42,24 @@ pub(crate) enum StartupHooksReviewOutcome {
     OpenHooksBrowser(HooksListEntry),
 }
 
+pub(crate) enum HooksReviewDecision {
+    Continue,
+    OpenHooksBrowser(HooksListEntry),
+    TrustAll(HooksListEntry),
+}
+
+pub(crate) fn hook_trust_updates(entry: &HooksListEntry) -> Vec<HookTrustUpdate> {
+    entry
+        .hooks
+        .iter()
+        .filter(|hook| hook_needs_review(hook))
+        .map(|hook| HookTrustUpdate {
+            key: hook.key.clone(),
+            current_hash: hook.current_hash.clone(),
+        })
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StartupHooksReviewSelection {
     ReviewHooks,
@@ -79,24 +97,49 @@ pub(crate) async fn maybe_run_startup_hooks_review(
         return Ok(StartupHooksReviewOutcome::Continue);
     }
 
-    run_startup_hooks_review_app(app_server, tui, config, entry).await
+    let mut entry = entry;
+    let mut error = None;
+    loop {
+        match choose_startup_hooks_review(tui, config, entry, error.as_deref()).await? {
+            HooksReviewDecision::Continue => return Ok(StartupHooksReviewOutcome::Continue),
+            HooksReviewDecision::OpenHooksBrowser(entry) => {
+                return Ok(StartupHooksReviewOutcome::OpenHooksBrowser(entry));
+            }
+            HooksReviewDecision::TrustAll(reviewed) => {
+                match write_hook_trusts(app_server.request_handle(), hook_trust_updates(&reviewed))
+                    .await
+                {
+                    Ok(_) => return Ok(StartupHooksReviewOutcome::Continue),
+                    Err(failure) => {
+                        error = Some(format!(
+                            "Failed to trust hooks: {}",
+                            format_config_error(&failure)
+                        ));
+                        entry = reviewed;
+                    }
+                }
+            }
+        }
+    }
 }
 
-async fn run_startup_hooks_review_app(
-    app_server: &mut AppServerSession,
+pub(crate) async fn choose_startup_hooks_review(
     tui: &mut Tui,
     config: &Config,
     entry: HooksListEntry,
-) -> Result<StartupHooksReviewOutcome> {
+    trust_all_error: Option<&str>,
+) -> Result<HooksReviewDecision> {
     let local_settings = crate::local_settings::LocalSettings::from(config);
     let keymap = RuntimeKeymap::from_config(&local_settings.tui.keymap)
         .map_err(|err| color_eyre::eyre::eyre!(err))?;
     let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
     let app_event_tx = AppEventSender::new(tx_raw);
-    let mut trust_all_error = None;
+    if !review_is_needed(config.bypass_hook_trust, &entry) {
+        return Ok(HooksReviewDecision::Continue);
+    }
     let mut view = selection_view(
         &entry,
-        trust_all_error.as_deref(),
+        trust_all_error,
         /*trusting_all*/ false,
         app_event_tx.clone(),
         &keymap,
@@ -110,7 +153,7 @@ async fn run_startup_hooks_review_app(
 
     loop {
         let Some(event) = tui_events.next().await else {
-            return Ok(StartupHooksReviewOutcome::Continue);
+            return Ok(HooksReviewDecision::Continue);
         };
         tui.screen_size_for_event(&event)?;
         match event {
@@ -135,51 +178,21 @@ async fn run_startup_hooks_review_app(
                 };
                 match selection {
                     StartupHooksReviewSelection::ReviewHooks => {
-                        return Ok(StartupHooksReviewOutcome::OpenHooksBrowser(entry));
+                        return Ok(HooksReviewDecision::OpenHooksBrowser(entry));
                     }
                     StartupHooksReviewSelection::ContinueWithoutTrusting => {
-                        return Ok(StartupHooksReviewOutcome::Continue);
+                        return Ok(HooksReviewDecision::Continue);
                     }
                     StartupHooksReviewSelection::TrustAllAndContinue => {
                         view = selection_view(
                             &entry,
-                            trust_all_error.as_deref(),
+                            trust_all_error,
                             /*trusting_all*/ true,
                             app_event_tx.clone(),
                             &keymap,
                         );
                         draw_view(tui, &view)?;
-                        let result = write_hook_trusts(
-                            app_server.request_handle(),
-                            entry
-                                .hooks
-                                .iter()
-                                .filter(|hook| hook_needs_review(hook))
-                                .map(|hook| HookTrustUpdate {
-                                    key: hook.key.clone(),
-                                    current_hash: hook.current_hash.clone(),
-                                })
-                                .collect(),
-                        )
-                        .await
-                        .map(|_| ())
-                        .map_err(|err| {
-                            format!("Failed to trust hooks: {}", format_config_error(&err))
-                        });
-                        match result {
-                            Ok(()) => return Ok(StartupHooksReviewOutcome::Continue),
-                            Err(err) => {
-                                trust_all_error = Some(err);
-                                view = selection_view(
-                                    &entry,
-                                    trust_all_error.as_deref(),
-                                    /*trusting_all*/ false,
-                                    app_event_tx.clone(),
-                                    &keymap,
-                                );
-                                draw_view(tui, &view)?;
-                            }
-                        }
+                        return Ok(HooksReviewDecision::TrustAll(entry));
                     }
                 }
             }

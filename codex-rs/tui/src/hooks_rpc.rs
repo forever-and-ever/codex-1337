@@ -59,6 +59,15 @@ pub(crate) async fn write_hook_trusts(
     request_handle: AppServerRequestHandle,
     trust_updates: Vec<HookTrustUpdate>,
 ) -> Result<ConfigWriteResponse> {
+    write_hook_trusts_typed(request_handle, trust_updates)
+        .await
+        .wrap_err("config/batchWrite failed while updating hook trust in TUI")
+}
+
+pub(crate) async fn write_hook_trusts_typed(
+    request_handle: AppServerRequestHandle,
+    trust_updates: Vec<HookTrustUpdate>,
+) -> std::result::Result<ConfigWriteResponse, codex_app_server_client::TypedRequestError> {
     let request_id = RequestId::String(format!("hooks-config-write-{}", Uuid::new_v4()));
     let value = serde_json::Value::Object(
         trust_updates
@@ -88,7 +97,6 @@ pub(crate) async fn write_hook_trusts(
             },
         })
         .await
-        .wrap_err("config/batchWrite failed while updating hook trust in TUI")
 }
 
 pub(crate) async fn write_hook_trust(
