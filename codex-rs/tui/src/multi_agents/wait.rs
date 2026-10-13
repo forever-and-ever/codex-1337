@@ -134,14 +134,7 @@ impl AgentToolHistoryCell {
                     .collect(),
             )
         } else {
-            let mut lines = self.captured.nested_detail_lines(width);
-            if lines
-                .first()
-                .is_some_and(|line| line.line.width() <= usize::from(width))
-            {
-                lines.remove(0);
-            }
-            lines
+            self.captured.nested_detail_lines(width)
         };
         mark_lines(&mut lines, OutputProvenance::Client);
         lines

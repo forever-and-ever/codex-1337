@@ -1404,9 +1404,12 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     assert!(!tests::text(&open).contains(capture));
     assert!(tests::text(&open).contains("Result"));
     assert!(tests::text(&open).contains("Interrupted"));
-    view.disclosure
-        .expanded
-        .insert("result:interrupt-result".into());
+    assert!(view.focus_fold(
+        &replay,
+        0,
+        FoldTarget::Part("result:interrupt-result".into())
+    ));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
     let result = tests::render(&mut view, &replay, 100, 12);
     assert!(tests::text(&result).contains(capture));
     // Missing legacy ownership is not proximity: its output item still has a named fold.

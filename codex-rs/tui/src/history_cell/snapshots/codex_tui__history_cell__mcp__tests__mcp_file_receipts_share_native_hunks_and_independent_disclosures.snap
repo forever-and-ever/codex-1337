@@ -39,6 +39,7 @@ Expanded with first diff
         1 -old
         1 +new
         //remote/workspace/old name.rs → //remote/… (+1, -1)
+  Result
     chosen model text
 
 partial failure

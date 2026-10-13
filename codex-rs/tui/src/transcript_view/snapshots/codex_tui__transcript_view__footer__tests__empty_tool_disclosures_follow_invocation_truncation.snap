@@ -46,6 +46,7 @@ expanded
         [-]   • Command
                   Read config.json (whole file)
 
+        [-]     Result
                   real file data
 
 cat config.json, width=44
@@ -56,6 +57,7 @@ expanded
         [-]   • Command
                   Read config.json (whole...
 
+        [-]     Result
                   real file data
 
 cat config.json, width=24
@@ -66,6 +68,7 @@ expanded
         [-]   • Command
                   Rea...
 
+        [-]     Result
                   real
                   file
                   data

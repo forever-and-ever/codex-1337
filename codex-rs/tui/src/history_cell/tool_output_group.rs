@@ -77,20 +77,10 @@ impl ToolOutputGroup {
                     parts.controls.clear();
                     parts
                 } else {
-                    member
-                        .output_parts(width, 0, expanded, mode)
-                        .unwrap_or_else(|| super::activity_parts::ActivityParts {
-                            lines: {
-                                let mut lines = member.activity_argument_lines(width);
-                                if let Some(header) = member.compact_hyperlink_lines(width).first()
-                                    && lines.first().is_none_or(|line| line.line != header.line)
-                                {
-                                    lines.insert(0, header.clone());
-                                }
-                                lines
-                            },
-                            ..super::activity_parts::ActivityParts::default()
-                        })
+                    super::activity_parts::ActivityParts {
+                        lines: member.activity_argument_lines(width),
+                        ..super::activity_parts::ActivityParts::default()
+                    }
                 };
                 let offset = parts.lines.len();
                 for control in &mut member_parts.controls {

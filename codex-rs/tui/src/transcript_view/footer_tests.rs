@@ -507,21 +507,18 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
             /*width*/ 80,
             /*key*/ None,
             expanded,
-            |width, _, _| {
+            |width, expanded, mode| {
+                let parts = tail.output_parts(width, 0, expanded, mode).unwrap();
                 Some(ActivityTranscriptLines {
                     output_mode: None,
                     is_tool_entry: tail.is_tool_entry(),
-                    header: tail.activity_header(),
-                    controls: Vec::new(),
+                    header: parts.header,
+                    controls: parts.controls,
                     preface: Vec::new(),
-                    activity: if expanded {
-                        tail.expanded_hyperlink_lines(width)
-                    } else {
-                        tail.compact_hyperlink_lines(width)
-                    },
+                    activity: parts.lines,
                     auxiliary: Vec::new(),
                     header_tokens,
-                    disclosure: tail.activity_disclosure(width),
+                    disclosure: parts.output,
                 })
             },
         );
@@ -614,11 +611,25 @@ fn empty_tool_disclosures_follow_invocation_truncation() {
                 view.render(area, &mut buffer, &cells);
                 assert!(view.current_layout(&cells, /*index*/ 0).unwrap().disclosure);
                 let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-                let source = layout.text();
                 if output.is_empty() {
-                    assert!(source.contains(script));
+                    assert!(layout.text().contains(script));
                 } else {
-                    assert!(source.contains(output));
+                    assert!(!layout.text().contains(output));
+                    assert!(view.focus_fold(
+                        &cells,
+                        0,
+                        crate::history_cell::activity_parts::FoldTarget::Part(
+                            "result:batch".into()
+                        )
+                    ));
+                    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+                    view.render(area, &mut buffer, &cells);
+                    assert!(
+                        view.current_layout(&cells, 0)
+                            .unwrap()
+                            .text()
+                            .contains(output)
+                    );
                 }
                 snapshots.push(format!(
                     "expanded\n{}",

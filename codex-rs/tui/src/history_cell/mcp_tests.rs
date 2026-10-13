@@ -127,6 +127,7 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
                 "mcp:edit".into(),
                 "output:tool-output-tokens:direct-output".into(),
                 "mcp-file:edit:0".into(),
+                "result:direct-output".into(),
             ]));
             let expanded_text = Text::from(visible_lines(expanded.lines));
             assert!(expanded_text.to_string().contains("chosen model text"));
@@ -141,7 +142,11 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
                     .iter()
                     .map(|control| (control.id.as_str(), control.expanded))
                     .collect::<Vec<_>>(),
-                vec![("mcp-file:edit:0", true), ("mcp-file:edit:1", false)]
+                vec![
+                    ("mcp-file:edit:0", true),
+                    ("mcp-file:edit:1", false),
+                    ("result:direct-output", true),
+                ]
             );
             snapshots.push(format!(
                 "Direct captured result\nCollapsed\n{}\nExpanded with first diff\n{}",

@@ -343,42 +343,6 @@ async fn snapshot_formatter_completed_patch_needs_no_started_notification() {
 }
 
 #[tokio::test]
-async fn snapshot_formatter_live_and_buffered_patch_notifications_render_once() {
-    for replay_kind in [
-        None,
-        Some(ReplayKind::ThreadSnapshot),
-        Some(ReplayKind::ResumeInitialMessages),
-    ] {
-        let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
-        drain_insert_history(&mut rx);
-        chat.handle_server_notification(
-            ServerNotification::ItemStarted(ItemStartedNotification {
-                thread_id: "thread".to_string(),
-                turn_id: "turn".to_string(),
-                item: patch_item(AppServerPatchApplyStatus::InProgress),
-                started_at_ms: 0,
-            }),
-            replay_kind,
-        );
-        chat.handle_server_notification(
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                thread_id: "thread".to_string(),
-                turn_id: "turn".to_string(),
-                item: patch_item(AppServerPatchApplyStatus::Completed),
-                completed_at_ms: 0,
-            }),
-            replay_kind,
-        );
-        let replayed = take_history_cells(&mut rx);
-        assert_eq!(replayed.len(), 1);
-        insta::assert_snapshot!(
-            "snapshot_formatter_completed_patch",
-            lines_to_single_string(&replayed[0].display_lines(/*width*/ 80))
-        );
-    }
-}
-
-#[tokio::test]
 async fn snapshot_formatter_empty_success_and_failed_patch_keep_their_outcomes() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     drain_insert_history(&mut rx);

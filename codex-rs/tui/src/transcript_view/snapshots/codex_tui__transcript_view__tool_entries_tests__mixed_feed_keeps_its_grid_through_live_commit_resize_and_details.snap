@@ -1,6 +1,5 @@
 ---
 source: tui/src/transcript_view/tool_entries_tests.rs
-assertion_line: 779
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
@@ -32,13 +31,11 @@ expanded width=64
                 More text
 
   14:17 [-]       $ poll foo  128
-
               • Command
                   $ cat foo.rs
-
-              • tools.inspect()
-
-                  combined result
+              • Called
+                └ tools.inspect()
+        [+]     Result
               • Edited
         [+]       foo.rs (+1, -0)
         [+]       bar.rs (+1, -0)
