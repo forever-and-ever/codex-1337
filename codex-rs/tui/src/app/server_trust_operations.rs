@@ -3,31 +3,43 @@ use crate::hooks_rpc::{HookTrustUpdate, write_hook_trusts_typed};
 use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
 use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
 
-#[derive(Clone)]
-pub(in crate::app) enum TrustWrite {
-    Directory(DirectoryTrustConsent),
-    Hooks(Vec<HookTrustUpdate>),
+pub(super) enum TrustConsent {
+    Directory {
+        consent: DirectoryTrustConsent,
+        context: Box<resume::ResumeContext>,
+        plan: crate::onboarding::onboarding_screen::DirectoryTrustPreparation,
+    },
+    Hooks {
+        updates: Vec<HookTrustUpdate>,
+        context: Box<resume::ResumeContext>,
+    },
 }
 
 #[derive(Clone)]
 pub(in crate::app) struct TrustOperation {
-    write: TrustWrite,
-    continuation: Arc<resume::ResumeTrustContinuation>,
+    generation: u64,
+    consent: Arc<TrustConsent>,
 }
 
 impl TrustOperation {
     pub(in crate::app::turn_submissions) fn scope(&self) -> String {
-        match &self.write {
-            TrustWrite::Directory(DirectoryTrustConsent::Path(path)) => path.display().to_string(),
-            TrustWrite::Directory(DirectoryTrustConsent::Key(key)) => key.clone(),
-            TrustWrite::Hooks(_) => self.continuation.next.hook_scope(),
+        match &*self.consent {
+            TrustConsent::Directory {
+                consent: DirectoryTrustConsent::Path(path),
+                ..
+            } => path.display().to_string(),
+            TrustConsent::Directory {
+                consent: DirectoryTrustConsent::Key(key),
+                ..
+            } => key.clone(),
+            TrustConsent::Hooks { context, .. } => context.hook_scope(),
         }
     }
 
     pub(in crate::app::turn_submissions) fn label(&self) -> &'static str {
-        match self.write {
-            TrustWrite::Directory(_) => "Saving folder trust",
-            TrustWrite::Hooks(_) => "Trusting hooks",
+        match &*self.consent {
+            TrustConsent::Directory { .. } => "Saving folder trust",
+            TrustConsent::Hooks { .. } => "Trusting hooks",
         }
     }
 
@@ -36,10 +48,10 @@ impl TrustOperation {
         handle: AppServerRequestHandle,
         id: Uuid,
     ) -> Result<OperationReceipt, TypedRequestError> {
-        match self.write {
-            TrustWrite::Directory(consent) => consent.send(handle, id).await?,
-            TrustWrite::Hooks(updates) => {
-                write_hook_trusts_typed(handle, updates).await?;
+        match &*self.consent {
+            TrustConsent::Directory { consent, .. } => consent.clone().send(handle, id).await?,
+            TrustConsent::Hooks { updates, .. } => {
+                write_hook_trusts_typed(handle, updates.clone()).await?;
             }
         }
         Ok(OperationReceipt::TrustSaved)
@@ -51,8 +63,7 @@ impl App {
         &mut self,
         server: &AppServerSession,
         operation: PendingNavigation,
-        write: TrustWrite,
-        next: resume::ResumeTrustNext,
+        consent: TrustConsent,
     ) {
         let PendingNavigation {
             id,
@@ -68,8 +79,8 @@ impl App {
             origin: OperationOrigin::Connection,
             request: SubmissionRequest::Operation(Box::new(ServerOperation::Connection(
                 ConnectionMutation::Trust(TrustOperation {
-                    write,
-                    continuation: Arc::new(resume::ResumeTrustContinuation { generation, next }),
+                    generation,
+                    consent: Arc::new(consent),
                 }),
             ))),
             buffering: None,
@@ -126,8 +137,8 @@ impl App {
         let ServerOperation::Connection(ConnectionMutation::Trust(operation)) = &**operation else {
             unreachable!("trust receipt without consent");
         };
-        let continuation = Arc::clone(&operation.continuation);
-        if continuation.generation != self.server_operations.navigation.generation
+        let consent = Arc::clone(&operation.consent);
+        if operation.generation != self.server_operations.navigation.generation
             || self.server_operations.navigation.current.is_some()
         {
             self.chat_widget.add_info_message(
@@ -143,11 +154,11 @@ impl App {
             id: lane.active.id,
             order: lane.active.order,
             epoch: lane.active.epoch,
-            generation: continuation.generation,
+            generation: operation.generation,
             intent: NavigationIntent::Transitioning,
             state: LaneState::Queued,
         };
-        self.continue_resume_trust_saved(server, pending, continuation.next.clone())
+        self.continue_resume_trust_saved(server, pending, &consent)
             .await
     }
 }

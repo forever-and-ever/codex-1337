@@ -1,4 +1,4 @@
-use super::trust::TrustWrite;
+use super::trust::TrustConsent;
 use super::*;
 use crate::app::resume_config::ResumeCwdBasis;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
@@ -28,26 +28,9 @@ pub(super) struct ResumeContext {
     settings: LocalSettings,
 }
 
-#[derive(Clone)]
-pub(super) struct ResumeTrustContinuation {
-    pub(super) generation: u64,
-    pub(super) next: ResumeTrustNext,
-}
-#[derive(Clone)]
-pub(super) enum ResumeTrustNext {
-    Directory {
-        context: Box<ResumeContext>,
-        plan: DirectoryTrustPreparation,
-    },
-    Hooks(Box<ResumeContext>),
-}
-
-impl ResumeTrustNext {
+impl ResumeContext {
     pub(super) fn hook_scope(&self) -> String {
-        let Self::Hooks(context) = self else {
-            unreachable!("hook trust must retain its hook review continuation");
-        };
-        format!("hooks in {}", context.config.cwd.to_path_buf().display())
+        format!("hooks in {}", self.config.cwd.to_path_buf().display())
     }
 }
 
@@ -384,8 +367,10 @@ impl App {
             HooksReviewDecision::TrustAll(hooks) => self.transfer_navigation_trust(
                 server,
                 operation,
-                TrustWrite::Hooks(hook_trust_updates(&hooks)),
-                ResumeTrustNext::Hooks(context),
+                TrustConsent::Hooks {
+                    updates: hook_trust_updates(&hooks),
+                    context,
+                },
             ),
         }
         Ok(())
@@ -395,13 +380,15 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
         mut operation: PendingNavigation,
-        next: ResumeTrustNext,
+        consent: &TrustConsent,
     ) -> Result<()> {
-        match next {
-            ResumeTrustNext::Hooks(context) => {
-                self.acquire_resumed_thread(server, operation, context)
+        match consent {
+            TrustConsent::Hooks { context, .. } => {
+                self.acquire_resumed_thread(server, operation, context.clone())
             }
-            ResumeTrustNext::Directory { context, mut plan } => {
+            TrustConsent::Directory { context, plan, .. } => {
+                let context = context.clone();
+                let mut plan = plan.clone();
                 let exit =
                     plan.note_consent(crate::onboarding::onboarding_screen::OnboardingResult {
                         directory_trust_persisted: true,
@@ -582,8 +569,11 @@ impl App {
                             self.transfer_navigation_trust(
                                 server,
                                 operation,
-                                TrustWrite::Directory(consent),
-                                ResumeTrustNext::Directory { context, plan },
+                                TrustConsent::Directory {
+                                    consent,
+                                    context,
+                                    plan,
+                                },
                             );
                             return Ok(AppRunControl::Continue);
                         }
