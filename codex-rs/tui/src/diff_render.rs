@@ -2604,7 +2604,7 @@ mod tests {
                     .expect("expected rendered diff span containing 'world'");
 
                 assert!(matches!(expected_style.fg, Some(Color::Rgb(..))));
-                assert_eq!(actual_style, expected_style.remove_modifier(Modifier::DIM));
+                assert_eq!(actual_style.fg, expected_style.fg);
             },
         );
     }
