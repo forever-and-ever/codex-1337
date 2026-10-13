@@ -2,12 +2,19 @@
 
 use anyhow::Result;
 use codex_core::ConfigRefreshOutcome;
+use codex_core::ForkSnapshot;
+use codex_core::StartThreadOptions;
 use codex_features::Feature;
+use codex_history::InitialHistory;
+use codex_history::ResumedHistory;
 use codex_history::RolloutItem;
 use codex_protocol::openai_models::CodeModeToolMessages;
 use codex_protocol::openai_models::ToolMessage;
 use codex_protocol::openai_models::ToolMode;
+use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::turn_input::TurnInputRequest;
+use codex_protocol::user_input::UserInput;
 use core_test_support::context_snapshot;
 use core_test_support::context_snapshot::ContextSnapshotOptions;
 use core_test_support::mock_server;
@@ -15,9 +22,11 @@ use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_wine_exec;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
 use core_test_support::wait_for_mcp_server;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::sync::Arc;
 use test_case::test_case;
 
 use super::super::rmcp_client::remote_aware_environment_id;
@@ -34,7 +43,7 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
     mock_server::run(&[&server], async {
     let mock = responses::mount_sse_sequence(
         &server,
-        (1..=4)
+        (1..=if use_responses_lite { 5 } else { 4 })
             .map(|index| responses::sse(vec![responses::ev_completed(&format!("resp-{index}"))]))
             .collect(),
     )
@@ -242,6 +251,53 @@ async fn incremental_tools_append_changed_catalog_without_rewriting_history(
                 .include_request_settings(),
         )
     );
+    // Ephemeral side forks still have a resident frontend. Persistence alone must not
+    // remove live tools and re-inject exec's otherwise unchanged embedded inventory.
+    let mut fork_config = test.config.clone();
+    fork_config.model = Some("updated-tools-model".to_string());
+    fork_config.ephemeral = true;
+    fork_config.daybreak_enabled = false;
+    fork_config.developer_instructions = Some("Answer only the side question.".to_string());
+    let mut fork_history = rollout.iter().map(|line| line.item.clone()).collect::<Vec<_>>();
+    // Snapshot the completed sampling step before its turn terminator, as /btw
+    // does when the parent's response is still in progress. Never alter the source.
+    let terminator = fork_history.iter().rposition(|item|
+        matches!(item, RolloutItem::EventMsg(EventMsg::TurnComplete(_)))
+    ).expect("parent turn terminator");
+    fork_history.remove(terminator);
+    let forked = test.thread_manager.fork_thread_from_history(
+        ForkSnapshot::Interrupted,
+        StartThreadOptions::new(fork_config),
+        InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
+            conversation_id: test.session_configured.thread_id,
+            history: Arc::new(fork_history),
+            rollout_path: None,
+        }),
+    ).await?;
+    forked.thread.start_or_steer_turn(
+        TurnInputRequest::user_input(vec![
+            UserInput::Text {
+                text: "Side question.".to_string(),
+                text_elements: Vec::new(),
+            },
+        ]),
+    ).await?;
+    wait_for_event(&forked.thread, |event|
+        matches!(event, EventMsg::TurnComplete(_))
+    ).await;
+    let fork_requests = mock.requests();
+    assert_eq!(fork_requests.len(), 5);
+    assert_eq!(fork_requests[4].inputs_of_type("additional_tools"), changed);
+    let fork_input = fork_requests[4].input();
+    assert!(fork_input.starts_with(&requests[3].input()));
+    let boundary = fork_input.iter().position(|item|
+        item.to_string().contains("<turn_aborted>")
+    ).expect("interrupted fork boundary");
+    let question = fork_input.iter().position(|item|
+        item["content"][0]["text"] == "Side question."
+    ).expect("side question");
+    assert!(boundary < question);
     Ok(())
     })
     .await
