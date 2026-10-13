@@ -458,18 +458,18 @@ impl App {
         Ok(AppRunControl::Continue)
     }
 
-    async fn attach_agents_overview_thread(
+    async fn attach_new_agents_overview_thread(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         root_thread_id: ThreadId,
-        started: Option<(Config, crate::app_server_session::AppServerStartedThread)>,
+        started: (Config, crate::app_server_session::AppServerStartedThread),
         mut startup_draft: Option<&mut StartupDraftPump>,
     ) -> color_eyre::Result<AppRunControl> {
         if self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
         }
-        let is_new_session = started.is_some();
+
         if self.current_displayed_thread_id() == Some(root_thread_id)
             && (!self.thread_unavailable(root_thread_id)
                 || self.chat_widget.is_external_writer_view())
@@ -487,7 +487,7 @@ impl App {
         if startup_draft.is_none() {
             loading::draw(tui)?;
         }
-        let mut restored_blank_session = false;
+
         if self.primary_thread_id != Some(root_thread_id) || self.thread_unavailable(root_thread_id)
         {
             let previous_displayed_thread_id = self.current_displayed_thread_id();
@@ -542,186 +542,16 @@ impl App {
                     .insert(active_thread_id, input_state);
             }
 
-            let target_thread = match StartupDraftPump::run_with_optional_draft(
-                startup_draft.as_deref_mut(),
-                tui,
-                app_server.thread_read(root_thread_id, /*include_turns*/ false),
-            )
-            .await
-            {
-                Ok(thread) => thread,
-                Err(error) => {
-                    self.add_agents_overview_error(format!(
-                        "Agent session {root_thread_id} is unavailable: {error}"
-                    ));
-                    return Ok(AppRunControl::Continue);
-                }
-            };
-            let unloaded = matches!(
-                target_thread.status,
-                codex_app_server_protocol::ThreadStatus::NotLoaded
-            );
-            let preserve_explicit_permissions = unloaded || started.is_some();
-            let (mut resume_config, mut local_settings) = if let Some((config, _)) = &started {
-                (config.clone(), self.local_settings.reloaded(config))
-            } else if unloaded {
-                let target_session = SessionTarget {
-                    path: target_thread.path.clone(),
-                    thread_id: root_thread_id,
-                    cwd: Some(target_thread.cwd.to_path_buf()),
-                    history_mode: Some(target_thread.history_mode),
-                };
-                match self
-                    .resume_config_for_target(tui, app_server, &target_session)
-                    .await
-                {
-                    Ok(config) => config,
-                    Err(control) => return Ok(control),
-                }
-            } else {
-                let config_cwd = if self.app_server_target.uses_remote_workspace() {
-                    self.config.cwd.to_path_buf()
-                } else {
-                    target_thread.cwd.to_path_buf()
-                };
-                let current_cwd = self.config.cwd.to_path_buf();
-                match self
-                    .rebuild_config_for_resume_or_fallback(&current_cwd, config_cwd)
-                    .await
-                {
-                    Ok(config) => config,
-                    Err(error) => {
-                        self.add_agents_overview_error(format!(
-                            "Failed to load task settings: {error}"
-                        ));
-                        return Ok(AppRunControl::Continue);
-                    }
-                }
-            };
-            if !unloaded && started.is_none() {
-                match self
-                    .confirm_directory_trust(
-                        tui,
-                        app_server,
-                        &mut resume_config,
-                        target_thread.cwd.as_path(),
-                        crate::onboarding::DirectoryTrustOptions {
-                            resumed_thread: Some(&target_thread),
-                            ..Default::default()
-                        },
-                        /*startup_draft*/ None,
-                    )
-                    .await
-                {
-                    Ok(Some(reloaded)) => local_settings = reloaded,
-                    Ok(None) => {}
-                    Err(control) => return Ok(control),
-                }
-            }
-            // Folder selection and trust prompts can replace or clear the loading frame.
-            if startup_draft.is_none() {
-                loading::draw(tui)?;
-            }
+            let (resume_config, resumed) = started;
+            let local_settings = self.local_settings.reloaded(&resume_config);
             let baseline_approval = resume_config.permissions.approval_policy.value();
             let baseline_reviewer = resume_config.approvals_reviewer;
             let baseline_permissions =
                 RuntimePermissionProfileOverride::from_config(&resume_config);
-            let resume_model_settings = match target_thread.status {
-                codex_app_server_protocol::ThreadStatus::NotLoaded => {
-                    if let Err(error) = self.apply_runtime_policy_overrides(
-                        &mut resume_config,
-                        RuntimePolicyOverrideScope::ExplicitOnly,
-                    ) {
-                        self.add_agents_overview_error(format!("{error:#}"));
-                        return Ok(AppRunControl::Continue);
-                    }
-                    if matches!(self.runtime_approval_policy_override,
-                        Some(RuntimeApprovalPolicyOverride::Explicit(policy))
-                            if policy.to_core() != resume_config.permissions.approval_policy.value())
-                        || self
-                            .runtime_permission_profile_override
-                            .as_ref()
-                            .is_some_and(|profile| {
-                                profile.turn_override
-                                    == RuntimePermissionProfileTurnOverride::LegacySandbox
-                                    && !profile.matches_config(&resume_config)
-                            })
-                    {
-                        self.add_agents_overview_error(
-                            "Cannot resume task without preserving the selected permissions."
-                                .to_string(),
-                        );
-                        return Ok(AppRunControl::Continue);
-                    }
-                    self.resume_model_settings()
-                }
-                codex_app_server_protocol::ThreadStatus::Idle
-                | codex_app_server_protocol::ThreadStatus::Active { .. }
-                | codex_app_server_protocol::ThreadStatus::SystemError => {
-                    crate::app_server_session::ResumeModelSettings::PreserveExistingThread
-                }
-            };
-            let mut history_notice = None;
             let presentation = if startup_draft.is_some() {
                 ThreadAttachPresentation::FreshWithDraft
-            } else if started.is_some() {
+            } else {
                 ThreadAttachPresentation::Fresh
-            } else {
-                ThreadAttachPresentation::SessionLineage
-            };
-            let (resumed, read_only) = if let Some((_, started)) = started {
-                (started, false)
-            } else if !unloaded
-                && let Some(blank) = self.agents_overview.blank_sessions.get(&root_thread_id)
-            {
-                // An untouched task has no rollout for thread/resume yet. Its live
-                // subscription and saved settings are sufficient to restore the editor.
-                restored_blank_session = true;
-                let mut blank = blank.clone();
-                blank.session.thread_name.clone_from(&target_thread.name);
-                (blank, false)
-            } else {
-                match app_server
-                    .resume_thread_with_permission_overrides(
-                        &local_settings,
-                        resume_config.clone(),
-                        root_thread_id,
-                        resume_model_settings,
-                        self.resume_permission_overrides(&resume_config),
-                    )
-                    .await
-                {
-                    Ok(resumed) => (resumed, false),
-                    Err(error) if crate::app_server_session::is_active_writer_error(&error) => {
-                        match app_server
-                            .read_thread_for_viewing(
-                                &resume_config,
-                                &local_settings,
-                                root_thread_id,
-                            )
-                            .await
-                        {
-                            Ok((thread, notice)) => {
-                                history_notice = notice;
-                                (thread, true)
-                            }
-                            Err(_) => {
-                                tracing::warn!("Failed to load read-only conversation history");
-                                self.add_agents_overview_error(
-                                    "Couldn't load this conversation. Please try again."
-                                        .to_string(),
-                                );
-                                return Ok(AppRunControl::Continue);
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        self.add_agents_overview_error(format!(
-                            "Failed to attach to task: {error}"
-                        ));
-                        return Ok(AppRunControl::Continue);
-                    }
-                }
             };
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
@@ -737,7 +567,6 @@ impl App {
                         None => self.discard_side_thread(app_server, side_thread_id).await,
                     };
                     if !discarded {
-                        let _ = app_server.thread_unsubscribe(root_thread_id).await;
                         return Ok(AppRunControl::Continue);
                     }
                 }
@@ -781,23 +610,14 @@ impl App {
                     }
                 }
             }
-            // Read-only views retain explicit choices but never another task's restored state.
-            let preserve_explicit_permissions = preserve_explicit_permissions || read_only;
-            self.runtime_approvals_reviewer_override = self
-                .runtime_approvals_reviewer_override
-                .filter(|_| preserve_explicit_permissions);
-            self.runtime_approval_policy_override =
-                self.runtime_approval_policy_override.filter(|policy| {
-                    preserve_explicit_permissions
-                        && matches!(policy, RuntimeApprovalPolicyOverride::Explicit(_))
-                });
+            self.runtime_approval_policy_override = self
+                .runtime_approval_policy_override
+                .filter(|policy| matches!(policy, RuntimeApprovalPolicyOverride::Explicit(_)));
             self.runtime_permission_profile_override = self
                 .runtime_permission_profile_override
                 .take()
                 .filter(|profile| {
-                    preserve_explicit_permissions
-                        && profile.turn_override
-                            == RuntimePermissionProfileTurnOverride::LegacySandbox
+                    profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
                 });
             self.local_settings = local_settings;
             self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
@@ -821,15 +641,7 @@ impl App {
             if startup_draft.is_none() {
                 loading::draw(tui)?;
             }
-            if read_only {
-                self.ensure_thread_channel(root_thread_id)
-                    .mark_external_writer();
-                self.chat_widget.show_external_writer_thread();
-                if let Some(notice) = history_notice {
-                    self.chat_widget
-                        .add_info_message(notice.to_string(), /*hint*/ None);
-                }
-            }
+
             let mut destination_config = self.chat_widget.config_ref().clone();
             if self.app_server_target.uses_remote_workspace() {
                 destination_config.cwd.clone_from(&self.config.cwd);
@@ -840,74 +652,33 @@ impl App {
                     .permissions
                     .set_workspace_roots(self.config.permissions.workspace_roots().to_vec());
             }
-            if unloaded && !is_new_session {
-                let server_config = destination_config.clone();
-                if let Err(error) = self.apply_runtime_policy_overrides(
-                    &mut destination_config,
-                    RuntimePolicyOverrideScope::ExplicitOnly,
-                ) {
-                    // The task is already attached; retain its accepted settings, not a partial override.
-                    self.config = server_config;
-                    self.chat_widget.add_error_message(format!(
-                        "Could not restore the selected permissions: {error:#}"
-                    ));
-                    return Ok(AppRunControl::Continue);
-                }
-                self.chat_widget.set_approval_policy(
-                    destination_config
-                        .permissions
-                        .approval_policy
-                        .value()
-                        .into(),
-                );
-                if let Err(error) = self
-                    .chat_widget
-                    .set_permission_profile_from_session_snapshot(
-                    crate::legacy_core::config::PermissionProfileSnapshot::from_session_snapshot(
-                        destination_config.permissions.permission_profile().clone(),
-                        destination_config.permissions.active_permission_profile(),
-                    ),
-                ) {
-                    self.chat_widget.add_error_message(format!(
-                        "Could not restore the selected permissions: {error}"
-                    ));
-                }
-                self.chat_widget
-                    .set_approvals_reviewer(destination_config.approvals_reviewer);
-                self.chat_widget
-                    .set_permission_network(destination_config.permissions.network.clone());
-            }
+
             self.config = destination_config;
-            if is_new_session {
-                self.remember_launch_permissions();
+
+            self.remember_launch_permissions();
+
+            let approval = self.config.permissions.approval_policy.value();
+            if self
+                .runtime_approval_policy_override
+                .is_none_or(|policy| policy.policy().to_core() != approval)
+            {
+                self.runtime_approval_policy_override = (approval != baseline_approval)
+                    .then_some(RuntimeApprovalPolicyOverride::Restored(approval.into()));
             }
-            if !read_only {
-                let approval = self.config.permissions.approval_policy.value();
-                if self
-                    .runtime_approval_policy_override
-                    .is_none_or(|policy| policy.policy().to_core() != approval)
-                {
-                    self.runtime_approval_policy_override = (approval != baseline_approval)
-                        .then_some(RuntimeApprovalPolicyOverride::Restored(approval.into()));
-                }
-                if self
-                    .runtime_permission_profile_override
-                    .as_ref()
-                    .is_none_or(|profile| !profile.matches_config(&self.config))
-                {
-                    self.runtime_permission_profile_override = (!baseline_permissions
-                        .matches_config(&self.config)
-                        || baseline_reviewer != self.config.approvals_reviewer)
-                        .then(|| {
-                            RuntimePermissionProfileOverride::from_restored_config(&self.config)
-                        });
-                }
+            if self
+                .runtime_permission_profile_override
+                .as_ref()
+                .is_none_or(|profile| !profile.matches_config(&self.config))
+            {
+                self.runtime_permission_profile_override = (!baseline_permissions
+                    .matches_config(&self.config)
+                    || baseline_reviewer != self.config.approvals_reviewer)
+                    .then(|| RuntimePermissionProfileOverride::from_restored_config(&self.config));
             }
+
             // A new session has no descendants. Scanning every loaded thread here
             // adds a serial round trip per agent before the composer can render.
-            if !is_new_session && !self.backfill_loaded_subagent_threads(app_server).await {
-                self.backfill_loaded_subagent_threads(app_server).await;
-            }
+
             for thread_id in previous_thread_ids {
                 if previous_running_thread_ids.is_empty()
                     && thread_id != root_thread_id
@@ -933,39 +704,27 @@ impl App {
             self.select_agent_thread_and_discard_side(tui, app_server, root_thread_id)
                 .await?;
         }
-        let read_only = self.chat_widget.is_external_writer_view();
-        if !read_only {
-            self.replay_agents_overview_requests(app_server, root_thread_id)
-                .await;
-        }
+
+        self.replay_agents_overview_requests(app_server, root_thread_id)
+            .await;
+
         if self.current_displayed_thread_id() == Some(root_thread_id)
-            && let Some(mut input_state) = self.agents_overview.input_states.remove(&root_thread_id)
+            && let Some(input_state) = self.agents_overview.input_states.remove(&root_thread_id)
         {
-            // A saved draft includes model settings, so apply newer server settings after it.
-            let pending_settings = restored_blank_session
-                .then(|| input_state.pending_thread_settings.take())
-                .flatten();
-            let preserve_in_flight_turn = !read_only
-                && self
-                    .active_turn_id_for_thread(root_thread_id)
-                    .await
-                    .is_some();
+            let preserve_in_flight_turn = self
+                .active_turn_id_for_thread(root_thread_id)
+                .await
+                .is_some();
             self.chat_widget.restore_thread_input_state(
                 Some(input_state),
                 ThreadInputStateRestoreMode {
                     preserve_in_flight_turn,
                 },
             );
-            if let Some(settings) = pending_settings {
-                self.chat_widget.on_thread_settings_updated(settings);
-            }
+
             if !preserve_in_flight_turn {
                 self.chat_widget.maybe_send_next_queued_input();
             }
-        }
-        if !read_only && !is_new_session && !self.chat_widget.fork_in_progress {
-            self.maybe_prompt_resume_paused_goal_after_resume(app_server, root_thread_id)
-                .await;
         }
 
         self.queue_farm_receipt_replay();

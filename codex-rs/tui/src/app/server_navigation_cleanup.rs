@@ -7,6 +7,33 @@ pub(super) enum CleanupContinuation {
 }
 
 impl App {
+    pub(in crate::app) fn adopt_navigation_cleanup(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        let order = self.server_operations.next_order;
+        self.server_operations.next_order =
+            order.checked_add(1).expect("operation sequence exhausted");
+        let operation = PendingNavigation {
+            id: Uuid::new_v4(),
+            order,
+            epoch: self.server_operations.epoch,
+            generation: self.server_operations.navigation.generation,
+            intent: NavigationIntent::Transitioning,
+            state: LaneState::Queued,
+        };
+        self.start_navigation_cleanup(
+            operation,
+            server.request_handle(),
+            thread_id,
+            Vec::new(),
+            CleanupContinuation::Done,
+            false,
+        );
+        self.refresh_submission_preview();
+    }
+
     pub(super) fn start_navigation_cleanup(
         &mut self,
         mut operation: PendingNavigation,
