@@ -645,7 +645,9 @@ impl App {
                     .await
             }
             ServerCompletion::Request(completion) => {
-                self.continue_confirmed_trust(server, &completion).await?;
+                let control = self
+                    .continue_confirmed_trust(tui, server, &completion)
+                    .await?;
                 self.finish_submission(
                     server,
                     completion.scope,
@@ -654,7 +656,7 @@ impl App {
                     completion.outcome,
                 )
                 .await?;
-                Ok(AppRunControl::Continue)
+                Ok(control)
             }
             ServerCompletion::Navigation(completion) => {
                 self.finish_navigation_operation(tui, server, completion)

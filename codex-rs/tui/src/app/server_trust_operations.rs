@@ -3,7 +3,12 @@ use crate::hooks_rpc::{HookTrustUpdate, write_hook_trusts_typed};
 use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
 use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
 
-pub(super) enum TrustConsent {
+enum TrustConsent {
+    Resume(ResumeTrustConsent),
+    Dashboard(crate::app::agents_overview::trust::DashboardTrustAdmission),
+}
+
+pub(super) enum ResumeTrustConsent {
     Directory {
         consent: DirectoryTrustConsent,
         context: Box<resume::ResumeContext>,
@@ -24,22 +29,24 @@ pub(in crate::app) struct TrustOperation {
 impl TrustOperation {
     pub(in crate::app::turn_submissions) fn scope(&self) -> String {
         match &*self.consent {
-            TrustConsent::Directory {
+            TrustConsent::Resume(ResumeTrustConsent::Directory {
                 consent: DirectoryTrustConsent::Path(path),
                 ..
-            } => path.display().to_string(),
-            TrustConsent::Directory {
+            }) => path.display().to_string(),
+            TrustConsent::Resume(ResumeTrustConsent::Directory {
                 consent: DirectoryTrustConsent::Key(key),
                 ..
-            } => key.clone(),
-            TrustConsent::Hooks { context, .. } => context.hook_scope(),
+            }) => key.clone(),
+            TrustConsent::Resume(ResumeTrustConsent::Hooks { context, .. }) => context.hook_scope(),
+            TrustConsent::Dashboard(consent) => consent.scope(),
         }
     }
 
     pub(in crate::app::turn_submissions) fn label(&self) -> &'static str {
         match &*self.consent {
-            TrustConsent::Directory { .. } => "Saving folder trust",
-            TrustConsent::Hooks { .. } => "Trusting hooks",
+            TrustConsent::Resume(ResumeTrustConsent::Directory { .. }) => "Saving folder trust",
+            TrustConsent::Resume(ResumeTrustConsent::Hooks { .. }) => "Trusting hooks",
+            TrustConsent::Dashboard(consent) => consent.label(),
         }
     }
 
@@ -49,21 +56,50 @@ impl TrustOperation {
         id: Uuid,
     ) -> Result<OperationReceipt, TypedRequestError> {
         match &*self.consent {
-            TrustConsent::Directory { consent, .. } => consent.clone().send(handle, id).await?,
-            TrustConsent::Hooks { updates, .. } => {
+            TrustConsent::Resume(ResumeTrustConsent::Directory { consent, .. }) => {
+                consent.clone().send(handle, id).await?
+            }
+            TrustConsent::Resume(ResumeTrustConsent::Hooks { updates, .. }) => {
                 write_hook_trusts_typed(handle, updates.clone()).await?;
             }
+            TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
         }
         Ok(OperationReceipt::TrustSaved)
     }
 }
 
 impl App {
+    pub(in crate::app) fn admit_dashboard_trust(
+        &mut self,
+        server: &AppServerSession,
+        consent: crate::app::agents_overview::trust::DashboardTrustAdmission,
+    ) {
+        self.enqueue_connection_operation(
+            server,
+            ServerOperation::Connection(ConnectionMutation::Trust(TrustOperation {
+                generation: self.server_operations.navigation.generation,
+                consent: Arc::new(TrustConsent::Dashboard(consent)),
+            })),
+        );
+    }
+
+    pub(in crate::app) fn pumped_configuration_ready(&mut self) -> bool {
+        let Some(lane) = self.server_operations.lanes.get(&OperationLane::Connection) else {
+            return true;
+        };
+        self.add_agents_overview_error(if matches!(lane.state, LaneState::Uncertain) {
+            "An earlier configuration outcome is unknown. Close and reopen this TUI to reread settings; the earlier request may still complete."
+        } else {
+            "Wait for the pending configuration change before starting a session."
+        }.into());
+        false
+    }
+
     pub(super) fn transfer_navigation_trust(
         &mut self,
         server: &AppServerSession,
         operation: PendingNavigation,
-        consent: TrustConsent,
+        consent: ResumeTrustConsent,
     ) {
         let PendingNavigation {
             id,
@@ -80,7 +116,7 @@ impl App {
             request: SubmissionRequest::Operation(Box::new(ServerOperation::Connection(
                 ConnectionMutation::Trust(TrustOperation {
                     generation,
-                    consent: Arc::new(consent),
+                    consent: Arc::new(TrustConsent::Resume(consent)),
                 }),
             ))),
             buffering: None,
@@ -112,9 +148,10 @@ impl App {
 
     pub(in crate::app::turn_submissions) async fn continue_confirmed_trust(
         &mut self,
+        tui: &mut tui::Tui,
         server: &mut AppServerSession,
         completion: &ControlCompletion,
-    ) -> Result<()> {
+    ) -> Result<AppRunControl> {
         if self.reconnect.offline
             || completion.epoch != self.server_operations.epoch
             || completion.scope != OperationScope::Connection
@@ -123,13 +160,13 @@ impl App {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::TrustSaved))
             )
         {
-            return Ok(());
+            return Ok(AppRunControl::Continue);
         }
         let Some(lane) = self.server_operations.lanes.get(&OperationLane::Connection) else {
-            return Ok(());
+            return Ok(AppRunControl::Continue);
         };
         if lane.active.id != completion.id || lane.active.epoch != completion.epoch {
-            return Ok(());
+            return Ok(AppRunControl::Continue);
         }
         let SubmissionRequest::Operation(operation) = &lane.active.request else {
             unreachable!("trust receipt without operation payload");
@@ -148,17 +185,25 @@ impl App {
                 ),
                 None,
             );
-            return Ok(());
+            return Ok(AppRunControl::Continue);
         }
-        let pending = PendingNavigation {
-            id: lane.active.id,
-            order: lane.active.order,
-            epoch: lane.active.epoch,
-            generation: operation.generation,
-            intent: NavigationIntent::Transitioning,
-            state: LaneState::Queued,
-        };
-        self.continue_resume_trust_saved(server, pending, &consent)
-            .await
+        match &*consent {
+            TrustConsent::Resume(consent) => {
+                let pending = PendingNavigation {
+                    id: lane.active.id,
+                    order: lane.active.order,
+                    epoch: lane.active.epoch,
+                    generation: operation.generation,
+                    intent: NavigationIntent::Transitioning,
+                    state: LaneState::Queued,
+                };
+                self.continue_resume_trust_saved(server, pending, consent)
+                    .await?;
+                Ok(AppRunControl::Continue)
+            }
+            TrustConsent::Dashboard(consent) => {
+                Box::pin(self.continue_confirmed_dashboard_trust(tui, server, consent)).await
+            }
+        }
     }
 }

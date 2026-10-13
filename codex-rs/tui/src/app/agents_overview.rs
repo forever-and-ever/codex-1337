@@ -2,6 +2,9 @@
 //! Tasks owned by another app server open as frozen, read-only history snapshots.
 //! Only the immediate attachment of a dashboard-created task is treated as fresh.
 
+#[path = "agents_overview_trust.rs"]
+pub(in crate::app) mod trust;
+
 #[path = "agents_overview_new.rs"]
 mod new;
 
@@ -757,7 +760,7 @@ impl App {
         app_server: &mut AppServerSession,
         cwd: Option<AbsolutePathBuf>,
         mut startup_draft: Option<&mut StartupDraftPump>,
-    ) -> Option<(Config, Option<PathBuf>)> {
+    ) -> Option<trust::DashboardConfigOutcome> {
         if self
             .chat_widget
             .thread_id()
@@ -798,21 +801,26 @@ impl App {
         if preserve_service_tier {
             config.service_tier = self.chat_widget.configured_service_tier();
         }
-        let trust_cwd = config.cwd.to_path_buf();
-        if self
-            .confirm_directory_trust(
-                tui,
-                app_server,
-                &mut config,
-                &trust_cwd,
-                crate::onboarding::DirectoryTrustOptions::default(),
-                startup_draft.as_deref_mut(),
-            )
-            .await
-            .is_err()
-        {
-            return None;
-        }
+        self.prepare_pumped_dashboard_trust(
+            tui,
+            app_server,
+            trust::DashboardTrustStage::Initial(trust::DashboardPreparation { config, remote_cwd }),
+            startup_draft,
+        )
+        .await
+    }
+
+    pub(in crate::app) async fn finish_dashboard_session_config(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        preparation: trust::DashboardPreparation,
+        mut startup_draft: Option<&mut StartupDraftPump>,
+    ) -> Option<(Config, Option<PathBuf>)> {
+        let trust::DashboardPreparation {
+            mut config,
+            remote_cwd,
+        } = preparation;
         if let Some(profile) = self.runtime_permission_profile_override.as_ref()
             && profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
             && profile

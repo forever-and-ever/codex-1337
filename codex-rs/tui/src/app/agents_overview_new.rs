@@ -18,6 +18,10 @@ impl App {
         if cwd.is_none() && self.restore_parked_session_draft(tui, app_server).await? {
             return Ok(AppRunControl::Continue);
         }
+        if !self.pumped_configuration_ready() {
+            return Ok(AppRunControl::Continue);
+        }
+        self.supersede_pending_navigation();
         let previous_thread = self.current_displayed_thread_id();
         let mut draft = self
             .agents_overview
@@ -43,20 +47,38 @@ impl App {
         let result =
             Box::pin(self.start_agents_overview_session(tui, app_server, cwd, Some(&mut draft)))
                 .await;
-        if self.current_displayed_thread_id() != previous_thread {
-            draft.flush_pending_paste_newline(tui).await?;
+        self.finish_dashboard_draft(tui, previous_thread, draft)
+            .await?;
+        result
+    }
+
+    pub(in crate::app) async fn finish_dashboard_draft(
+        &mut self,
+        tui: &mut tui::Tui,
+        previous_thread: Option<ThreadId>,
+        mut draft: Box<StartupDraftPump>,
+    ) -> Result<()> {
+        let attached = self.current_displayed_thread_id() != previous_thread;
+        let flushed = if attached {
+            draft.flush_pending_paste_newline(tui).await
+        } else {
+            draft.flush_pending_events(tui).await
+        };
+        if let Err(error) = flushed {
+            self.agents_overview.new_session_draft = Some(draft);
+            return Err(error.into());
+        }
+        if attached {
             self.chat_widget
                 .empty_state_animation
                 .borrow_mut()
                 .continue_from(&mut draft.blossom.borrow_mut());
             self.chat_widget.restore_startup_draft(draft.take_draft());
         } else {
-            // Retain edits if setup fails so retrying `n` does not lose the draft.
-            draft.flush_pending_events(tui).await?;
             self.agents_overview.new_session_draft = Some(draft);
         }
         tui.frame_requester().schedule_frame();
-        result
+        Ok(())
     }
 
     pub(in crate::app) async fn start_agents_overview_session(
@@ -69,12 +91,33 @@ impl App {
         if self.reconnect.offline || self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
         }
-        let Some((config, remote_cwd)) = self
+        let Some(outcome) = self
             .agents_overview_session_config(tui, app_server, cwd, startup_draft.as_deref_mut())
             .await
         else {
             return Ok(AppRunControl::Continue);
         };
+        match outcome {
+            trust::DashboardConfigOutcome::Pending(consent) => {
+                self.admit_dashboard_trust(app_server, consent);
+                Ok(AppRunControl::Continue)
+            }
+            trust::DashboardConfigOutcome::Stopped(control) => Ok(control),
+            trust::DashboardConfigOutcome::Ready(config, remote_cwd) => {
+                self.start_dashboard_with_config(tui, app_server, config, remote_cwd, startup_draft)
+                    .await
+            }
+        }
+    }
+
+    pub(in crate::app) async fn start_dashboard_with_config(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        config: Config,
+        remote_cwd: Option<PathBuf>,
+        mut startup_draft: Option<&mut StartupDraftPump>,
+    ) -> Result<AppRunControl> {
         let selected_profile = self.chat_widget.thread_id().and_then(|thread_id| {
             if let Some(selection) = self
                 .agents_overview

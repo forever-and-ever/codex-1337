@@ -1,4 +1,4 @@
-use super::trust::TrustConsent;
+use super::trust::ResumeTrustConsent;
 use super::*;
 use crate::app::resume_config::ResumeCwdBasis;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
@@ -431,7 +431,7 @@ impl App {
             HooksReviewDecision::TrustAll(hooks) => self.transfer_navigation_trust(
                 server,
                 operation,
-                TrustConsent::Hooks {
+                ResumeTrustConsent::Hooks {
                     updates: hook_trust_updates(&hooks),
                     context,
                 },
@@ -444,13 +444,13 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
         mut operation: PendingNavigation,
-        consent: &TrustConsent,
+        consent: &ResumeTrustConsent,
     ) -> Result<()> {
         match consent {
-            TrustConsent::Hooks { context, .. } => {
+            ResumeTrustConsent::Hooks { context, .. } => {
                 self.acquire_resumed_thread(server, operation, context.clone())
             }
-            TrustConsent::Directory { context, plan, .. } => {
+            ResumeTrustConsent::Directory { context, plan, .. } => {
                 let context = context.clone();
                 let mut plan = plan.clone();
                 let exit =
@@ -735,7 +735,7 @@ impl App {
                             self.transfer_navigation_trust(
                                 server,
                                 operation,
-                                TrustConsent::Directory {
+                                ResumeTrustConsent::Directory {
                                     consent,
                                     context,
                                     plan,
