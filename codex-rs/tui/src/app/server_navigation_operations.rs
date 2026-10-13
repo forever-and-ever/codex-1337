@@ -6,12 +6,15 @@ use futures::FutureExt;
 
 #[path = "server_navigation_cleanup.rs"]
 mod cleanup;
+#[path = "server_directory_navigation.rs"]
+mod directory;
 #[path = "server_agent_discovery.rs"]
 mod discovery;
 #[path = "server_fresh_navigation.rs"]
 mod fresh;
 #[path = "server_resume_navigation.rs"]
 mod resume;
+pub(in crate::app) use directory::DirectoryHistory;
 #[path = "server_thread_selection.rs"]
 mod selection;
 #[path = "server_trust_operations.rs"]
@@ -53,6 +56,7 @@ enum NavigationIntent {
     },
     Uncertain(Vec<ThreadId>),
     Resume(resume::ResumeStage),
+    Directory(directory::DirectoryStage),
 }
 
 struct PickerPreparation {
@@ -81,6 +85,7 @@ enum NavigationReceipt {
     Fresh(fresh::FreshReceipt),
     Cleaned(Result<(), String>),
     Resumed(resume::ResumeReceipt),
+    Directory(directory::DirectoryReceipt),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -118,6 +123,7 @@ impl NavigationOwner {
                     NavigationIntent::Select(stage) => stage.thread_id() == thread_id,
                     NavigationIntent::Fresh(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Resume(stage) => stage.fences_thread(thread_id),
+                    NavigationIntent::Directory(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Cleanup {
                         thread_id: target,
                         fences,
@@ -163,6 +169,7 @@ impl NavigationOwner {
             && !matches!(operation.state, LaneState::Queued)
             && !matches!(&operation.intent, NavigationIntent::Fresh(stage) if stage.is_read_only())
             && !matches!(&operation.intent, NavigationIntent::Resume(stage) if stage.is_read_only())
+            && !matches!(&operation.intent, NavigationIntent::Directory(stage) if stage.is_read_only())
             && !matches!(
                 operation.intent,
                 NavigationIntent::Discover(_)
@@ -331,6 +338,7 @@ impl App {
         let thread_target = match &operation.intent {
             NavigationIntent::Select(stage) => Some(stage.thread_id()),
             NavigationIntent::Resume(stage) => Some(stage.thread_id()),
+            NavigationIntent::Directory(stage) => Some(stage.thread_id()),
             _ => None,
         };
         let thread_blocked = thread_target.is_some_and(|thread_id| {
@@ -348,6 +356,11 @@ impl App {
         {
             let thread_id = *thread_id;
             self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        if matches!(operation.intent, NavigationIntent::Directory(_)) {
+            self.dispatch_directory_change(server, &mut operation);
             self.server_operations.navigation.current = Some(operation);
             return;
         }
@@ -445,6 +458,10 @@ impl App {
         };
         let Some(mut operation) = operation else {
             assert!(
+                !matches!(&completion.receipt, NavigationReceipt::Directory(receipt) if receipt.requires_owner()),
+                "directory resource receipt lost its owner"
+            );
+            assert!(
                 !matches!(completion.receipt, NavigationReceipt::Cleaned(_)),
                 "subscription cleanup lost its owner"
             );
@@ -479,6 +496,10 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Directory(receipt) => {
+                self.finish_directory_navigation(tui, server, operation, matching, receipt)
+                    .await?;
+            }
             NavigationReceipt::Resumed(receipt) => {
                 let control = self
                     .finish_resume_navigation(tui, server, operation, matching, receipt)

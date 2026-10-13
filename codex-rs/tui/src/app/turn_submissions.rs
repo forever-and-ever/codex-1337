@@ -80,6 +80,8 @@ pub(in crate::app) use requests::ThreadMutation;
 #[path = "server_navigation_operations.rs"]
 mod navigation;
 
+pub(in crate::app) use navigation::DirectoryHistory;
+
 pub(super) use navigation::SelectionAfter;
 
 // TELOS(durable-approvals-and-queues): One operation owner carries captured origin, epoch and uncertain effects.

@@ -5,6 +5,7 @@ use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
 
 enum TrustConsent {
     Resume(ResumeTrustConsent),
+    DirectoryChange(directory::DirectoryTrustAdmission),
     Dashboard(crate::app::agents_overview::trust::DashboardTrustAdmission),
 }
 
@@ -39,6 +40,7 @@ impl TrustOperation {
             }) => key.clone(),
             TrustConsent::Resume(ResumeTrustConsent::Hooks { context, .. }) => context.hook_scope(),
             TrustConsent::Dashboard(consent) => consent.scope(),
+            TrustConsent::DirectoryChange(consent) => consent.scope(),
         }
     }
 
@@ -47,6 +49,7 @@ impl TrustOperation {
             TrustConsent::Resume(ResumeTrustConsent::Directory { .. }) => "Saving folder trust",
             TrustConsent::Resume(ResumeTrustConsent::Hooks { .. }) => "Trusting hooks",
             TrustConsent::Dashboard(consent) => consent.label(),
+            TrustConsent::DirectoryChange(_) => "Saving folder trust",
         }
     }
 
@@ -63,6 +66,9 @@ impl TrustOperation {
                 write_hook_trusts_typed(handle, updates.clone()).await?;
             }
             TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
+            TrustConsent::DirectoryChange(consent) => {
+                consent.consent.clone().send(handle, id).await?
+            }
         }
         Ok(OperationReceipt::TrustSaved)
     }
@@ -95,11 +101,11 @@ impl App {
         false
     }
 
-    pub(super) fn transfer_navigation_trust(
+    fn transfer_trust_consent(
         &mut self,
         server: &AppServerSession,
         operation: PendingNavigation,
-        consent: ResumeTrustConsent,
+        consent: TrustConsent,
     ) {
         let PendingNavigation {
             id,
@@ -116,7 +122,7 @@ impl App {
             request: SubmissionRequest::Operation(Box::new(ServerOperation::Connection(
                 ConnectionMutation::Trust(TrustOperation {
                     generation,
-                    consent: Arc::new(TrustConsent::Resume(consent)),
+                    consent: Arc::new(consent),
                 }),
             ))),
             buffering: None,
@@ -144,6 +150,23 @@ impl App {
         );
         self.drive_server_operations(server);
         self.refresh_submission_preview();
+    }
+
+    pub(super) fn transfer_navigation_trust(
+        &mut self,
+        server: &AppServerSession,
+        operation: PendingNavigation,
+        consent: ResumeTrustConsent,
+    ) {
+        self.transfer_trust_consent(server, operation, TrustConsent::Resume(consent));
+    }
+    pub(super) fn transfer_directory_trust(
+        &mut self,
+        server: &AppServerSession,
+        operation: PendingNavigation,
+        consent: directory::DirectoryTrustAdmission,
+    ) {
+        self.transfer_trust_consent(server, operation, TrustConsent::DirectoryChange(consent));
     }
 
     pub(in crate::app::turn_submissions) async fn continue_confirmed_trust(
@@ -188,6 +211,19 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
         match &*consent {
+            TrustConsent::DirectoryChange(consent) => {
+                let pending = PendingNavigation {
+                    id: lane.active.id,
+                    order: lane.active.order,
+                    epoch: lane.active.epoch,
+                    generation: operation.generation,
+                    intent: NavigationIntent::Transitioning,
+                    state: LaneState::Queued,
+                };
+                self.continue_directory_trust_saved(server, pending, consent)
+                    .await;
+                Ok(AppRunControl::Continue)
+            }
             TrustConsent::Resume(consent) => {
                 let pending = PendingNavigation {
                     id: lane.active.id,

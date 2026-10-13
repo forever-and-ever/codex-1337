@@ -3628,7 +3628,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
     app.app_server_target = crate::AppServerTarget::Remote { endpoint };
     assert!(app.selected_server_profile(thread_id).is_none());
     while events.try_recv().is_ok() {}
-    app.change_working_directory(&mut tui, &mut server, home.path().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, home.path().abs())
         .await;
     insta::assert_snapshot!(
         next_history_message(&mut events),

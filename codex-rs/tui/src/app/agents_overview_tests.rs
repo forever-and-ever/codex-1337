@@ -2424,7 +2424,7 @@ async fn restored_server_permission_profile_survives_cd_without_turn_override() 
         TurnPermissionsOverride::Preserve
     );
 
-    app.change_working_directory(&mut tui, &mut app_server, destination.clone())
+    app.change_working_directory_and_settle(&mut tui, &mut app_server, destination.clone())
         .await;
 
     assert_eq!(app.chat_widget.config_ref().cwd, destination);

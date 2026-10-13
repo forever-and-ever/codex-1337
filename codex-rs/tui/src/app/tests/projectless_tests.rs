@@ -82,7 +82,7 @@ sandbox = "unelevated"
                 .as_deref()
                 .is_some_and(rollout_path_is_resumable)
         );
-        app.change_working_directory(&mut tui, &mut server, cwd.abs())
+        app.change_working_directory_and_settle(&mut tui, &mut server, cwd.abs())
             .await;
         assert_eq!(app.config.cwd.as_path(), cwd);
         assert_eq!(
@@ -170,7 +170,7 @@ sandbox = "unelevated"
         &PermissionProfile::workspace_write()
     );
     let before = app.chat_widget.thread_id();
-    app.change_working_directory(
+    app.change_working_directory_and_settle(
         &mut tui,
         &mut server,
         destination.path().to_path_buf().abs(),
@@ -196,7 +196,7 @@ sandbox = "unelevated"
             serde_json::to_string(untrusted.path())?
         ),
     )?;
-    app.change_working_directory(&mut tui, &mut server, untrusted.path().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, untrusted.path().abs())
         .await;
     assert_eq!(
         (
@@ -220,7 +220,7 @@ sandbox = "unelevated"
             vec![App::side_boundary_prompt_item()],
         )
         .await?;
-    app.change_working_directory(&mut tui, &mut server, source.path().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, source.path().abs())
         .await;
     assert_eq!(
         (

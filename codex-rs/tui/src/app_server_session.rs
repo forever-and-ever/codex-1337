@@ -727,14 +727,7 @@ impl AppServerSession {
         );
         params.model_provider = self.explicit_model_provider(config);
         params.daybreak_enabled = (config.daybreak_enabled && !config.ephemeral).then_some(true);
-        if let Some(selected_profile) = selected_profile {
-            params.runtime_workspace_roots = None;
-            params.permissions = Some(selected_profile.profile_id.clone());
-            params.sandbox = None;
-            params.approval_policy = selected_profile.approval_policy;
-            params.approvals_reviewer = selected_profile.approvals_reviewer.map(Into::into);
-            remove_permission_config_overrides(&mut params.config);
-        }
+        session_preparation::apply_selected_start_permissions(&mut params, selected_profile);
         self.start_thread_with_params(local_settings, config, params)
             .await
     }

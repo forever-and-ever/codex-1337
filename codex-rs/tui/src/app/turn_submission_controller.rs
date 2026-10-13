@@ -1105,7 +1105,8 @@ impl App {
         server: &mut AppServerSession,
     ) -> Result<AppRunControl> {
         tokio::time::timeout(Duration::from_secs(5), async {
-            while !self.server_operations.navigation.is_empty()
+            while self.server_operations.lanes.contains_key(&OperationLane::Connection)
+                || !self.server_operations.navigation.is_empty()
                 || !self.server_operations.control_rx.is_empty()
             {
                 tokio::select! {

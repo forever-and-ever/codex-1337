@@ -134,6 +134,20 @@ pub(crate) enum ThreadStartChoice {
     Configured(Option<ThreadStartSource>),
     Provider(String),
 }
+pub(super) fn apply_selected_start_permissions(
+    params: &mut ThreadStartParams,
+    selected: Option<&PermissionProfileSelection>,
+) {
+    if let Some(selected) = selected {
+        params.runtime_workspace_roots = None;
+        params.permissions = Some(selected.profile_id.clone());
+        params.sandbox = None;
+        params.approval_policy = selected.approval_policy;
+        params.approvals_reviewer = selected.approvals_reviewer.map(Into::into);
+        remove_permission_config_overrides(&mut params.config);
+    }
+}
+
 pub(crate) struct StartPreparation {
     handle: AppServerRequestHandle,
     params: ThreadStartParams,
@@ -196,6 +210,14 @@ impl AppServerSession {
     }
 }
 impl StartPreparation {
+    pub(crate) fn with_selected_profile(
+        mut self,
+        selected: Option<&PermissionProfileSelection>,
+    ) -> Self {
+        apply_selected_start_permissions(&mut self.params, selected);
+        self
+    }
+
     pub(crate) async fn run(self) -> PreparedSession {
         let Self {
             handle,

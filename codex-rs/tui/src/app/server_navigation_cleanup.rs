@@ -3,6 +3,7 @@ use codex_app_server_client::AppServerRequestHandle;
 
 pub(super) enum CleanupContinuation {
     Done,
+    ArchiveFork,
     SelectionFallback(Box<selection::SelectionContext>),
 }
 
@@ -43,6 +44,7 @@ impl App {
         next: CleanupContinuation,
         matching: bool,
     ) {
+        let archive = matches!(next, CleanupContinuation::ArchiveFork);
         operation.intent = NavigationIntent::Cleanup {
             thread_id,
             fences,
@@ -61,8 +63,30 @@ impl App {
                     .await
                     .map_err(|_| {
                         "Unsubscribe acknowledgement timed out; it may still complete".to_string()
-                    })
-                    .and_then(|result| result.map_err(|error| error.to_string()))
+                    })?
+                    .map_err(|error| error.to_string())?;
+                if archive {
+                    tokio::time::timeout(
+                        ACK_TIMEOUT,
+                        handle.request::<codex_app_server_protocol::ThreadArchiveResponse>(
+                            codex_app_server_protocol::ClientRequest::ThreadArchive {
+                                request_id: codex_app_server_protocol::RequestId::String(format!(
+                                    "tui-cleanup-archive-{id}"
+                                )),
+                                params: codex_app_server_protocol::ThreadArchiveParams {
+                                    thread_id: thread_id.to_string(),
+                                },
+                            },
+                        ),
+                    )
+                    .await
+                    .map_err(|_| {
+                        "Replacement fork archive acknowledgement timed out; it may still complete"
+                            .to_string()
+                    })?
+                    .map_err(|error| error.to_string())?;
+                }
+                Ok(())
             })
             .catch_unwind()
             .await

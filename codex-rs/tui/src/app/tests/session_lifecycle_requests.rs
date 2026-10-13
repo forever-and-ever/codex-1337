@@ -2907,7 +2907,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
                 .await?;
         }
         requests.lock().expect("request recorder lock").clear();
-        app.change_working_directory(&mut tui, &mut server, failed.clone().abs())
+        app.change_working_directory_and_settle(&mut tui, &mut server, failed.clone().abs())
             .await;
         assert_eq!(
             recorded_params(&requests, "thread/backgroundTerminals/list"),
@@ -2929,7 +2929,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         Some(RuntimePermissionProfileOverride::from_config(&app.config));
     for (path, expected) in [(&failed, 0), (&trusted, 2)] {
         requests.lock().expect("request recorder lock").clear();
-        app.change_working_directory(&mut tui, &mut server, path.clone().abs())
+        app.change_working_directory_and_settle(&mut tui, &mut server, path.clone().abs())
             .await;
         assert_eq!(app.chat_widget.thread_id(), Some(original));
         assert_eq!(app.config.cwd, current.clone().abs());
@@ -3015,7 +3015,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     app.harness_overrides.bypass_hook_trust = Some(true);
     requests.lock().expect("request recorder lock").clear();
-    app.change_working_directory(&mut tui, &mut server, trusted.clone().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, trusted.clone().abs())
         .await;
     assert!(app.config.bypass_hook_trust && !app.chat_widget.has_active_view());
     assert!(recorded_params(&requests, "hooks/list").is_empty());
@@ -3028,7 +3028,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         RuntimePermissionProfileOverride::from_restored_config(&app.config),
     );
     requests.lock().expect("request recorder lock").clear();
-    app.change_working_directory(&mut tui, &mut server, untrusted.clone().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, untrusted.clone().abs())
         .await;
     assert_eq!(app.config.active_project.trust_level, Some(T::Untrusted));
     let approval = app.config.permissions.approval_policy.value();
@@ -3037,7 +3037,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let warning = "Project-local config, hooks, and exec policies are disabled";
     assert!(history().iter().any(|line| line.contains(warning)));
     let untrusted_permissions = app.config.permissions.permission_profile().clone();
-    app.change_working_directory(&mut tui, &mut server, trusted.clone().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, trusted.clone().abs())
         .await;
     assert_eq!(app.config.cwd, trusted.abs());
     assert_eq!(

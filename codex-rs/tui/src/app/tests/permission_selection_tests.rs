@@ -245,7 +245,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     }))?]).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     while events.try_recv().is_ok() {}
-    app.change_working_directory(&mut tui, &mut server, client_home.path().abs())
+    app.change_working_directory_and_settle(&mut tui, &mut server, client_home.path().abs())
         .await;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     insta::assert_snapshot!(next_history_message(&mut events), @"■ Changing directories with an unconfirmed named profile is not supported.");
@@ -349,7 +349,7 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
         std::fs::write(&requirements, "allowed_approval_policies = [\"never\"]")?;
         app.loader_overrides.system_requirements_path = Some(requirements.to_path_buf());
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        app.change_working_directory(&mut tui, &mut server, destination.clone())
+        app.change_working_directory_and_settle(&mut tui, &mut server, destination.clone())
             .await;
         assert_ne!(app.chat_widget.thread_id(), Some(source));
         assert_eq!(

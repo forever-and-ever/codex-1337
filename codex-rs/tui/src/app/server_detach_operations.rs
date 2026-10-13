@@ -243,6 +243,9 @@ impl App {
                 }
                 (DetachKind::Conversation, Ok(())) => {
                     let thread_id = target.thread_id;
+                    let drafts = self
+                        .take_unsent_detached_operations(thread_id, &target.store)
+                        .await;
                     self.thread_event_channels
                         .get_mut(&thread_id)
                         .expect("matching detach target checked")
@@ -250,6 +253,8 @@ impl App {
                     self.abort_thread_event_listener(thread_id);
                     self.pending_server_profiles.remove(&thread_id);
                     self.pause_detached_thread_input(target).await;
+                    self.restore_submission_drafts(thread_id, drafts, DraftDisposition::Edit)
+                        .await;
                 }
                 (DetachKind::Conversation, Err(error)) => {
                     tracing::warn!(thread_id = %target.thread_id, %error, "unsubscribe not confirmed; local attachment retained");
