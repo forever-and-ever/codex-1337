@@ -14,8 +14,8 @@ use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
 
 #[derive(Clone)]
 pub(in crate::app) struct DashboardPreparation {
-    pub(super) config: Config,
-    pub(super) remote_cwd: Option<PathBuf>,
+    pub(in crate::app) config: Config,
+    pub(in crate::app) remote_cwd: Option<PathBuf>,
 }
 
 #[derive(Clone)]

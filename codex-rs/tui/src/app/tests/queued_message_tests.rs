@@ -551,6 +551,123 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(recorded_params(&requests, "thread/alarm/disarm").is_empty());
     assert!(recorded_params(&requests, "thread/compact/start").is_empty());
     assert!(app.server_operations.is_empty());
+
+    // Accepted consent transfers once to the existing connection owner. A withheld write
+    // must survive navigation replacement, keep dependent work queued, and leave control live.
+    let consent_cwd = app.config.codex_home.join("accepted-consent");
+    std::fs::create_dir(&consent_cwd)?;
+    let consent_plan = crate::onboarding::onboarding_screen::DirectoryTrustPreparation::new(
+        &app.config,
+        &app.app_server_target,
+        &consent_cwd,
+        crate::onboarding::DirectoryTrustOptions::default(),
+    )?;
+    app.agents_overview.new_session_draft = Some(crate::startup_draft::StartupDraftPump::new(
+        &tui,
+        crate::startup_draft::StartupDraftInitialScreen::Onboarding,
+        crate::startup_draft::StartupDraftSessionAction::NewFromCommandCenter,
+    ));
+    let writes_before_consent = recorded_params(&requests, "config/batchWrite").len();
+    app.admit_dashboard_trust(
+        &server,
+        crate::app::agents_overview::trust::DashboardTrustAdmission::Directory {
+            consent: crate::onboarding::onboarding_screen::DirectoryTrustConsent::Path(
+                consent_cwd.to_path_buf(),
+            ),
+            preparation: crate::app::agents_overview::trust::DashboardPreparation {
+                config: app.config.clone(),
+                remote_cwd: None,
+            },
+            plan: consent_plan,
+        },
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "config/batchWrite").len() == writes_before_consent {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    let accepted_write = recorded_params(&requests, "config/batchWrite")
+        .pop()
+        .expect("accepted write");
+    assert!(
+        accepted_write["edits"][0]["keyPath"]
+            .as_str()
+            .expect("trust key")
+            .contains("accepted-consent")
+    );
+    assert_eq!(accepted_write["edits"][0]["value"], "trusted");
+    app.chat_widget.apply_external_edit("consent draft".into());
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    app.select_agent_thread(&mut tui, &mut server, thread_id)
+        .await?;
+    assert!(
+        app.pending_navigation_admission()
+            .expect("dependent selection")
+            .2,
+        "later selection remains queued behind accepted consent"
+    );
+    app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
+        .await?;
+    assert_eq!(
+        recorded_params(&requests, "config/batchWrite").len(),
+        writes_before_consent + 1
+    );
+    urgent_store
+        .lock()
+        .await
+        .set_active_turn_id("consent-control".into());
+    let interrupts_before_consent = recorded_params(&requests, "turn/interrupt").len();
+    app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "turn/interrupt").len() == interrupts_before_consent {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await?;
+    // Replacing the selection cannot cancel or re-admit the already accepted config write.
+    app.supersede_pending_navigation();
+    assert!(app.agents_overview.new_session_draft.is_some());
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(31)).await;
+    while !app.pending_configuration_is_uncertain() {
+        let completion = app
+            .server_operations
+            .control_rx
+            .recv()
+            .await
+            .expect("accepted consent deadline");
+        app.handle_server_completion(&mut tui, &mut server, completion)
+            .await?;
+    }
+    tokio::time::resume();
+    assert!(app.pending_configuration_is_uncertain());
+    assert!(!app.pumped_configuration_ready());
+    assert_eq!(
+        recorded_params(&requests, "config/batchWrite").len(),
+        writes_before_consent + 1,
+        "unknown accepted consent is never replayed and cannot release its queued config successor"
+    );
+    assert!(
+        app.chat_widget
+            .composer_text_with_pending()
+            .contains("consent draft")
+    );
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    assert!(app.server_operations.is_empty());
+    assert!(app.agents_overview.new_session_draft.is_some());
+
     // Approval delivery transfers its request identity exactly once and bypasses a stalled
     // model lane/config barrier. A second UI resolution cannot manufacture a second send.
     app.submit_thread_op(

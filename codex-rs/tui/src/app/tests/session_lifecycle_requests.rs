@@ -434,6 +434,13 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                         .lock()
                         .expect("request recorder lock")
                         .push(request.clone());
+                    if history_capabilities == HistoryCapabilities::TurnSubmissionStalls
+                        && request.method == "config/batchWrite"
+                        && request.params.as_ref().and_then(|params| params.get("edits")).and_then(serde_json::Value::as_array)
+                            .is_some_and(|edits| edits.iter().any(|edit| edit.get("keyPath").and_then(serde_json::Value::as_str).is_some_and(|key| key.contains("accepted-consent"))))
+                    {
+                        continue;
+                    }
                     if realtime_behavior == RealtimeRequestBehavior::AcceptSpeechAndStallStop
                         && request.method == "thread/realtime/stop"
                     {

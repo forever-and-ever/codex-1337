@@ -101,6 +101,14 @@ impl App {
         false
     }
 
+    #[cfg(test)]
+    pub(in crate::app) fn pending_configuration_is_uncertain(&self) -> bool {
+        self.server_operations
+            .lanes
+            .get(&OperationLane::Connection)
+            .is_some_and(|lane| matches!(lane.state, LaneState::Uncertain))
+    }
+
     fn transfer_trust_consent(
         &mut self,
         server: &AppServerSession,
