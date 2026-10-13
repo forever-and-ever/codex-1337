@@ -942,13 +942,16 @@ async fn plan_implementation_popup_skips_without_proposed_plan() {
     chat.set_collaboration_mask(plan_mask);
 
     chat.on_task_started();
-    chat.on_plan_update(UpdatePlanArgs {
-        explanation: None,
-        plan: vec![PlanItemArg {
-            step: "First".to_string(),
-            status: StepStatus::Pending,
-        }],
-    });
+    chat.on_plan_update(
+        UpdatePlanArgs {
+            explanation: None,
+            plan: vec![PlanItemArg {
+                step: "First".to_string(),
+                status: StepStatus::Pending,
+            }],
+        }
+        .into(),
+    );
     chat.on_task_complete(
         /*last_agent_message*/ None, /*completion*/ None, /*from_replay*/ false,
     );
@@ -1082,13 +1085,16 @@ async fn plan_implementation_popup_skips_when_rate_limit_prompt_pending() {
     chat.set_collaboration_mask(plan_mask);
 
     chat.on_task_started();
-    chat.on_plan_update(UpdatePlanArgs {
-        explanation: None,
-        plan: vec![PlanItemArg {
-            step: "First".to_string(),
-            status: StepStatus::Pending,
-        }],
-    });
+    chat.on_plan_update(
+        UpdatePlanArgs {
+            explanation: None,
+            plan: vec![PlanItemArg {
+                step: "First".to_string(),
+                status: StepStatus::Pending,
+            }],
+        }
+        .into(),
+    );
     chat.on_rate_limit_snapshot(Some(snapshot(/*percent*/ 92.0)));
     chat.on_task_complete(
         /*last_agent_message*/ None, /*completion*/ None, /*from_replay*/ false,
@@ -1827,9 +1833,17 @@ async fn plan_update_renders_history_cell() {
             },
         ],
     };
-    chat.on_plan_update(update);
+    // Equal checklist text does not establish shared invocation ownership.
+    for call_id in ["plan-call-1", "plan-call-2"] {
+        chat.on_plan_update(codex_protocol::plan_update::PlanUpdateEvent {
+            call_id: Some(call_id.into()),
+            update: update.clone(),
+        });
+    }
     let cells = drain_insert_history(&mut rx);
-    assert!(!cells.is_empty(), "expected plan update cell to be sent");
+    assert_eq!(cells.len(), 2);
+    assert_eq!(cells[0].outer_call_id(), Some("plan-call-1"));
+    assert_eq!(cells[1].outer_call_id(), Some("plan-call-2"));
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
         blob.contains("Updated Plan"),

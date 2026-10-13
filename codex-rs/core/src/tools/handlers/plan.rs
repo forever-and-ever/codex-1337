@@ -72,7 +72,7 @@ impl PlanHandler {
         let ToolInvocation {
             session,
             turn,
-            call_id: _,
+            call_id,
             payload,
             ..
         } = invocation;
@@ -94,7 +94,13 @@ impl PlanHandler {
 
         let args = parse_update_plan_arguments(&arguments)?;
         session
-            .send_event(turn.as_ref(), EventMsg::PlanUpdate(args))
+            .send_event(
+                turn.as_ref(),
+                EventMsg::PlanUpdate(codex_protocol::plan_update::PlanUpdateEvent {
+                    call_id: Some(call_id),
+                    update: args,
+                }),
+            )
             .await;
 
         Ok(boxed_tool_output(PlanToolOutput))

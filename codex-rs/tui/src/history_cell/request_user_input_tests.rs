@@ -19,6 +19,7 @@ fn completed_and_interrupted_results() {
         }]),
     };
     let mut cell = RequestUserInputResultCell {
+        call_id: None,
         questions: vec![question],
         answers: HashMap::from([(
             "choice".into(),

@@ -6,12 +6,30 @@ use crate::style::accent_color;
 /// Renders a completed (or interrupted) request_user_input exchange in history.
 #[derive(Debug)]
 pub(crate) struct RequestUserInputResultCell {
+    pub(crate) call_id: Option<String>,
     pub(crate) questions: Vec<ToolRequestUserInputQuestion>,
     pub(crate) answers: HashMap<String, ToolRequestUserInputAnswer>,
     pub(crate) interrupted: bool,
 }
 
 impl HistoryCell for RequestUserInputResultCell {
+    fn outer_call_id(&self) -> Option<&str> {
+        self.call_id.as_deref()
+    }
+
+    fn activity_ids(&self) -> Vec<String> {
+        self.call_id
+            .iter()
+            .map(|id| format!("questions:{id}"))
+            .collect()
+    }
+
+    fn activity_header(&self) -> Option<super::activity_parts::ActivityHeader> {
+        Some(super::activity_parts::ActivityHeader::at_end(&Line::from(
+            vec!["• ".into(), "Questions".into()],
+        )))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }

@@ -202,6 +202,8 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
     wait_for_event(&codex, |event| match event {
         EventMsg::PlanUpdate(update) => {
             saw_plan_update = true;
+            assert_eq!(update.call_id.as_deref(), Some(call_id));
+            let update = &update.update;
             assert_eq!(update.explanation.as_deref(), Some("Tool harness check"));
             assert_eq!(update.plan.len(), 2);
             assert_eq!(update.plan[0].step, "Inspect workspace");

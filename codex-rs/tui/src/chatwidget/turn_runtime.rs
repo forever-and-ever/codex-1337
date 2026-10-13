@@ -5,6 +5,7 @@
 //! Terminal errors retain live question drafts across queued input delivery.
 
 use super::*;
+use codex_protocol::plan_update::PlanUpdateEvent;
 
 const LEGACY_SAFETY_ACCESS_BLOCK_PREFIX: &str =
     "Invalid prompt: we've limited access to this content for safety reasons.";
@@ -582,7 +583,8 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn on_plan_update(&mut self, update: UpdatePlanArgs) {
+    pub(super) fn on_plan_update(&mut self, event: PlanUpdateEvent) {
+        let update = &event.update;
         self.transcript.saw_plan_update_this_turn = true;
         let total = update.plan.len();
         let completed = update
@@ -595,6 +597,6 @@ impl ChatWidget {
             .count();
         self.transcript.last_plan_progress = (total > 0).then_some((completed, total));
         self.refresh_status_surfaces();
-        self.add_to_history(history_cell::new_plan_update(update));
+        self.add_to_history(history_cell::new_plan_update(event));
     }
 }

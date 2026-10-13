@@ -1115,6 +1115,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
 
     let started = processor.collect_thread_events(ServerNotification::TurnPlanUpdated(
         TurnPlanUpdatedNotification {
+            call_id: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             explanation: None,
@@ -1156,6 +1157,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
 
     let updated = processor.collect_thread_events(ServerNotification::TurnPlanUpdated(
         TurnPlanUpdatedNotification {
+            call_id: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             explanation: None,
@@ -1247,6 +1249,7 @@ fn plan_update_after_completion_starts_new_todo_list_with_new_id() {
 
     let _ = processor.collect_thread_events(ServerNotification::TurnPlanUpdated(
         TurnPlanUpdatedNotification {
+            call_id: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             explanation: None,
@@ -1275,6 +1278,7 @@ fn plan_update_after_completion_starts_new_todo_list_with_new_id() {
 
     let restarted = processor.collect_thread_events(ServerNotification::TurnPlanUpdated(
         TurnPlanUpdatedNotification {
+            call_id: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-2".to_string(),
             explanation: None,

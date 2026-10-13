@@ -746,7 +746,7 @@ async fn native_regular_replay_profiles(
             }));
         }
         assert_eq!(observed.iter().filter(|event| {
-            matches!(event, EventMsg::PlanUpdate(event) if event.plan.len() == 1 && event.plan[0].step == "Native commit once")
+            matches!(event, EventMsg::PlanUpdate(event) if event.update.plan.len() == 1 && event.update.plan[0].step == "Native commit once")
         }).count(), usize::from(committed));
         server.verify().await;
     }

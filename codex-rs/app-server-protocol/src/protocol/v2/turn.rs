@@ -632,6 +632,9 @@ pub struct TurnDiffUpdatedNotification {
 pub struct TurnPlanUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub call_id: Option<String>,
     pub explanation: Option<String>,
     pub plan: Vec<TurnPlanStep>,
 }

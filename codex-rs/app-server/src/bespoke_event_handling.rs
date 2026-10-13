@@ -95,6 +95,7 @@ use codex_protocol::items::CollabAgentTool as CoreCollabAgentTool;
 use codex_protocol::items::ModelInvocationContext;
 use codex_protocol::items::TurnItem as CoreTurnItem;
 use codex_protocol::models::AdditionalPermissionProfile as CoreAdditionalPermissionProfile;
+#[cfg(test)]
 use codex_protocol::plan_tool::UpdatePlanArgs;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
@@ -1336,15 +1337,17 @@ async fn handle_turn_diff(
 async fn handle_turn_plan_update(
     conversation_id: ThreadId,
     event_turn_id: &str,
-    plan_update_event: UpdatePlanArgs,
+    plan_update_event: codex_protocol::plan_update::PlanUpdateEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
     // `update_plan` is a todo/checklist tool; it is not related to plan-mode updates
     let notification = TurnPlanUpdatedNotification {
         thread_id: conversation_id.to_string(),
         turn_id: event_turn_id.to_string(),
-        explanation: plan_update_event.explanation,
+        call_id: plan_update_event.call_id,
+        explanation: plan_update_event.update.explanation,
         plan: plan_update_event
+            .update
             .plan
             .into_iter()
             .map(TurnPlanStep::from)
@@ -3686,13 +3689,23 @@ mod tests {
 
         let conversation_id = ThreadId::new();
 
-        handle_turn_plan_update(conversation_id, "turn-123", update, &outgoing).await;
+        handle_turn_plan_update(
+            conversation_id,
+            "turn-123",
+            codex_protocol::plan_update::PlanUpdateEvent {
+                call_id: Some("plan-call-456".into()),
+                update,
+            },
+            &outgoing,
+        )
+        .await;
 
         let msg = recv_broadcast_notification(&mut rx).await?;
         match msg {
             ServerNotification::TurnPlanUpdated(n) => {
                 assert_eq!(n.thread_id, conversation_id.to_string());
                 assert_eq!(n.turn_id, "turn-123");
+                assert_eq!(n.call_id.as_deref(), Some("plan-call-456"));
                 assert_eq!(n.explanation.as_deref(), Some("need plan"));
                 assert_eq!(n.plan.len(), 2);
                 assert_eq!(n.plan[0].step, "first");
