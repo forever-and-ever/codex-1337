@@ -308,6 +308,34 @@ impl HistoryCell for ComputerActivityCell {
         self.group.details.has_formatted_output()
     }
 
+    fn output_parts(
+        &self,
+        width: u16,
+        _reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        self.group.details.returned_output_has_details()?;
+        let mut parts = super::activity_parts::ActivityParts {
+            lines: self.compact_hyperlink_lines(width),
+            header: self.activity_header(),
+            output: self.activity_disclosure(width),
+            controls: Vec::new(),
+        };
+        if self.activity_ids().iter().any(|id| expanded.contains(id)) {
+            parts.lines.extend(
+                self.group
+                    .calls
+                    .iter()
+                    .flat_map(|call| call.activity_argument_lines(width)),
+            );
+            self.group
+                .details
+                .append_result_parts(&mut parts, width, expanded, mode);
+        }
+        Some(parts)
+    }
+
     fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
         if let Some(output) = self.group.details.output_lines(width, mode) {
             let mut lines = self

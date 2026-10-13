@@ -32,12 +32,83 @@ impl ToolOutputGroup {
             })
             .then_some(&self.members)
     }
+    fn captured_output_parts(
+        &self,
+        width: u16,
+        expanded: &HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        if !self
+            .members
+            .iter()
+            .any(|member| member.as_any().is::<ToolOutputCell>())
+        {
+            return None;
+        }
+        let mut parts = super::activity_parts::ActivityParts {
+            lines: if self
+                .members
+                .iter()
+                .filter(|member| !member.as_any().is::<ToolOutputCell>())
+                .all(|member| member.compact_hyperlink_lines(width).is_empty())
+            {
+                self.compact_hyperlink_lines(width)
+            } else {
+                Vec::new()
+            },
+            header: self.activity_header(),
+            output: self.activity_disclosure(width),
+            controls: Vec::new(),
+        };
+        let open = self.activity_ids().iter().any(|id| expanded.contains(id));
+        if !open {
+            parts.lines = self.compact_hyperlink_lines(width);
+            return Some(parts);
+        }
+        for member in &self.members {
+            if let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>() {
+                if output.activity_disclosure(width).is_some() {
+                    output.append_result_parts(&mut parts, width, expanded, mode);
+                }
+            } else {
+                let mut member_parts = if member.as_any().is::<PatchHistoryCell>() {
+                    let mut parts = member.nested_summary_parts(width, expanded);
+                    // The activity control already owns this file's disclosure.
+                    parts.controls.clear();
+                    parts
+                } else {
+                    member
+                        .output_parts(width, 0, expanded, mode)
+                        .unwrap_or_else(|| super::activity_parts::ActivityParts {
+                            lines: {
+                                let mut lines = member.activity_argument_lines(width);
+                                if let Some(header) = member.compact_hyperlink_lines(width).first()
+                                    && lines.first().is_none_or(|line| line.line != header.line)
+                                {
+                                    lines.insert(0, header.clone());
+                                }
+                                lines
+                            },
+                            ..super::activity_parts::ActivityParts::default()
+                        })
+                };
+                let offset = parts.lines.len();
+                for control in &mut member_parts.controls {
+                    control.line += offset;
+                }
+                parts.controls.extend(member_parts.controls);
+                parts.lines.extend(member_parts.lines);
+            }
+        }
+        Some(parts)
+    }
     /// Attach a matching outer return without inferring ownership from activity proximity.
     pub(crate) fn attach(
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
     ) -> Option<ProjectionChange> {
         output.as_any().downcast_ref::<ToolOutputCell>()?;
+        let call_id = output.outer_call_id()?;
         if let Some(start) = Self::patch_owner(cells) {
             if cells[start].outer_call_id() != output.outer_call_id() {
                 return None;
@@ -71,7 +142,6 @@ impl ToolOutputGroup {
         }
         // Only a concrete matching invocation owns this return. Legacy activity proximity
         // cannot establish parentage, and independently disclosed files remain separate.
-        let call_id = output.outer_call_id()?;
         let start = cells.iter().rposition(|cell| {
             !cell.as_any().is::<PatchHistoryCell>() && cell.tool_call_ids().contains(&call_id)
         })?;
@@ -341,7 +411,7 @@ impl HistoryCell for ToolOutputGroup {
                 .iter()
                 .filter_map(|member| member.as_any().downcast_ref::<ToolOutputCell>())
                 .collect::<Vec<_>>();
-            return Some(super::agent_wait_projection::wait_output_parts(
+            return Some(super::tool_output::result_parts(
                 wait.map(AsRef::as_ref),
                 &outputs,
                 width,
@@ -362,7 +432,7 @@ impl HistoryCell for ToolOutputGroup {
                 .iter()
                 .filter_map(|member| member.as_any().downcast_ref::<ToolOutputCell>())
                 .collect::<Vec<_>>();
-            return Some(super::agent_wait_projection::wait_output_parts(
+            return Some(super::tool_output::result_parts(
                 None, &outputs, width, expanded, mode,
             ));
         }
@@ -378,13 +448,21 @@ impl HistoryCell for ToolOutputGroup {
             for id in mcp.activity_ids() {
                 receipt_expanded.remove(&id);
             }
-            let mut parts = mcp.output_parts(width, header_reserve, &receipt_expanded, mode)?;
+            let mut parts = mcp
+                .output_parts(width, header_reserve, &receipt_expanded, mode)
+                .unwrap_or_else(|| super::activity_parts::ActivityParts {
+                    lines: mcp.activity_argument_lines(width),
+                    header: mcp.activity_header(),
+                    ..super::activity_parts::ActivityParts::default()
+                });
             parts.header = self.activity_header();
             parts.output = self.activity_disclosure(width);
             if self.activity_ids().iter().any(|id| expanded.contains(id)) {
                 for output in self.members.iter().skip(1) {
                     if let Some(output) = output.as_any().downcast_ref::<ToolOutputCell>() {
-                        parts.lines.extend(output.output_lines(width, mode));
+                        if output.activity_disclosure(width).is_some() {
+                            output.append_result_parts(&mut parts, width, expanded, mode);
+                        }
                     }
                 }
             }
@@ -395,26 +473,27 @@ impl HistoryCell for ToolOutputGroup {
         for member in &self.members {
             if let Some(command) = member.as_any().downcast_ref::<crate::exec_cell::ExecCell>() {
                 if !command.is_agent_command_group() {
-                    return None;
+                    return self.captured_output_parts(width, expanded, mode);
                 }
                 commands.push(command);
             } else if let Some(batch) = member.as_any().downcast_ref::<ToolOutputCell>() {
                 batches.push(batch);
             } else if !member.as_any().is::<ReasoningSummaryCell>() {
-                return None;
+                return self.captured_output_parts(width, expanded, mode);
             }
         }
-        (!commands.is_empty()).then(|| {
-            crate::exec_cell::rows::command_parts(
-                &commands,
-                &batches,
-                width,
-                header_reserve,
-                expanded,
-                &self.activity_ids(),
-                mode,
-            )
-        })
+        if commands.is_empty() {
+            return self.captured_output_parts(width, expanded, mode);
+        }
+        Some(crate::exec_cell::rows::command_parts(
+            &commands,
+            &batches,
+            width,
+            header_reserve,
+            expanded,
+            &self.activity_ids(),
+            mode,
+        ))
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -546,7 +625,17 @@ impl HistoryCell for ToolOutputGroup {
                 .find_map(|cell| cell.activity_disclosure(width));
         }
         match self.members.first() {
-            Some(cell) if cell.as_any().is::<PatchHistoryCell>() => cell.activity_disclosure(width),
+            Some(cell) if cell.as_any().is::<PatchHistoryCell>() => {
+                cell.activity_disclosure(width).or_else(|| {
+                    self.members
+                        .iter()
+                        .any(|member| {
+                            member.as_any().is::<ToolOutputCell>()
+                                && member.activity_disclosure(width).is_some()
+                        })
+                        .then_some(super::ActivityDisclosure::Generic)
+                })
+            }
             _ => self
                 .members
                 .iter()

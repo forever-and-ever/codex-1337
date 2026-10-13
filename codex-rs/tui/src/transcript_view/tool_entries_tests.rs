@@ -110,6 +110,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
     let mut view = TranscriptView::default();
     view.disclosure.expanded.extend(output.activity_ids());
+    view.disclosure
+        .expanded
+        .insert(format!("result:{}", output.id()));
     view.record_tool_output_tokens("tool-output-tokens:mode".into(), "mode".into(), Some(123));
     let mut painted = Vec::new();
     for mode in [OutputMode::Fmt, OutputMode::Raw, OutputMode::Fmt] {
@@ -317,6 +320,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
         let mut view = TranscriptView::default();
         view.disclosure.expanded.extend(output.activity_ids());
+        view.disclosure
+            .expanded
+            .insert(format!("result:{}", output.id()));
         tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
         let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
         let start = layout.text().find(&safe).unwrap();
@@ -1160,6 +1166,11 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 .disclosure
                 .expanded
                 .extend(cell.activity_ids());
+            let output = cell.as_any().downcast_ref::<ToolOutputCell>().unwrap();
+            expanded_view
+                .disclosure
+                .expanded
+                .insert(format!("result:{}", output.id()));
         }
     }
     let expanded = tests::render(
@@ -1369,7 +1380,48 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             .insert("agent-activity:interrupt-p".into())
     );
     let open = tests::render(&mut view, &replay, 100, 12);
-    assert!(tests::text(&open).contains(capture));
+    assert!(!tests::text(&open).contains(capture));
+    assert!(tests::text(&open).contains("Result"));
+    assert!(tests::text(&open).contains("Interrupted"));
+    view.disclosure
+        .expanded
+        .insert("result:interrupt-result".into());
+    let result = tests::render(&mut view, &replay, 100, 12);
+    assert!(tests::text(&result).contains(capture));
+    // Missing legacy ownership is not proximity: its output item still has a named fold.
+    let orphan = Arc::new(
+        ToolOutputCell::from_output(
+            "orphan-result",
+            None,
+            "inspect",
+            Some("tools"),
+            &FunctionCallOutputBody::Text("legacy exact result".into()),
+        )
+        .unwrap(),
+    ) as Arc<dyn HistoryCell>;
+    assert_eq!(orphan.outer_call_id(), None);
+    assert!(
+        orphan.display_lines(100)[0]
+            .to_string()
+            .contains("tools.inspect")
+    );
+    assert!(crate::history_cell::ToolOutputGroup::attach(&replay, orphan.clone()).is_none());
+    let expanded = std::collections::HashSet::from_iter(orphan.activity_ids());
+    let folded = orphan
+        .output_parts(
+            100,
+            0,
+            &expanded,
+            crate::history_cell::output_provenance::OutputMode::Raw,
+        )
+        .unwrap();
+    assert_eq!(folded.controls[0].id, "result:orphan-result");
+    assert!(!folded.controls[0].expanded);
+    assert!(
+        !TextLayout::new(folded.lines, 100)
+            .text()
+            .contains("legacy exact result")
+    );
     for (status, outcome, label) in [
         (
             CollabAgentToolCallStatus::Completed,

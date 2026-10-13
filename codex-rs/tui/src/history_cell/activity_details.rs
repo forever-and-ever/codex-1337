@@ -80,6 +80,22 @@ impl ActivityDetails {
         output
     }
 
+    pub(crate) fn append_result_parts(
+        &self,
+        parts: &mut super::activity_parts::ActivityParts,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+        mode: OutputMode,
+    ) {
+        for (_, cell) in &self.entries {
+            if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>()
+                && output.activity_disclosure(width).is_some()
+            {
+                output.append_result_parts(parts, width, expanded, mode);
+            }
+        }
+    }
+
     pub(crate) fn prepend(&mut self, mut older: Self, older_calls: usize) {
         for (position, _) in &mut self.entries {
             *position += older_calls;
