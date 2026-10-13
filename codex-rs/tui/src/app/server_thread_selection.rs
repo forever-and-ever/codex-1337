@@ -33,8 +33,10 @@ impl SelectStage {
     }
 }
 
+#[derive(Clone)]
 pub(in crate::app) enum SelectionAfter {
     SelectOnly,
+    Fork,
     DiscardSide(ThreadId),
     SurfaceInactive,
 }
@@ -568,11 +570,18 @@ impl App {
 
     pub(in crate::app) async fn finish_selection_after(
         &mut self,
+        tui: &mut tui::Tui,
         server: &mut AppServerSession,
         after: SelectionAfter,
     ) -> Result<()> {
         match after {
             SelectionAfter::SelectOnly => {}
+            SelectionAfter::Fork => {
+                // The continuation lease ends here; admission installs the fork's lease.
+                self.chat_widget.fork_in_progress = false;
+                self.fork_current_thread(tui, server, None, Vec::new(), true)
+                    .await?;
+            }
             SelectionAfter::DiscardSide(thread_id) => {
                 self.discard_side_thread_in_background(server, thread_id)
                     .await;
@@ -794,7 +803,7 @@ impl App {
             self.chat_widget.add_info_message(message, /*hint*/ None);
         }
         self.refresh_pending_thread_approvals().await;
-        self.finish_selection_after(app_server, after).await?;
+        self.finish_selection_after(tui, app_server, after).await?;
 
         Ok(())
     }

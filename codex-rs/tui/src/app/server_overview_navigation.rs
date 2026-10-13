@@ -1,14 +1,67 @@
 use super::*;
 
 impl App {
+    pub(in crate::app) async fn select_agents_overview_thread_after(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    ) -> Result<AppRunControl> {
+        if self.current_displayed_thread_id() == Some(thread_id)
+            && self.thread_unavailable(thread_id)
+            && !self.chat_widget.is_external_writer_view()
+            && matches!(after, SelectionAfter::SelectOnly)
+        {
+            return Box::pin(
+                self.resume_target_session(
+                    tui,
+                    server,
+                    SessionTarget {
+                        path: self
+                            .primary_session_configured
+                            .as_ref()
+                            .and_then(|session| session.rollout_path.clone()),
+                        thread_id,
+                        cwd: None,
+                        history_mode: None,
+                    },
+                ),
+            )
+            .await;
+        }
+        if self.windows_sandbox_blocks_thread_switch() {
+            return Ok(AppRunControl::Continue);
+        }
+        if self.current_displayed_thread_id() == Some(thread_id)
+            && (!self.thread_unavailable(thread_id) || self.chat_widget.is_external_writer_view())
+        {
+            self.supersede_pending_navigation();
+            if let Ok(mut state) = self.agents_overview.view_state.lock() {
+                state.completion = Some(crate::bottom_pane::ViewCompletion::Accepted);
+            }
+            self.finish_selection_after(tui, server, after).await?;
+            self.drive_server_operations(server);
+            self.refresh_submission_preview();
+            self.chat_widget.pre_draw_tick();
+            return Ok(AppRunControl::Continue);
+        }
+        if self.reject_pending_permission_root_switch() {
+            return Ok(AppRunControl::Continue);
+        }
+        self.enqueue_overview_attachment(server, thread_id, after);
+        Ok(AppRunControl::Continue)
+    }
+
     pub(in crate::app) fn enqueue_overview_attachment(
         &mut self,
         server: &AppServerSession,
         thread_id: ThreadId,
+        after: SelectionAfter,
     ) {
         self.enqueue_navigation(
             server,
-            NavigationIntent::Resume(ResumeStage::OverviewAdmitted(thread_id)),
+            NavigationIntent::Resume(ResumeStage::OverviewAdmitted { thread_id, after }),
         );
     }
 
@@ -35,6 +88,7 @@ impl App {
         operation: PendingNavigation,
         thread_id: ThreadId,
         thread: api::Thread,
+        after: SelectionAfter,
     ) -> Result<AppRunControl> {
         if thread.id != thread_id.to_string() {
             self.add_agents_overview_error(
@@ -63,7 +117,10 @@ impl App {
                     target,
                     basis,
                     history_cwd,
-                    ResumeSource::Overview(Box::new(thread)),
+                    ResumeSource::Overview {
+                        thread: Box::new(thread),
+                        after,
+                    },
                 )
                 .await;
         }
@@ -87,7 +144,10 @@ impl App {
             target,
             settings,
             purpose: ResumePurpose::from_source(
-                ResumeSource::Overview(Box::new(thread.clone())),
+                ResumeSource::Overview {
+                    thread: Box::new(thread.clone()),
+                    after,
+                },
                 &config,
             ),
             config,
@@ -173,7 +233,12 @@ impl App {
             started,
             presentation,
         } = ready;
-        let ResumePurpose::Overview { thread, baseline } = context.purpose else {
+        let ResumePurpose::Overview {
+            thread,
+            baseline,
+            after,
+        } = context.purpose
+        else {
             unreachable!("overview commit requires its captured settings policy");
         };
         let thread_id = started.session.thread_id;
@@ -295,6 +360,9 @@ impl App {
                     .then(|| RuntimePermissionProfileOverride::from_restored_config(&self.config));
             }
         }
+        // Family discovery completes under this owner before the explicit fork continuation.
+        // Keep restored source input parked until that continuation owns the fork.
+        self.chat_widget.fork_in_progress = matches!(after, SelectionAfter::Fork);
         if let Some(mut input) = self.agents_overview.input_states.remove(&thread_id) {
             let pending_settings = restored_blank
                 .then(|| input.pending_thread_settings.take())
@@ -310,7 +378,7 @@ impl App {
             if let Some(settings) = pending_settings {
                 self.chat_widget.on_thread_settings_updated(settings);
             }
-            if !preserve_in_flight_turn {
+            if !preserve_in_flight_turn && !matches!(after, SelectionAfter::Fork) {
                 self.chat_widget.maybe_send_next_queued_input();
             }
         }
@@ -318,6 +386,7 @@ impl App {
         operation.intent = NavigationIntent::Resume(ResumeStage::Following {
             thread_id,
             presentation,
+            after,
         });
         self.spawn_resume_effect(
             &mut operation,

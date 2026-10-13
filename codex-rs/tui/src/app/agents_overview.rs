@@ -414,47 +414,13 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> Result<AppRunControl> {
-        if self.current_displayed_thread_id() == Some(thread_id)
-            && self.thread_unavailable(thread_id)
-            && !self.chat_widget.is_external_writer_view()
-        {
-            return Box::pin(
-                self.resume_target_session(
-                    tui,
-                    app_server,
-                    SessionTarget {
-                        path: self
-                            .primary_session_configured
-                            .as_ref()
-                            .and_then(|session| session.rollout_path.clone()),
-                        thread_id,
-                        cwd: None,
-                        history_mode: None,
-                    },
-                ),
-            )
-            .await;
-        }
-        if self.windows_sandbox_blocks_thread_switch() {
-            return Ok(AppRunControl::Continue);
-        }
-        if self.current_displayed_thread_id() == Some(thread_id)
-            && (!self.thread_unavailable(thread_id) || self.chat_widget.is_external_writer_view())
-        {
-            self.supersede_pending_navigation();
-            self.drive_server_operations(app_server);
-            self.refresh_submission_preview();
-            if let Ok(mut state) = self.agents_overview.view_state.lock() {
-                state.completion = Some(crate::bottom_pane::ViewCompletion::Accepted);
-            }
-            self.chat_widget.pre_draw_tick();
-            return Ok(AppRunControl::Continue);
-        }
-        if self.reject_pending_permission_root_switch() {
-            return Ok(AppRunControl::Continue);
-        }
-        self.enqueue_overview_attachment(app_server, thread_id);
-        Ok(AppRunControl::Continue)
+        self.select_agents_overview_thread_after(
+            tui,
+            app_server,
+            thread_id,
+            super::turn_submissions::SelectionAfter::SelectOnly,
+        )
+        .await
     }
 
     async fn attach_new_agents_overview_thread(

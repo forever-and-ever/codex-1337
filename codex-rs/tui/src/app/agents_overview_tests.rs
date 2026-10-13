@@ -3159,8 +3159,7 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
             assert_eq!(app.current_displayed_thread_id(), Some(source));
             app.store_active_thread_receiver().await;
         }
-        app.chat_widget
-            .set_queue_autosend_suppressed(/*suppressed*/ true);
+        app.chat_widget.set_queue_autosend_suppressed(true);
         app.chat_widget.queue_user_message_with_options(
             "Keep this on the source".into(),
             crate::bottom_pane::QueuedInputAction::Plain,
@@ -3190,63 +3189,43 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
             app.chat_widget.handle_thread_session(session);
         }
         while events.try_recv().is_ok() {}
+        // Attachment must carry the explicit fork through family discovery without
+        // allowing the restored idle source queue to autosend before the fork owns it.
         Box::pin(app.handle_event_and_settle_navigation(
             &mut tui,
             &mut server,
             AppEvent::ForkAgentsOverviewThread { thread_id: source },
         ))
         .await?;
-        assert_eq!(
+        assert_ne!(
             app.current_displayed_thread_id(),
             Some(source),
-            "{}",
-            render_bottom_popup(&app.chat_widget, /*width*/ 96)
+            "cached_primary={cached_primary}: {}",
+            render_bottom_popup(&app.chat_widget, 96),
         );
-        assert_eq!(
-            app.chat_widget.queued_user_message_texts(),
-            vec!["Keep this on the source"],
-            "cached_primary={cached_primary}"
-        );
-        let retained = app.agents_overview.input_states[&source].clone();
-        let mut ready = None;
+        let destination = app.current_displayed_thread_id().expect("fork destination");
+        let forked = server.thread_read(destination, false).await?;
+        assert_eq!(forked.forked_from_id, Some(source.to_string()));
+        assert!(app.chat_widget.queued_user_message_texts().is_empty());
+        assert!(!app.chat_widget.fork_in_progress);
         while let Ok(event) = events.try_recv() {
             assert!(!matches!(
                 event,
                 AppEvent::CodexOp(AppCommand::UserTurn { .. })
             ));
-            if matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. }) {
-                ready = Some(event);
-            }
         }
-        // Failed reattachment can leave the source displayed as a saved replay.
-        app.app_server_target = AppServerTarget::LocalDaemon {
-            allow_embedded_fallback: true,
-            endpoint: crate::resolve_remote_addr("ws://127.0.0.1:4500")?,
-        };
-        app.ensure_thread_channel(source).mark_replay_only();
-        let RequestId::Integer(request) = server.next_request_id() else {
-            panic!("integer request ID")
-        };
-        Box::pin(app.handle_event_and_settle_navigation(
-            &mut tui,
-            &mut server,
-            AppEvent::ForkAgentsOverviewThreadReady { thread_id: source },
-        ))
-        .await?;
-        assert_eq!(app.current_displayed_thread_id(), Some(source));
-        assert_eq!(server.next_request_id(), RequestId::Integer(request + 1));
-        assert!(!app.chat_widget.fork_in_progress);
-        app.app_server_target = AppServerTarget::Embedded;
-        Box::pin(app.handle_event_and_settle_navigation(
-            &mut tui,
-            &mut server,
-            ready.expect("fork continuation"),
-        ))
-        .await?;
-        assert_ne!(app.current_displayed_thread_id(), Some(source));
-        assert_eq!(app.agents_overview.input_states[&source], retained);
-        assert!(app.chat_widget.queued_user_message_texts().is_empty());
-        assert!(!app.chat_widget.fork_in_progress);
+        let retained = app.agents_overview.input_states[&source].clone();
+        app.chat_widget.restore_thread_input_state(
+            Some(retained),
+            crate::chatwidget::ThreadInputStateRestoreMode {
+                preserve_in_flight_turn: false,
+            },
+        );
+        assert_eq!(
+            app.chat_widget.queued_user_message_texts(),
+            vec!["Keep this on the source"],
+            "cached_primary={cached_primary}",
+        );
         server.shutdown().await?;
     }
     Ok(())

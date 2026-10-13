@@ -349,7 +349,7 @@ impl App {
     ) -> Result<()> {
         if self.active_thread_id == Some(thread_id) && !self.thread_unavailable(thread_id) {
             self.supersede_pending_navigation();
-            return self.finish_selection_after(app_server, after).await;
+            return self.finish_selection_after(tui, app_server, after).await;
         }
         if self.reject_pending_permission_root_switch() {
             return Ok(());

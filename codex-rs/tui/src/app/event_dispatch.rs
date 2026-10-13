@@ -33,19 +33,6 @@ impl App {
         let Some(event) = self.consume_local_shell_event(event, tui) else {
             return Ok(AppRunControl::Continue);
         };
-        let from_agents_overview = matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
-        let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
-            if self.current_displayed_thread_id() != Some(thread_id)
-                || (self.thread_unavailable(thread_id)
-                    && !self.chat_widget.is_external_writer_view())
-            {
-                self.chat_widget.fork_in_progress = false;
-                return Ok(AppRunControl::Continue);
-            }
-            AppEvent::ForkCurrentSession { name: None }
-        } else {
-            event
-        };
         // Release the shortcut's input guard even when a fork is rejected below.
         if matches!(event, AppEvent::ForkCurrentSession { .. }) {
             self.chat_widget.fork_in_progress = false;
@@ -456,10 +443,8 @@ impl App {
                 return self.delete_current_thread(tui, app_server).await;
             }
             AppEvent::ForkCurrentSession { name } => {
-                self.fork_current_thread(tui, app_server, name, Vec::new(), from_agents_overview).await?;
-                if !from_agents_overview {
-                    self.chat_widget.maybe_send_next_queued_input();
-                }
+                self.fork_current_thread(tui, app_server, name, Vec::new(), false).await?;
+                self.chat_widget.maybe_send_next_queued_input();
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::RevertSessionForPromptEdit {
@@ -2654,22 +2639,10 @@ impl App {
                     );
                     return Ok(AppRunControl::Continue);
                 }
-                // Attachment replay must not submit queued input on the source task.
-                self.chat_widget.fork_in_progress = true;
-                let control = self.select_agents_overview_thread(tui, app_server, thread_id).await;
-                if matches!(&control, Ok(AppRunControl::Continue))
-                    && self.current_displayed_thread_id() == Some(thread_id)
-                {
-                    if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                        self.agents_overview.input_states.insert(thread_id, input);
-                    }
-                    self.app_event_tx.send(AppEvent::ForkAgentsOverviewThreadReady { thread_id });
-                } else {
-                    self.chat_widget.fork_in_progress = false;
-                }
-                return control;
+                return self.select_agents_overview_thread_after(
+                    tui, app_server, thread_id, super::turn_submissions::SelectionAfter::Fork,
+                ).await;
             }
-            AppEvent::ForkAgentsOverviewThreadReady { .. } => unreachable!("normalized above"),
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
                 self.rename_thread(app_server, thread_id, name, Vec::new()).await;
             }

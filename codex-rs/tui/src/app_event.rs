@@ -293,10 +293,6 @@ pub(crate) enum AppEvent {
     ForkAgentsOverviewThread {
         thread_id: ThreadId,
     },
-    /// Run the existing fork action after selection events have been processed.
-    ForkAgentsOverviewThreadReady {
-        thread_id: ThreadId,
-    },
     /// Rename a task directly from the shared dashboard.
     RenameAgentsOverviewThread {
         thread_id: ThreadId,

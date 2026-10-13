@@ -219,6 +219,7 @@ impl App {
         let fork_source = self.server_operations.navigation.current.as_ref().and_then(
             |operation| match &operation.intent {
                 NavigationIntent::Fork(stage) => Some(stage.thread_id()),
+                NavigationIntent::Resume(stage) => stage.pending_fork_source(),
                 _ => None,
             },
         );

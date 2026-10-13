@@ -35,7 +35,10 @@ pub(super) struct ResumeContext {
 #[derive(Clone)]
 pub(super) enum ResumeSource {
     Explicit,
-    Overview(Box<api::Thread>),
+    Overview {
+        thread: Box<api::Thread>,
+        after: SelectionAfter,
+    },
 }
 
 #[derive(Clone)]
@@ -44,6 +47,7 @@ pub(super) enum ResumePurpose {
     Overview {
         thread: Box<api::Thread>,
         baseline: OverviewBaseline,
+        after: SelectionAfter,
     },
 }
 
@@ -68,8 +72,9 @@ impl ResumePurpose {
     fn from_source(source: ResumeSource, config: &Config) -> Self {
         match source {
             ResumeSource::Explicit => Self::Explicit,
-            ResumeSource::Overview(thread) => Self::Overview {
+            ResumeSource::Overview { thread, after } => Self::Overview {
                 thread,
+                after,
                 baseline: OverviewBaseline::capture(config),
             },
         }
@@ -96,9 +101,18 @@ pub(super) enum ResumePresentation {
 
 pub(super) enum ResumeStage {
     Admitted(SessionTarget),
-    OverviewAdmitted(ThreadId),
-    OverviewConfig(ThreadId),
-    OverviewMetadata(ThreadId),
+    OverviewAdmitted {
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    },
+    OverviewConfig {
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    },
+    OverviewMetadata {
+        thread_id: ThreadId,
+        after: SelectionAfter,
+    },
     Config(SessionTarget),
     Cwd {
         target: SessionTarget,
@@ -121,6 +135,7 @@ pub(super) enum ResumeStage {
     Following {
         thread_id: ThreadId,
         presentation: ResumePresentation,
+        after: SelectionAfter,
     },
     Goal(ThreadId),
 }
@@ -128,9 +143,9 @@ pub(super) enum ResumeStage {
 impl ResumeStage {
     pub(super) fn thread_id(&self) -> ThreadId {
         match self {
-            Self::OverviewAdmitted(id) | Self::OverviewConfig(id) | Self::OverviewMetadata(id) => {
-                *id
-            }
+            Self::OverviewAdmitted { thread_id, .. }
+            | Self::OverviewConfig { thread_id, .. }
+            | Self::OverviewMetadata { thread_id, .. } => *thread_id,
             Self::Admitted(target) | Self::Config(target) | Self::Cwd { target, .. } => {
                 target.thread_id
             }
@@ -147,6 +162,17 @@ impl ResumeStage {
 
     pub(super) fn is_read_only(&self) -> bool {
         !matches!(self, Self::Acquiring(_) | Self::Detaching { .. })
+    }
+
+    pub(super) fn pending_fork_source(&self) -> Option<ThreadId> {
+        match self {
+            Self::Following {
+                thread_id,
+                after: SelectionAfter::Fork,
+                ..
+            } => Some(*thread_id),
+            _ => None,
+        }
     }
 
     pub(super) fn fences_thread(&self, thread_id: ThreadId) -> bool {
@@ -221,8 +247,8 @@ impl App {
         let stage = match std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
         {
             NavigationIntent::Resume(ResumeStage::Admitted(target)) => ResumeStage::Config(target),
-            NavigationIntent::Resume(ResumeStage::OverviewAdmitted(id)) => {
-                ResumeStage::OverviewConfig(id)
+            NavigationIntent::Resume(ResumeStage::OverviewAdmitted { thread_id, after }) => {
+                ResumeStage::OverviewConfig { thread_id, after }
             }
             _ => unreachable!("resume dispatch requires admitted target"),
         };
@@ -614,21 +640,25 @@ impl App {
         };
         let ResumeReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
-            (ResumeStage::OverviewConfig(thread_id), ResumeOutcome::Begin) if matching => {
+            (ResumeStage::OverviewConfig { thread_id, after }, ResumeOutcome::Begin)
+                if matching =>
+            {
                 self.refresh_in_memory_config_from_disk_best_effort("attaching a task")
                     .await;
                 operation.intent =
-                    NavigationIntent::Resume(ResumeStage::OverviewMetadata(thread_id));
+                    NavigationIntent::Resume(ResumeStage::OverviewMetadata { thread_id, after });
                 self.spawn_resume_effect(&mut operation, handle, ResumeEffect::Thread(thread_id));
                 self.server_operations.navigation.current = Some(operation);
             }
-            (ResumeStage::OverviewMetadata(thread_id), ResumeOutcome::Thread(result))
+            (ResumeStage::OverviewMetadata { thread_id, after }, ResumeOutcome::Thread(result))
                 if matching =>
             {
                 match result {
                     Ok(thread) => {
                         return self
-                            .begin_overview_attachment(tui, server, operation, thread_id, thread)
+                            .begin_overview_attachment(
+                                tui, server, operation, thread_id, thread, after,
+                            )
                             .await;
                     }
                     Err(error) => self.add_agents_overview_error(format!(
@@ -953,6 +983,7 @@ impl App {
                 ResumeStage::Following {
                     thread_id,
                     presentation,
+                    after,
                 },
                 ResumeOutcome::Loaded(result),
             ) if matching => {
@@ -971,7 +1002,9 @@ impl App {
                     ) {
                         self.replay_agents_overview_requests(server, thread_id)
                             .await;
-                        if !self.chat_widget.has_misalignment_policy_violation() {
+                        if !matches!(after, SelectionAfter::Fork)
+                            && !self.chat_widget.has_misalignment_policy_violation()
+                        {
                             operation.intent =
                                 NavigationIntent::Resume(ResumeStage::Goal(thread_id));
                             self.spawn_resume_effect(
@@ -982,6 +1015,7 @@ impl App {
                             self.server_operations.navigation.current = Some(operation);
                         }
                     }
+                    self.finish_selection_after(tui, server, after).await?;
                 }
             }
             (ResumeStage::Goal(thread_id), ResumeOutcome::Goal(result)) if matching => {
@@ -1009,6 +1043,9 @@ impl App {
                 }
             }
             (stage, ResumeOutcome::Terminated) => {
+                if matching && let Some(source) = stage.pending_fork_source() {
+                    self.cancel_fork_projection(source);
+                }
                 self.add_agents_overview_error("Conversation preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
                 match stage {
                     ResumeStage::Acquiring(context) if same_epoch => self
@@ -1188,6 +1225,7 @@ impl App {
         operation.intent = NavigationIntent::Resume(ResumeStage::Following {
             thread_id,
             presentation: ready.presentation,
+            after: SelectionAfter::SelectOnly,
         });
         self.spawn_resume_effect(
             &mut operation,
