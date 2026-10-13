@@ -197,6 +197,7 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
     • Generated Image:
       └ A diagram of the history pages
     • Image generation · in_progress
+      └ A diagram of the history pages
     • Completed `/root/reviewer`
     << Code review finished: No findings >>
     • Context compacted

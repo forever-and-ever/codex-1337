@@ -1,6 +1,7 @@
 //! Owned-transcript command previews with full command/output retained for local disclosure.
 
 use super::model::ExecCell;
+use super::outcome::CommandOutcome;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::activity_preview::clipped_line;
@@ -20,7 +21,7 @@ impl ExecCell {
         call.is_unified_exec_interaction()
             && !self.is_active()
             && call.output.as_ref().is_some_and(|output| {
-                output.exit_code == 0 && output.lines().all(|line| line.trim().is_empty())
+                output.outcome.is_success() && output.lines().all(|line| line.trim().is_empty())
             })
     }
 
@@ -69,8 +70,8 @@ impl ExecCell {
         let [call] = self.group.calls.as_slice() else {
             return (Line::default(), None);
         };
-        let failed = call.output.as_ref().filter(|output| output.exit_code != 0);
-        let marker = if failed.is_some() {
+        let outcome = call.output.as_ref().map(|output| output.outcome);
+        let marker = if outcome.is_some_and(|outcome| !outcome.is_success()) {
             "•".red().bold()
         } else if self.is_active() {
             activity_indicator(
@@ -82,15 +83,15 @@ impl ExecCell {
         } else {
             "•".green().bold()
         };
-        let (verb, suffix) = match failed {
-            Some(output) => (
-                "Command",
-                format!(" · failed (exit {})", output.exit_code).red(),
-            ),
-            None if !self.is_active() && call.is_unified_exec_interaction() => {
+        let (verb, suffix) = match outcome {
+            Some(CommandOutcome::Declined) => ("Command", " · declined".red()),
+            Some(CommandOutcome::Exited(code)) if code != 0 => {
+                ("Command", format!(" · failed (exit {code})").red())
+            }
+            _ if !self.is_active() && call.is_unified_exec_interaction() => {
                 ("Background", " output".bold())
             }
-            None => ("Command", "".into()),
+            _ => ("Command", "".into()),
         };
         let heading = vec![marker, " ".into()];
         let mut heading = Line::from(heading);

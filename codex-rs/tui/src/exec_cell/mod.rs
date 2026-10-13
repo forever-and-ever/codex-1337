@@ -1,6 +1,7 @@
 mod compact;
 mod live_output;
 mod model;
+mod outcome;
 mod render;
 pub(crate) mod rows;
 mod segments;
@@ -10,6 +11,7 @@ pub(crate) use model::CommandOutput;
 #[cfg(test)]
 pub(crate) use model::ExecCall;
 pub(crate) use model::ExecCell;
+pub(crate) use outcome::CommandOutcome;
 pub(crate) use render::OutputLinesParams;
 pub(crate) use render::TOOL_CALL_MAX_LINES;
 pub(crate) use render::alarm_output_lines;

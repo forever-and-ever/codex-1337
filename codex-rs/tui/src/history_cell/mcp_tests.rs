@@ -445,7 +445,7 @@ fn code_mode_output_preserves_trailing_failure_diagnostics_in_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(display, @"
-    • Called Inspect page
+    • Failed Inspect page
       └ Script failed
         Page title
         Navigation
@@ -763,6 +763,19 @@ fn titled_image_call_keeps_error_and_full_title_when_narrow() {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("\n")
+    );
+    // A protocol error must stay a failure in every projection, even when it returns an image.
+    assert!(
+        cell.compact_mcp_lines(/*width*/ 200)[0]
+            .line
+            .to_string()
+            .starts_with("• Failed")
+    );
+    assert!(cell.raw_lines()[0].to_string().starts_with("Failed"));
+    assert!(
+        cell.transcript_lines(/*width*/ 200)[0]
+            .to_string()
+            .starts_with("• Failed")
     );
     assert!(cell.raw_lines()[0].to_string().contains(title));
     assert!(

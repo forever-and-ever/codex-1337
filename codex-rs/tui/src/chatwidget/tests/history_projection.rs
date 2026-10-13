@@ -94,6 +94,25 @@ async fn older_tool_projection_matches_initial_replay() {
             duration_ms: Some(5),
         });
     }
+    // Legacy pending image history has an empty status, not a successful generation.
+    for (index, status) in ["completed", "failed", "", "in_progress"]
+        .into_iter()
+        .enumerate()
+    {
+        items.push(AppServerThreadItem::ImageGeneration(
+            codex_app_server_protocol::ImageGenerationItem {
+                id: format!("image-{index}"),
+                status: status.into(),
+                revised_prompt: Some("A diagram of the history pages".into()),
+                result: String::new(),
+                transparent_background: None,
+                failure: None,
+                saved_path: None,
+                imagegen_request_id: None,
+                generation_id: None,
+            },
+        ));
+    }
     for (index, id) in [(1, "trailing-read-one"), (2, "trailing-read-two")] {
         if index == 2 {
             items.push(AppServerThreadItem::Reasoning {

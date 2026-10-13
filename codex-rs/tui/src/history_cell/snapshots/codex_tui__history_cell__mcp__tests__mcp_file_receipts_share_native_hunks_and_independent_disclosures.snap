@@ -55,7 +55,7 @@ First file expanded
         1 +new
         /workspace/refused.rs — not applied; content unavailable
 Transcript
-• Called semedit.edit()
+• Failed semedit.edit()
   └ Publication partially failed; do not retry.
     Partially applied
         /workspace/a.rs (+1, -1)

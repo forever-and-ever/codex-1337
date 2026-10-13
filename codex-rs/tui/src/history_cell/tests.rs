@@ -1527,13 +1527,13 @@ fn code_mode_tool_call_preserves_failure_details() {
     let transcript = render_lines(&cell.transcript_lines(/*width*/ 120)).join("\n");
     insta::assert_snapshot!(format!("history:\n{history}\n\ntranscript:\n{transcript}"), @r#"
     history:
-    • Called Inspect workspace
+    • Failed Inspect workspace
       └ Script failed
         Output:
         permission denied
 
     transcript:
-    • Called node_repl.js({"title":"Inspect workspace","code":"throw Error('denied')"})
+    • Failed node_repl.js({"title":"Inspect workspace","code":"throw Error('denied')"})
       └ Script failed
         Output:
         permission denied

@@ -12,6 +12,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use super::live_output::LiveCommandOutput;
+use super::outcome::CommandOutcome;
 use crate::history_cell::ActivityGroup;
 use codex_app_server_protocol::CommandExecutionSource as ExecCommandSource;
 use codex_protocol::parse_command::ParsedCommand;
@@ -19,7 +20,7 @@ use itertools::Either;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CommandOutput {
-    pub(crate) exit_code: i32,
+    pub(crate) outcome: CommandOutcome,
     /// The finalized, interleaved stderr and stdout that replaces any streamed preview.
     aggregated_output: String,
     /// The live preview while command-output deltas are still arriving.
@@ -27,9 +28,9 @@ pub(crate) struct CommandOutput {
 }
 
 impl CommandOutput {
-    pub(crate) fn new(exit_code: i32, aggregated_output: String) -> Self {
+    pub(crate) fn new(outcome: impl Into<CommandOutcome>, aggregated_output: String) -> Self {
         Self {
-            exit_code,
+            outcome: outcome.into(),
             aggregated_output,
             live_output: None,
         }
@@ -133,7 +134,7 @@ impl ExecCell {
                 call.duration = Some(elapsed);
                 call.output
                     .get_or_insert_with(CommandOutput::default)
-                    .exit_code = 1;
+                    .outcome = CommandOutcome::Exited(1);
             }
         }
     }

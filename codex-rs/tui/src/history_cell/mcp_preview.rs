@@ -15,22 +15,19 @@ use ratatui::text::Line;
 impl McpToolCallCell {
     pub(super) fn compact_mcp_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let status = self.success();
-        let (marker, verb) = match status {
-            Some(true) => ("•".green().bold(), "Called"),
-            Some(false) => ("•".red().bold(), "Failed"),
-            None => (
-                activity_indicator(
-                    Some(self.start_time),
-                    MotionMode::from_animations_enabled(self.animations_enabled),
-                    ReducedMotionIndicator::StaticBullet,
-                )
-                .unwrap_or_else(|| "•".dim()),
-                "Calling",
-            ),
+        let marker = match status {
+            Some(true) => "•".green().bold(),
+            Some(false) => "•".red().bold(),
+            None => activity_indicator(
+                Some(self.start_time),
+                MotionMode::from_animations_enabled(self.animations_enabled),
+                ReducedMotionIndicator::StaticBullet,
+            )
+            .unwrap_or_else(|| "•".dim()),
         };
         let mut spans = vec![marker, " ".into()];
         spans.extend([
-            verb.bold(),
+            self.outcome_verb().bold(),
             " ".into(),
             single_line(&self.invocation.server).fg(accent_color()),
             ".".into(),
