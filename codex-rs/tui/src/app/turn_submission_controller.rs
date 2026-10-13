@@ -454,7 +454,7 @@ impl App {
         );
     }
 
-    pub(super) async fn take_unsent_detached_operations(
+    pub(super) async fn take_unsent_thread_operations(
         &mut self,
         thread_id: ThreadId,
         store: &Arc<Mutex<ThreadEventStore>>,
@@ -1121,8 +1121,8 @@ impl App {
             while self
                 .server_operations
                 .lanes
-                .values()
-                .any(|lane| matches!(lane.state, LaneState::Running(_)))
+                .get(&OperationLane::Connection)
+                .is_some_and(|lane| matches!(lane.state, LaneState::Running(_)))
                 || self.server_operations.navigation.has_running()
                 || !self.server_operations.control_rx.is_empty()
             {

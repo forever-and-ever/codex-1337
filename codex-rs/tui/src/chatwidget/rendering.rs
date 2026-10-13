@@ -231,7 +231,7 @@ impl ChatWidget {
         &'a self,
         mut options: crate::bottom_pane::ComposerRenderOptions<'a>,
     ) -> RenderableItem<'a> {
-        if self.fork_in_progress {
+        if self.fork_in_progress && self.external_writer_view {
             RenderableItem::Owned(Box::new(
                 Paragraph::new("Forking conversation…".dim()).inset(Insets::tlbr(
                     /*top*/ 1, /*left*/ 2, /*bottom*/ 1, /*right*/ 2,

@@ -1034,12 +1034,22 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(app.chat_widget.fork_in_progress);
     assert_eq!(app.current_displayed_thread_id(), Some(other_id));
     assert_eq!(recovered_message(&mut app), source_draft);
+    let text_before_fork_key = app.chat_widget.composer_text_with_pending();
     app.handle_key_event(
         &mut tui,
         &mut server,
         KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
     )
     .await;
+    assert_ne!(
+        app.chat_widget.composer_text_with_pending(),
+        text_before_fork_key
+    );
+    assert_eq!(
+        app.chat_widget.composer_text_with_pending().len(),
+        text_before_fork_key.len() + 1
+    );
+    assert!(render_bottom_popup(&app.chat_widget, 200).contains("newer draft"));
     let pending = match app.server_operations.preview(Some(other_id)).navigation {
         Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
         preview => panic!("fork acquisition remains owned: {preview:?}"),

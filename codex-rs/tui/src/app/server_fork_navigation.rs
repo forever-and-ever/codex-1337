@@ -467,6 +467,12 @@ impl App {
         mut ready: ForkReady,
     ) -> Result<()> {
         let target = ready.started.session.thread_id;
+        if matches!(ready.context.input.purpose, ForkPurpose::Ordinary { .. }) {
+            let (source, store) = ready.context.input.origin.thread();
+            let drafts = self.take_unsent_thread_operations(source, store).await;
+            self.restore_submission_drafts(source, drafts, DraftDisposition::Edit)
+                .await;
+        }
         let retained_input = match &ready.context.input.purpose {
             ForkPurpose::Ordinary {
                 from_locked_thread: true,
@@ -499,6 +505,9 @@ impl App {
                 true,
             );
             if self.current_displayed_thread_id() != Some(target) {
+                if matches!(ready.context.input.purpose, ForkPurpose::Safety(_)) {
+                    self.chat_widget.add_warning_message("The original task was detached. Unsent input is retained; reopen the original task to continue.".into());
+                }
                 self.start_navigation_cleanup(
                     operation,
                     handle,

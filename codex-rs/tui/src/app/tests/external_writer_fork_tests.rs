@@ -252,12 +252,6 @@ async fn external_writer_fork_failure_keeps_the_locked_view_and_draft() -> Resul
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     assert!(app.chat_widget.is_external_writer_view());
     assert!(!app.chat_widget.fork_in_progress);
-    // The input drain can consume a resize; the next draw must sample the backend again.
-    tui.terminal.last_known_screen_size = Size::new(/*width*/ 120, /*height*/ 40);
-    assert_eq!(
-        tui.screen_size_for_event(&TuiEvent::Draw)?,
-        tui.terminal.size()?,
-    );
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Retained draft"

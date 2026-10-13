@@ -3190,7 +3190,7 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
             app.chat_widget.handle_thread_session(session);
         }
         while events.try_recv().is_ok() {}
-        Box::pin(app.handle_event(
+        Box::pin(app.handle_event_and_settle_navigation(
             &mut tui,
             &mut server,
             AppEvent::ForkAgentsOverviewThread { thread_id: source },
@@ -3226,7 +3226,7 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         let RequestId::Integer(request) = server.next_request_id() else {
             panic!("integer request ID")
         };
-        Box::pin(app.handle_event(
+        Box::pin(app.handle_event_and_settle_navigation(
             &mut tui,
             &mut server,
             AppEvent::ForkAgentsOverviewThreadReady { thread_id: source },
@@ -3236,8 +3236,12 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         assert_eq!(server.next_request_id(), RequestId::Integer(request + 1));
         assert!(!app.chat_widget.fork_in_progress);
         app.app_server_target = AppServerTarget::Embedded;
-        Box::pin(app.handle_event(&mut tui, &mut server, ready.expect("fork continuation")))
-            .await?;
+        Box::pin(app.handle_event_and_settle_navigation(
+            &mut tui,
+            &mut server,
+            ready.expect("fork continuation"),
+        ))
+        .await?;
         assert_ne!(app.current_displayed_thread_id(), Some(source));
         assert_eq!(app.agents_overview.input_states[&source], retained);
         assert!(app.chat_widget.queued_user_message_texts().is_empty());

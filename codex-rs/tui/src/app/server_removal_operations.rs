@@ -696,7 +696,7 @@ impl App {
             if let Some(channel) = self.thread_event_channels.get_mut(&id) {
                 channel.mark_replay_only();
                 let store = Arc::clone(&channel.store);
-                let drafts = self.take_unsent_detached_operations(id, &store).await;
+                let drafts = self.take_unsent_thread_operations(id, &store).await;
                 self.restore_submission_drafts(id, drafts, DraftDisposition::Edit)
                     .await;
             }

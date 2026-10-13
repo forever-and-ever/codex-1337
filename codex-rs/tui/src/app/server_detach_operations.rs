@@ -224,7 +224,7 @@ impl App {
                 (DetachKind::Side { .. }, Ok(())) => {
                     self.abandoned_side_threads.insert(target.thread_id);
                     let drafts = self
-                        .take_unsent_detached_operations(target.thread_id, &target.store)
+                        .take_unsent_thread_operations(target.thread_id, &target.store)
                         .await;
                     self.pause_detached_thread_input(target).await;
                     self.discard_thread_local_state(target.thread_id).await;
@@ -244,7 +244,7 @@ impl App {
                 (DetachKind::Conversation, Ok(())) => {
                     let thread_id = target.thread_id;
                     let drafts = self
-                        .take_unsent_detached_operations(thread_id, &target.store)
+                        .take_unsent_thread_operations(thread_id, &target.store)
                         .await;
                     self.thread_event_channels
                         .get_mut(&thread_id)

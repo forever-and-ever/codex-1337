@@ -122,13 +122,55 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         .chat_widget
         .capture_thread_input_state()
         .expect("source draft");
-    Box::pin(app.handle_event_and_settle_navigation(
+    Box::pin(app.handle_event(
         &mut tui,
         &mut server,
         AppEvent::ForkCurrentSession { name: None },
     ))
     .await?;
 
+    if mode == ThreadParamsMode::Embedded {
+        // Interleave after the fork's early retention snapshot, before its detach receipt.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !app
+                .agents_overview
+                .input_states
+                .contains_key(&source_thread_id)
+            {
+                let completion = app
+                    .server_operations
+                    .control_rx
+                    .recv()
+                    .await
+                    .expect("fork receipt");
+                app.handle_server_completion(&mut tui, &mut server, completion)
+                    .await?;
+            }
+            Ok::<_, color_eyre::Report>(())
+        })
+        .await??;
+        assert_eq!(app.chat_widget.thread_id(), Some(source_thread_id));
+        app.handle_tui_event(
+            &mut tui,
+            &mut server,
+            TuiEvent::Paste(" typed during fork".into()),
+        )
+        .await?;
+        assert_eq!(
+            app.chat_widget.composer_text_with_pending(),
+            "source draft typed during fork"
+        );
+        app.enqueue_subagent_turn(
+            &server,
+            source_thread_id,
+            None,
+            vec![codex_app_server_protocol::UserInput::Text {
+                text: "unsent after fork admission".into(),
+                text_elements: Vec::new(),
+            }],
+        );
+    }
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert_ne!(app.chat_widget.thread_id(), Some(source_thread_id));
     assert_eq!(app.chat_widget.config_ref().workspace_roots, expected_roots);
     let fork_roots: Vec<_> = recorded_params(&requests, "thread/fork")
@@ -144,10 +186,17 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
     );
     assert!(app.agents_overview.dispatched_requests[&child_id].is_empty());
     assert_eq!(app.agents_overview.input_states[&child_id], child_input);
-    assert_eq!(
-        app.agents_overview.input_states[&source_thread_id],
-        source_input
-    );
+    if mode == ThreadParamsMode::Remote {
+        assert_eq!(
+            app.agents_overview.input_states[&source_thread_id],
+            source_input
+        );
+    } else {
+        assert!(recorded_params(&requests, "turn/start").is_empty());
+        assert!(!app.server_operations.lanes.contains_key(
+            &crate::app::turn_submissions::OperationLane::Thread(source_thread_id)
+        ));
+    }
     let question = request_user_input_request(source_thread_id, "source-turn", "question");
     app.handle_app_server_event(
         &server,
@@ -166,6 +215,18 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         app.pending_app_server_requests
             .contains_server_request(&question)
     );
+    if mode == ThreadParamsMode::Embedded {
+        let restored = app.chat_widget.composer_text_with_pending();
+        assert!(
+            restored.contains("source draft typed during fork"),
+            "{restored}"
+        );
+        assert!(
+            restored.contains("unsent after fork admission"),
+            "{restored}"
+        );
+        assert!(recorded_params(&requests, "turn/start").is_empty());
+    }
     app.discard_thread_local_state(source_thread_id).await;
     server.shutdown().await?;
     proxy.await??;
