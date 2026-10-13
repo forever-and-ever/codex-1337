@@ -73,7 +73,7 @@ impl App {
         } else {
             thread.cwd.to_path_buf()
         };
-        let config = match self
+        let (config, settings) = match self
             .rebuild_config_for_resume_or_fallback(&current_cwd, config_cwd)
             .await
         {
@@ -85,7 +85,7 @@ impl App {
         };
         let context = Box::new(ResumeContext {
             target,
-            settings: self.local_settings.reloaded(&config),
+            settings,
             purpose: ResumePurpose::from_source(
                 ResumeSource::Overview(Box::new(thread.clone())),
                 &config,
@@ -223,7 +223,6 @@ impl App {
             }
             return Ok(());
         }
-        self.chat_widget.prepare_startup_task_name_prompt();
         if let ResumePresentation::ReadOnly(notice) = &presentation {
             self.ensure_thread_channel(thread_id).mark_external_writer();
             self.chat_widget.show_external_writer_thread();
