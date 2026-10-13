@@ -24,18 +24,14 @@ Full
 failure
 Compact
 ✘ Failed to apply patch
+    new.txt (+1, -0) — requested
 Full
 ✘ Failed to apply patch
-Stored result · exact capture unavailable
-  └ first
-    second
-    third
-    fourth diagnostic
+    new.txt (+1, -0) — requested
+    1 +requested
 
 missing diagnostics
 Compact
 ✘ Failed to apply patch
 Full
 ✘ Failed to apply patch
-Stored result · exact capture unavailable
-  └ (error details unavailable)

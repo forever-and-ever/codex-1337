@@ -433,9 +433,10 @@ impl ChatWidget {
                 self.on_command_execution_completed(CompletedItem { item, timestamp })
             }
             ThreadItem::FileChange {
+                id,
+                changes,
                 status: codex_app_server_protocol::PatchApplyStatus::InProgress,
-                ..
-            } => {}
+            } => self.on_patch_apply_begin(id, file_update_changes_to_display(changes)),
             item @ ThreadItem::FileChange { .. } => {
                 self.on_file_change_completed(CompletedItem { item, timestamp })
             }

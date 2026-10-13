@@ -2190,6 +2190,153 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
             })
             .collect::<Vec<_>>()
     };
+    // Terminal status must revise requested files even if its authoritative map is empty.
+    // A same-path invocation and an already-attached exact capture make identity errors visible.
+    for status in [
+        PatchApplyStatus::Completed,
+        PatchApplyStatus::Failed,
+        PatchApplyStatus::Declined,
+    ] {
+        for empty_terminal in [false, true] {
+            let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
+            let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+            tui.set_owned_screen(/*owned*/ true).unwrap();
+            let mut pending = current.items[0].clone();
+            if let ThreadItem::FileChange { status, .. } = &mut pending {
+                *status = PatchApplyStatus::InProgress;
+            }
+            let mut unrelated = pending.clone();
+            if let ThreadItem::FileChange { id, .. } = &mut unrelated {
+                *id = "other-patch".into();
+            }
+            let capture = ThreadItem::FunctionCallOutput {
+                id: "patch-output".into(),
+                call_id: Some("patch".into()),
+                name: "apply_patch".into(),
+                namespace: None,
+                output: FunctionCallOutputBody::Text(
+                    std::iter::once("exact patch capture".to_string())
+                        .chain((1..=12).map(|line| format!("diagnostic line {line}")))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+            };
+            for item in [pending.clone(), capture, unrelated] {
+                app.chat_widget.replay_thread_item(
+                    item,
+                    current.id.clone(),
+                    ReplayKind::ResumeInitialMessages,
+                );
+                while let Ok(event) = rx.try_recv() {
+                    if let AppEvent::InsertHistoryCell(cell) = event {
+                        app.insert_history_cell(&mut tui, cell);
+                    }
+                }
+            }
+            assert_eq!(app.transcript_cells.len(), 4);
+            let ids = app
+                .transcript_cells
+                .iter()
+                .map(|cell| cell.activity_ids())
+                .collect::<Vec<_>>();
+            let unrelated_cells = app.transcript_cells[2..].to_vec();
+            let mut terminal = pending.clone();
+            if let ThreadItem::FileChange {
+                status: outcome,
+                changes,
+                ..
+            } = &mut terminal
+            {
+                *outcome = status.clone();
+                if empty_terminal {
+                    changes.clear();
+                }
+            }
+            for item in [terminal.clone(), pending.clone()] {
+                app.chat_widget.replay_thread_item(
+                    item,
+                    current.id.clone(),
+                    ReplayKind::ResumeInitialMessages,
+                );
+                while let Ok(event) = rx.try_recv() {
+                    if let AppEvent::InsertHistoryCell(cell) = event {
+                        app.insert_history_cell(&mut tui, cell);
+                    }
+                }
+            }
+            assert_eq!(app.transcript_cells.len(), 4);
+            assert_eq!(
+                app.transcript_cells
+                    .iter()
+                    .map(|cell| cell.activity_ids())
+                    .collect::<Vec<_>>(),
+                ids,
+            );
+            assert!(
+                app.transcript_cells[..2]
+                    .iter()
+                    .all(|cell| !history_cell::has_running_tool_calls(cell.as_ref()))
+            );
+            assert!(
+                app.transcript_cells[2..]
+                    .iter()
+                    .all(|cell| history_cell::has_running_tool_calls(cell.as_ref()))
+            );
+            assert!(
+                app.transcript_cells[2..]
+                    .iter()
+                    .zip(&unrelated_cells)
+                    .all(|(cell, old)| Arc::ptr_eq(cell, old))
+            );
+            let summary = app.transcript_cells[..2]
+                .iter()
+                .flat_map(|cell| cell.compact_hyperlink_lines(/*width*/ 80))
+                .map(|line| line.line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let heading = match status {
+                PatchApplyStatus::Completed if empty_terminal => "No changes",
+                PatchApplyStatus::Completed => "Edited",
+                PatchApplyStatus::Failed => "Failed to apply patch",
+                PatchApplyStatus::Declined => "Patch application declined",
+                PatchApplyStatus::InProgress => unreachable!(),
+            };
+            assert!(summary.contains(heading), "{summary}");
+            if status != PatchApplyStatus::Completed || empty_terminal {
+                assert!(!summary.contains("Edited"), "{summary}");
+                assert_eq!(summary.matches("— requested").count(), 2);
+            }
+            let raw = app
+                .transcript_cells
+                .iter()
+                .flat_map(|cell| cell.raw_lines())
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(raw.matches("exact patch capture").count(), 1);
+            assert!(raw.contains("diagnostic line 12"));
+
+            // A snapshot can already know the outcome when a buffered start arrives.
+            app.transcript_cells = project(&app, &[terminal]);
+            let terminal_count = app.transcript_cells.len();
+            app.chat_widget.replay_thread_item(
+                pending,
+                current.id.clone(),
+                ReplayKind::ResumeInitialMessages,
+            );
+            while let Ok(event) = rx.try_recv() {
+                if let AppEvent::InsertHistoryCell(cell) = event {
+                    app.insert_history_cell(&mut tui, cell);
+                }
+            }
+            assert_eq!(app.transcript_cells.len(), terminal_count);
+            assert!(
+                app.transcript_cells
+                    .iter()
+                    .all(|cell| !history_cell::has_running_tool_calls(cell.as_ref()))
+            );
+        }
+    }
     for (file_count, with_command) in [(2, false), (2, true), (1, true)] {
         let mut current = current.clone();
         if let ThreadItem::FileChange { changes, .. } = &mut current.items[0] {

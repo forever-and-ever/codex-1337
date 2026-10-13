@@ -5,6 +5,7 @@ use super::ComputerActivityCell;
 use super::DynamicToolCallCell;
 use super::HistoryCell;
 use super::McpToolCallCell;
+use super::PatchHistoryCell;
 use super::ToolOutputGroup;
 use super::WebSearchCell;
 use crate::exec_cell::ExecCell;
@@ -38,6 +39,10 @@ pub(crate) fn has_running_tool_calls(cell: &dyn HistoryCell) -> bool {
             .is_some_and(WebSearchCell::is_active)
         || cell
             .as_any()
+            .downcast_ref::<PatchHistoryCell>()
+            .is_some_and(PatchHistoryCell::is_active)
+        || cell
+            .as_any()
             .downcast_ref::<DynamicToolCallCell>()
             .is_some_and(DynamicToolCallCell::is_active)
 }
@@ -47,6 +52,7 @@ enum Revision<'a> {
     Exec(&'a ExecCell, usize),
     Web(&'a WebSearchCell),
     AgentWait(&'a Arc<dyn HistoryCell>),
+    Patch(&'a PatchHistoryCell),
 }
 
 pub(crate) struct ToolCallReconciliation {
@@ -70,6 +76,11 @@ impl Revision<'_> {
             return Some(ToolOutputGroup::from_cells(members));
         }
         match self {
+            Self::Patch(newer) => cell
+                .as_any()
+                .downcast_ref::<PatchHistoryCell>()?
+                .revise(newer)
+                .map(|updated| Arc::new(updated) as Arc<dyn HistoryCell>),
             Self::AgentWait(newer) => {
                 let new_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(newer.as_ref())?;
                 let old_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref())?;
@@ -151,6 +162,8 @@ pub(crate) fn reconcile_tool_calls(
         (0..cell.group.calls.len())
             .map(|index| Revision::Exec(cell, index))
             .collect()
+    } else if let Some(cell) = incoming.as_any().downcast_ref::<PatchHistoryCell>() {
+        vec![Revision::Patch(cell)]
     } else if let Some(cell) = incoming.as_any().downcast_ref::<WebSearchCell>() {
         vec![Revision::Web(cell)]
     } else if crate::multi_agents::AgentToolHistoryCell::wait_for(incoming.as_ref()).is_some() {

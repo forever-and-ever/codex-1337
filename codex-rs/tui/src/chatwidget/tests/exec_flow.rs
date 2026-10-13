@@ -1379,8 +1379,8 @@ async fn apply_patch_events_emit_history_cells() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     insta::assert_snapshot!(blob, @"
-    • Edited
-        foo.txt (+16, -0)
+    • Patch application pending
+        foo.txt (+16, -0) — requested
          1 +line 1
          2 +line 2
          3 +line 3
@@ -1415,10 +1415,12 @@ async fn apply_patch_events_emit_history_cells() {
         AppServerPatchApplyStatus::Completed,
     );
     let cells = drain_insert_history(&mut rx);
-    assert!(
-        cells.is_empty(),
-        "no success cell should be emitted anymore"
+    assert_eq!(
+        cells.len(),
+        1,
+        "terminal patch revises the pending activity"
     );
+    assert!(lines_to_single_string(&cells[0]).starts_with("• Edited\n"));
 }
 
 #[tokio::test]
@@ -1458,7 +1460,7 @@ async fn apply_patch_manual_approval_adjusts_header() {
     assert!(!cells.is_empty(), "expected apply block cell to be sent");
     let blob = lines_to_single_string(cells.last().unwrap());
     assert!(
-        blob.starts_with("• Edited\n    foo.txt (+1, -0)\n"),
+        blob.starts_with("• Patch application pending\n    foo.txt (+1, -0) — requested\n"),
         "expected apply summary header for foo.txt: {blob:?}"
     );
 }
