@@ -83,6 +83,7 @@ both files expanded with batch bill
         [-]       alpha.rs (+2, -0)
                   1 +alpha body
                   2 +second alpha line
+        [+]     Result
         [-]       beta.rs (+2, -0)
                   1 +beta body
                   2 +second beta line
@@ -106,6 +107,7 @@ next file expanded
         [+]       beta.rs (+2, -0)
         [-]       gamma.rs (+1, -0)  55
                   1 +gamma body
+        [+]     Result
 
 message boundary
               • Edited  123
@@ -117,3 +119,4 @@ message boundary
               • Edited  55
         [-]       gamma.rs (+1, -0)
                   1 +gamma body
+        [+]     Result

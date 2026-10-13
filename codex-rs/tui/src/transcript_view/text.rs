@@ -100,7 +100,9 @@ struct DisclosureControl {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DisclosurePlacement {
     Row,
-    Leading,
+    Leading {
+        line: usize,
+    },
     /// A Feed Item's fold, after the clock on its header row.
     Fold,
     Output {
@@ -117,6 +119,7 @@ enum DisclosurePlacement {
 struct TextRow {
     line: HyperlinkLine,
     source: Range<usize>,
+    logical_line: Option<usize>,
     /// Source offset at the logical line end; absent on soft wraps and synthetic rows.
     line_end: Option<usize>,
     content_width: u16,
@@ -200,9 +203,9 @@ impl TextLayout {
                 DisclosurePlacement::Row => {
                     layout.with_disclosure_control_at(control.label.clone(), control.source_offset)
                 }
-                DisclosurePlacement::Leading => layout.with_leading_disclosure_at(
+                DisclosurePlacement::Leading { line } => layout.with_leading_disclosure_on_line(
                     control.label.clone(),
-                    control.source_offset,
+                    line,
                     control.target.clone(),
                 ),
                 // The header row is synthetic and returns with its line below.
@@ -262,6 +265,7 @@ impl TextLayout {
         self.rows.insert(
             control_row,
             TextRow {
+                logical_line: None,
                 line: HyperlinkLine::from(line),
                 source: source_offset..source_offset,
                 line_end: None,
@@ -305,6 +309,7 @@ impl TextLayout {
         self.rows.insert(
             /*index*/ 0,
             TextRow {
+                logical_line: None,
                 line: HyperlinkLine::from(line),
                 source: 0..0,
                 line_end: None,
@@ -388,7 +393,7 @@ impl TextLayout {
                 row.first_column as u16
                     ..line_width(&row.line.line).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Leading | DisclosurePlacement::Fold => {
+            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold => {
                 crate::transcript_geometry::CONTROL_COLUMN.min(self.width)
                     ..(crate::transcript_geometry::CONTROL_COLUMN
                         + crate::transcript_geometry::CONTROL_COLUMNS)
@@ -445,7 +450,7 @@ impl TextLayout {
             for control in self.disclosure_controls.iter().filter(|control| {
                 matches!(
                     control.placement,
-                    DisclosurePlacement::Leading
+                    DisclosurePlacement::Leading { .. }
                         | DisclosurePlacement::Fold
                         | DisclosurePlacement::Output { .. }
                 ) && control.row == start_row + usize::from(screen_row)
@@ -616,7 +621,7 @@ impl TextLayout {
         let mut text = String::new();
         let mut rows = Vec::new();
         let mut has_source_line = false;
-        for line in &logical {
+        for (index, line) in logical.iter().enumerate() {
             let client_label = line.is_client_label();
             if has_source_line && !client_label {
                 text.push('\n');
@@ -629,7 +634,7 @@ impl TextLayout {
                     .iter()
                     .map(|span| span.content.as_ref()),
             );
-            rows.extend(layout_line(line, start, width));
+            rows.extend(layout_line(line, start, width, index));
             has_source_line |= !client_label;
             if !client_label && let Some(row) = rows.last_mut() {
                 row.line_end = Some(text.len());
@@ -650,7 +655,12 @@ impl TextLayout {
     }
 }
 
-fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<TextRow> {
+fn layout_line(
+    logical: &LogicalLine,
+    text_start: usize,
+    width: u16,
+    logical_line: usize,
+) -> Vec<TextRow> {
     let content_width = width.saturating_sub(logical.right_reserve).max(/*other*/ 1);
     // Client labels are painted text, not selectable source. Wrap the synthetic text itself,
     // rather than discarding it as an oversized indentation on narrow terminals.
@@ -672,6 +682,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
             source.prefix_bytes = line.line.spans.iter().map(|span| span.content.len()).sum();
             line.source = Some(source);
             TextRow {
+                logical_line: Some(logical_line),
                 line,
                 source: text_start..text_start,
                 line_end: None,
@@ -751,6 +762,7 @@ fn layout_line(logical: &LogicalLine, text_start: usize, width: u16) -> Vec<Text
             };
             let range = text_start + source.start..text_start + source.end;
             TextRow {
+                logical_line: Some(logical_line),
                 line: wrapped,
                 source: range,
                 line_end: None,

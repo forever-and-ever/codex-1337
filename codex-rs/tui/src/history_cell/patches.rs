@@ -43,6 +43,10 @@ impl PatchHistoryCell {
         self
     }
 
+    pub(super) fn shares_heading_with(&self, other: &Self) -> bool {
+        self.state == other.state
+    }
+
     pub(super) fn is_active(&self) -> bool {
         self.state == PatchState::InProgress
     }

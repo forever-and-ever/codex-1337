@@ -4,12 +4,12 @@ expression: "examples.join(\"\\n\\n\")"
 ---
 unknown
               • Started `/root/worker`
-              • Returned
+              • tool returned
               • Completed `/root/worker`
 
 positive
               • Started `/root/worker`
-              • Returned  3
+              • tool returned  3
               • Completed `/root/worker`
 
 zero

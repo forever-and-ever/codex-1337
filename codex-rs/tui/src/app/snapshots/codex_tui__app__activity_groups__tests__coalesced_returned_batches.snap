@@ -18,26 +18,12 @@ Exploration ordinary=false expanded=true
                       Read first.rs (whole file)
                   • Command
                       Read nested.rs (whole file)
-                  • Returned
-                        chosen porcelain:  exact
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-                  • Returned
-                      Returned b
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result
+        [+]         Result
         [-]   • Called (Code Mode τνμβ)  20
                   • Command
                       Read second.rs (whole file)
-                  • Returned
-                      Returned c
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result
 
 Computer ordinary=false expanded=false
 [+]   • Called (Code Mode εμογ)  1280
@@ -50,25 +36,11 @@ Computer ordinary=false expanded=true
 [-]   • Called (Code Mode εμογ)  1280
                   • cua_repl.js({"title":"Inspect first"})
                   • cua_repl.js({"title":"Inspect nested"})
-                  • Returned
-                        chosen porcelain:  exact
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-                  • Returned
-                      Returned b
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result
+        [+]         Result
         [-]   • Called (Code Mode τνμβ)  20
                   • cua_repl.js({"title":"Inspect second"})
-                  • Returned
-                      Returned c
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result
 
 Exploration ordinary=true expanded=false
 [+]   • Called (Code Mode εμογ)  1280
@@ -81,22 +53,8 @@ Exploration ordinary=true expanded=true
 [-]   • Called (Code Mode εμογ)  1280
                   • Command cargo check
                   • Command cargo check
-                  • Returned
-                        chosen porcelain:  exact
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-                      {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-                  • Returned
-                      Returned b
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result
+        [+]         Result
         [-]   • Called (Code Mode τνμβ)  20
                   • Command cargo check
-                  • Returned
-                      Returned c
-                      Script completed
-                      Wall time 0.0 seconds
-                      Output:
-                      Only model-visible text.
+        [+]         Result

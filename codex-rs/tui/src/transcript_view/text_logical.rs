@@ -15,6 +15,7 @@ use crate::width::display_width;
 #[derive(Clone)]
 pub(super) struct LogicalLine {
     pub(super) line: HyperlinkLine,
+    pub(super) input_rows: Range<usize>,
     pub(super) initial_indent: Line<'static>,
     pub(super) subsequent_indent: Line<'static>,
     pub(super) wrap_policy: LineWrapPolicy,
@@ -24,7 +25,7 @@ pub(super) struct LogicalLine {
 
 pub(super) fn logical_lines(lines: &[HyperlinkLine]) -> Vec<LogicalLine> {
     let mut logical: Vec<LogicalLine> = Vec::new();
-    for line in lines {
+    for (input_row, line) in lines.iter().enumerate() {
         let source = line
             .source
             .clone()
@@ -34,9 +35,13 @@ pub(super) fn logical_lines(lines: &[HyperlinkLine]) -> Vec<LogicalLine> {
                 && previous.origin.range.end <= source.range.start
         });
         match previous {
-            Some(previous) => previous.append(line, source),
+            Some(previous) => {
+                previous.input_rows.end = input_row + 1;
+                previous.append(line, source);
+            }
             None => {
                 let mut entry = LogicalLine {
+                    input_rows: input_row..input_row + 1,
                     line: HyperlinkLine::new(Line::default().style(line.line.style)),
                     initial_indent: slice_line(&line.line, 0..source.prefix_bytes),
                     subsequent_indent: source.continuation_indent.clone(),

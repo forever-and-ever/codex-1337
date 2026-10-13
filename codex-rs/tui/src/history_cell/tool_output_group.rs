@@ -154,12 +154,26 @@ impl ToolOutputGroup {
     }
 
     pub(crate) fn is_patch(cell: &dyn HistoryCell) -> bool {
-        cell.as_any().is::<PatchHistoryCell>()
-            || cell.as_any().downcast_ref::<Self>().is_some_and(|group| {
-                group
+        Self::patch(cell).is_some()
+    }
+
+    pub(crate) fn shares_patch_heading(left: &dyn HistoryCell, right: &dyn HistoryCell) -> bool {
+        match (Self::patch(left), Self::patch(right)) {
+            (Some(left), Some(right)) => left.shares_heading_with(right),
+            _ => false,
+        }
+    }
+
+    fn patch(cell: &dyn HistoryCell) -> Option<&PatchHistoryCell> {
+        cell.as_any()
+            .downcast_ref::<PatchHistoryCell>()
+            .or_else(|| {
+                cell.as_any()
+                    .downcast_ref::<Self>()?
                     .members
-                    .first()
-                    .is_some_and(|cell| cell.as_any().is::<PatchHistoryCell>())
+                    .first()?
+                    .as_any()
+                    .downcast_ref::<PatchHistoryCell>()
             })
     }
 

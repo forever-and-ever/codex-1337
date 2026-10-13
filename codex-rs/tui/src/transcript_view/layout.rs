@@ -325,8 +325,9 @@ impl TranscriptView {
             .flatten();
         let continued_edit = disclosure
             && !cell.is_stream_continuation()
-            && ToolOutputGroup::is_patch(cell.as_ref())
-            && previous.is_some_and(|previous| ToolOutputGroup::is_patch(previous.as_ref()));
+            && previous.is_some_and(|previous| {
+                ToolOutputGroup::shares_patch_heading(cell.as_ref(), previous.as_ref())
+            });
         if manually_expanded {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
@@ -365,15 +366,14 @@ impl TranscriptView {
             };
             // The activity's rows, compact or expanded, and what controls them.
             let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
-                if !full_content
+                let mut lines = if !full_content
                     && let Some(parts) = cell.output_parts(
                         content_width,
                         /*reserve*/ 0,
                         expanded_parts,
                         output_mode,
-                    )
-                {
-                    return ActivityTranscriptLines {
+                    ) {
+                    ActivityTranscriptLines {
                         output_mode: (expanded && cell.has_formatted_output())
                             .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
@@ -384,34 +384,34 @@ impl TranscriptView {
                         header_tokens,
                         disclosure: parts.output,
                         controls: parts.controls,
-                    };
-                }
-                let mut activity = if expanded {
-                    cell.expanded_output_lines(content_width, output_mode)
+                    }
                 } else {
-                    cell.compact_hyperlink_lines(content_width)
-                };
-                let disclosure = if continued_edit {
-                    activity.remove(0);
-                    Some(ActivityDisclosure::EditedFile { header: false })
-                } else {
-                    cell.activity_disclosure(content_width)
-                };
-                ActivityTranscriptLines {
-                    output_mode: (expanded && cell.has_formatted_output()).then_some(output_mode),
-                    is_tool_entry: cell.is_tool_entry(),
-                    preface: Vec::new(),
-                    activity: crate::transcript_geometry::clock_lines(activity, timestamp),
-                    header: if expanded {
-                        cell.expanded_activity_header()
+                    let activity = if expanded {
+                        cell.expanded_output_lines(content_width, output_mode)
                     } else {
-                        cell.activity_header()
-                    },
-                    auxiliary: Vec::new(),
-                    header_tokens,
-                    disclosure,
-                    controls: Vec::new(),
+                        cell.compact_hyperlink_lines(content_width)
+                    };
+                    ActivityTranscriptLines {
+                        output_mode: (expanded && cell.has_formatted_output())
+                            .then_some(output_mode),
+                        is_tool_entry: cell.is_tool_entry(),
+                        preface: Vec::new(),
+                        activity: crate::transcript_geometry::clock_lines(activity, timestamp),
+                        header: if expanded {
+                            cell.expanded_activity_header()
+                        } else {
+                            cell.activity_header()
+                        },
+                        auxiliary: Vec::new(),
+                        header_tokens,
+                        disclosure: cell.activity_disclosure(content_width),
+                        controls: Vec::new(),
+                    }
+                };
+                if continued_edit {
+                    yield_head(&mut lines);
                 }
+                lines
             };
             let mut layout = match seat.content {
                 Content::Hidden => TextLayout::new(Vec::new(), width),

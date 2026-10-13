@@ -68,36 +68,43 @@ impl TextLayout {
         label: String,
         source_line: usize,
     ) -> Self {
-        let offset = self.line_offset(source_line);
-        self.with_leading_disclosure_at(label, offset, FoldTarget::Activity)
+        self.with_leading_disclosure_on_line(label, source_line, FoldTarget::Activity)
     }
 
-    /// Where logical line `line` starts in the layout's source.
+    /// Selectable-source offset of an input row, excluding client-only labels.
     pub(in crate::transcript_view) fn line_offset(&self, line: usize) -> usize {
-        self.logical
-            .iter()
-            .take(line)
-            .map(|line| line.origin.range.len() + 1)
-            .sum()
+        self.row_for_input_line(line)
+            .map_or(self.text.len(), |row| self.rows[row].source.start)
     }
 
-    pub(super) fn with_leading_disclosure_at(
+    fn row_for_input_line(&self, line: usize) -> Option<usize> {
+        let logical = self
+            .logical
+            .iter()
+            .position(|entry| entry.input_rows.contains(&line))?;
+        self.rows
+            .iter()
+            .position(|row| row.logical_line == Some(logical))
+    }
+
+    pub(super) fn with_leading_disclosure_on_line(
         mut self,
         label: String,
-        source_offset: usize,
+        line: usize,
         target: FoldTarget,
     ) -> Self {
-        if self.text.is_empty() {
+        // A source offset cannot distinguish client-only rows, and wrapped input
+        // rows may coalesce. Retain the supplied row through that projection.
+        let Some(row) = self.row_for_input_line(line) else {
             return self;
-        }
-        let row = self.row_for_offset(source_offset);
+        };
         self.disclosure = true;
         self.disclosure_controls.push(DisclosureControl {
             target,
             label,
-            source_offset,
+            source_offset: self.rows[row].source.start,
             row,
-            placement: DisclosurePlacement::Leading,
+            placement: DisclosurePlacement::Leading { line },
         });
         self
     }
@@ -106,10 +113,9 @@ impl TextLayout {
         self,
         part: crate::history_cell::activity_parts::PartControl,
     ) -> Self {
-        let offset = self.line_offset(part.line);
-        self.with_leading_disclosure_at(
+        self.with_leading_disclosure_on_line(
             if part.expanded { "[-]" } else { "[+]" }.into(),
-            offset,
+            part.line,
             FoldTarget::Part(part.id),
         )
     }

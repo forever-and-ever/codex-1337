@@ -121,7 +121,11 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         let target = FoldTarget::OutputMode(mode);
         let (row, columns, _) = layout.fold_position(&target).unwrap();
         assert_eq!(layout.fold_at(row, columns.start), Some(target));
-        assert_eq!(layout.fold_at(/*row*/ 1, /*column*/ 10), None);
+        let result_row = layout
+            .fold_position(&FoldTarget::Part("result:mode".into()))
+            .unwrap()
+            .0;
+        assert_eq!(layout.fold_at(result_row + 1, 10), None);
         assert!(view.toggle_disclosure_at(&cells, columns.start, row as u16));
         let buffer = tests::render(&mut view, &cells, /*width*/ 80, /*height*/ 14);
         let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
@@ -341,14 +345,31 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 .join(" ")
                 .contains("escaped for display")
         );
-        // Client-only labels have no selectable source. Their wraps must still
-        // respect the gutter rather than putting notice text into metadata columns.
+        // A client-only fold label has no source offset of its own. Its control
+        // must remain on that label, not the following payload, including after reflow.
+        let layout = view.current_layout(&cells, 0).unwrap();
+        let target = FoldTarget::Part("result:unsafe".into());
+        let result_row = layout.fold_position(&target).unwrap().0;
+        let narrow = layout.rewrap(24);
+        for (layout, width) in [(layout.as_ref(), 32), (&narrow, 24)] {
+            let row = layout.fold_position(&target).unwrap().0;
+            let area = Rect::new(0, 0, width, u16::try_from(row + 1).unwrap());
+            let mut painted = Buffer::empty(area);
+            layout.render(area, &mut painted, 0);
+            let label = (0..width)
+                .map(|column| painted[(column, row as u16)].symbol())
+                .collect::<String>();
+            assert!(label.trim_end().ends_with("Result"), "{label:?}");
+            assert!(!layout.text().contains("Result"));
+        }
         for row in 1..buffer.area.height {
-            assert!(
-                (0..crate::transcript_geometry::GUTTER_COLUMNS
-                    + crate::transcript_geometry::CHILD_INDENT)
-                    .all(|column| buffer[(column, row)].symbol() == " ")
-            );
+            if usize::from(row) != result_row {
+                assert!(
+                    (0..crate::transcript_geometry::GUTTER_COLUMNS
+                        + crate::transcript_geometry::CHILD_INDENT)
+                        .all(|column| buffer[(column, row)].symbol() == " ")
+                );
+            }
         }
         painted.push(format!("escaped capture\n{buffer:?}"));
     }

@@ -809,18 +809,30 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     ));
     assert_prompt_arrival_ordering().await;
     // Explicit functions.wait stores the targetless fact on the awaited owner itself.
-    let explicit = apply(
-        &b,
+    let awaited = owner("exec-explicit");
+    apply(
+        &awaited,
         code_mode(
-            "exec-b",
+            "exec-explicit",
+            CodeModeEvent::Started {
+                call_id: "exec-explicit".into(),
+                script: None,
+            },
+        ),
+    );
+    let explicit = apply(
+        &awaited,
+        code_mode(
+            "exec-explicit",
             CodeModeEvent::WaitStarted {
                 call_id: "explicit-wait".into(),
                 target: None,
             },
         ),
     );
-    assert!(live(&explicit.block).contains(&format!("Waiting for ({target})")));
-    assert!(live(&explicit.block).contains(&format!("Running ({target})")));
+    let explicit_target = history_cell::CodeModeCell::owned(awaited, false).tetrad();
+    assert!(live(&explicit.block).contains(&format!("Waiting for ({explicit_target})")));
+    assert!(live(&explicit.block).contains(&format!("Running ({explicit_target})")));
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
         app.transcript_cells = thread_items_to_transcript_cells(
@@ -2024,16 +2036,6 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         no_owner.display_lines(120)[0]
             .to_string()
             .contains("wrangler_agents.wait_agent")
-    );
-    assert!(
-        history_cell::ToolOutputCell::from_output(
-            "other",
-            None,
-            "wait",
-            None,
-            &FunctionCallOutputBody::Text(captured.into())
-        )
-        .is_none()
     );
     for result_first in [false, true] {
         let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;

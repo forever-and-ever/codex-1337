@@ -244,6 +244,37 @@ fn file_disclosures_are_independent_and_not_copied() {
             );
         }
     }
+    // Adjacent patches may share presentation only when their canonical outcomes agree.
+    // A retained output must not make a failed patch inherit the preceding Edited heading.
+    cells.extend(crate::thread_transcript::thread_items_to_transcript_cells(
+        None,
+        &test_path_buf("/project").abs(),
+        [
+            ThreadItem::FileChange {
+                id: "failed-patch".into(),
+                changes: vec![],
+                status: PatchApplyStatus::Failed,
+            },
+            ThreadItem::FunctionCallOutput {
+                id: "failed-output".into(),
+                call_id: Some("failed-patch".into()),
+                name: "apply_patch".into(),
+                namespace: None,
+                output: FunctionCallOutputBody::Text("rejected patch".into()),
+            },
+        ],
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        None,
+        &|_| crate::multi_agents::AgentMetadata::default(),
+    ));
+    view.jump_to_latest();
+    view.render(area, &mut Buffer::empty(area), &cells);
+    assert!(
+        view.current_layout(&cells, cells.len() - 1)
+            .unwrap()
+            .text()
+            .contains("Failed to apply patch")
+    );
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }
 
