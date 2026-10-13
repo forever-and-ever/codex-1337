@@ -77,7 +77,7 @@ pub(super) async fn send(
                             },
                         })
                         .await?;
-                    let history = if thread.thread.history_mode == ThreadHistoryMode::Paginated
+                    let history = if thread.thread.history_mode == api::ThreadHistoryMode::Paginated
                         && paginated_history
                     {
                         None

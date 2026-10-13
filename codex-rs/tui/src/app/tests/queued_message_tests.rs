@@ -562,11 +562,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &consent_cwd,
         crate::onboarding::DirectoryTrustOptions::default(),
     )?;
-    app.agents_overview.new_session_draft = Some(crate::startup_draft::StartupDraftPump::new(
-        &tui,
-        crate::startup_draft::StartupDraftInitialScreen::Onboarding,
-        crate::startup_draft::StartupDraftSessionAction::NewFromCommandCenter,
-    ));
+    app.agents_overview.new_session_draft =
+        Some(Box::new(crate::startup_draft::StartupDraftPump::new(
+            &tui,
+            crate::startup_draft::StartupDraftInitialScreen::Onboarding,
+            crate::startup_draft::StartupDraftSessionAction::NewFromCommandCenter,
+        )));
     let writes_before_consent = recorded_params(&requests, "config/batchWrite").len();
     app.admit_dashboard_trust(
         &server,
