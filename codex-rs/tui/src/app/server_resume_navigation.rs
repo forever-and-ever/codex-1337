@@ -1,11 +1,11 @@
 use super::*;
 use crate::app::resume_config::ResumeCwdBasis;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
-use crate::chatwidget::ThreadInputStateRestoreMode;
 use crate::app_server_session::session_preparation::{
     self as preparation, PreparedSession, PreparedView, RequestPolicy, ResumePreparation,
     SubscriptionCustody, ViewPreparation,
 };
+use crate::chatwidget::ThreadInputStateRestoreMode;
 use crate::config_update::{
     ProjectTrustHost, RemoteProjectTrust, read_remote_project_trust_with_policy,
 };

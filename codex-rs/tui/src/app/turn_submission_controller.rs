@@ -1110,7 +1110,9 @@ impl App {
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.expect("server receipt channel open");
                         let control = self.handle_server_completion(tui, server, completion).await?;
-if matches!(control, AppRunControl::Exit(_)) { return Ok(control); }
+                        if matches!(control, AppRunControl::Exit(_)) {
+                            return Ok(control);
+                        }
                     }
                 }
             }
