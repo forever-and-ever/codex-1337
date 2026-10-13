@@ -295,6 +295,7 @@ mod thread_processor_behavior_tests {
             items: vec![ThreadItem::UserMessage {
                 id: "live-user-message".to_string(),
                 client_id: None,
+                source_response_item_id: None,
                 content: vec![V2UserInput::Text {
                     text: "live".to_string(),
                     text_elements: Vec::new(),
