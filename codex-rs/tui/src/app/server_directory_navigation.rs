@@ -997,7 +997,7 @@ impl App {
                 if !valid {
                     if matching {
                         if fences.is_empty() {
-                            self.directory_stale();
+                            self.working_directory_error("Directory change canceled after the original task was detached. Its draft is retained; reopen the original task to continue. No replacement was installed.");
                         } else {
                             self.working_directory_error("Directory detachment was not confirmed. Close and reopen this TUI to resynchronize; no detach was retried.");
                         }
@@ -1011,6 +1011,7 @@ impl App {
                         if same_epoch { fences } else { Vec::new() },
                     );
                 } else {
+                    let history = input.history;
                     let DirectoryReplacement { ready, started } = *replacement;
                     let DirectoryReady {
                         context,
@@ -1031,10 +1032,18 @@ impl App {
                         },
                     )
                     .await;
-                    // Local installation consumes custody before any fallible presentation work.
-                    if self.current_displayed_thread_id() == Some(target)
-                        && !self.config.bypass_hook_trust
-                    {
+                    if self.current_displayed_thread_id() != Some(target) {
+                        self.directory_cleanup(
+                            operation,
+                            handle,
+                            source,
+                            target,
+                            history,
+                            Vec::new(),
+                        );
+                        return Ok(());
+                    }
+                    if !self.config.bypass_hook_trust {
                         self.server_operations.navigation.current =
                             Some(self.continue_directory_effect(
                                 operation,
