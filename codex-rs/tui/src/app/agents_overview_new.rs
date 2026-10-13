@@ -45,8 +45,7 @@ impl App {
         draft.show(tui)?;
         // Keep the large session-start future off the TUI's stack in dev builds.
         let result =
-            Box::pin(self.start_agents_overview_session(tui, app_server, cwd, Some(&mut draft)))
-                .await;
+            Box::pin(self.start_agents_overview_session(tui, app_server, cwd, &mut draft)).await;
         self.finish_dashboard_draft(tui, previous_thread, draft)
             .await?;
         result
@@ -86,13 +85,13 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         cwd: Option<AbsolutePathBuf>,
-        mut startup_draft: Option<&mut StartupDraftPump>,
+        startup_draft: &mut StartupDraftPump,
     ) -> Result<AppRunControl> {
         if self.reconnect.offline || self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
         }
         let Some(outcome) = self
-            .agents_overview_session_config(tui, app_server, cwd, startup_draft.as_deref_mut())
+            .agents_overview_session_config(tui, app_server, cwd, startup_draft)
             .await
         else {
             return Ok(AppRunControl::Continue);
@@ -116,7 +115,7 @@ impl App {
         app_server: &mut AppServerSession,
         config: Config,
         remote_cwd: Option<PathBuf>,
-        mut startup_draft: Option<&mut StartupDraftPump>,
+        startup_draft: &mut StartupDraftPump,
     ) -> Result<AppRunControl> {
         let selected_profile = self.chat_widget.thread_id().and_then(|thread_id| {
             if let Some(selection) = self
@@ -141,11 +140,9 @@ impl App {
             })
         });
         let local_settings = self.local_settings.reloaded(&config);
-        if let Some(draft) = startup_draft.as_deref_mut() {
-            draft.apply_settings(&local_settings, config.cwd.as_path());
-        }
+        startup_draft.apply_settings(&local_settings, config.cwd.as_path());
         let result = StartupDraftPump::run_with_optional_draft(
-            startup_draft.as_deref_mut(),
+            Some(&mut *startup_draft),
             tui,
             Box::pin(app_server.start_thread_with_session_start_source(
                 &local_settings,

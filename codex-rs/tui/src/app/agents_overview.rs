@@ -11,9 +11,6 @@ mod new;
 #[path = "agents_overview_errors.rs"]
 mod errors;
 
-#[path = "agents_overview_loading.rs"]
-mod loading;
-
 #[path = "agents_overview_selection.rs"]
 mod selection;
 
@@ -467,7 +464,7 @@ impl App {
         app_server: &mut AppServerSession,
         root_thread_id: ThreadId,
         started: (Config, crate::app_server_session::AppServerStartedThread),
-        mut startup_draft: Option<&mut StartupDraftPump>,
+        startup_draft: &mut StartupDraftPump,
     ) -> color_eyre::Result<AppRunControl> {
         if self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
@@ -487,10 +484,6 @@ impl App {
         if self.reject_pending_permission_root_switch() {
             return Ok(AppRunControl::Continue);
         }
-        if startup_draft.is_none() {
-            loading::draw(tui)?;
-        }
-
         if self.primary_thread_id != Some(root_thread_id) || self.thread_unavailable(root_thread_id)
         {
             let previous_displayed_thread_id = self.current_displayed_thread_id();
@@ -551,24 +544,12 @@ impl App {
             let baseline_reviewer = resume_config.approvals_reviewer;
             let baseline_permissions =
                 RuntimePermissionProfileOverride::from_config(&resume_config);
-            let presentation = if startup_draft.is_some() {
-                ThreadAttachPresentation::FreshWithDraft
-            } else {
-                ThreadAttachPresentation::Fresh
-            };
+            let presentation = ThreadAttachPresentation::FreshWithDraft;
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
-                    let discarded = match startup_draft.as_deref_mut() {
-                        Some(draft) => {
-                            draft
-                                .run_until(
-                                    tui,
-                                    self.discard_side_thread(app_server, side_thread_id),
-                                )
-                                .await?
-                        }
-                        None => self.discard_side_thread(app_server, side_thread_id).await,
-                    };
+                    let discarded = startup_draft
+                        .run_until(tui, self.discard_side_thread(app_server, side_thread_id))
+                        .await?;
                     if !discarded {
                         return Ok(AppRunControl::Continue);
                     }
@@ -595,23 +576,12 @@ impl App {
                 && !previous_displayed_thread_id
                     .is_some_and(|id| self.agents_overview.blank_sessions.contains_key(&id))
             {
-                match startup_draft.as_deref_mut() {
-                    Some(draft) => {
-                        draft
-                            .run_until(
-                                tui,
-                                self.detach_current_thread_for_navigation(
-                                    app_server,
-                                    Some(root_thread_id),
-                                ),
-                            )
-                            .await?
-                    }
-                    None => {
-                        self.detach_current_thread_for_navigation(app_server, Some(root_thread_id))
-                            .await
-                    }
-                }
+                startup_draft
+                    .run_until(
+                        tui,
+                        self.detach_current_thread_for_navigation(app_server, Some(root_thread_id)),
+                    )
+                    .await?;
             }
             self.runtime_approval_policy_override = self
                 .runtime_approval_policy_override
@@ -640,11 +610,6 @@ impl App {
                 self.add_agents_overview_error(format!("Failed to attach to task: {error}"));
                 return Ok(AppRunControl::Continue);
             }
-            // Replacing the widget clears the terminal before the remaining server requests.
-            if startup_draft.is_none() {
-                loading::draw(tui)?;
-            }
-
             let mut destination_config = self.chat_widget.config_ref().clone();
             if self.app_server_target.uses_remote_workspace() {
                 destination_config.cwd.clone_from(&self.config.cwd);
@@ -689,7 +654,7 @@ impl App {
                     && Some(thread_id) != previous_displayed_thread_id
                     && !self.agents_overview.blank_sessions.contains_key(&thread_id)
                     && let Err(error) = StartupDraftPump::run_with_optional_draft(
-                        startup_draft.as_deref_mut(),
+                        Some(&mut *startup_draft),
                         tui,
                         app_server.thread_unsubscribe(thread_id),
                     )
@@ -759,7 +724,7 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         cwd: Option<AbsolutePathBuf>,
-        mut startup_draft: Option<&mut StartupDraftPump>,
+        startup_draft: &mut StartupDraftPump,
     ) -> Option<trust::DashboardConfigOutcome> {
         if self
             .chat_widget
@@ -786,7 +751,7 @@ impl App {
             )
         };
         let mut config = match StartupDraftPump::run_with_optional_draft(
-            startup_draft.as_deref_mut(),
+            Some(&mut *startup_draft),
             tui,
             self.rebuild_config_for_cwd(local_cwd),
         )
@@ -815,7 +780,7 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         preparation: trust::DashboardPreparation,
-        mut startup_draft: Option<&mut StartupDraftPump>,
+        startup_draft: &mut StartupDraftPump,
     ) -> Option<(Config, Option<PathBuf>)> {
         let trust::DashboardPreparation {
             mut config,
@@ -853,15 +818,13 @@ impl App {
                 .unwrap_or(Path::new(".")),
         }
         .to_path_buf();
-        if let Some(draft) = startup_draft.as_deref_mut() {
-            draft.apply_settings(
-                &crate::local_settings::LocalSettings::from(&config),
-                config.cwd.as_path(),
-            );
-        }
+        startup_draft.apply_settings(
+            &crate::local_settings::LocalSettings::from(&config),
+            config.cwd.as_path(),
+        );
         let mut server_model_cleared = false;
         match StartupDraftPump::run_with_optional_draft(
-            startup_draft,
+            Some(startup_draft),
             tui,
             crate::config_update::read_effective_config_if_supported(
                 app_server.request_handle(),

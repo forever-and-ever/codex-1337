@@ -115,7 +115,7 @@ impl App {
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
         stage: DashboardTrustStage,
-        mut draft: Option<&mut StartupDraftPump>,
+        draft: &mut StartupDraftPump,
     ) -> Option<DashboardConfigOutcome> {
         let (mut preparation, mut plan) = match stage {
             DashboardTrustStage::ConfirmedHooks(preparation) => {
@@ -157,7 +157,7 @@ impl App {
         while let Some(cwd) = plan.next_cwd() {
             let lookup = read_remote_project_trust(server.request_handle(), &cwd, plan.host());
             let project =
-                match StartupDraftPump::run_with_optional_draft(draft.as_deref_mut(), tui, lookup)
+                match StartupDraftPump::run_with_optional_draft(Some(&mut *draft), tui, lookup)
                     .await
                 {
                     Ok(project) => project,
@@ -178,9 +178,7 @@ impl App {
                     return None;
                 }
             };
-            if let Some(draft) = draft.as_deref_mut()
-                && let Err(error) = draft.flush_pending_events(tui).await
-            {
+            if let Err(error) = draft.flush_pending_events(tui).await {
                 self.add_agents_overview_error(format!("Unable to retain the draft: {error}"));
                 return None;
             }
@@ -223,7 +221,7 @@ impl App {
         let consent = plan.finish();
         if consent.directory_trust_persisted && !server.uses_remote_workspace() {
             preparation.config = match StartupDraftPump::run_with_optional_draft(
-                draft.as_deref_mut(),
+                Some(&mut *draft),
                 tui,
                 self.rebuild_config_for_cwd(preparation.config.cwd.to_path_buf()),
             )
@@ -242,7 +240,7 @@ impl App {
                 preparation.config.cwd.to_path_buf(),
             );
             let hooks =
-                match StartupDraftPump::run_with_optional_draft(draft.as_deref_mut(), tui, async {
+                match StartupDraftPump::run_with_optional_draft(Some(&mut *draft), tui, async {
                     Ok::<_, std::io::Error>(load.await)
                 })
                 .await
@@ -255,11 +253,9 @@ impl App {
                         return None;
                     }
                 };
-            if let Some(draft) = draft.as_deref_mut() {
-                if let Err(error) = draft.flush_pending_events(tui).await {
-                    self.add_agents_overview_error(format!("Unable to retain the draft: {error}"));
-                    return None;
-                }
+            if let Err(error) = draft.flush_pending_events(tui).await {
+                self.add_agents_overview_error(format!("Unable to retain the draft: {error}"));
+                return None;
             }
             match choose_startup_hooks_review(tui, &preparation.config, hooks, None).await {
                 Ok(HooksReviewDecision::Continue) => {}
@@ -306,11 +302,11 @@ impl App {
         };
         let previous = self.current_displayed_thread_id();
         let outcome = self
-            .prepare_pumped_dashboard_trust(tui, server, consent.confirmed(), Some(&mut draft))
+            .prepare_pumped_dashboard_trust(tui, server, consent.confirmed(), &mut draft)
             .await;
         let result = match outcome {
             Some(DashboardConfigOutcome::Ready(config, cwd)) => {
-                self.start_dashboard_with_config(tui, server, config, cwd, Some(&mut draft))
+                self.start_dashboard_with_config(tui, server, config, cwd, &mut draft)
                     .await
             }
             Some(DashboardConfigOutcome::Pending(consent)) => {
