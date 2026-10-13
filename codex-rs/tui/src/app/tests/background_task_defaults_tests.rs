@@ -172,7 +172,7 @@ async fn review_regression_agents_overview_creation_is_fresh_but_returning_is_no
         app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
             .await?;
         assert_ne!(app.chat_widget.thread_id(), Some(original));
-        app.select_agents_overview_thread(&mut tui, &mut server, original)
+        app.select_agents_overview_thread_and_settle(&mut tui, &mut server, original)
             .await?;
         assert_eq!(app.chat_widget.thread_id(), Some(original));
         let returned = render(&app.chat_widget);
@@ -788,7 +788,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
     )
     .await?;
     for target in [other, thread_id] {
-        app.select_agents_overview_thread(&mut tui, &mut server, target)
+        app.select_agents_overview_thread_and_settle(&mut tui, &mut server, target)
             .await?;
         assert_eq!(
             app.chat_widget.thread_id(),
@@ -863,7 +863,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         .await?;
     app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
         .await?;
-    app.select_agents_overview_thread(&mut tui, &mut server, startup)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, startup)
         .await?;
     assert_eq!(app.chat_widget.thread_id(), Some(startup));
     app.chat_widget.set_model("gpt-local-choice");
@@ -883,10 +883,10 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
     app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
         .await?;
     let other = app.chat_widget.thread_id().unwrap();
-    app.select_agents_overview_thread(&mut tui, &mut server, startup)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, startup)
         .await?;
     assert_eq!(app.chat_widget.current_model(), "gpt-local-choice");
-    app.select_agents_overview_thread(&mut tui, &mut server, first)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, first)
         .await?;
     assert_eq!(app.chat_widget.thread_id(), Some(first));
     assert_eq!(
@@ -917,7 +917,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         app.agents_overview.blank_sessions.remove(&id);
     }
     for profile_id in [":read-only", ":workspace"] {
-        app.select_agents_overview_thread(&mut tui, &mut server, first)
+        app.select_agents_overview_thread_and_settle(&mut tui, &mut server, first)
             .await?;
         assert_eq!(app.chat_widget.thread_id(), Some(first));
         assert_eq!(
@@ -944,7 +944,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         for switch in [false, true] {
             if switch {
                 for target in [other, first] {
-                    app.select_agents_overview_thread(&mut tui, &mut server, target)
+                    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, target)
                         .await?;
                     assert_eq!(app.chat_widget.thread_id(), Some(target));
                 }
@@ -972,17 +972,17 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
             );
         }
     }
-    app.select_agents_overview_thread(&mut tui, &mut server, first)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, first)
         .await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "Keep this unsent draft"
     );
     assert!(recorded_params(&requests, "turn/start").is_empty());
-    app.select_agents_overview_thread(&mut tui, &mut server, startup)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, startup)
         .await?;
     app.chat_widget.insert_str("Background draft");
-    app.select_agents_overview_thread(&mut tui, &mut server, first)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, first)
         .await?;
     assert!(
         server
@@ -1004,7 +1004,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
         )),
     )
     .await;
-    app.select_agents_overview_thread(&mut tui, &mut server, startup)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, startup)
         .await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),

@@ -159,7 +159,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         Some(&question)
     );
     assert!(!app.chat_widget.has_active_view());
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut server, source_thread_id)).await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, source_thread_id)).await?;
     app.drain_active_thread_events(&mut tui).await?;
     assert!(
         app.pending_app_server_requests

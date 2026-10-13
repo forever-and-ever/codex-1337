@@ -21,11 +21,59 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_config::types::ResumeCwdMode;
 
+#[path = "server_overview_navigation.rs"]
+mod overview;
+
 #[derive(Clone)]
 pub(super) struct ResumeContext {
     target: SessionTarget,
     config: Config,
     settings: LocalSettings,
+    purpose: ResumePurpose,
+}
+
+#[derive(Clone)]
+pub(super) enum ResumeSource {
+    Explicit,
+    Overview(Box<api::Thread>),
+}
+
+#[derive(Clone)]
+pub(super) enum ResumePurpose {
+    Explicit,
+    Overview {
+        thread: Box<api::Thread>,
+        baseline: OverviewBaseline,
+    },
+}
+
+#[derive(Clone)]
+pub(super) struct OverviewBaseline {
+    approval: api::AskForApproval,
+    reviewer: codex_config::types::ApprovalsReviewer,
+    permissions: RuntimePermissionProfileOverride,
+}
+
+impl OverviewBaseline {
+    fn capture(config: &Config) -> Self {
+        Self {
+            approval: config.permissions.approval_policy.value().into(),
+            reviewer: config.approvals_reviewer,
+            permissions: RuntimePermissionProfileOverride::from_config(config),
+        }
+    }
+}
+
+impl ResumePurpose {
+    fn from_source(source: ResumeSource, config: &Config) -> Self {
+        match source {
+            ResumeSource::Explicit => Self::Explicit,
+            ResumeSource::Overview(thread) => Self::Overview {
+                thread,
+                baseline: OverviewBaseline::capture(config),
+            },
+        }
+    }
 }
 
 impl ResumeContext {
@@ -42,15 +90,20 @@ pub(super) struct ResumeReady {
 
 pub(super) enum ResumePresentation {
     Writable,
+    CachedBlank,
     ReadOnly(Option<&'static str>),
 }
 
 pub(super) enum ResumeStage {
     Admitted(SessionTarget),
+    OverviewAdmitted(ThreadId),
+    OverviewConfig(ThreadId),
+    OverviewMetadata(ThreadId),
     Config(SessionTarget),
     Cwd {
         target: SessionTarget,
         basis: ResumeCwdBasis,
+        source: ResumeSource,
     },
     TrustMetadata(Box<ResumeContext>),
     Trust {
@@ -74,6 +127,9 @@ pub(super) enum ResumeStage {
 impl ResumeStage {
     pub(super) fn thread_id(&self) -> ThreadId {
         match self {
+            Self::OverviewAdmitted(id) | Self::OverviewConfig(id) | Self::OverviewMetadata(id) => {
+                *id
+            }
             Self::Admitted(target) | Self::Config(target) | Self::Cwd { target, .. } => {
                 target.thread_id
             }
@@ -118,6 +174,7 @@ enum ResumeOutcome {
     Rechecked(Result<api::Thread>),
     Hooks(Result<api::HooksListEntry, String>),
     Acquired(PreparedSession),
+    Cached(crate::app_server_session::AppServerStartedThread),
     Viewed(PreparedView),
     Detached(detach::DetachReceipt),
     Loaded(Result<Vec<(ThreadId, Result<api::Thread>)>>),
@@ -135,6 +192,7 @@ enum ResumeEffect {
     Recheck(ThreadId),
     Hooks(PathBuf),
     Acquire(ResumePreparation),
+    Cached(crate::app_server_session::AppServerStartedThread),
     View(ViewPreparation),
     Detach(detach::DetachPlan),
     Loaded(ThreadId),
@@ -158,12 +216,15 @@ impl App {
         server: &AppServerSession,
         operation: &mut PendingNavigation,
     ) {
-        let NavigationIntent::Resume(ResumeStage::Admitted(target)) =
-            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
-        else {
-            unreachable!("resume dispatch requires admitted target");
+        let stage = match std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        {
+            NavigationIntent::Resume(ResumeStage::Admitted(target)) => ResumeStage::Config(target),
+            NavigationIntent::Resume(ResumeStage::OverviewAdmitted(id)) => {
+                ResumeStage::OverviewConfig(id)
+            }
+            _ => unreachable!("resume dispatch requires admitted target"),
         };
-        operation.intent = NavigationIntent::Resume(ResumeStage::Config(target));
+        operation.intent = NavigationIntent::Resume(stage);
         self.spawn_resume_effect(operation, server.request_handle(), ResumeEffect::Begin);
     }
 
@@ -210,6 +271,7 @@ impl App {
                         .map_err(|_| "Folder hooks read timed out".into()),
                     ),
                     ResumeEffect::Acquire(plan) => ResumeOutcome::Acquired(plan.run().await),
+                    ResumeEffect::Cached(started) => ResumeOutcome::Cached(started),
                     ResumeEffect::View(plan) => ResumeOutcome::Viewed(plan.run().await),
                     ResumeEffect::Detach(plan) => ResumeOutcome::Detached(
                         match tokio::time::timeout(ACK_TIMEOUT, detach::send(&handle, id, &plan))
@@ -425,22 +487,67 @@ impl App {
         operation: &mut PendingNavigation,
         mut context: Box<ResumeContext>,
     ) {
-        if let Err(error) = self.apply_runtime_policy_overrides(
-            &mut context.config,
-            RuntimePolicyOverrideScope::ExplicitOnly,
-        ) {
-            self.add_session_picker_error(format!("{error:#}"));
-            return;
+        let loaded_overview = matches!(&context.purpose, ResumePurpose::Overview { thread, .. } if !matches!(thread.status, api::ThreadStatus::NotLoaded));
+        if let ResumePurpose::Overview { baseline, .. } = &mut context.purpose {
+            *baseline = OverviewBaseline::capture(&context.config);
+        }
+        if !loaded_overview {
+            if let Err(error) = self.apply_runtime_policy_overrides(
+                &mut context.config,
+                RuntimePolicyOverrideScope::ExplicitOnly,
+            ) {
+                self.add_session_picker_error(format!("{error:#}"));
+                return;
+            }
+            if matches!(context.purpose, ResumePurpose::Overview { .. })
+                && (matches!(self.runtime_approval_policy_override, Some(RuntimeApprovalPolicyOverride::Explicit(policy)) if policy.to_core() != context.config.permissions.approval_policy.value())
+                    || self
+                        .runtime_permission_profile_override
+                        .as_ref()
+                        .is_some_and(|profile| {
+                            profile.turn_override
+                                == RuntimePermissionProfileTurnOverride::LegacySandbox
+                                && !profile.matches_config(&context.config)
+                        }))
+            {
+                self.add_agents_overview_error(
+                    "Cannot resume task without preserving the selected permissions.".into(),
+                );
+                return;
+            }
         }
         if let Some(mode) = context.target.history_mode {
             server.remember_thread_history_mode(context.target.thread_id, mode);
         }
+        if loaded_overview
+            && let Some(blank) = self
+                .agents_overview
+                .blank_sessions
+                .get(&context.target.thread_id)
+        {
+            let mut started = blank.clone();
+            if let ResumePurpose::Overview { thread, .. } = &context.purpose {
+                started.session.thread_name.clone_from(&thread.name);
+            }
+            operation.intent = NavigationIntent::Resume(ResumeStage::Acquiring(context));
+            self.spawn_resume_effect(
+                operation,
+                server.request_handle(),
+                ResumeEffect::Cached(started),
+            );
+            return;
+        }
+        let model = if loaded_overview {
+            crate::app_server_session::ResumeModelSettings::PreserveExistingThread
+        } else {
+            self.resume_model_settings()
+        };
         let plan = server.prepare_resume_thread(
             RequestPolicy::Interactive,
             &context.settings,
             context.config.clone(),
             context.target.thread_id,
-            self.resume_model_settings(),
+            model,
             self.resume_permission_overrides(&context.config),
         );
         operation.intent = NavigationIntent::Resume(ResumeStage::Acquiring(context));
@@ -469,6 +576,9 @@ impl App {
         mut operation: PendingNavigation,
         ready: Box<ResumeReady>,
     ) {
+        if matches!(ready.context.purpose, ResumePurpose::Overview { .. }) {
+            self.retain_overview_origin().await;
+        }
         let plan = self
             .prepare_detach_plan(detach::DetachScope::Navigation {
                 destination: Some(ready.started.session.thread_id),
@@ -502,6 +612,41 @@ impl App {
         };
         let ResumeReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
+            (ResumeStage::OverviewConfig(thread_id), ResumeOutcome::Begin) if matching => {
+                self.refresh_in_memory_config_from_disk_best_effort("attaching a task")
+                    .await;
+                operation.intent =
+                    NavigationIntent::Resume(ResumeStage::OverviewMetadata(thread_id));
+                self.spawn_resume_effect(&mut operation, handle, ResumeEffect::Thread(thread_id));
+                self.server_operations.navigation.current = Some(operation);
+            }
+            (ResumeStage::OverviewMetadata(thread_id), ResumeOutcome::Thread(result))
+                if matching =>
+            {
+                match result {
+                    Ok(thread) => {
+                        return self
+                            .begin_overview_attachment(tui, server, operation, thread_id, thread)
+                            .await;
+                    }
+                    Err(error) => self.add_agents_overview_error(format!(
+                        "Failed to read task settings: {error}"
+                    )),
+                }
+            }
+            (ResumeStage::Acquiring(context), ResumeOutcome::Cached(started)) if matching => {
+                self.detach_for_resume(
+                    server,
+                    operation,
+                    Box::new(ResumeReady {
+                        context: *context,
+                        started,
+                        presentation: ResumePresentation::CachedBlank,
+                    }),
+                )
+                .await;
+            }
+            (ResumeStage::Acquiring(_), ResumeOutcome::Cached(_)) => {}
             (ResumeStage::Config(target), ResumeOutcome::Begin) if matching => {
                 self.refresh_in_memory_config_from_disk_best_effort("resuming a thread")
                     .await;
@@ -513,7 +658,11 @@ impl App {
                     && !matches!(basis.mode, Some(ResumeCwdMode::Current));
                 if needs_history {
                     let thread_id = target.thread_id;
-                    operation.intent = NavigationIntent::Resume(ResumeStage::Cwd { target, basis });
+                    operation.intent = NavigationIntent::Resume(ResumeStage::Cwd {
+                        target,
+                        basis,
+                        source: ResumeSource::Explicit,
+                    });
                     self.spawn_resume_effect(
                         &mut operation,
                         handle,
@@ -522,11 +671,26 @@ impl App {
                     self.server_operations.navigation.current = Some(operation);
                 } else {
                     return self
-                        .finish_resume_cwd(tui, server, operation, target, basis, None)
+                        .finish_resume_cwd(
+                            tui,
+                            server,
+                            operation,
+                            target,
+                            basis,
+                            None,
+                            ResumeSource::Explicit,
+                        )
                         .await;
                 }
             }
-            (ResumeStage::Cwd { target, basis }, ResumeOutcome::Thread(result)) if matching => {
+            (
+                ResumeStage::Cwd {
+                    target,
+                    basis,
+                    source,
+                },
+                ResumeOutcome::Thread(result),
+            ) if matching => {
                 let history_cwd = match result {
                     Ok(thread) => Some(thread.cwd.to_path_buf()),
                     Err(error) => {
@@ -535,7 +699,7 @@ impl App {
                     }
                 };
                 return self
-                    .finish_resume_cwd(tui, server, operation, target, basis, history_cwd)
+                    .finish_resume_cwd(tui, server, operation, target, basis, history_cwd, source)
                     .await;
             }
             (ResumeStage::TrustMetadata(context), ResumeOutcome::Thread(result)) if matching => {
@@ -771,10 +935,12 @@ impl App {
                             CleanupContinuation::Done,
                             false,
                         ),
-                        ResumePresentation::ReadOnly(_) if same_epoch && !fences.is_empty() => {
+                        ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank
+                            if same_epoch && !fences.is_empty() =>
+                        {
                             self.retain_navigation_uncertainty(operation, fences, false)
                         }
-                        ResumePresentation::ReadOnly(_) => {}
+                        ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank => {}
                     }
                 } else {
                     self.commit_resumed_navigation(tui, server, operation, *ready)
@@ -797,7 +963,10 @@ impl App {
                             tracing::warn!(%error, "failed to list loaded threads for subagent backfill")
                         }
                     }
-                    if matches!(presentation, ResumePresentation::Writable) {
+                    if matches!(
+                        presentation,
+                        ResumePresentation::Writable | ResumePresentation::CachedBlank
+                    ) {
                         self.replay_agents_overview_requests(server, thread_id)
                             .await;
                         if !self.chat_widget.has_misalignment_policy_violation() {
@@ -882,6 +1051,7 @@ impl App {
         target: SessionTarget,
         basis: ResumeCwdBasis,
         history_cwd: Option<PathBuf>,
+        source: ResumeSource,
     ) -> Result<AppRunControl> {
         let (config, settings) = match self
             .project_resume_config(tui, &target, basis, history_cwd)
@@ -890,7 +1060,9 @@ impl App {
             Ok(result) => result,
             Err(control) => return Ok(control),
         };
+        let purpose = ResumePurpose::from_source(source, &config);
         let context = Box::new(ResumeContext {
+            purpose,
             target,
             config,
             settings,
@@ -918,6 +1090,11 @@ impl App {
         mut operation: PendingNavigation,
         ready: ResumeReady,
     ) -> Result<()> {
+        if matches!(ready.context.purpose, ResumePurpose::Overview { .. }) {
+            return self
+                .commit_overview_attachment(tui, server, operation, ready)
+                .await;
+        }
         let thread_id = ready.started.session.thread_id;
         let running = ready
             .started

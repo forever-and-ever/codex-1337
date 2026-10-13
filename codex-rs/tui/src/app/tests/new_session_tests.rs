@@ -28,7 +28,7 @@ async fn new_sessions_preserve_yolo_launch_and_later_permission_choices() -> Res
         .permissions
         .set_permission_profile(PermissionProfile::read_only())?;
     let loaded = server.start_thread(&loaded_config).await?;
-    app.select_agents_overview_thread(&mut tui, &mut server, loaded.session.thread_id)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut server, loaded.session.thread_id)
         .await?;
     for picker_change in [false, true] {
         if picker_change {

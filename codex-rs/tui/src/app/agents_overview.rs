@@ -436,10 +436,26 @@ impl App {
             )
             .await;
         }
-        Box::pin(self.attach_agents_overview_thread(
-            tui, app_server, thread_id, /*started*/ None, /*startup_draft*/ None,
-        ))
-        .await
+        if self.windows_sandbox_blocks_thread_switch() {
+            return Ok(AppRunControl::Continue);
+        }
+        if self.current_displayed_thread_id() == Some(thread_id)
+            && (!self.thread_unavailable(thread_id) || self.chat_widget.is_external_writer_view())
+        {
+            self.server_operations.navigation.retire_current();
+            self.drive_server_operations(app_server);
+            self.refresh_submission_preview();
+            if let Ok(mut state) = self.agents_overview.view_state.lock() {
+                state.completion = Some(crate::bottom_pane::ViewCompletion::Accepted);
+            }
+            self.chat_widget.pre_draw_tick();
+            return Ok(AppRunControl::Continue);
+        }
+        if self.reject_pending_permission_root_switch() {
+            return Ok(AppRunControl::Continue);
+        }
+        self.enqueue_overview_attachment(app_server, thread_id);
+        Ok(AppRunControl::Continue)
     }
 
     async fn attach_agents_overview_thread(

@@ -1,0 +1,331 @@
+use super::*;
+
+impl App {
+    pub(in crate::app) fn enqueue_overview_attachment(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+    ) {
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Resume(ResumeStage::OverviewAdmitted(thread_id)),
+        );
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) async fn select_agents_overview_thread_and_settle(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        thread_id: ThreadId,
+    ) -> Result<AppRunControl> {
+        let control = self
+            .select_agents_overview_thread(tui, server, thread_id)
+            .await?;
+        if matches!(control, AppRunControl::Continue) {
+            return self.settle_navigation(tui, server).await;
+        }
+        Ok(control)
+    }
+
+    pub(super) async fn begin_overview_attachment(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        operation: PendingNavigation,
+        thread_id: ThreadId,
+        thread: api::Thread,
+    ) -> Result<AppRunControl> {
+        if thread.id != thread_id.to_string() {
+            self.add_agents_overview_error(
+                "The task read returned a different conversation; no attachment was attempted."
+                    .into(),
+            );
+            return Ok(AppRunControl::Continue);
+        }
+        let target = SessionTarget {
+            path: thread.path.clone(),
+            thread_id,
+            cwd: Some(thread.cwd.to_path_buf()),
+            history_mode: Some(thread.history_mode),
+        };
+        if matches!(thread.status, api::ThreadStatus::NotLoaded) {
+            let basis = match self.capture_resume_cwd_basis(server) {
+                Ok(basis) => basis,
+                Err(control) => return Ok(control),
+            };
+            let history_cwd = Some(thread.cwd.to_path_buf());
+            return self
+                .finish_resume_cwd(
+                    tui,
+                    server,
+                    operation,
+                    target,
+                    basis,
+                    history_cwd,
+                    ResumeSource::Overview(Box::new(thread)),
+                )
+                .await;
+        }
+        let current_cwd = self.config.cwd.to_path_buf();
+        let config_cwd = if self.app_server_target.uses_remote_workspace() {
+            current_cwd.clone()
+        } else {
+            thread.cwd.to_path_buf()
+        };
+        let config = match self
+            .rebuild_config_for_resume_or_fallback(&current_cwd, config_cwd)
+            .await
+        {
+            Ok(config) => config,
+            Err(error) => {
+                self.add_agents_overview_error(format!("Failed to load task settings: {error}"));
+                return Ok(AppRunControl::Continue);
+            }
+        };
+        let context = Box::new(ResumeContext {
+            target,
+            settings: self.local_settings.reloaded(&config),
+            purpose: ResumePurpose::from_source(
+                ResumeSource::Overview(Box::new(thread.clone())),
+                &config,
+            ),
+            config,
+        });
+        self.begin_resume_trust(server, operation, context, Some(&thread))
+            .await
+    }
+
+    pub(super) async fn retain_overview_origin(&mut self) {
+        if let Some(thread_id) = self.current_displayed_thread_id()
+            && !self.side_threads.contains_key(&thread_id)
+        {
+            if let Some(blank) = self.agents_overview.blank_sessions.get_mut(&thread_id)
+                && let Some(channel) = self.thread_event_channels.get(&thread_id)
+                && let Some(session) = channel.store.lock().await.session.as_ref()
+            {
+                blank.session = session.clone();
+            }
+            if let Some(input) = self.chat_widget.capture_thread_input_state() {
+                self.agents_overview.input_states.insert(thread_id, input);
+            }
+        }
+        let mut ids = self
+            .thread_event_channels
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        ids.extend(
+            self.agent_navigation
+                .tracked_thread_ids()
+                .into_iter()
+                .filter(|id| !self.thread_event_channels.contains_key(id)),
+        );
+        let mut running = false;
+        for thread_id in &ids {
+            if self.side_threads.contains_key(thread_id) {
+                continue;
+            }
+            if let Some(channel) = self.thread_event_channels.get(thread_id) {
+                let store = channel.store.lock().await;
+                running |= store.active_turn_id().is_some();
+                if Some(*thread_id) != self.current_displayed_thread_id()
+                    && let Some(input) = store.input_state.clone()
+                {
+                    self.agents_overview.input_states.insert(*thread_id, input);
+                }
+                let requests = store.pending_replay_requests();
+                if !requests.is_empty() {
+                    self.agents_overview
+                        .dispatched_requests
+                        .entry(*thread_id)
+                        .or_default()
+                        .extend(requests);
+                }
+            } else {
+                running |= self
+                    .agent_navigation
+                    .get(thread_id)
+                    .is_some_and(|entry| entry.is_running);
+            }
+        }
+        if running {
+            for thread_id in ids {
+                if !self.side_threads.contains_key(&thread_id) {
+                    self.agents_overview
+                        .dispatched_requests
+                        .entry(thread_id)
+                        .or_default();
+                }
+            }
+        }
+    }
+
+    pub(super) async fn commit_overview_attachment(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        ready: ResumeReady,
+    ) -> Result<()> {
+        let ResumeReady {
+            context,
+            started,
+            presentation,
+        } = ready;
+        let ResumePurpose::Overview { thread, baseline } = context.purpose else {
+            unreachable!("overview commit requires its captured settings policy");
+        };
+        let thread_id = started.session.thread_id;
+        let unloaded = matches!(thread.status, api::ThreadStatus::NotLoaded);
+        let restored_blank = matches!(presentation, ResumePresentation::CachedBlank);
+        let read_only = matches!(presentation, ResumePresentation::ReadOnly(_));
+        let preserve_explicit = unloaded || read_only;
+        self.runtime_approvals_reviewer_override = self
+            .runtime_approvals_reviewer_override
+            .filter(|_| preserve_explicit);
+        self.runtime_approval_policy_override =
+            self.runtime_approval_policy_override.filter(|policy| {
+                preserve_explicit && matches!(policy, RuntimeApprovalPolicyOverride::Explicit(_))
+            });
+        self.runtime_permission_profile_override = self
+            .runtime_permission_profile_override
+            .take()
+            .filter(|profile| {
+                preserve_explicit
+                    && profile.turn_override == RuntimePermissionProfileTurnOverride::LegacySandbox
+            });
+        self.local_settings = context.settings;
+        self.config = context.config;
+        self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
+        tui.set_notification_settings(&self.local_settings.tui.notification_settings);
+        self.file_search
+            .update_search_dir(self.config.cwd.to_path_buf());
+        if let Err(error) = self
+            .replace_chat_widget_with_app_server_thread(
+                tui,
+                started,
+                ThreadAttachPresentation::SessionLineage,
+                None,
+            )
+            .await
+        {
+            self.add_agents_overview_error(format!("Failed to attach to task: {error}"));
+            if !read_only && !restored_blank && self.chat_widget.thread_id() != Some(thread_id) {
+                self.start_navigation_cleanup(
+                    operation,
+                    server.request_handle(),
+                    thread_id,
+                    Vec::new(),
+                    CleanupContinuation::Done,
+                    false,
+                );
+            }
+            return Ok(());
+        }
+        self.chat_widget.prepare_startup_task_name_prompt();
+        if let ResumePresentation::ReadOnly(notice) = &presentation {
+            self.ensure_thread_channel(thread_id).mark_external_writer();
+            self.chat_widget.show_external_writer_thread();
+            if let Some(notice) = notice {
+                self.chat_widget.add_info_message((*notice).into(), None);
+            }
+        }
+        let mut destination = self.chat_widget.config_ref().clone();
+        if self.app_server_target.uses_remote_workspace() {
+            destination.cwd.clone_from(&self.config.cwd);
+            destination
+                .workspace_roots
+                .clone_from(&self.config.workspace_roots);
+            destination
+                .permissions
+                .set_workspace_roots(self.config.permissions.workspace_roots().to_vec());
+        }
+        if unloaded {
+            let accepted = destination.clone();
+            if let Err(error) = self.apply_runtime_policy_overrides(
+                &mut destination,
+                RuntimePolicyOverrideScope::ExplicitOnly,
+            ) {
+                self.config = accepted;
+                self.chat_widget.add_error_message(format!(
+                    "Could not restore the selected permissions: {error:#}"
+                ));
+                return Ok(());
+            }
+            self.chat_widget
+                .set_approval_policy(destination.permissions.approval_policy.value().into());
+            if let Err(error) = self
+                .chat_widget
+                .set_permission_profile_from_session_snapshot(
+                    crate::legacy_core::config::PermissionProfileSnapshot::from_session_snapshot(
+                        destination.permissions.permission_profile().clone(),
+                        destination.permissions.active_permission_profile(),
+                    ),
+                )
+            {
+                self.chat_widget.add_error_message(format!(
+                    "Could not restore the selected permissions: {error}"
+                ));
+            }
+            self.chat_widget
+                .set_approvals_reviewer(destination.approvals_reviewer);
+            self.chat_widget
+                .set_permission_network(destination.permissions.network.clone());
+        }
+        self.config = destination;
+        if !read_only {
+            let approval = self.config.permissions.approval_policy.value();
+            if self
+                .runtime_approval_policy_override
+                .is_none_or(|policy| policy.policy().to_core() != approval)
+            {
+                self.runtime_approval_policy_override = (api::AskForApproval::from(approval)
+                    != baseline.approval)
+                    .then_some(RuntimeApprovalPolicyOverride::Restored(approval.into()));
+            }
+            if self
+                .runtime_permission_profile_override
+                .as_ref()
+                .is_none_or(|profile| !profile.matches_config(&self.config))
+            {
+                self.runtime_permission_profile_override = (!baseline
+                    .permissions
+                    .matches_config(&self.config)
+                    || baseline.reviewer != self.config.approvals_reviewer)
+                    .then(|| RuntimePermissionProfileOverride::from_restored_config(&self.config));
+            }
+        }
+        if let Some(mut input) = self.agents_overview.input_states.remove(&thread_id) {
+            let pending_settings = restored_blank
+                .then(|| input.pending_thread_settings.take())
+                .flatten();
+            let preserve_in_flight_turn =
+                !read_only && self.active_turn_id_for_thread(thread_id).await.is_some();
+            self.chat_widget.restore_thread_input_state(
+                Some(input),
+                ThreadInputStateRestoreMode {
+                    preserve_in_flight_turn,
+                },
+            );
+            if let Some(settings) = pending_settings {
+                self.chat_widget.on_thread_settings_updated(settings);
+            }
+            if !preserve_in_flight_turn {
+                self.chat_widget.maybe_send_next_queued_input();
+            }
+        }
+        self.queue_farm_receipt_replay();
+        operation.intent = NavigationIntent::Resume(ResumeStage::Following {
+            thread_id,
+            presentation,
+        });
+        self.spawn_resume_effect(
+            &mut operation,
+            server.request_handle(),
+            ResumeEffect::Loaded(thread_id),
+        );
+        self.server_operations.navigation.current = Some(operation);
+        Ok(())
+    }
+}

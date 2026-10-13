@@ -1000,7 +1000,7 @@ async fn shared_overview_seeds_once_and_retains_locally_resumed_history() -> Res
     )
     .map_err(std::io::Error::other)?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, ids[2])).await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, ids[2])).await?;
     assert_eq!(app.primary_thread_id, Some(ids[2]));
     app_server.shutdown().await?;
 
@@ -1887,7 +1887,7 @@ async fn failed_root_switch_keeps_background_requests_on_the_active_session() ->
         .active_turn_id = Some("running-turn".to_string());
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    app.select_agents_overview_thread(&mut tui, &mut app_server, ThreadId::new())
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, ThreadId::new())
         .await?;
 
     assert!(app.agents_overview.dispatched_requests.is_empty());
@@ -1931,7 +1931,7 @@ async fn root_switch_preserves_vim_line_yank() -> Result<()> {
     assert_eq!(app.chat_widget.composer_text_with_pending(), "");
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target_thread_id))
         .await?;
 
     assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
@@ -1984,7 +1984,7 @@ async fn root_switch_loads_local_preferences_from_disk() -> Result<()> {
     let expected = crate::local_settings::LocalSettings::from(&config);
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id))
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target_thread_id))
         .await?;
 
     assert_eq!(app.current_displayed_thread_id(), Some(target_thread_id));
@@ -2035,7 +2035,7 @@ async fn root_switch_preserves_idle_root_with_running_subagent() -> Result<()> {
     app.active_thread_id = Some(child_id);
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    app.select_agents_overview_thread(&mut tui, &mut app_server, target.session.thread_id)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target.session.thread_id)
         .await?;
 
     assert!(
@@ -2160,7 +2160,7 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
                 AskForApproval::UnlessTrusted,
             ));
         }
-        Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
         assert_eq!(
             app.runtime_approvals_reviewer_override,
             (thread_id == thread_ids[2] || thread_id == thread_ids[3])
@@ -2197,7 +2197,7 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
     app.loader_overrides.system_requirements_path = Some(requirements.to_path_buf());
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     app.chat_widget.show_bottom_pane_view(Box::new(view));
-    Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, thread_ids[4])).await?;
+    Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_ids[4])).await?;
     assert_eq!(
         (
             app.primary_thread_id,
@@ -2250,7 +2250,7 @@ async fn overview_selection_applies_user_permissions_only_to_unloaded_threads() 
         AppEvent::UpdateApprovalsReviewer(ApprovalsReviewer::AutoReview),
     ))
     .await?;
-    app.select_agents_overview_thread(&mut tui, &mut app_server, thread_ids[4])
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_ids[4])
         .await?;
     let resumed = app_server
         .resume_thread(
@@ -2324,12 +2324,12 @@ async fn overview_cold_resume_honors_working_directory_selection() -> Result<()>
         // On this current-thread runtime, the server cannot answer until we yield. Cancel the
         // pending selection to release its terminal borrow and inspect what the user sees now.
         let mut selection =
-            Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, thread_id));
+            Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id));
         assert!(futures::poll!(&mut selection).is_pending());
         drop(selection);
         let pending_loading =
             crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
-        Box::pin(app.select_agents_overview_thread(&mut tui, &mut app_server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, thread_id)).await?;
         // The widget replacement clears the terminal; feedback must remain until the next draw.
         let loading =
             crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
@@ -2390,7 +2390,7 @@ async fn restored_server_permission_profile_survives_cd_without_turn_override() 
     let target_thread_id = target.session.thread_id;
     let mut tui = crate::tui::test_support::make_test_tui()?;
 
-    app.select_agents_overview_thread(&mut tui, &mut app_server, target_thread_id)
+    app.select_agents_overview_thread_and_settle(&mut tui, &mut app_server, target_thread_id)
         .await?;
     app.config
         .permissions
@@ -3157,7 +3157,7 @@ async fn overview_fork_keeps_idle_source_input_queued() -> Result<()> {
         let mut tui = crate::tui::test_support::make_test_tui()?;
         let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
         if cached_primary {
-            Box::pin(app.select_agents_overview_thread(&mut tui, &mut server, source)).await?;
+            Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, source)).await?;
             assert_eq!(app.current_displayed_thread_id(), Some(source));
             app.store_active_thread_receiver().await;
         }

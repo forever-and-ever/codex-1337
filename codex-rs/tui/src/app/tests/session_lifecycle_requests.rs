@@ -3655,7 +3655,7 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
         app.runtime_permission_profile_override = Some(
             RuntimePermissionProfileOverride::from_restored_config(&app.config),
         );
-        Box::pin(app.select_agents_overview_thread(&mut tui, &mut server, thread_id)).await?;
+        Box::pin(app.select_agents_overview_thread_and_settle(&mut tui, &mut server, thread_id)).await?;
         assert_eq!(recorded_params(&requests, "thread/resume").len(), 1);
         assert!(recorded_params(&requests, "turn/start").is_empty());
         if matches!(
