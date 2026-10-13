@@ -910,61 +910,20 @@ impl App {
         Some((config, remote_cwd))
     }
 
-    pub(super) async fn stop_agents_overview_thread(
+    pub(super) fn stop_agents_overview_thread(
         &mut self,
-        app_server: &mut AppServerSession,
+        app_server: &AppServerSession,
         thread_id: ThreadId,
     ) {
-        let active_turn_id = match self.active_turn_id_for_thread(thread_id).await {
-            Some(turn_id) => Some(turn_id),
-            None => match async {
-                let thread = app_server
-                    .thread_read(thread_id, /*include_turns*/ false)
-                    .await?;
-                let turns = match thread.history_mode {
-                    ThreadHistoryMode::Paginated if app_server.supports_paginated_history() => {
-                        app_server
-                            .thread_turns_page(
-                                thread_id,
-                                /*cursor*/ None,
-                                crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
-                            )
-                            .await?
-                            .data
-                    }
-                    ThreadHistoryMode::Legacy | ThreadHistoryMode::Paginated => {
-                        app_server
-                            .thread_read(thread_id, /*include_turns*/ true)
-                            .await?
-                            .turns
-                    }
-                };
-                Ok::<_, color_eyre::Report>(
-                    turns
-                        .into_iter()
-                        .find(|turn| turn.status == TurnStatus::InProgress)
-                        .map(|turn| turn.id),
-                )
-            }
-            .await
-            {
-                Ok(turn_id) => turn_id,
-                Err(error) => {
-                    self.add_agents_overview_error(format!(
-                        "Failed to stop background task: {error}"
-                    ));
-                    self.refresh_agents_overview_threads(app_server);
-                    return;
-                }
-            },
-        };
-        let Some(turn_id) = active_turn_id else {
-            return;
-        };
-        if let Err(error) = app_server.turn_interrupt(thread_id, turn_id).await {
-            self.add_agents_overview_error(format!("Failed to stop background task: {error}"));
-            self.refresh_agents_overview_threads(app_server);
-        }
+        self.enqueue_server_operation(
+            app_server,
+            thread_id,
+            super::turn_submissions::ServerOperation::Control(
+                super::turn_submissions::ControlOperation::InterruptActive {
+                    paginated_history: app_server.supports_paginated_history(),
+                },
+            ),
+        );
     }
 
     #[cfg(any(unix, windows))]

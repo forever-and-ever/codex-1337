@@ -2789,8 +2789,7 @@ impl App {
                 self.run_agents_overview_action(tui, app_server, thread_id, action).await?;
             }
             AppEvent::StopAgentsOverviewThread { thread_id } => {
-                self.stop_agents_overview_thread(app_server, thread_id)
-                    .await;
+                self.stop_agents_overview_thread(app_server, thread_id);
             }
             #[cfg(any(unix, windows))]
             AppEvent::StartAgentsDaemon => {

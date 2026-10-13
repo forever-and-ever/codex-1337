@@ -624,8 +624,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .await
         .set_active_turn_id("consent-control".into());
     let interrupts_before_consent = recorded_params(&requests, "turn/interrupt").len();
-    app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
-        .await?;
+    app.stop_agents_overview_thread(&server, other_id);
     tokio::time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/interrupt").len() == interrupts_before_consent {
             tokio::task::yield_now().await;

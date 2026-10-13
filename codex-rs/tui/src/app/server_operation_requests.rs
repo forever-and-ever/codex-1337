@@ -115,6 +115,9 @@ impl ServerOperation {
                 "Detaching frontend before exit"
             }
             Self::Control(control::ControlOperation::Interrupt { .. }) => "Interrupting turn",
+            Self::Control(control::ControlOperation::InterruptActive { .. }) => {
+                "Stopping background task"
+            }
             Self::Control(control::ControlOperation::StopAndExit { .. }) => {
                 "Stopping task before exit"
             }
@@ -569,6 +572,13 @@ impl App {
                 state.rename_target = Some(thread_id);
             }
             self.repaint_agents_overview();
+            self.add_agents_overview_error(message);
+            return;
+        }
+        if matches!(
+            operation,
+            ServerOperation::Control(control::ControlOperation::InterruptActive { .. })
+        ) {
             self.add_agents_overview_error(message);
             return;
         }

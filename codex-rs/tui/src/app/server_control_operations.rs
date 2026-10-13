@@ -6,6 +6,9 @@ use codex_app_server_protocol as api;
 
 #[derive(Clone)]
 pub(in crate::app) enum ControlOperation {
+    InterruptActive {
+        paginated_history: bool,
+    },
     Interrupt {
         turn_id: String,
     },
@@ -60,6 +63,81 @@ pub(super) async fn send(
             return Ok(OperationReceipt::ExitDetached(receipt));
         }
         ControlOperation::Interrupt { turn_id } => (Some(turn_id), false),
+        ControlOperation::InterruptActive { paginated_history } => {
+            let cached = store.lock().await.active_turn_id().map(str::to_owned);
+            let turn_id = match cached {
+                Some(turn_id) => Some(turn_id),
+                None => {
+                    let thread: api::ThreadReadResponse = handle
+                        .request_typed(api::ClientRequest::ThreadRead {
+                            request_id: api::RequestId::String(format!("tui-operation-{id}-read")),
+                            params: api::ThreadReadParams {
+                                thread_id: thread_id.to_string(),
+                                include_turns: false,
+                            },
+                        })
+                        .await?;
+                    let history = if thread.thread.history_mode == ThreadHistoryMode::Paginated
+                        && paginated_history
+                    {
+                        None
+                    } else {
+                        match handle
+                            .request_typed::<api::ThreadReadResponse>(
+                                api::ClientRequest::ThreadRead {
+                                    request_id: api::RequestId::String(format!(
+                                        "tui-operation-{id}-history"
+                                    )),
+                                    params: api::ThreadReadParams {
+                                        thread_id: thread_id.to_string(),
+                                        include_turns: true,
+                                    },
+                                },
+                            )
+                            .await
+                        {
+                            Ok(history) => Some(history.thread.turns),
+                            // Legacy negotiation can coexist with a migrated paginated rollout.
+                            Err(TypedRequestError::Server { ref source, .. })
+                                if source.message
+                                    == "paginated threads do not support thread/read(includeTurns=true)" =>
+                            {
+                                None
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    };
+                    let turns = match history {
+                        Some(turns) => turns,
+                        None => {
+                            let page: api::ThreadTurnsListResponse = handle
+                                .request_typed(api::ClientRequest::ThreadTurnsList {
+                                    request_id: api::RequestId::String(format!(
+                                        "tui-operation-{id}-turns"
+                                    )),
+                                    params: api::ThreadTurnsListParams {
+                                        thread_id: thread_id.to_string(),
+                                        cursor: None,
+                                        limit: Some(
+                                            crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
+                                        ),
+                                        sort_direction: Some(api::SortDirection::Desc),
+                                        items_view: Some(api::TurnItemsView::NotLoaded),
+                                    },
+                                })
+                                .await?;
+                            page.data
+                        }
+                    };
+                    turns
+                        .into_iter()
+                        .find(|turn| turn.status == TurnStatus::InProgress)
+                        .map(|turn| turn.id)
+                }
+            };
+            store.lock().await.pending_interrupt_turn_id = turn_id.clone();
+            (turn_id, false)
+        }
         ControlOperation::StopAndExit { turn_id, goal } => {
             if matches!(goal, GoalStop::Pause) {
                 let _: api::ThreadGoalSetResponse = handle

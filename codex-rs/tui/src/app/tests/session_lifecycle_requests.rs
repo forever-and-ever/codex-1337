@@ -2351,8 +2351,8 @@ async fn agents_overview_stop_uses_history_mode_for_turn_lookup() -> Result<()> 
         let previous_reads = recorded_params(&requests, "thread/read");
         let previous_turn_page_count = recorded_params(&requests, "thread/turns/list").len();
 
-        app.stop_agents_overview_thread(&mut app_server, thread_id)
-            .await;
+        app.stop_agents_overview_thread(&app_server, thread_id);
+        app.settle_turn_submissions(&mut app_server).await?;
 
         let reads = recorded_params(&requests, "thread/read");
         let include_turns = reads[previous_reads.len()..]
@@ -2476,8 +2476,8 @@ async fn agents_overview_stop_uses_full_history_after_legacy_negotiation() -> Re
     .await?;
     app_server.start_thread(&app.config).await?;
 
-    app.stop_agents_overview_thread(&mut app_server, thread_id)
-        .await;
+    app.stop_agents_overview_thread(&app_server, thread_id);
+    app.settle_turn_submissions(&mut app_server).await?;
 
     let include_turns = recorded_params(&requests, "thread/read")
         .into_iter()

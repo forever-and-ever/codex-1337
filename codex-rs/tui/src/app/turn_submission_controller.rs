@@ -602,7 +602,7 @@ impl App {
                         task.abort();
                     }
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                        if matches!(&**operation, ServerOperation::Control(control::ControlOperation::Interrupt { .. })))
+                        if matches!(&**operation, ServerOperation::Control(control::ControlOperation::Interrupt { .. } | control::ControlOperation::InterruptActive { .. })))
                     {
                         lane.active
                             .origin
@@ -780,7 +780,10 @@ impl App {
             };
             if matches!(
                 &**operation,
-                ServerOperation::Control(control::ControlOperation::Interrupt { .. })
+                ServerOperation::Control(
+                    control::ControlOperation::Interrupt { .. }
+                        | control::ControlOperation::InterruptActive { .. }
+                )
             ) {
                 // This is the sole active control lease for this captured store. A successor
                 // cannot dispatch before this receipt is reduced, including a wrong-turn retry.
