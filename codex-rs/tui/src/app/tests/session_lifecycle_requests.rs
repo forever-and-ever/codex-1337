@@ -1,6 +1,7 @@
 use super::*;
 use crate::app_event::TranscriptExportDestination;
 use crate::bottom_pane::BottomPaneView;
+use crate::local_settings::LocalSettings;
 use app_test_support::create_fake_paginated_rollout;
 use app_test_support::create_fake_parented_rollout_with_source;
 use app_test_support::create_fake_rollout;
@@ -3749,7 +3750,7 @@ async fn side_fork_uses_one_request_for_long_paginated_history() -> Result<()> {
     config.terminal_resize_reflow.max_rows =
         crate::legacy_core::config::TerminalResizeReflowMaxRows::Limit(100);
     let filename_ts = "2025-01-05T12-00-00";
-    let source_id = crate::app_test_support::create_fake_paginated_rollout(
+    let source_id = create_fake_paginated_rollout(
         config.codex_home.as_path(),
         filename_ts,
         "2025-01-05T12:00:00Z",
@@ -3758,7 +3759,7 @@ async fn side_fork_uses_one_request_for_long_paginated_history() -> Result<()> {
         /*git_info*/ None,
     )
     .expect("create long paginated source rollout");
-    let source_path = crate::app_test_support::rollout_path(
+    let source_path = rollout_path(
         config.codex_home.as_path(),
         filename_ts,
         source_id.as_str(),
