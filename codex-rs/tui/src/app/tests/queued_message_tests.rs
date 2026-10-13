@@ -768,7 +768,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await;
     assert!(app.chat_widget.composer_text_with_pending().contains('x'));
     let pending = match app.server_operations.preview(visible_before).navigation {
-        Some(crate::bottom_pane::NavigationPreview::Preparing { id }) => id,
+        Some(super::super::turn_submissions::NavigationPreview::Preparing { id }) => id,
         preview => panic!("expected owned resume metadata: {preview:?}"),
     };
     app.handle_submission_event(

@@ -11,7 +11,6 @@ use super::app_server_event_targets::server_request_thread_id;
 use super::*;
 use crate::app_server_session::source_agent_path;
 use crate::app_server_session::thread_blocks_direct_input;
-use crate::chatwidget::ThreadInputStateRestoreMode;
 
 #[derive(Clone, Copy)]
 pub(super) enum ThreadAttachPresentation {
