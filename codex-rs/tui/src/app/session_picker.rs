@@ -63,7 +63,7 @@ impl App {
             SessionSelection::Fork(_) => {}
         }
 
-        if self.server_operations.navigation.current.is_none() {
+        if self.server_operations.preview(None).navigation.is_none() {
             self.chat_widget.maybe_send_next_queued_input();
         }
         // Leaving alt-screen may blank the inline viewport; force a redraw either way.
