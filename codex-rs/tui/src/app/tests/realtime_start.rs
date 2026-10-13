@@ -208,6 +208,7 @@ async fn lifecycle_actions_stop_parked_voice_before_removing_owner() -> Result<(
         } else {
             Box::pin(app.run_agents_overview_action(&mut tui, &mut server, owner, action)).await?;
         }
+        app.settle_removal(&mut tui, &mut server).await?;
         assert_eq!(app.voice_owner_thread_id(), None);
         assert_eq!(
             recorded_params(&requests, "thread/realtime/stop"),

@@ -710,6 +710,7 @@ async fn rejected_delete_preserves_a_live_attachment_and_draft() -> Result<()> {
         AgentsOverviewAction::Delete,
     ))
     .await?;
+    app.settle_removal(&mut tui, &mut app_server).await?;
     assert_eq!(
         (app.primary_thread_id, app.chat_widget.thread_id()),
         (Some(id), Some(id))
@@ -866,6 +867,7 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
                 .join(rollout.file_name().unwrap());
             std::fs::create_dir_all(&blocked_archive)?;
             Box::pin(app.run_agents_overview_action(&mut tui, &mut app_server, id, action)).await?;
+            app.settle_removal(&mut tui, &mut app_server).await?;
             assert_eq!(
                 (app.primary_thread_id, app.chat_widget.thread_id()),
                 (None, None)
@@ -933,6 +935,7 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
         let stale_threads = app.agents_overview.threads.clone();
         Box::pin(app.run_agents_overview_action(&mut tui, &mut app_server, background, action))
             .await?;
+        app.settle_removal(&mut tui, &mut app_server).await?;
         app.apply_agents_overview_thread_refresh(
             &app_server,
             request_id,
@@ -964,6 +967,7 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
             action,
         ))
         .await?;
+        app.settle_removal(&mut tui, &mut app_server).await?;
         assert_eq!(
             (app.primary_thread_id, app.chat_widget.thread_id()),
             (Some(primary), Some(primary))
@@ -1048,6 +1052,7 @@ async fn lifecycle_removes_background_and_current_tasks_without_losing_the_dashb
                 }),
             });
         Box::pin(app.handle_event(&mut tui, &mut app_server, confirmed)).await?;
+        app.settle_removal(&mut tui, &mut app_server).await?;
         if app.agents_overview.request_id.is_some() {
             finish_overview_refresh(&mut app, &app_server, &mut rx).await;
         }

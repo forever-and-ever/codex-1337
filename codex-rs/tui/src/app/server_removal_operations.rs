@@ -345,6 +345,20 @@ impl App {
         }
     }
 
+    async fn prepare_removal_detach(&mut self) -> detach::DetachPlan {
+        let mut plan = self
+            .prepare_detach_plan(detach::DetachScope::Navigation { destination: None })
+            .await;
+        plan.targets.retain(|target| {
+            matches!(target.kind, detach::DetachKind::Side { .. })
+                || self
+                    .thread_event_channels
+                    .get(&target.thread_id)
+                    .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::Live)
+        });
+        plan
+    }
+
     pub(super) async fn finish_removal_completion(
         &mut self,
         tui: &mut tui::Tui,
@@ -396,8 +410,10 @@ impl App {
                             })
                             .await;
                         plan.targets.retain(|entry| {
-                            matches!(target.request.source, RemovalSource::Current)
+                            (matches!(target.request.source, RemovalSource::Current)
                                 && !matches!(self.app_server_target, AppServerTarget::Embedded)
+                                || matches!(target.request.source, RemovalSource::Overview)
+                                    && target.primary.is_some())
                                 && matches!(entry.kind, detach::DetachKind::Side { .. })
                         });
                         if let Some(voice) = voice {
@@ -462,11 +478,7 @@ impl App {
                                         AgentsOverviewAction::Delete => ExitReason::ThreadRemoved,
                                     });
                                 } else {
-                                    let plan = self
-                                        .prepare_detach_plan(detach::DetachScope::Navigation {
-                                            destination: None,
-                                        })
-                                        .await;
+                                    let plan = self.prepare_removal_detach().await;
                                     self.continue_removal(
                                         server,
                                         lane,
@@ -492,11 +504,7 @@ impl App {
                             self.pause_removed_primary(&target).await;
                         }
                         if !loaded && self.removal_view_matches(&target) {
-                            let plan = self
-                                .prepare_detach_plan(detach::DetachScope::Navigation {
-                                    destination: None,
-                                })
-                                .await;
+                            let plan = self.prepare_removal_detach().await;
                             self.continue_removal(
                                 server,
                                 lane,
@@ -531,6 +539,12 @@ impl App {
                         if matches!(certainty, DetachCertainty::Confirmed)
                             && self.removal_view_matches(&target)
                         {
+                            let input = self.chat_widget.capture_thread_input_state().and_then(
+                                |mut input| {
+                                    input.questions = None;
+                                    input.has_unsent_input().then_some(input)
+                                },
+                            );
                             self.reset_for_thread_switch(tui)?;
                             self.pending_thread_switch_resets += 1;
                             self.app_event_tx
@@ -542,6 +556,19 @@ impl App {
                                 None,
                             );
                             self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+                            if let Some(input) = input {
+                                self.chat_widget.restore_thread_input_state(
+                                    Some(input),
+                                    crate::chatwidget::ThreadInputStateRestoreMode {
+                                        preserve_in_flight_turn: false,
+                                    },
+                                );
+                                self.chat_widget.restore_session_draft();
+                                self.chat_widget.add_info_message(
+                                    "Unsent input was kept as a new draft.".into(),
+                                    None,
+                                );
+                            }
                             self.open_agents_overview(server);
                         }
                         if let Some(failure) = failure {
@@ -574,6 +601,32 @@ impl App {
         )
         .await?;
         Ok(control)
+    }
+
+    #[cfg(test)]
+    pub(in crate::app) async fn settle_removal(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+    ) -> Result<AppRunControl> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while self.server_operations.lanes.get(&OperationLane::Connection).is_some_and(|lane| {
+                !matches!(lane.state, LaneState::Uncertain)
+                    && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                        if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(_))))
+            }) {
+                tokio::select! {
+                    completion = self.thread_delivery.completion_rx.recv() => {
+                        self.handle_local_thread_completion(server, completion.expect("local receipt channel open")).await?;
+                    }
+                    completion = self.server_operations.control_rx.recv() => {
+                        let control = self.handle_server_completion(tui, server, completion.expect("server receipt channel open")).await?;
+                        if !matches!(control, AppRunControl::Continue) { return Ok(control); }
+                    }
+                }
+            }
+            Ok(AppRunControl::Continue)
+        }).await?
     }
 
     fn hold_uncertain_removal(&mut self, mut lane: SubmissionLane) {

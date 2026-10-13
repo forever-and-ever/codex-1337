@@ -855,7 +855,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     );
     app.submit_thread_op(&mut server, other_id, AppCommand::ReloadUserConfig)
-        .await;
+        .await?;
     app.enqueue_subagent_turn(
         &server,
         closing_side,

@@ -852,6 +852,7 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
             app.delete_current_thread(&mut tui, &mut server).await?,
             AppRunControl::Continue
         );
+        app.settle_removal(&mut tui, &mut server).await?;
         assert_eq!(app.active_thread_id, Some(missing_id));
         assert_eq!(
             app.chat_widget.composer_text_with_pending(),
@@ -902,6 +903,7 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
                 app.delete_current_thread(&mut tui, &mut server).await?,
                 AppRunControl::Continue
             );
+            app.settle_removal(&mut tui, &mut server).await?;
             assert_eq!(app.active_thread_id, Some(thread_id));
             assert!(app.side_threads.contains_key(&side_id));
             assert!(!app.chat_widget.has_active_view());
@@ -909,9 +911,15 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
         }
         let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
         app.app_event_tx = AppEventSender::new(tx);
-        let control =
+        assert_matches!(
             Box::pin(app.handle_event(&mut tui, &mut server, AppEvent::DeleteCurrentThread))
-                .await?;
+                .await?,
+            AppRunControl::Continue
+        );
+        app.chat_widget
+            .insert_str(" typed while deletion was pending");
+        let retained_draft = app.chat_widget.composer_text_with_pending();
+        let control = app.settle_removal(&mut tui, &mut server).await?;
         assert!(
             server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -946,7 +954,11 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
                 ),
                 (None, None, None)
             );
-            assert!(app.chat_widget.composer_is_empty());
+            assert_eq!(app.chat_widget.composer_text_with_pending(), retained_draft);
+            assert_eq!(
+                app.chat_widget.session_draft,
+                Some(crate::chatwidget::SessionDraft::Editing)
+            );
             assert!(app.chat_widget.has_active_view());
         }
         assert_eq!(
@@ -986,9 +998,15 @@ async fn archive_current_thread_reports_success_only_after_archiving() -> Result
         AppRunControl::Continue
     );
 
+    app.settle_removal(&mut tui, &mut app_server).await?;
     app.active_thread_id = Some(thread_id);
     assert_matches!(
-        app.archive_current_thread(&mut tui, &mut app_server).await?,
+        app.archive_current_thread(&mut tui, &mut app_server)
+            .await?,
+        AppRunControl::Continue
+    );
+    assert_matches!(
+        app.settle_removal(&mut tui, &mut app_server).await?,
         AppRunControl::Exit(ExitReason::Archived(archived_id)) if archived_id == thread_id
     );
 
