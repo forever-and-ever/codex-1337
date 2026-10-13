@@ -192,6 +192,12 @@ class AgentPath(RootModel[str]):
     root: str
 
 
+class AgentWaitOutcome(Enum):
+    timed_out = "timedOut"
+    mailbox_activity = "mailboxActivity"
+    steered = "steered"
+
+
 class ClockAlarmCondition(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7557,6 +7563,14 @@ class AdditionalContextEntry(BaseModel):
     value: str
 
 
+class AgentWaitCompletion(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    elapsed_ms: Annotated[int, Field(alias="elapsedMs", ge=0)]
+    outcome: AgentWaitOutcome
+
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11386,6 +11400,7 @@ class CollabAgentToolCallThreadItem(BaseModel):
     type: Annotated[
         Literal["collabAgentToolCall"], Field(title="CollabAgentToolCallThreadItemType")
     ]
+    wait_completion: Annotated[AgentWaitCompletion | None, Field(alias="waitCompletion")] = None
 
 
 class WebSearchThreadItem(BaseModel):

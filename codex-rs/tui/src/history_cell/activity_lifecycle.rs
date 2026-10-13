@@ -74,9 +74,7 @@ impl Revision<'_> {
                 let new_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(newer.as_ref())?;
                 let old_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref())?;
                 (old_wait.id == new_wait.id).then(|| {
-                    if new_wait.status
-                        == codex_app_server_protocol::CollabAgentToolCallStatus::InProgress
-                    {
+                    if new_wait.state.is_running() {
                         Arc::clone(cell)
                     } else {
                         Arc::clone(newer)

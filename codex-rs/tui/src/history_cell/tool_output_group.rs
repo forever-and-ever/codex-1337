@@ -327,6 +327,45 @@ impl HistoryCell for ToolOutputGroup {
         expanded: &HashSet<String>,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
+        let wait = self.members.iter().find(|member| {
+            crate::multi_agents::AgentToolHistoryCell::wait_for(member.as_ref()).is_some()
+        });
+        if wait.is_some()
+            && self.members.iter().all(|member| {
+                crate::multi_agents::AgentToolHistoryCell::wait_for(member.as_ref()).is_some()
+                    || member.as_any().is::<ToolOutputCell>()
+            })
+        {
+            let outputs = self
+                .members
+                .iter()
+                .filter_map(|member| member.as_any().downcast_ref::<ToolOutputCell>())
+                .collect::<Vec<_>>();
+            return Some(super::agent_wait_projection::wait_output_parts(
+                wait.map(AsRef::as_ref),
+                &outputs,
+                width,
+                expanded,
+                mode,
+            ));
+        }
+        if !self.members.is_empty()
+            && self.members.iter().all(|member| {
+                member
+                    .as_any()
+                    .downcast_ref::<ToolOutputCell>()
+                    .is_some_and(ToolOutputCell::is_agent_wait)
+            })
+        {
+            let outputs = self
+                .members
+                .iter()
+                .filter_map(|member| member.as_any().downcast_ref::<ToolOutputCell>())
+                .collect::<Vec<_>>();
+            return Some(super::agent_wait_projection::wait_output_parts(
+                None, &outputs, width, expanded, mode,
+            ));
+        }
         if let Some(mcp) = self.members.first()
             && mcp.as_any().is::<super::McpToolCallCell>()
             && self

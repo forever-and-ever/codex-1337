@@ -23,7 +23,8 @@ use std::sync::OnceLock;
 #[derive(Debug)]
 pub(crate) struct ToolOutputCell {
     id: String,
-    call_id: String,
+    call_id: Option<String>,
+    name: codex_protocol::ToolName,
     output: FunctionCallOutputBody,
     readable: String,
     wait: Option<WaitOutcome>,
@@ -36,7 +37,7 @@ impl ToolOutputCell {
     /// Only a known zero measurement may hide this empty, successful presentation.
     /// Captured headers with status other than successful completion remain visible.
     pub(crate) fn is_empty_completed_return(&self) -> bool {
-        if !self.readable.is_empty() || self.wait.is_some() {
+        if !self.readable.is_empty() || self.wait.is_some() || self.has_agent_wait_name() {
             return false;
         }
         match &self.output {
@@ -52,15 +53,25 @@ impl ToolOutputCell {
         }
     }
 
-    fn heading(&self) -> &'static str {
-        if self.wait.is_some() {
-            "Waited"
+    fn heading(&self) -> std::borrow::Cow<'static, str> {
+        if self.has_agent_wait_name() {
+            format!("{} returned", self.name).into()
+        } else if self.wait.is_some() {
+            "Waited".into()
         } else {
-            "Returned"
+            "Returned".into()
         }
     }
     pub(crate) fn id(&self) -> &str {
         &self.id
+    }
+
+    pub(crate) fn is_agent_wait(&self) -> bool {
+        self.name == codex_protocol::ToolName::new(Some("wrangler_agents".into()), "wait_agent")
+    }
+
+    pub(crate) fn has_agent_wait_name(&self) -> bool {
+        self.name.name == "wait_agent"
     }
 
     pub(crate) fn is_item(item: &codex_app_server_protocol::ThreadItem) -> bool {
@@ -77,7 +88,10 @@ impl ToolOutputCell {
         namespace: Option<&str>,
         output: &FunctionCallOutputBody,
     ) -> Option<Self> {
-        let call_id = call_id?;
+        let tool_name = codex_protocol::ToolName::new(namespace.map(str::to_owned), name);
+        if call_id.is_none() && name != "wait_agent" {
+            return None;
+        }
         let code_mode = codex_protocol::ToolName::new(namespace.map(str::to_owned), name)
             .is_default_namespace()
             && matches!(name, "exec" | "wait");
@@ -110,7 +124,8 @@ impl ToolOutputCell {
         };
         Some(Self {
             id: id.to_owned(),
-            call_id: call_id.to_owned(),
+            call_id: call_id.map(str::to_owned),
+            name: tool_name,
             output: output.clone(),
             readable,
             wait,
@@ -233,6 +248,17 @@ impl HistoryCell for ToolOutputCell {
             .is_some_and(|blocks| blocks.iter().any(Option::is_some))
     }
 
+    fn output_parts(
+        &self,
+        width: u16,
+        _reserve: usize,
+        expanded: &std::collections::HashSet<String>,
+        mode: OutputMode,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        self.has_agent_wait_name().then(|| {
+            super::agent_wait_projection::wait_output_parts(None, &[self], width, expanded, mode)
+        })
+    }
     fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
         let mut lines = self.compact_hyperlink_lines(width);
         lines.extend(self.output_lines(width, mode));
@@ -250,7 +276,7 @@ impl HistoryCell for ToolOutputCell {
         Some(header)
     }
     fn outer_call_id(&self) -> Option<&str> {
-        Some(&self.call_id)
+        self.call_id.as_deref()
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<super::ActivityDisclosure> {

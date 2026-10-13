@@ -4015,6 +4015,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
             prompt: Some(CHILD_PROMPT.to_string()),
             model: Some(format!("mock_provider/{REQUESTED_MODEL}")),
             reasoning_effort: Some(REQUESTED_REASONING_EFFORT),
+            wait_completion: None,
             agents_states: HashMap::new(),
         }
     );

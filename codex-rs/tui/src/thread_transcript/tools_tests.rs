@@ -312,6 +312,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
             prompt: Some("Inspect the parser".to_string()),
             model: None,
             reasoning_effort: None,
+            wait_completion: None,
             agents_states: Default::default(),
         };
         let cells = thread_items_to_transcript_cells(

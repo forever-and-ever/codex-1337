@@ -4,7 +4,8 @@ expression: "stages.join(\"\\n\\n\")"
 ---
 InProgress
               • Started `/root/worker`
-              • Waiting for agents
+        [+]   • Waiting for agent updates
 
 Completed
               • Started `/root/worker`
+        [+]   • Waited for agent updates · outcome unavailable

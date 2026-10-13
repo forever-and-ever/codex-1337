@@ -449,6 +449,9 @@ pub enum ThreadItem {
         reasoning_effort: Option<ReasoningEffort>,
         /// Last known status of the target agents, when available.
         agents_states: HashMap<String, CollabAgentState>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        wait_completion: Option<codex_protocol::agent_wait::AgentWaitCompletion>,
     },
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -1052,6 +1055,7 @@ impl From<CoreTurnItem> for ThreadItem {
             },
             CoreTurnItem::CollabAgentToolCall(call) => ThreadItem::CollabAgentToolCall {
                 id: call.id,
+                wait_completion: call.wait_completion,
                 tool: call.tool.into(),
                 status: call.status.into(),
                 sender_thread_id: call.sender_thread_id.to_string(),

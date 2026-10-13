@@ -2,6 +2,8 @@ use super::*;
 use crate::session::InputQueueActivity;
 use crate::tools::handlers::multi_agents_spec::WaitAgentTimeoutOptions;
 use crate::tools::handlers::multi_agents_spec::create_wait_agent_tool_v2;
+use codex_protocol::agent_wait::AgentWaitCompletion;
+use codex_protocol::agent_wait::AgentWaitOutcome;
 use codex_tools::ToolSpec;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -77,6 +79,7 @@ impl Handler {
             .emit_turn_item_started(
                 &turn,
                 &TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
+                    wait_completion: None,
                     id: call_id.clone(),
                     tool: CollabAgentTool::Wait,
                     status: CollabAgentToolCallStatus::InProgress,
@@ -94,17 +97,18 @@ impl Handler {
         let wait_started = Instant::now();
         let deadline = wait_started + Duration::from_millis(timeout_ms as u64);
         let outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline).await;
+        let elapsed = wait_started.elapsed();
         // A completed wait may wake for a message, user input, or its timeout.
         // Dropped waits do not have an observed outcome and are not included.
         turn.session_telemetry.record_duration(
             "codex.multi_agent.wait.duration_ms",
-            wait_started.elapsed(),
+            elapsed,
             &[(
                 "outcome",
                 match outcome {
-                    WaitOutcome::MailboxActivity => "mailbox",
-                    WaitOutcome::Steered => "steered",
-                    WaitOutcome::TimedOut => "timed_out",
+                    AgentWaitOutcome::MailboxActivity => "mailbox",
+                    AgentWaitOutcome::Steered => "steered",
+                    AgentWaitOutcome::TimedOut => "timed_out",
                 },
             )],
         );
@@ -114,6 +118,10 @@ impl Handler {
             .emit_turn_item_completed(
                 &turn,
                 TurnItem::CollabAgentToolCall(CollabAgentToolCallItem {
+                    wait_completion: Some(AgentWaitCompletion {
+                        outcome,
+                        elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                    }),
                     id: call_id,
                     tool: CollabAgentTool::Wait,
                     status: CollabAgentToolCallStatus::Completed,
@@ -152,14 +160,14 @@ pub(crate) struct WaitAgentResult {
 
 impl WaitAgentResult {
     fn from_outcome(
-        outcome: WaitOutcome,
+        outcome: AgentWaitOutcome,
         requested_timeout_ms: Option<i64>,
         timeout_ms: i64,
     ) -> Self {
         let message = match outcome {
-            WaitOutcome::MailboxActivity => "Wait completed.",
-            WaitOutcome::Steered => "Wait interrupted by new input.",
-            WaitOutcome::TimedOut => "Wait timed out.",
+            AgentWaitOutcome::MailboxActivity => "Wait completed.",
+            AgentWaitOutcome::Steered => "Wait interrupted by new input.",
+            AgentWaitOutcome::TimedOut => "Wait timed out.",
         };
         let message = match requested_timeout_ms {
             Some(requested_timeout_ms) if requested_timeout_ms < timeout_ms => format!(
@@ -169,7 +177,7 @@ impl WaitAgentResult {
         };
         Self {
             message,
-            timed_out: outcome == WaitOutcome::TimedOut,
+            timed_out: outcome == AgentWaitOutcome::TimedOut,
         }
     }
 }
@@ -194,29 +202,22 @@ impl ToolOutput for WaitAgentResult {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WaitOutcome {
-    MailboxActivity,
-    Steered,
-    TimedOut,
-}
-
 async fn wait_for_activity(
     activity_rx: &mut tokio::sync::watch::Receiver<InputQueueActivity>,
     pending_activity: Option<InputQueueActivity>,
     deadline: Instant,
-) -> WaitOutcome {
+) -> AgentWaitOutcome {
     if let Some(activity) = pending_activity {
         return match activity {
-            InputQueueActivity::Mailbox => WaitOutcome::MailboxActivity,
-            InputQueueActivity::Steer => WaitOutcome::Steered,
+            InputQueueActivity::Mailbox => AgentWaitOutcome::MailboxActivity,
+            InputQueueActivity::Steer => AgentWaitOutcome::Steered,
         };
     }
     match timeout_at(deadline, activity_rx.changed()).await {
         Ok(Ok(())) => match *activity_rx.borrow_and_update() {
-            InputQueueActivity::Mailbox => WaitOutcome::MailboxActivity,
-            InputQueueActivity::Steer => WaitOutcome::Steered,
+            InputQueueActivity::Mailbox => AgentWaitOutcome::MailboxActivity,
+            InputQueueActivity::Steer => AgentWaitOutcome::Steered,
         },
-        Ok(Err(_)) | Err(_) => WaitOutcome::TimedOut,
+        Ok(Err(_)) | Err(_) => AgentWaitOutcome::TimedOut,
     }
 }

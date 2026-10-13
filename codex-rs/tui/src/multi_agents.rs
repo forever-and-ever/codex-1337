@@ -208,6 +208,7 @@ pub(crate) fn tool_call_history_cell(
         receiver_thread_ids,
         prompt,
         agents_states,
+        wait_completion,
         ..
     } = item
     else {
@@ -278,48 +279,9 @@ pub(crate) fn tool_call_history_cell(
                 .map(|receiver_thread_id| close_end(receiver_thread_id, &mut agent_metadata))
         }
     }?;
-    let wait = (*tool == CollabAgentTool::Wait).then(|| {
-        let mut terminal_lines = match status {
-            CollabAgentToolCallStatus::Failed => vec![title_text("Agent wait failed")],
-            CollabAgentToolCallStatus::Interrupted => vec![title_text("Agent wait interrupted")],
-            CollabAgentToolCallStatus::Completed | CollabAgentToolCallStatus::InProgress => {
-                Vec::new()
-            }
-        };
-        if matches!(
-            status,
-            CollabAgentToolCallStatus::Failed | CollabAgentToolCallStatus::Interrupted
-        ) && !agents_states.is_empty()
-        {
-            terminal_lines.extend(prefix_lines(
-                wait_complete_lines(receiver_thread_ids, agents_states, &mut agent_metadata),
-                "  └ ".dim(),
-                "    ".into(),
-            ));
-        } else if *status == CollabAgentToolCallStatus::Completed {
-            let errors = agents_states
-                .iter()
-                .filter(|(_, state)| {
-                    matches!(
-                        state.status,
-                        CollabAgentStatus::Errored | CollabAgentStatus::NotFound
-                    )
-                })
-                .map(|(id, state)| (id.clone(), state.clone()))
-                .collect::<std::collections::HashMap<_, _>>();
-            if !errors.is_empty() {
-                terminal_lines.extend(prefix_lines(
-                    wait_complete_lines(receiver_thread_ids, &errors, &mut agent_metadata),
-                    "• ".dim(),
-                    "• ".dim(),
-                ));
-            }
-        }
-        WaitPresentation {
-            id: id.clone(),
-            status: status.clone(),
-            terminal_lines,
-        }
+    let wait = (*tool == CollabAgentTool::Wait).then(|| WaitPresentation {
+        id: id.clone(),
+        state: wait::WaitState::from_lifecycle(status, wait_completion.as_ref()),
     });
     Some(AgentToolHistoryCell {
         timestamp: None,
@@ -786,6 +748,7 @@ mod tests {
                 prompt: Some("Compute 11! and reply with just the integer result.".to_string()),
                 model: Some("gpt-5".to_string()),
                 reasoning_effort: Some(ReasoningEffortConfig::High),
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     robie_id.to_string(),
                     agent_state(CollabAgentStatus::PendingInit, /*message*/ None),
@@ -806,6 +769,7 @@ mod tests {
                 prompt: Some("Please continue and return the answer only.".to_string()),
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     robie_id.to_string(),
                     agent_state(CollabAgentStatus::Running, /*message*/ None),
@@ -826,6 +790,7 @@ mod tests {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::new(),
             },
             /*cached_spawn_request*/ None,
@@ -843,6 +808,7 @@ mod tests {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::from([
                     (
                         robie_id.to_string(),
@@ -869,6 +835,7 @@ mod tests {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     robie_id.to_string(),
                     agent_state(CollabAgentStatus::Completed, Some("39916800")),
@@ -954,6 +921,7 @@ mod tests {
                 prompt: Some(String::new()),
                 model: Some("gpt-5".to_string()),
                 reasoning_effort: Some(ReasoningEffortConfig::High),
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     robie_id.to_string(),
                     agent_state(CollabAgentStatus::PendingInit, /*message*/ None),
@@ -993,6 +961,7 @@ mod tests {
                 prompt: None,
                 model: None,
                 reasoning_effort: None,
+                wait_completion: None,
                 agents_states: HashMap::from([(
                     robie_id.to_string(),
                     agent_state(CollabAgentStatus::Interrupted, /*message*/ None),
