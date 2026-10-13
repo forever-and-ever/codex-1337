@@ -563,6 +563,10 @@ impl App {
                 }
                 for (_, lane) in lanes {
                     let thread_id = lane.active.origin.thread_id();
+                    if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(_))))
+                    {
+                        self.chat_widget.add_error_message("Task removal was interrupted by a connection change. Refresh the task list before trying again; no action was retried.".into());
+                    }
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Voice(voice_preferences::VoicePreferenceOperation::Confirm { .. }))))
                     {
                         self.chat_widget.add_error_message("Voice preference was saved, but confirmation was interrupted by a connection change. No write was retried.".into());

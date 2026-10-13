@@ -449,7 +449,10 @@ impl App {
                                 self.hold_uncertain_removal(lane);
                                 return Ok(control);
                             }
-                            DetachCertainty::Rejected => {}
+                            DetachCertainty::Rejected => self.present_removal_failure(
+                                &target,
+                                &"A frontend attachment could not be closed. The task was not removed; retry the action when ready.",
+                            ),
                         }
                     }
                     (RemovalOperation::Mutate(target), RemovalReceipt::Mutated(result)) => {
@@ -539,13 +542,18 @@ impl App {
                         if matches!(certainty, DetachCertainty::Confirmed)
                             && self.removal_view_matches(&target)
                         {
+                            if let Err(error) = self.reset_for_thread_switch(tui) {
+                                self.server_operations
+                                    .lanes
+                                    .insert(OperationLane::Connection, lane);
+                                return Err(error);
+                            }
                             let input = self.chat_widget.capture_thread_input_state().and_then(
                                 |mut input| {
                                     input.questions = None;
                                     input.has_unsent_input().then_some(input)
                                 },
                             );
-                            self.reset_for_thread_switch(tui)?;
                             self.pending_thread_switch_resets += 1;
                             self.app_event_tx
                                 .send(AppEvent::ResetTranscriptForThreadSwitch);
