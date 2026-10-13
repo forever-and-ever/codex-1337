@@ -3668,8 +3668,8 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
             insta::allow_duplicates! {
                 insta::assert_snapshot!(error, @"
                   Unable to complete action
-                  Failed to view thread open elsewhere: thread/read failed during TUI session lookup:
-                  thread/read failed: saved history unavailable (code -32603)
+                  Failed to view thread open elsewhere: thread/read failed during TUI session lookup: thread/
+                  read failed: saved history unavailable (code -32603)
 
 
                 › 1. Return to command center
