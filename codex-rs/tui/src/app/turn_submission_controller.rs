@@ -822,6 +822,14 @@ impl App {
                     }
                     if applicable {
                         self.reject_server_operation(&origin, operation, &failure);
+                        if matches!(
+                            &**operation,
+                            ServerOperation::Control(
+                                control::ControlOperation::InterruptActive { .. }
+                            )
+                        ) {
+                            self.refresh_agents_overview_threads(server);
+                        }
                     } else {
                         self.chat_widget.add_error_message(format!("Earlier {:?}: {} did not receive a usable acknowledgement; no retry was sent.", scope, operation.label()));
                     }
@@ -1108,11 +1116,14 @@ impl App {
         server: &mut AppServerSession,
     ) -> Result<AppRunControl> {
         tokio::time::timeout(Duration::from_secs(5), async {
+            // An uncertain effect is quiescent, not completed. Tests must inspect its
+            // retained fence instead of waiting for a receipt that cannot arrive.
             while self
                 .server_operations
                 .lanes
-                .contains_key(&OperationLane::Connection)
-                || !self.server_operations.navigation.is_empty()
+                .values()
+                .any(|lane| matches!(lane.state, LaneState::Running(_)))
+                || self.server_operations.navigation.has_running()
                 || !self.server_operations.control_rx.is_empty()
             {
                 tokio::select! {

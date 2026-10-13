@@ -164,6 +164,18 @@ sandbox = "unelevated"
     })
     .await??;
     response.single_request();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while app.chat_widget.is_user_turn_pending_or_running() {
+            let event = server
+                .next_event()
+                .await
+                .expect("server notification stream");
+            app.handle_app_server_event(&server, event).await;
+            app.drain_active_thread_events(&mut tui).await?;
+        }
+        Ok::<_, color_eyre::Report>(())
+    })
+    .await??;
     let (next, _) = app.load_new_session_config(&server).await?;
     assert_eq!(
         next.permissions.permission_profile(),
@@ -176,7 +188,19 @@ sandbox = "unelevated"
         destination.path().to_path_buf().abs(),
     )
     .await;
-    assert_eq!(app.config.cwd.as_path(), destination.path());
+    assert_eq!(
+        app.config.cwd.as_path(),
+        destination.path(),
+        "{}",
+        std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| match event {
+                AppEvent::InsertHistoryCell(cell) =>
+                    Some(lines_to_single_string(&cell.transcript_lines(200))),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     assert_ne!(app.chat_widget.thread_id(), before);
     assert!(
         !app.config

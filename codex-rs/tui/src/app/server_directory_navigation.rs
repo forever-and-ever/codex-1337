@@ -438,7 +438,11 @@ impl App {
         if detached && let Some(expected) = &mut expected {
             expected.pause_unavailable_thread();
         }
-        self.chat_widget.capture_thread_input_state() == expected
+        match (self.chat_widget.capture_thread_input_state(), expected) {
+            (Some(actual), Some(expected)) => actual.same_pending_input(&expected),
+            (None, None) => true,
+            _ => false,
+        }
     }
 
     fn directory_stale(&mut self) {

@@ -195,6 +195,14 @@ impl NavigationOwner {
         self.retire_current();
         true
     }
+
+    #[cfg(test)]
+    pub(super) fn has_running(&self) -> bool {
+        self.current
+            .iter()
+            .chain(&self.retired)
+            .any(|operation| matches!(operation.state, LaneState::Running(_)))
+    }
 }
 
 impl App {

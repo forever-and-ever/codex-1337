@@ -303,7 +303,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
 #[tokio::test]
 async fn accepted_permissions_survive_directory_change_before_notification() -> Result<()> {
     for preserve_history in [false, true] {
-        let (mut app, _events, _ops) = make_test_app_with_channels().await;
+        let (mut app, mut events, _ops) = make_test_app_with_channels().await;
         app.config.ephemeral = false;
         app.config
             .permissions
@@ -367,7 +367,19 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
             );
         }
         app.settle_navigation(&mut tui, &mut server).await?;
-        assert_ne!(app.chat_widget.thread_id(), Some(source));
+        assert_ne!(
+            app.chat_widget.thread_id(),
+            Some(source),
+            "preserve_history={preserve_history}: {}",
+            std::iter::from_fn(|| events.try_recv().ok())
+                .filter_map(|event| match event {
+                    AppEvent::InsertHistoryCell(cell) =>
+                        Some(lines_to_single_string(&cell.transcript_lines(200))),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
         assert_eq!(
             (&app.config.cwd, app.config.permissions.permission_profile()),
             (&destination, &PermissionProfile::read_only())

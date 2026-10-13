@@ -17,6 +17,28 @@ impl ThreadInputState {
                 .prepend_messages(vec![UserMessage::from(text)]),
         );
     }
+
+    pub(crate) fn same_pending_input(&self, other: &Self) -> bool {
+        // Server snapshots may refresh instruction templates and lifecycle bookkeeping
+        // without changing the human's pending input or selected model/mode controls.
+        self.composer == other.composer
+            && self.questions == other.questions
+            && self.input_queue == other.input_queue
+            && self.current_collaboration_mode.mode == other.current_collaboration_mode.mode
+            && self.current_collaboration_mode.settings.model
+                == other.current_collaboration_mode.settings.model
+            && self.current_collaboration_mode.settings.reasoning_effort
+                == other.current_collaboration_mode.settings.reasoning_effort
+            && self
+                .active_collaboration_mask
+                .as_ref()
+                .map(|mask| (&mask.mode, &mask.model, &mask.reasoning_effort))
+                == other
+                    .active_collaboration_mask
+                    .as_ref()
+                    .map(|mask| (&mask.mode, &mask.model, &mask.reasoning_effort))
+            && self.plan_mode_reasoning_effort == other.plan_mode_reasoning_effort
+    }
 }
 
 impl ChatWidget {

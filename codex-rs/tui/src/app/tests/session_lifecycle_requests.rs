@@ -2861,6 +2861,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
             .await?;
         if let Some(pending) = app.pending_working_directory_change.take() {
             Box::pin(app.finish_working_directory_change(&mut tui, &mut server, pending)).await;
+            app.settle_navigation(&mut tui, &mut server).await?;
         }
         assert_eq!(app.chat_widget.thread_id(), Some(original));
         assert_eq!(app.config.cwd, current.clone().abs());
@@ -2947,6 +2948,18 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let archived = recorded_params(&requests, "thread/archive");
     assert_eq!(removed[0]["threadId"], original.to_string());
     assert_eq!(archived[0]["threadId"], removed[1]["threadId"]);
+    assert!(
+        !app.server_operations.is_empty(),
+        "unconfirmed source detach retains its fence"
+    );
+    // A new transport epoch abandons local uncertainty, never resends the old effect.
+    // The recorder rejected source unsubscribe before touching its live subscription.
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    assert!(app.server_operations.is_empty());
     requests.lock().expect("request recorder lock").clear();
     app.handle_event(&mut tui, &mut server, change(original, "../trusted"))
         .await?;
@@ -2957,6 +2970,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         .take()
         .expect("valid /cd queued");
     Box::pin(app.finish_working_directory_change(&mut tui, &mut server, pending)).await;
+    app.settle_navigation(&mut tui, &mut server).await?;
     let forked = app.chat_widget.thread_id().expect("forked thread");
     assert_ne!(forked, original);
     let forked_rollout = app.chat_widget.rollout_path().expect("forked rollout");
