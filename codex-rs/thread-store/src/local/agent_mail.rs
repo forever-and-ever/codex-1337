@@ -93,7 +93,7 @@ impl LocalThreadStore {
                 reader
                     .read_exact(&mut last_byte)
                     .map_err(mail_history_error)?;
-                if last_byte != [b'\n'] {
+                if last_byte != *b"\n" {
                     return Err(mail_history_error(
                         "incomplete canonical record at lineage cutoff",
                     ));
@@ -103,14 +103,34 @@ impl LocalThreadStore {
                 let mut next_ordinal = segment.end.map(|end| end.end_ordinal_exclusive);
                 let mut valid_ordinals = true;
                 let mut oldest_header_mode = None;
-                while let Some(outcome) = scanner
-                    .scan_next_rollout_line()
+                let mut successor = Vec::new();
+                while let Some((outcome, record)) = scanner
+                    .scan_next_rollout_line_with_record()
                     .map_err(mail_history_error)?
                 {
                     let line = match outcome {
                         ScanOutcome::Parsed(line) => line,
-                        ScanOutcome::Rejected(error) => return Err(mail_history_error(error)),
+                        ScanOutcome::Rejected(error)
+                            if error.is_eof() && retried_record_prefix(record, &successor) =>
+                        {
+                            // Reopening can newline-terminate a failed write before retrying
+                            // its unchanged ordinal. The complete adjacent retry owns admission;
+                            // a matching partial attempt adds no record and loses no bytes.
+                            tracing::warn!(rollout = %segment.rollout_path.display(),
+                                ordinal = ?next_ordinal, bytes = record.len(),
+                                "canonical reconciliation verified a truncated retry prefix");
+                            continue;
+                        }
+                        ScanOutcome::Rejected(error) => {
+                            return Err(mail_history_error(format!(
+                                "{} before ordinal {:?}: {error}",
+                                segment.rollout_path.display(),
+                                next_ordinal
+                            )));
+                        }
                     };
+                    successor.clear();
+                    successor.extend_from_slice(record);
                     valid_ordinals &= line.ordinal.is_some_and(|ordinal| {
                         next_ordinal.is_none_or(|next| ordinal.checked_add(1) == Some(next))
                     });
@@ -177,6 +197,31 @@ impl LocalThreadStore {
         }
         Ok(())
     }
+}
+
+fn retried_record_prefix(partial: &[u8], complete: &[u8]) -> bool {
+    fn without_timestamp(record: &[u8]) -> Option<&[u8]> {
+        let value = record.strip_prefix(b"{\"timestamp\":")?;
+        let mut timestamp = serde_json::Deserializer::from_slice(value).into_iter::<String>();
+        timestamp.next()?.ok()?;
+        let rest = &value[timestamp.byte_offset()..];
+        // Require a complete numeric ordinal and item discriminator, not a shared JSON header.
+        let value = rest.strip_prefix(b",\"ordinal\":")?;
+        let mut ordinal = serde_json::Deserializer::from_slice(value).into_iter::<u64>();
+        ordinal.next()?.ok()?;
+        let value = value[ordinal.byte_offset()..].strip_prefix(b",\"type\":")?;
+        let mut kind = serde_json::Deserializer::from_slice(value).into_iter::<String>();
+        kind.next()?.ok()?;
+        value[kind.byte_offset()..].strip_prefix(b",\"payload\":")?;
+        Some(rest)
+    }
+    let Some(partial) = without_timestamp(partial) else {
+        return false;
+    };
+    let Some(complete) = without_timestamp(complete) else {
+        return false;
+    };
+    partial.len() < complete.len() && complete.starts_with(partial)
 }
 
 fn mail_history_error(error: impl std::fmt::Display) -> ThreadStoreError {
