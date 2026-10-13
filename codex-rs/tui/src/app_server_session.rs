@@ -8,6 +8,7 @@ mod comms;
 mod context_inventory;
 mod context_role;
 mod external_agent_config;
+pub(crate) mod fork_preparation;
 pub(crate) mod fs;
 mod history;
 mod models;
@@ -806,20 +807,22 @@ impl AppServerSession {
         selected_profile: Option<&PermissionProfileSelection>,
         name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
-        self.fork_thread_at_with_presentation(
-            local_settings,
-            config,
-            thread_id,
-            last_turn_id,
-            before_turn_id,
-            goal_continuation,
-            ForkPresentation::Regular,
-            selected_profile,
-            ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session,
-            name,
-        )
-        .await
+        let prepared = self
+            .prepare_fork_thread(
+                session_preparation::RequestPolicy::Unbounded,
+                local_settings,
+                config,
+                thread_id,
+                last_turn_id,
+                before_turn_id,
+                goal_continuation,
+                selected_profile,
+                name,
+            )
+            .run()
+            .await;
+        self.apply_session_observations(prepared.observations);
+        prepared.result
     }
 
     pub(crate) async fn fork_side_thread(
@@ -863,147 +866,25 @@ impl AppServerSession {
         config_source: ForkConfigSource,
         name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
-        let fork_parent = match presentation {
-            ForkPresentation::Regular => self
-                .thread_read(thread_id, /*include_turns*/ false)
-                .await
-                .ok(),
-            ForkPresentation::SideConversation => None,
-        };
-        let exclude_turns = self.history_support == ThreadHistorySupport::Paginated
-            && (fork_parent
-                .as_ref()
-                .is_some_and(|thread| thread.history_mode == ThreadHistoryMode::Paginated)
-                || presentation == ForkPresentation::SideConversation);
-        let request_id = self.next_request_id();
-        let child_fork = config_source == ForkConfigSource::Session
-            && fork_parent.as_ref().is_some_and(thread_blocks_direct_input);
-        let session_config = if child_fork || config.model.is_none() {
-            // Avoid inferring a tier from the stale client default model.
-            config.clone()
-        } else {
-            self.session_config_with_effective_service_tier(&config)
-        };
-        let mut params = ThreadForkParams {
-            name: name.as_ref().map(|name| name.name.clone()),
-            conflict_thread_ids: name.map(|name| name.conflict_thread_ids),
-            last_turn_id,
-            before_turn_id,
-            defer_goal_continuation: goal_continuation == ForkGoalContinuation::DeferUntilNextTurn,
-            exclude_turns,
-            ..thread_fork_params_from_config(
-                session_config,
+        let prepared = self
+            .prepare_fork_with_presentation(
+                session_preparation::RequestPolicy::Unbounded,
+                local_settings,
+                config,
                 thread_id,
-                self.thread_params_mode(),
-                self.remote_cwd_override.as_deref(),
+                last_turn_id,
+                before_turn_id,
+                goal_continuation,
+                presentation,
+                selected_profile,
+                permission_mode,
+                config_source,
+                name,
             )
-        };
-        params.model_provider = match config_source {
-            ForkConfigSource::Local => self.explicit_model_provider(&config),
-            ForkConfigSource::Session => Some(config.model_provider_id.clone()),
-        };
-        if config_source == ForkConfigSource::Session {
-            // Active-session config has already adopted the server's roots. Fork does
-            // not restore saved roots when omitted, so preserve this explicit selection.
-            params.runtime_workspace_roots = Some(config.workspace_roots.clone());
-        }
-        if child_fork {
-            params.cwd = Some(config.cwd.to_string_lossy().into_owned());
-            params.service_tier = Some(config.service_tier.clone());
-            params.base_instructions = None;
-            params.developer_instructions = None;
-        }
-        if (child_fork || self.thread_params_mode() == ThreadParamsMode::Remote)
-            && permission_mode == ForkPermissionMode::InheritSaved
-            && selected_profile.is_none()
-        {
-            params.approval_policy = None;
-            params.approvals_reviewer = None;
-            params.sandbox = None;
-            params.permissions = None;
-            remove_permission_config_overrides(&mut params.config);
-        } else if let Some(selected_profile) = selected_profile {
-            params.runtime_workspace_roots = None;
-            params.permissions = Some(selected_profile.profile_id.clone());
-            params.sandbox = None;
-            params.approval_policy = selected_profile.approval_policy;
-            params.approvals_reviewer = selected_profile.approvals_reviewer.map(Into::into);
-            remove_permission_config_overrides(&mut params.config);
-        }
-        let response: ThreadForkResponse = match self
-            .client
-            .request_typed(ClientRequest::ThreadFork {
-                request_id,
-                params: params.clone(),
-            })
-            .await
-        {
-            Ok(response) => response,
-            Err(TypedRequestError::Server { source, .. })
-                if params.exclude_turns && is_history_pagination_unsupported(&source) =>
-            {
-                self.history_support = ThreadHistorySupport::LegacyOnly;
-                params.exclude_turns = false;
-                let request_id = self.next_request_id();
-                self.client
-                    .request_typed(ClientRequest::ThreadFork { request_id, params })
-                    .await
-                    .map_err(|err| {
-                        bootstrap_request_error("thread/fork failed during TUI bootstrap", err)
-                    })?
-            }
-            Err(err) => {
-                return Err(bootstrap_request_error(
-                    "thread/fork failed during TUI bootstrap",
-                    err,
-                ));
-            }
-        };
-        let mut response = response;
-        if presentation == ForkPresentation::Regular
-            && !response.thread.ephemeral
-            && let Err(error) = self
-                .hydrate_initial_thread_history(
-                    &mut response.thread,
-                    /*turn_cursor*/ None,
-                    /*item_cursor*/ None,
-                    Some(&config),
-                    Some(local_settings),
-                    HistoryHydrationScope::Initial,
-                )
-                .await
-        {
-            tracing::warn!(
-                thread_id = %response.thread.id,
-                error = %error,
-                "preserving the created fork after bounded history hydration failed"
-            );
-        }
-        // Explicit selections use the server's effective policy, including on local daemons.
-        let selected_permissions = selected_profile.map(|_| {
-            PermissionProfile::from_legacy_sandbox_policy_for_cwd(
-                &response.sandbox.to_core(),
-                response.cwd.as_path(),
-            )
-        });
-        let mut started = started_thread_from_fork_response(
-            response,
-            local_settings,
-            &config,
-            self.thread_params_mode(),
-        )
-        .await?;
-        if let Some(permissions) = selected_permissions {
-            started.session.permission_profile = permissions;
-        }
-        if presentation == ForkPresentation::SideConversation {
-            started.session.daybreak_enabled = false;
-        }
-        started.session.fork_parent_title = fork_parent.and_then(|thread| thread.name);
-        if self.task_tools_available(thread_id) {
-            started.task_tools_available = true;
-        }
-        Ok(started)
+            .run()
+            .await;
+        self.apply_session_observations(prepared.observations);
+        prepared.result
     }
 
     pub(crate) fn thread_params_mode(&self) -> ThreadParamsMode {

@@ -1810,9 +1810,28 @@ async fn paginated_resume_and_fork_survive_post_response_hydration_failure() -> 
     .await?;
     assert_eq!(started.session.thread_id, parent_thread_id);
 
-    let forked =
-        Box::pin(app_server.fork_thread(&app.local_settings, app.config.clone(), parent_thread_id))
-            .await?;
+    // A successful acquisition still owns the new subscription when display hydration fails.
+    let prepared = app_server
+        .prepare_fork_thread(
+            crate::app_server_session::session_preparation::RequestPolicy::Interactive,
+            &app.local_settings,
+            app.config.clone(),
+            parent_thread_id,
+            None,
+            None,
+            crate::app_server_session::ForkGoalContinuation::StartIfIdle,
+            None,
+            None,
+        )
+        .run()
+        .await;
+    let forked = prepared.result?;
+    assert!(matches!(
+        prepared.custody,
+        crate::app_server_session::session_preparation::SubscriptionCustody::Subscribed(id)
+            if id == forked.session.thread_id
+    ));
+    app_server.apply_session_observations(prepared.observations);
 
     assert_ne!(forked.session.thread_id, parent_thread_id);
     assert_eq!(recorded_params(&requests, "thread/fork").len(), 1);

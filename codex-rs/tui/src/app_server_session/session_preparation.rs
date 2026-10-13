@@ -378,8 +378,8 @@ pub(crate) enum SubscriptionCustody {
 }
 
 pub(crate) struct SessionObservations {
-    history: HistoryPaginationUpdate,
-    history_support: ThreadHistorySupport,
+    pub(super) history: HistoryPaginationUpdate,
+    pub(super) history_support: ThreadHistorySupport,
 }
 
 pub(crate) struct PreparedSession {
