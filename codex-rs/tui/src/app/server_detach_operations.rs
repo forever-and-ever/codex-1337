@@ -49,7 +49,7 @@ pub(in crate::app) enum DetachReceipt {
 #[derive(Debug)]
 pub(in crate::app) struct DetachedTarget {
     pub(super) thread_id: ThreadId,
-    pub(super) result: Result<(), String>,
+    pub(super) result: Result<(), TypedRequestError>,
 }
 
 pub(super) async fn unsubscribe(
@@ -113,12 +113,12 @@ pub(super) async fn send(
                                 turn_id = actual;
                                 continue;
                             }
-                            return Err(error.to_string());
+                            return Err(error);
                         }
                     }
                 }
             }
-            unsubscribe(handle, id, thread_id).await.map_err(|error| error.to_string())
+            unsubscribe(handle, id, thread_id).await
         }.await;
         results.push(DetachedTarget { thread_id, result });
     }

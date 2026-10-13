@@ -53,10 +53,7 @@ impl FreshReceipt {
     pub(super) fn requires_owner(&self) -> bool {
         matches!(
             self.outcome,
-            FreshOutcome::Started(_)
-                | FreshOutcome::Named(_)
-                | FreshOutcome::Detached(_)
-                | FreshOutcome::Cleaned(_)
+            FreshOutcome::Started(_) | FreshOutcome::Named(_) | FreshOutcome::Detached(_)
         )
     }
 }
@@ -406,7 +403,14 @@ impl App {
                     }
                     match custody {
                         SubscriptionCustody::Subscribed(thread_id) => self
-                            .cleanup_fresh_subscription(operation, handle, thread_id, Vec::new()),
+                            .start_navigation_cleanup(
+                                operation,
+                                handle,
+                                thread_id,
+                                Vec::new(),
+                                CleanupContinuation::Done,
+                                false,
+                            ),
                         SubscriptionCustody::NewThreadUncertain
                         | SubscriptionCustody::Uncertain(_)
                             if same_epoch =>

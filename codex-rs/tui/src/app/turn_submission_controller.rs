@@ -368,7 +368,7 @@ impl App {
         self.drive_navigation_operation(server);
     }
 
-    fn start_submission(
+    pub(super) fn start_submission(
         &mut self,
         server: &AppServerSession,
         active: PendingSubmission,
@@ -633,6 +633,10 @@ impl App {
                 self.recover_local_navigation_draft(recovery).await;
                 Ok(AppRunControl::Continue)
             }
+            ServerCompletion::Request(completion) if self.owns_removal_completion(&completion) => {
+                self.finish_removal_completion(tui, server, completion)
+                    .await
+            }
             ServerCompletion::Request(completion) => {
                 self.finish_submission(
                     server,
@@ -811,6 +815,7 @@ impl App {
                     if !matches!(failure, SubmissionFailure::Rejected(_))
                         && !matches!(&**operation, ServerOperation::Realtime(operation) if operation.is_preparation())
                         && !matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Voice(preference)) if preference.is_read_only())
+                        && !matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(removal)) if removal.is_read_only())
                         && !matches!(
                             &**operation,
                             ServerOperation::Catalog(_) | ServerOperation::Control(_)

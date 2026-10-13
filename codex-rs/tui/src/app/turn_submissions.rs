@@ -29,6 +29,8 @@ pub(in crate::app) use requests::ServerRequestDelivery;
 
 #[path = "server_realtime_operations.rs"]
 mod realtime;
+#[path = "server_removal_operations.rs"]
+mod removal;
 
 pub(in crate::app) use realtime::RealtimeIdentity;
 

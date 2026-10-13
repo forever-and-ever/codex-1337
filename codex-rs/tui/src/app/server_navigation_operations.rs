@@ -89,6 +89,10 @@ impl std::fmt::Debug for NavigationCompletion {
 }
 
 impl NavigationOwner {
+    pub(super) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub(super) fn is_empty(&self) -> bool {
         self.current.is_none() && self.retired.is_empty()
     }

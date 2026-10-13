@@ -42,6 +42,7 @@ pub(in crate::app) enum ConnectionMutation {
         edits: Vec<api::ConfigEdit>,
         setting: String,
     },
+    Removal(super::removal::RemovalOperation),
 }
 
 #[derive(Clone)]
@@ -99,6 +100,7 @@ pub(in crate::app) enum OperationReceipt {
     RealtimeStopped,
     ServerRequestDelivered,
     ModelDefaultsSaved(api::ConfigWriteResponse),
+    Removal(super::removal::RemovalReceipt),
 }
 
 impl ServerOperation {
@@ -126,6 +128,7 @@ impl ServerOperation {
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
+            Self::Connection(ConnectionMutation::Removal(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ModelDefaults { .. }) => "Saving default model",
             Self::Connection(ConnectionMutation::Voice(operation)) => match operation {
                 super::voice_preferences::VoicePreferenceOperation::Open { .. } => {
@@ -142,6 +145,9 @@ impl ServerOperation {
     }
 
     pub(super) fn cancellable_before_send(&self) -> bool {
+        if let Self::Connection(ConnectionMutation::Removal(operation)) = self {
+            return operation.cancellable_before_send();
+        }
         !matches!(
             self,
             Self::Control(_)
@@ -213,6 +219,9 @@ pub(super) async fn send(
                 })
                 .await?;
             return Ok(OperationReceipt::ModelDefaultsSaved(response));
+        }
+        ServerOperation::Connection(ConnectionMutation::Removal(operation)) => {
+            return super::removal::send(handle, id, operation).await;
         }
         ServerOperation::Connection(ConnectionMutation::Voice(operation)) => {
             return super::voice_preferences::send(handle, id, operation).await;
@@ -380,6 +389,7 @@ impl App {
         }
         let thread_id = origin.thread().0;
         match receipt {
+            OperationReceipt::Removal(_) => {}
             OperationReceipt::ServerRequestDelivered => {
                 if let ServerOperation::Response(delivery) = operation
                     && let ServerRequestDelivery::Resolved { command, .. } = &**delivery

@@ -18,24 +18,6 @@ impl App {
             .and_then(ChatWidget::thread_id)
     }
 
-    pub(super) async fn stop_voice_for_removed_thread(
-        &mut self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> Result<()> {
-        if let Some(owner) = self.voice_owner_thread_id()
-            && (owner == thread_id
-                || app_server
-                    .thread_read(owner, /*include_turns*/ false)
-                    .await?
-                    .session_id
-                    == thread_id.to_string())
-        {
-            self.stop_realtime_conversation(app_server).await;
-        }
-        Ok(())
-    }
-
     pub(super) fn voice_widget_for_thread(
         &mut self,
         thread_id: ThreadId,
