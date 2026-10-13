@@ -118,7 +118,7 @@ pub(super) fn cells(
         }
         item @ ThreadItem::SubAgentActivity { .. } => {
             if let Some(cell) = multi_agents::sub_agent_activity_history_cell(&item) {
-                cells.push(Arc::new(cell));
+                cells.push(Arc::from(cell));
             }
         }
         ThreadItem::EnteredReviewMode { review, .. } => {

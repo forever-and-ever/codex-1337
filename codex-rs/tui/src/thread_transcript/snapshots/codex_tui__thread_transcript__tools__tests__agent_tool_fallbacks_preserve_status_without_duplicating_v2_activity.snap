@@ -3,7 +3,9 @@ source: tui/src/thread_transcript/tools_tests.rs
 expression: "snapshots.join(\"\\n\")"
 ---
 agent tool: SpawnAgent · In progress at last update
-agent tool: SendInput · Failed
-agent tool: CloseAgent · Interrupted
-agent tool: ResumeAgent · Failed
+• Failed to send input to 00000000-0000-0000-0000-000000000002
+  └ Inspect the parser
+• Close interrupted for 00000000-0000-0000-0000-000000000002
+• Failed to resume 00000000-0000-0000-0000-000000000002
+  └ Error - Agent resume failed
 • Agent wait interrupted

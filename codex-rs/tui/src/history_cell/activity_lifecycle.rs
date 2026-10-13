@@ -47,6 +47,7 @@ enum Revision<'a> {
     Exec(&'a ExecCell, usize),
     Web(&'a WebSearchCell),
     AgentWait(&'a Arc<dyn HistoryCell>),
+    AgentResume(&'a Arc<dyn HistoryCell>),
 }
 
 pub(crate) struct ToolCallReconciliation {
@@ -70,6 +71,19 @@ impl Revision<'_> {
             return Some(ToolOutputGroup::from_cells(members));
         }
         match self {
+            Self::AgentResume(newer) => {
+                let new_resume =
+                    crate::multi_agents::AgentToolHistoryCell::resume_for(newer.as_ref())?;
+                let old_resume =
+                    crate::multi_agents::AgentToolHistoryCell::resume_for(cell.as_ref())?;
+                (old_resume.id == new_resume.id).then(|| {
+                    if new_resume.is_running() {
+                        Arc::clone(cell)
+                    } else {
+                        Arc::clone(newer)
+                    }
+                })
+            }
             Self::AgentWait(newer) => {
                 let new_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(newer.as_ref())?;
                 let old_wait = crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref())?;
@@ -155,6 +169,8 @@ pub(crate) fn reconcile_tool_calls(
         vec![Revision::Web(cell)]
     } else if crate::multi_agents::AgentToolHistoryCell::wait_for(incoming.as_ref()).is_some() {
         vec![Revision::AgentWait(incoming)]
+    } else if crate::multi_agents::AgentToolHistoryCell::resume_for(incoming.as_ref()).is_some() {
+        vec![Revision::AgentResume(incoming)]
     } else {
         return ToolCallReconciliation {
             replacements: BTreeMap::new(),

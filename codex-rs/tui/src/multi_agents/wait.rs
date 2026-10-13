@@ -18,7 +18,14 @@ use ratatui::text::Line;
 pub(crate) struct AgentToolHistoryCell {
     pub(crate) timestamp: Option<HistoryTimestamp>,
     pub(crate) captured: PlainHistoryCell,
-    pub(crate) wait: Option<WaitPresentation>,
+    pub(super) presentation: AgentPresentation,
+}
+
+#[derive(Debug)]
+pub(super) enum AgentPresentation {
+    Wait(WaitPresentation),
+    Notice(super::notice::NoticePresentation),
+    SubAgentInvocation { id: String },
 }
 
 #[derive(Debug)]
@@ -76,16 +83,46 @@ impl WaitState {
 }
 
 impl AgentToolHistoryCell {
+    fn wait(&self) -> Option<&WaitPresentation> {
+        match &self.presentation {
+            AgentPresentation::Wait(wait) => Some(wait),
+            AgentPresentation::Notice(_) | AgentPresentation::SubAgentInvocation { .. } => None,
+        }
+    }
+
+    pub(crate) fn resume_for(cell: &dyn HistoryCell) -> Option<&super::notice::NoticePresentation> {
+        let cell = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::ToolItemCell>()
+            .map_or(cell, |cell| cell.inner.as_ref());
+        match &cell.as_any().downcast_ref::<Self>()?.presentation {
+            AgentPresentation::Notice(notice)
+                if notice.operation == super::notice::NoticeOperation::Resume =>
+            {
+                Some(notice)
+            }
+            _ => None,
+        }
+    }
+
+    fn id(&self) -> &str {
+        match &self.presentation {
+            AgentPresentation::Wait(wait) => &wait.id,
+            AgentPresentation::Notice(notice) => &notice.id,
+            AgentPresentation::SubAgentInvocation { id } => id,
+        }
+    }
+
     pub(crate) fn wait_for(cell: &dyn HistoryCell) -> Option<&WaitPresentation> {
         let cell = cell
             .as_any()
             .downcast_ref::<crate::history_cell::ToolItemCell>()
             .map_or(cell, |cell| cell.inner.as_ref());
-        cell.as_any().downcast_ref::<Self>()?.wait.as_ref()
+        cell.as_any().downcast_ref::<Self>()?.wait()
     }
 
     fn arguments(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut lines = if let Some(wait) = &self.wait {
+        let mut lines = if let Some(wait) = self.wait() {
             plain_hyperlink_lines(
                 std::iter::once(Line::from("  wrangler_agents.wait_agent"))
                     .chain(
@@ -97,7 +134,14 @@ impl AgentToolHistoryCell {
                     .collect(),
             )
         } else {
-            self.captured.nested_detail_lines(width)
+            let mut lines = self.captured.nested_detail_lines(width);
+            if lines
+                .first()
+                .is_some_and(|line| line.line.width() <= usize::from(width))
+            {
+                lines.remove(0);
+            }
+            lines
         };
         mark_lines(&mut lines, OutputProvenance::Client);
         lines
@@ -110,31 +154,41 @@ impl HistoryCell for AgentToolHistoryCell {
     }
 
     fn tool_call_ids(&self) -> Vec<&str> {
-        self.wait.iter().map(|wait| wait.id.as_str()).collect()
+        vec![self.id()]
     }
 
     fn outer_call_id(&self) -> Option<&str> {
-        self.wait.as_ref().map(|wait| wait.id.as_str())
+        Some(self.id())
     }
 
     fn activity_ids(&self) -> Vec<String> {
-        self.wait
-            .iter()
-            .map(|wait| format!("agent-wait:{}", wait.id))
-            .collect()
+        vec![match &self.presentation {
+            AgentPresentation::Wait(wait) => format!("agent-wait:{}", wait.id),
+            AgentPresentation::Notice(notice) => format!("agent-tool:{}", notice.id),
+            AgentPresentation::SubAgentInvocation { id } => format!("agent-activity:{id}"),
+        }]
     }
 
     fn activity_header(&self) -> Option<ActivityHeader> {
-        self.wait
-            .as_ref()
-            .map(|wait| ActivityHeader::at_end(&super::title_text(wait.state.heading())))
+        match self.wait() {
+            Some(wait) => Some(ActivityHeader::at_end(&super::title_text(
+                wait.state.heading(),
+            ))),
+            None => self
+                .captured
+                .display_lines(u16::MAX)
+                .first()
+                .map(ActivityHeader::at_end),
+        }
     }
 
     fn activity_disclosure(&self, width: u16) -> Option<ActivityDisclosure> {
-        if self.wait.is_some() {
+        if self.wait().is_some() {
             Some(ActivityDisclosure::Generic)
         } else {
-            self.captured.activity_disclosure(width)
+            self.captured
+                .has_nested_details(width)
+                .then_some(ActivityDisclosure::Generic)
         }
     }
 
@@ -143,7 +197,7 @@ impl HistoryCell for AgentToolHistoryCell {
     }
 
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        match &self.wait {
+        match self.wait() {
             Some(wait) => vec![super::title_text(wait.state.heading())],
             None => self.captured.display_lines(width),
         }
@@ -151,14 +205,14 @@ impl HistoryCell for AgentToolHistoryCell {
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut lines = plain_hyperlink_lines(self.display_lines(width));
-        if self.wait.is_some() {
+        if self.wait().is_some() {
             mark_lines(&mut lines, OutputProvenance::Client);
         }
         lines
     }
 
     fn nested_summary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if self.wait.is_some() {
+        if self.wait().is_some() {
             self.display_hyperlink_lines(width)
         } else {
             self.captured.nested_summary_lines(width)
@@ -178,11 +232,11 @@ impl HistoryCell for AgentToolHistoryCell {
     }
 
     fn has_nested_details(&self, width: u16) -> bool {
-        self.wait.is_some() || self.captured.has_nested_details(width)
+        self.wait().is_some() || self.captured.has_nested_details(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        if self.wait.is_some() {
+        if self.wait().is_some() {
             Vec::new()
         } else {
             self.captured.raw_lines()

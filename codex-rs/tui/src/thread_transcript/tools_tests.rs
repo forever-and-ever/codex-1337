@@ -1,4 +1,5 @@
 use super::*;
+use crate::history_cell::HistoryCell;
 use crate::test_support::PathBufExt;
 use crate::test_support::test_path_buf;
 use crate::thread_transcript::RawReasoningVisibility;
@@ -256,6 +257,18 @@ fn historical_command_fallbacks_preserve_status_output_and_group_boundaries() {
 #[test]
 fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
     let cwd = test_path_buf("/workspace").abs();
+    let agent_call = |id: &str, tool, status| ThreadItem::CollabAgentToolCall {
+        id: id.to_owned(),
+        tool,
+        status,
+        sender_thread_id: "00000000-0000-0000-0000-000000000001".into(),
+        receiver_thread_ids: vec!["00000000-0000-0000-0000-000000000002".into()],
+        prompt: Some("Inspect the parser".into()),
+        model: None,
+        reasoning_effort: None,
+        wait_completion: None,
+        agents_states: Default::default(),
+    };
     let mut snapshots = Vec::new();
     for (tool, status) in [
         (
@@ -303,18 +316,7 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
                 | CollabAgentTool::ResumeAgent
                 | CollabAgentTool::Wait
         );
-        let item = ThreadItem::CollabAgentToolCall {
-            id: "pending-agent-call".to_string(),
-            tool,
-            status,
-            sender_thread_id: "00000000-0000-0000-0000-000000000001".to_string(),
-            receiver_thread_ids: vec!["00000000-0000-0000-0000-000000000002".to_string()],
-            prompt: Some("Inspect the parser".to_string()),
-            model: None,
-            reasoning_effort: None,
-            wait_completion: None,
-            agents_states: Default::default(),
-        };
+        let item = agent_call("pending-agent-call", tool, status);
         let cells = thread_items_to_transcript_cells(
             /*thread_id*/ None,
             &cwd,
@@ -336,4 +338,159 @@ fn agent_tool_fallbacks_preserve_status_without_duplicating_v2_activity() {
         }
     }
     insta::assert_snapshot!(snapshots.join("\n"));
+
+    // Receiver status is not the invocation outcome: a completed resume can target
+    // an interrupted agent, while a failed operation can still name its receiver.
+    for (tool, headings) in [
+        (
+            CollabAgentTool::SpawnAgent,
+            ["Spawned", "Failed to spawn", "Spawn interrupted for"],
+        ),
+        (
+            CollabAgentTool::SendInput,
+            [
+                "Sent input to",
+                "Failed to send input to",
+                "Input interrupted for",
+            ],
+        ),
+        (
+            CollabAgentTool::ResumeAgent,
+            ["Resumed", "Failed to resume", "Resume interrupted for"],
+        ),
+        (
+            CollabAgentTool::CloseAgent,
+            ["Closed", "Failed to close", "Close interrupted for"],
+        ),
+    ] {
+        for (status, heading) in [
+            CollabAgentToolCallStatus::Completed,
+            CollabAgentToolCallStatus::Failed,
+            CollabAgentToolCallStatus::Interrupted,
+        ]
+        .into_iter()
+        .zip(headings)
+        {
+            let mut item = agent_call("agent-call", tool.clone(), status);
+            if let ThreadItem::CollabAgentToolCall { agents_states, .. } = &mut item {
+                agents_states.insert(
+                    "00000000-0000-0000-0000-000000000002".into(),
+                    codex_app_server_protocol::CollabAgentState {
+                        status: codex_app_server_protocol::CollabAgentStatus::Interrupted,
+                        message: None,
+                    },
+                );
+            }
+            let live =
+                crate::multi_agents::tool_call_history_cell(&item, None, |_| Default::default())
+                    .unwrap();
+            let replay = thread_items_to_transcript_cells(
+                None,
+                &cwd,
+                [item.clone()],
+                RawReasoningVisibility::Hidden,
+                None,
+                &|_| Default::default(),
+            );
+            assert_eq!(replay.len(), 1);
+            assert_eq!(live.display_lines(120), replay[0].display_lines(120));
+            assert!(
+                live.display_lines(120)[0]
+                    .to_string()
+                    .starts_with(&format!("• {heading} "))
+            );
+            if let ThreadItem::CollabAgentToolCall {
+                receiver_thread_ids,
+                ..
+            } = &mut item
+            {
+                receiver_thread_ids.clear();
+            }
+            let unavailable = thread_items_to_transcript_cells(
+                None,
+                &cwd,
+                [item],
+                RawReasoningVisibility::Hidden,
+                None,
+                &|_| Default::default(),
+            );
+            assert_eq!(unavailable.len(), 1);
+            assert_eq!(unavailable[0].tool_call_ids(), vec!["agent-call"]);
+            let lines = unavailable[0].display_lines(120);
+            assert!(
+                lines[0]
+                    .to_string()
+                    .starts_with(&format!("• {heading} agent"))
+            );
+            assert!(
+                lines
+                    .iter()
+                    .any(|line| line.to_string().contains("Recipient identity unavailable"))
+            );
+        }
+    }
+
+    // The same target may receive several resumes. Only the invocation ID may
+    // revise an earlier cell, including after its result is already attached.
+    for terminal in [
+        CollabAgentToolCallStatus::Completed,
+        CollabAgentToolCallStatus::Failed,
+        CollabAgentToolCallStatus::Interrupted,
+    ] {
+        let start = agent_call(
+            "resume-p",
+            CollabAgentTool::ResumeAgent,
+            CollabAgentToolCallStatus::InProgress,
+        );
+        let finish = agent_call("resume-p", CollabAgentTool::ResumeAgent, terminal);
+        let unrelated = agent_call(
+            "resume-q",
+            CollabAgentTool::ResumeAgent,
+            CollabAgentToolCallStatus::InProgress,
+        );
+        let capture = ThreadItem::FunctionCallOutput {
+            id: "resume-result".into(),
+            call_id: Some("resume-p".into()),
+            name: "resume_agent".into(),
+            namespace: None,
+            output: codex_protocol::models::FunctionCallOutputBody::Text(
+                "unchanged captured result".into(),
+            ),
+        };
+        let replay = thread_items_to_transcript_cells(
+            None,
+            &cwd,
+            [
+                start.clone(),
+                unrelated.clone(),
+                capture,
+                finish.clone(),
+                start,
+            ],
+            RawReasoningVisibility::Hidden,
+            None,
+            &|_| Default::default(),
+        );
+        assert_eq!(replay.len(), 2);
+        assert_eq!(replay[0].outer_call_id(), Some("resume-p"));
+        assert_eq!(replay[1].outer_call_id(), Some("resume-q"));
+        assert!(
+            replay[0]
+                .activity_ids()
+                .contains(&"agent-tool:resume-p".into())
+        );
+        let expected =
+            crate::multi_agents::tool_call_history_cell(&finish, None, |_| Default::default())
+                .unwrap();
+        assert_eq!(
+            replay[0].compact_hyperlink_lines(120)[0].line,
+            expected.display_lines(120)[0]
+        );
+        assert!(
+            replay[0]
+                .raw_lines()
+                .iter()
+                .any(|line| line.to_string() == "unchanged captured result")
+        );
+    }
 }

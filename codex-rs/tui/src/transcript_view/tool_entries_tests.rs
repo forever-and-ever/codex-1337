@@ -1029,19 +1029,23 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             7,
         ),
     ];
-    let agent = |kind| {
-        Arc::new(
-            crate::multi_agents::sub_agent_activity_history_cell(&ThreadItem::SubAgentActivity {
-                id: format!("{kind:?}"),
+    let agent_item = |kind, id: &str| ThreadItem::SubAgentActivity {
+        id: id.into(),
+        kind,
+        agent_thread_id: "00000000-0000-0000-0000-000000000001".into(),
+        agent_path: "/root/worker".into(),
+        message_preview: None,
+        model: None,
+        reasoning_effort: None,
+    };
+    let agent = |kind| -> Arc<dyn HistoryCell> {
+        Arc::from(
+            crate::multi_agents::sub_agent_activity_history_cell(&agent_item(
                 kind,
-                agent_thread_id: "00000000-0000-0000-0000-000000000001".into(),
-                agent_path: "/root/worker".into(),
-                message_preview: None,
-                model: None,
-                reasoning_effort: None,
-            })
+                &format!("{kind:?}"),
+            ))
             .unwrap(),
-        ) as Arc<dyn HistoryCell>
+        )
     };
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![
         Arc::new(PlainHistoryCell::new(vec!["Before tools".into()])),
@@ -1306,6 +1310,66 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     }
     insta::assert_snapshot!("agent_wait_lifecycle", stages.join("\n\n"));
     use codex_protocol::agent_wait::{AgentWaitCompletion, AgentWaitOutcome};
+    // A tool activity owns its exact capture across interleaving; a later autonomous
+    // completion of that same agent is not the tool's completion or result owner.
+    let capture = r#"{"previous_status":"running"}"#;
+    let interrupted = agent_item(SubAgentActivityKind::Interrupted, "interrupt-p");
+    let replay = crate::thread_transcript::thread_items_to_transcript_cells(
+        None,
+        &cwd,
+        [
+            interrupted.clone(),
+            agent_item(SubAgentActivityKind::Interacted, "message-q"),
+            ThreadItem::FunctionCallOutput {
+                id: "interrupt-result".into(),
+                call_id: Some("interrupt-p".into()),
+                name: "interrupt_agent".into(),
+                namespace: Some("wrangler_agents".into()),
+                output: FunctionCallOutputBody::Text(capture.into()),
+            },
+            agent_item(SubAgentActivityKind::Completed, "autonomous-completion"),
+        ],
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        None,
+        &|_| Default::default(),
+    );
+    assert_eq!(replay.len(), 3);
+    assert_eq!(replay[0].outer_call_id(), Some("interrupt-p"));
+    assert!(
+        replay[0]
+            .activity_ids()
+            .contains(&"agent-activity:interrupt-p".into())
+    );
+    assert!(
+        replay[0]
+            .raw_lines()
+            .iter()
+            .any(|line| line.to_string() == capture)
+    );
+    assert_eq!(replay[1].outer_call_id(), Some("message-q"));
+    assert!(replay[2].tool_call_ids().is_empty());
+    assert_eq!(replay[2].outer_call_id(), None);
+    let live = crate::multi_agents::sub_agent_activity_history_cell(&interrupted).unwrap();
+    let scoped = crate::thread_transcript::scoped_item_cells(
+        interrupted,
+        &cwd,
+        crate::code_mode_transcript::Source::Live,
+        &|_| Default::default(),
+    );
+    assert_eq!(live.tool_call_ids(), scoped[0].tool_call_ids());
+    assert_eq!(live.activity_ids(), scoped[0].activity_ids());
+    assert_eq!(live.outer_call_id(), scoped[0].outer_call_id());
+
+    let mut view = TranscriptView::default();
+    let closed = tests::render(&mut view, &replay, 100, 12);
+    assert!(!tests::text(&closed).contains(capture));
+    assert!(
+        view.disclosure
+            .expanded
+            .insert("agent-activity:interrupt-p".into())
+    );
+    let open = tests::render(&mut view, &replay, 100, 12);
+    assert!(tests::text(&open).contains(capture));
     for (status, outcome, label) in [
         (
             CollabAgentToolCallStatus::Completed,
