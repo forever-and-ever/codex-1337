@@ -11,7 +11,6 @@ use crate::text_formatting::truncate_text;
 use codex_app_server_protocol::CollabAgentState;
 use codex_app_server_protocol::CollabAgentStatus;
 use codex_app_server_protocol::CollabAgentTool;
-use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::ThreadId;
@@ -31,9 +30,9 @@ const COLLAB_PROMPT_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_ERROR_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_RESPONSE_PREVIEW_GRAPHEMES: usize = 240;
 
+mod notice;
 mod wait;
 pub(crate) use wait::AgentToolHistoryCell;
-use wait::WaitPresentation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentPickerThreadEntry {
@@ -199,95 +198,9 @@ pub(crate) fn spawn_request_summary(item: &ThreadItem) -> Option<SpawnRequestSum
 pub(crate) fn tool_call_history_cell(
     item: &ThreadItem,
     cached_spawn_request: Option<&SpawnRequestSummary>,
-    mut agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
+    agent_metadata: impl FnMut(ThreadId) -> AgentMetadata,
 ) -> Option<AgentToolHistoryCell> {
-    let ThreadItem::CollabAgentToolCall {
-        id,
-        tool,
-        status,
-        receiver_thread_ids,
-        prompt,
-        agents_states,
-        wait_completion,
-        ..
-    } = item
-    else {
-        return None;
-    };
-
-    let first_receiver = receiver_thread_ids
-        .first()
-        .and_then(|id| parse_thread_id(id));
-    let prompt = prompt.as_deref().unwrap_or_default();
-
-    let captured = match tool {
-        // V2 uses SubAgentActivity for display; these variants are analytics-only.
-        CollabAgentTool::SendMessage
-        | CollabAgentTool::FollowupTask
-        | CollabAgentTool::InterruptAgent
-        | CollabAgentTool::ListAgents => None,
-        CollabAgentTool::SpawnAgent => {
-            if matches!(status, CollabAgentToolCallStatus::InProgress) {
-                return None;
-            }
-            let fallback_spawn_request = spawn_request_summary(item);
-            let spawn_request = cached_spawn_request.or(fallback_spawn_request.as_ref());
-            Some(spawn_end(
-                first_receiver,
-                prompt,
-                spawn_request,
-                &mut agent_metadata,
-            ))
-        }
-        CollabAgentTool::SendInput => {
-            if matches!(status, CollabAgentToolCallStatus::InProgress) {
-                return None;
-            }
-            first_receiver.map(|receiver_thread_id| {
-                interaction_end(receiver_thread_id, prompt, &mut agent_metadata)
-            })
-        }
-        CollabAgentTool::ResumeAgent => first_receiver.map(|receiver_thread_id| {
-            if matches!(status, CollabAgentToolCallStatus::InProgress) {
-                resume_begin(receiver_thread_id, &mut agent_metadata)
-            } else {
-                let state = first_agent_state(receiver_thread_ids, agents_states);
-                resume_end(
-                    receiver_thread_id,
-                    state,
-                    "Agent resume failed",
-                    &mut agent_metadata,
-                )
-            }
-        }),
-        CollabAgentTool::Wait => {
-            if matches!(status, CollabAgentToolCallStatus::InProgress) {
-                Some(waiting_begin(receiver_thread_ids, &mut agent_metadata))
-            } else {
-                Some(waiting_end(
-                    receiver_thread_ids,
-                    agents_states,
-                    &mut agent_metadata,
-                ))
-            }
-        }
-        CollabAgentTool::CloseAgent => {
-            if matches!(status, CollabAgentToolCallStatus::InProgress) {
-                return None;
-            }
-            first_receiver
-                .map(|receiver_thread_id| close_end(receiver_thread_id, &mut agent_metadata))
-        }
-    }?;
-    let wait = (*tool == CollabAgentTool::Wait).then(|| WaitPresentation {
-        id: id.clone(),
-        state: wait::WaitState::from_lifecycle(status, wait_completion.as_ref()),
-    });
-    Some(AgentToolHistoryCell {
-        timestamp: None,
-        captured,
-        wait,
-    })
+    notice::tool_call_history_cell(item, cached_spawn_request, agent_metadata)
 }
 
 pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentActivityDisplay> {
@@ -312,17 +225,10 @@ pub(crate) fn sub_agent_activity_display(item: &ThreadItem) -> Option<SubAgentAc
     })
 }
 
-pub(crate) fn sub_agent_activity_history_cell(item: &ThreadItem) -> Option<PlainHistoryCell> {
-    let ThreadItem::SubAgentActivity {
-        kind, agent_path, ..
-    } = item
-    else {
-        return None;
-    };
-    Some(collab_event(
-        sub_agent_activity_title(*kind, agent_path),
-        Vec::new(),
-    ))
+pub(crate) fn sub_agent_activity_history_cell(
+    item: &ThreadItem,
+) -> Option<Box<dyn crate::history_cell::HistoryCell>> {
+    notice::sub_agent_activity_history_cell(item)
 }
 
 fn sub_agent_activity_title(kind: SubAgentActivityKind, agent_path: &str) -> Line<'static> {
@@ -339,19 +245,17 @@ fn sub_agent_activity_title(kind: SubAgentActivityKind, agent_path: &str) -> Lin
 }
 
 fn spawn_end(
-    new_thread_id: Option<ThreadId>,
+    heading: &str,
+    new_thread_id: ThreadId,
     prompt: &str,
     spawn_request: Option<&SpawnRequestSummary>,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
 ) -> PlainHistoryCell {
-    let title = match new_thread_id {
-        Some(thread_id) => title_with_agent(
-            "Spawned",
-            agent_label(thread_id, &agent_metadata(thread_id)),
-            spawn_request,
-        ),
-        None => title_text("Agent spawn failed"),
-    };
+    let title = title_with_agent(
+        heading,
+        agent_label(new_thread_id, &agent_metadata(new_thread_id)),
+        spawn_request,
+    );
 
     let mut details = Vec::new();
     if let Some(line) = prompt_line(prompt) {
@@ -361,12 +265,13 @@ fn spawn_end(
 }
 
 fn interaction_end(
+    heading: &str,
     receiver_thread_id: ThreadId,
     prompt: &str,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
 ) -> PlainHistoryCell {
     let title = title_with_agent(
-        "Sent input to",
+        heading,
         agent_label(receiver_thread_id, &agent_metadata(receiver_thread_id)),
         /*spawn_request*/ None,
     );
@@ -420,12 +325,13 @@ fn waiting_end(
 }
 
 fn close_end(
+    heading: &str,
     receiver_thread_id: ThreadId,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
 ) -> PlainHistoryCell {
     collab_event(
         title_with_agent(
-            "Closed",
+            heading,
             agent_label(receiver_thread_id, &agent_metadata(receiver_thread_id)),
             /*spawn_request*/ None,
         ),
@@ -448,18 +354,18 @@ fn resume_begin(
 }
 
 fn resume_end(
+    heading: &str,
     receiver_thread_id: ThreadId,
-    status: Option<&CollabAgentState>,
-    fallback_error: &str,
+    detail: Line<'static>,
     agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
 ) -> PlainHistoryCell {
     collab_event(
         title_with_agent(
-            "Resumed",
+            heading,
             agent_label(receiver_thread_id, &agent_metadata(receiver_thread_id)),
             /*spawn_request*/ None,
         ),
-        vec![status_summary_line(status, fallback_error)],
+        vec![detail],
     )
 }
 
@@ -676,6 +582,7 @@ fn error_summary_spans(error: &str) -> Vec<Span<'static>> {
 mod tests {
     use super::*;
     use crate::history_cell::HistoryCell;
+    use codex_app_server_protocol::CollabAgentToolCallStatus;
     #[cfg(target_os = "macos")]
     use crossterm::event::KeyEvent;
     #[cfg(target_os = "macos")]
@@ -703,7 +610,7 @@ mod tests {
 
         assert_eq!(sub_agent_activity_display(&item), None);
         let cell = sub_agent_activity_history_cell(&item).expect("interaction history");
-        insta::assert_snapshot!("subagent_interaction_preview", cell_to_text(&cell));
+        insta::assert_snapshot!("subagent_interaction_preview", cell_to_text(cell.as_ref()));
     }
 
     #[test]
@@ -848,7 +755,7 @@ mod tests {
 
         let snapshot = [spawn, send, waiting, finished, close]
             .iter()
-            .map(cell_to_text)
+            .map(|cell| cell_to_text(cell))
             .filter(|text| !text.is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -998,7 +905,7 @@ mod tests {
         }
     }
 
-    fn cell_to_text(cell: &impl crate::history_cell::HistoryCell) -> String {
+    fn cell_to_text(cell: &dyn crate::history_cell::HistoryCell) -> String {
         cell.display_lines(/*width*/ 200)
             .iter()
             .map(line_to_text)

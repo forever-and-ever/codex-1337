@@ -68,7 +68,9 @@ fn push_activity_cell(cells: &mut TranscriptCells, cell: Arc<dyn HistoryCell>) {
         .or_else(|| crate::history_cell::reconcile_code_mode(cells, &cell))
     {
         cells.splice(range, replacements);
-    } else if crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref()).is_some() {
+    } else if crate::multi_agents::AgentToolHistoryCell::wait_for(cell.as_ref()).is_some()
+        || crate::multi_agents::AgentToolHistoryCell::resume_for(cell.as_ref()).is_some()
+    {
         let reconciliation = crate::history_cell::reconcile_tool_calls(cells, &cell);
         for (index, replacement) in reconciliation.replacements {
             cells[index] = replacement;

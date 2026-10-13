@@ -93,20 +93,14 @@ pub(crate) fn historical_tool_fallback(item: &ThreadItem) -> Option<PlainHistory
             tool:
                 tool @ (CollabAgentTool::SpawnAgent
                 | CollabAgentTool::SendInput
-                | CollabAgentTool::CloseAgent
-                | CollabAgentTool::ResumeAgent
-                | CollabAgentTool::Wait),
-            status,
+                | CollabAgentTool::CloseAgent),
+            status: CollabAgentToolCallStatus::InProgress,
             ..
-        } if *tool != CollabAgentTool::Wait && *status != CollabAgentToolCallStatus::Completed => {
-            let status = match status {
-                CollabAgentToolCallStatus::InProgress => "In progress at last update",
-                CollabAgentToolCallStatus::Failed => "Failed",
-                CollabAgentToolCallStatus::Interrupted => "Interrupted",
-                CollabAgentToolCallStatus::Completed => "Completed",
-            };
-            vec![format!("agent tool: {tool:?} · {status}").dim().into()]
-        }
+        } => vec![
+            format!("agent tool: {tool:?} · In progress at last update")
+                .dim()
+                .into(),
+        ],
         _ => return None,
     };
     Some(PlainHistoryCell::new(lines))
