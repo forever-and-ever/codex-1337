@@ -376,6 +376,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
                     TitleScenario::Automatic | TitleScenario::Suggestion => unreachable!(),
                 };
                 app.handle_event(&mut tui, &mut app_server, event).await?;
+                app.settle_turn_submissions(&mut app_server).await?;
                 assert!(app.pending_thread_titles.is_empty());
                 let popup = render_bottom_popup(&app.chat_widget, /*width*/ 120);
                 assert!(popup.contains("Keep this title"));
@@ -462,6 +463,7 @@ async fn canceled_thread_title_ignores_late_start_and_completion() -> color_eyre
         &AppCommand::set_thread_name("Keep this title".to_string()),
     )
     .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert!(cancellation.is_cancelled());
     assert!(app.pending_thread_titles.is_empty());
 

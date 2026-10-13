@@ -221,6 +221,7 @@ async fn run_verification_rpc_scenario(scenario: RpcScenario) -> color_eyre::Res
         app.handle_local_thread_completion(&mut session, completion)
             .await?;
     }
+    app.settle_turn_submissions(&mut session).await?;
     if scenario == RpcScenario::CancelWhilePending {
         // Flush the client command queue after processing the late proof. The mock rejects any
         // second elicitation response before acknowledging this harmless read.

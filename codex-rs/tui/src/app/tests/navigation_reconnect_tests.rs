@@ -547,7 +547,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
                 );
             }
             available.store(true, std::sync::atomic::Ordering::SeqCst);
-            app.handle_event(
+            app.handle_event_and_settle_navigation(
                 &mut tui,
                 &mut session,
                 AppEvent::SelectAgentsOverviewThread { thread_id: id },

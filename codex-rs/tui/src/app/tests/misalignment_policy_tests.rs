@@ -174,6 +174,7 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
         if reject {
             app.continue_misalignment(&mut server, Arc::clone(&review))
                 .await;
+            app.settle_turn_submissions(&mut server).await?;
             assert!(app.chat_widget.has_misalignment_policy_violation());
             let errors = std::iter::from_fn(|| rx.try_recv().ok())
                 .filter_map(|event| match event {
@@ -212,6 +213,7 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
             .await;
         app.continue_misalignment(&mut server, Arc::clone(&review))
             .await;
+        app.settle_turn_submissions(&mut server).await?;
         assert!(!app.chat_widget.has_misalignment_policy_violation());
         let params = recorded_params(&requests, "turn/start");
         let [params] = params.as_slice() else {

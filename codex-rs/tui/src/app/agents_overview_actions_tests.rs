@@ -291,7 +291,12 @@ async fn archiving_selects_the_next_displayed_task() -> Result<()> {
                     let confirmed = std::iter::from_fn(|| rx.try_recv().ok())
                         .find(|event| matches!(event, AppEvent::RunAgentsOverviewAction { .. }))
                         .expect("confirmed archive");
-                    Box::pin(app.handle_event(&mut tui, &mut app_server, confirmed)).await?;
+                    Box::pin(app.handle_event_and_settle_navigation(
+                        &mut tui,
+                        &mut app_server,
+                        confirmed,
+                    ))
+                    .await?;
                     // Later repaints retain the selected successor.
                     app.repaint_agents_overview();
                 }

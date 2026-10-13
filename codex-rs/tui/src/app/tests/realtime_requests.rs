@@ -127,6 +127,7 @@ async fn check_remote_voice_start(
         },
     ))
     .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     if capabilities == super::session_lifecycle_requests::HistoryCapabilities::Current {
         assert_eq!(
             (
@@ -1270,11 +1271,6 @@ async fn rejected_realtime_speech_restores_the_delegated_final_answer() -> Resul
         }
     }
     assert_eq!(restored, 1);
-    assert!(
-        rendered
-            .iter()
-            .any(|line| line.contains("Voice conversation failed:"))
-    );
     insta::assert_snapshot!(
         "rejected_realtime_speech",
         rendered
@@ -1768,6 +1764,7 @@ async fn rejected_voice_setting_preserves_current_selection() -> Result<()> {
         },
     ))
     .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     assert_eq!(
         (
             app.config.realtime.voice,
@@ -1788,7 +1785,7 @@ async fn rejected_voice_setting_preserves_current_selection() -> Result<()> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(messages.contains("Failed to save voice"));
+    assert!(messages.contains("Saving voice preference failed"));
     app_server.shutdown().await?;
     proxy.await??;
     Ok(())

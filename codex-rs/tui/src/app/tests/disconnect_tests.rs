@@ -308,6 +308,7 @@ async fn remote_disconnect_retires_voice_before_reconnecting() -> Result<()> {
         }),
     )
     .await?;
+    app.settle_turn_submissions(&mut session).await?;
     assert_eq!(
         (app.voice_owner_thread_id(), app.active_thread_id),
         (None, None)

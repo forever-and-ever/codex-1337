@@ -917,6 +917,7 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
         assert_eq!(actual_thread_id, expected_thread_id);
         app.submit_thread_op(&mut app_server, expected_thread_id, op)
             .await?;
+        app.settle_turn_submissions(&mut app_server).await?;
     }
     assert!(!app.chat_widget.has_active_view());
 
@@ -6165,6 +6166,7 @@ async fn background_side_cleanup_removes_local_state_and_ignores_late_events() -
     );
     app.discard_side_thread_in_background(&mut app_server, side_thread_id)
         .await;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     assert_eq!(app.active_thread_id, Some(parent_thread_id));
     assert!(!app.side_threads.contains_key(&side_thread_id));

@@ -1090,8 +1090,12 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
         app.app_event_tx = AppEventSender::new(tx);
 
         assert_matches!(
-            Box::pin(app.handle_event(&mut tui, &mut server, AppEvent::ArchiveCurrentThread))
-                .await?,
+            Box::pin(app.handle_event_and_settle_navigation(
+                &mut tui,
+                &mut server,
+                AppEvent::ArchiveCurrentThread
+            ))
+            .await?,
             AppRunControl::Continue
         );
         loop {

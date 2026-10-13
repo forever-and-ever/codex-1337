@@ -329,7 +329,13 @@ stream_max_retries = 0
             .input_state
             .clone()
     };
-    assert_eq!(parked, pending_input);
+    // Attachment may refresh model instructions; only the pending human input is retained.
+    assert!(
+        parked
+            .as_ref()
+            .expect("parked input")
+            .same_pending_input(pending_input.as_ref().expect("pending input"),)
+    );
     app.settle_turn_submissions(&mut app_server).await?;
     let pending_input = if via_overview {
         app.agents_overview.input_states.get(&thread_id).cloned()

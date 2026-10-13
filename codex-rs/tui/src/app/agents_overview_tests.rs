@@ -2655,6 +2655,7 @@ async fn resume_picker_round_trip_preserves_each_threads_input() -> Result<()> {
             SessionSelection::Resume(target.clone()),
         ))
         .await?;
+        app.settle_navigation(&mut tui, &mut server).await?;
         assert_eq!(app.chat_widget.thread_id(), Some(target.thread_id));
         if expected_states.len() < targets.len() {
             assert_eq!(app.chat_widget.composer_text_with_pending(), "");
@@ -2748,6 +2749,7 @@ async fn command_center_handles_resume_failure_and_success() -> Result<()> {
         .await?,
         AppRunControl::Continue
     ));
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert!(
         app.chat_widget
             .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
@@ -2772,6 +2774,7 @@ async fn command_center_handles_resume_failure_and_success() -> Result<()> {
         .await?,
         AppRunControl::Continue
     ));
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     assert_eq!(
         app.chat_widget
@@ -2881,7 +2884,7 @@ async fn command_center_attach_conflict_opens_read_only_and_retries() -> Result<
     assert!(
         matches!(event, AppEvent::SelectAgentsOverviewThread { thread_id: id } if id == thread_id)
     );
-    Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut server, event)).await?;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     assert!(app.chat_widget.is_external_writer_view());
     assert_eq!(
@@ -2913,7 +2916,7 @@ async fn command_center_attach_conflict_opens_read_only_and_retries() -> Result<
         );
 
         // Opening the displayed task returns to the same frozen snapshot without retrying.
-        Box::pin(app.handle_event(
+        Box::pin(app.handle_event_and_settle_navigation(
             &mut tui,
             &mut server,
             AppEvent::SelectAgentsOverviewThread { thread_id },
@@ -2939,6 +2942,7 @@ async fn command_center_attach_conflict_opens_read_only_and_retries() -> Result<
 
     // An explicit retry remains read-only while the other server owns the task.
     Box::pin(app.handle_key_event(&mut tui, &mut server, KeyCode::Char('r').into())).await;
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert!(app.chat_widget.is_external_writer_view());
     assert_eq!(
         (
@@ -2974,6 +2978,7 @@ async fn command_center_attach_conflict_opens_read_only_and_retries() -> Result<
     );
     owner.shutdown().await?;
     Box::pin(app.handle_key_event(&mut tui, &mut server, KeyCode::Char('r').into())).await;
+    app.settle_navigation(&mut tui, &mut server).await?;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     assert!(!app.chat_widget.is_external_writer_view());
     assert_eq!(
@@ -3057,21 +3062,22 @@ async fn command_center_action_failures_remain_visible() -> Result<()> {
     for (event, expected) in [
         (
             AppEvent::SelectAgentsOverviewThread { thread_id },
-            "is unavailable",
+            "Failed to read task settings",
         ),
         (
             AppEvent::RenameAgentsOverviewThread {
                 thread_id,
                 name: "New name".into(),
             },
-            "Failed to rename task",
+            "Renaming conversation failed",
         ),
         (
             AppEvent::StopAgentsOverviewThread { thread_id },
-            "Failed to stop background task",
+            "Stopping background task failed",
         ),
     ] {
-        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+        Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut server, event)).await?;
+        app.settle_turn_submissions(&mut server).await?;
         let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 96);
         assert!(rendered.contains("Unable to complete action"), "{rendered}");
         assert!(rendered.contains(expected), "{rendered}");
@@ -3082,7 +3088,7 @@ async fn command_center_action_failures_remain_visible() -> Result<()> {
     }
     // The retained primary task can also fail in the nested agent-attachment path.
     app.primary_thread_id = Some(thread_id);
-    Box::pin(app.handle_event(
+    Box::pin(app.handle_event_and_settle_navigation(
         &mut tui,
         &mut server,
         AppEvent::SelectAgentsOverviewThread { thread_id },
@@ -3090,7 +3096,10 @@ async fn command_center_action_failures_remain_visible() -> Result<()> {
     .await?;
     let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 96);
     assert!(rendered.contains("Unable to complete action"), "{rendered}");
-    assert!(rendered.contains("is no longer available"), "{rendered}");
+    assert!(
+        rendered.contains("Failed to read task settings"),
+        "{rendered}"
+    );
     server.shutdown().await?;
     Ok(())
 }

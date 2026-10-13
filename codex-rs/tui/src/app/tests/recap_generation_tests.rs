@@ -471,7 +471,7 @@ async fn temporary_recap_threads_disable_memories_and_remote_mcp_servers() -> Re
     )?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
     app.config.sqlite = codex_state::SqliteConfig::new_for_testing(codex_home.path().abs());
-    let (app_server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
+    let (mut app_server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
 
     let config = app.chat_widget.config_ref();
     let options = crate::temporary_structured_request::TemporaryStructuredThreadOptions {
@@ -510,6 +510,7 @@ async fn temporary_recap_threads_disable_memories_and_remote_mcp_servers() -> Re
         );
     }
 
+    app.settle_turn_submissions(&mut app_server).await?;
     let starts = recorded_params(&requests, "thread/start");
     assert_eq!(starts.len(), 1);
     assert_eq!(starts[0]["sandbox"], "read-only");

@@ -584,6 +584,8 @@ async fn daemon_ctrl_c_closes_running_side_thread_and_returns_to_parent() -> Res
     );
 
     open_running_task_exit_menu(&mut app, &mut tui, &mut app_server).await;
+    app.settle_navigation(&mut tui, &mut app_server).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     assert!(app.chat_widget.no_modal_or_popup_active());
     assert_eq!(app.active_thread_id, Some(parent_thread_id));

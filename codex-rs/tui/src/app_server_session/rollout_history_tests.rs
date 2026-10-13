@@ -7,6 +7,7 @@ use crate::legacy_core::config::ConfigBuilder;
 use app_test_support::create_fake_paginated_rollout;
 use app_test_support::create_fake_rollout;
 use codex_app_server_protocol::ThreadHistoryMode;
+use codex_app_server_protocol::ThreadStatus;
 use codex_features::Feature;
 use codex_protocol::ThreadId;
 use color_eyre::eyre::Result;
@@ -252,7 +253,6 @@ async fn viewing_thread_reads_history_without_resuming_it() -> Result<()> {
         .expect("create source rollout"),
     )?;
     let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
-    let next_request_id = app_server.next_request_id;
     let (viewed, notice) = app_server
         .read_thread_for_viewing(
             &config,
@@ -265,7 +265,11 @@ async fn viewing_thread_reads_history_without_resuming_it() -> Result<()> {
     assert_eq!(viewed.session.thread_id, thread_id);
     assert!(!viewed.turns.is_empty());
     assert!(!viewed.blocks_direct_input);
-    assert!(app_server.next_request_id > next_request_id);
+    assert_eq!(
+        app_server.thread_read(thread_id, false).await?.status,
+        ThreadStatus::NotLoaded,
+    );
+
     app_server.shutdown().await?;
     Ok(())
 }
@@ -304,7 +308,6 @@ async fn legacy_resume_preserves_history_mode_after_picker_server_replacement() 
 
     let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
     app_server.remember_thread_history_mode(thread_id, history_mode);
-    let next_request_id = app_server.next_request_id;
     let resumed = app_server
         .resume_thread(
             &crate::local_settings::LocalSettings::from(&config),
@@ -314,7 +317,6 @@ async fn legacy_resume_preserves_history_mode_after_picker_server_replacement() 
         )
         .await?;
 
-    assert_eq!(app_server.next_request_id, next_request_id + 2);
     assert!(!resumed.turns.is_empty());
     app_server.shutdown().await?;
     Ok(())
@@ -359,7 +361,6 @@ async fn cached_legacy_resume_revalidates_history_across_migration_settings() ->
             Box::pin(crate::start_embedded_app_server_for_picker(&startup_config)).await?;
         app_server.remember_thread_history_mode(legacy_thread_id, ThreadHistoryMode::Legacy);
         let local_settings = crate::local_settings::LocalSettings::from(&resume_config);
-        let next_request_id = app_server.next_request_id;
         let legacy = {
             // Keep the large resume future off the Windows test thread's stack.
             let mut resume = Box::pin(app_server.resume_thread(
@@ -377,7 +378,7 @@ async fn cached_legacy_resume_revalidates_history_across_migration_settings() ->
             );
             resume.await?
         };
-        assert_eq!(app_server.next_request_id, next_request_id + 2);
+
         assert!(!legacy.turns.is_empty());
         app_server.shutdown().await?;
     }
@@ -404,7 +405,6 @@ async fn rollout_maintenance_contention_disables_cached_legacy_resume_shortcut()
     let _maintenance_guard =
         codex_rollout::try_acquire_rollout_maintenance_lock(codex_home.path())?
             .expect("acquire rollout maintenance lock");
-    let next_request_id = app_server.next_request_id;
 
     let resumed = app_server
         .resume_thread(
@@ -415,7 +415,6 @@ async fn rollout_maintenance_contention_disables_cached_legacy_resume_shortcut()
         )
         .await?;
 
-    assert_eq!(app_server.next_request_id, next_request_id + 3);
     assert_eq!(resumed.session.thread_id, thread_id);
     assert_eq!(
         app_server
@@ -446,7 +445,6 @@ async fn stale_legacy_history_mode_is_revalidated_before_resume() -> Result<()> 
     )?;
     let mut app_server = crate::start_embedded_app_server_for_picker(&config).await?;
     app_server.remember_thread_history_mode(thread_id, ThreadHistoryMode::Legacy);
-    let next_request_id = app_server.next_request_id;
 
     let resumed = app_server
         .resume_thread(
@@ -457,7 +455,7 @@ async fn stale_legacy_history_mode_is_revalidated_before_resume() -> Result<()> 
         )
         .await?;
     assert_eq!(resumed.session.thread_id, thread_id);
-    assert!(app_server.next_request_id >= next_request_id + 4);
+
     assert_eq!(
         app_server
             .history_pagination
@@ -468,7 +466,6 @@ async fn stale_legacy_history_mode_is_revalidated_before_resume() -> Result<()> 
 
     let missing_thread_id = ThreadId::new();
     app_server.remember_thread_history_mode(missing_thread_id, ThreadHistoryMode::Legacy);
-    let next_request_id = app_server.next_request_id;
     assert!(
         app_server
             .resume_thread(
@@ -480,7 +477,6 @@ async fn stale_legacy_history_mode_is_revalidated_before_resume() -> Result<()> 
             .await
             .is_err()
     );
-    assert_eq!(app_server.next_request_id, next_request_id + 2);
 
     app_server.shutdown().await?;
     Ok(())

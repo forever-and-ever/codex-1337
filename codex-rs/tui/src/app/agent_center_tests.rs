@@ -293,6 +293,7 @@ async fn live_center_rename_retains_target_when_status_leaves_filter() -> Result
             let mut tui = crate::tui::test_support::make_test_tui()?;
             // Synthetic IDs have no rollout: the server rejects the rename.
             Box::pin(app.handle_event(&mut tui, &mut server, rename)).await?;
+            app.settle_turn_submissions(&mut server).await?;
             let mut retry = app.agents_overview_view(threads.clone(), Some(other));
             assert_eq!(retry.rows[retry.selected_index().unwrap()].thread_id, id);
             retry.handle_key_event(KeyCode::Enter.into());
