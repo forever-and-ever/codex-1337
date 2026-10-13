@@ -376,8 +376,16 @@ impl ChatWidget {
             None => ExecEndTarget::NewCell,
         };
 
-        let output = if is_unified_exec_interaction {
-            CommandOutput::new(exit_code, String::new())
+        let aggregated_output = if is_unified_exec_interaction {
+            String::new()
+        } else {
+            aggregated_output
+        };
+        let output = if status == codex_app_server_protocol::CommandExecutionStatus::Declined {
+            CommandOutput::new(
+                crate::exec_cell::CommandOutcome::Declined,
+                aggregated_output,
+            )
         } else {
             CommandOutput::new(exit_code, aggregated_output)
         };

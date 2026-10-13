@@ -133,7 +133,7 @@ pub(crate) fn output_lines(
         include_prefix,
     } = params;
     let output = match output {
-        Some(output) if only_err && output.exit_code == 0 => {
+        Some(output) if only_err && output.outcome.is_success() => {
             return OutputLines {
                 lines: Vec::new(),
                 omitted: None,
@@ -479,7 +479,7 @@ impl ExecCell {
         let layout = EXEC_DISPLAY_LAYOUT;
         let success = call
             .duration
-            .and_then(|_| call.output.as_ref().map(|o| o.exit_code == 0));
+            .and_then(|_| call.output.as_ref().map(|o| o.outcome.is_success()));
         let bullet = match success {
             Some(true) => "•".green().bold(),
             Some(false) => "•".red().bold(),
@@ -490,6 +490,12 @@ impl ExecCell {
             ""
         } else if self.is_active() {
             "Running"
+        } else if call
+            .output
+            .as_ref()
+            .is_some_and(|output| output.outcome == super::outcome::CommandOutcome::Declined)
+        {
+            "Declined"
         } else if call.is_user_shell_command() {
             "You ran"
         } else {

@@ -281,7 +281,8 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
     } = &mut declined
     {
         *status = AppServerCommandExecutionStatus::Declined;
-        *exit_code = None;
+        // Legacy rejection events carry -1, not an actual process exit.
+        *exit_code = Some(-1);
     }
     let turn = AppServerTurn {
         items: vec![
@@ -302,6 +303,14 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
         )
     };
 
+    let (mut live, mut live_rx, _live_op_rx) =
+        make_chatwidget_manual(/*model_override*/ None).await;
+    for item in turn.items.iter().cloned() {
+        live.handle_command_execution_completed_now(CompletedItem {
+            item,
+            timestamp: None,
+        });
+    }
     chat.replay_thread_turns(vec![turn], ReplayKind::ResumeInitialMessages);
 
     let cells = std::iter::from_fn(|| rx.try_recv().ok())
@@ -316,6 +325,19 @@ async fn replayed_commands_preserve_individual_output_and_failure_status() {
         .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
         .collect::<Vec<_>>()
         .join("\n");
+    let live_transcript = std::iter::from_fn(|| live_rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::InsertHistoryCell(cell) => Some(cell),
+            _ => None,
+        })
+        .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(live_transcript, transcript);
+    let declined_heading = cells[3].display_lines(/*width*/ 80)[0].to_string();
+    assert!(declined_heading.contains("declined"));
+    assert!(!declined_heading.contains("failed"));
+    assert!(!declined_heading.contains("exit"));
     insta::assert_snapshot!(transcript, @r"$ printf first
 first
 ✓ • 5ms
@@ -330,7 +352,7 @@ failure
 
 $ printf declined
 declined
-✗ (1) • 5ms
+Declined • 5ms
 ");
 }
 

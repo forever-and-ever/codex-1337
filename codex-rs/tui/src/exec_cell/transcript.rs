@@ -2,6 +2,7 @@
 //! Raw history omits transcript-only reasoning while retaining full command output.
 
 use super::model::ExecCell;
+use super::outcome::CommandOutcome;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::HistoryRenderMode;
 use crate::history_cell::output_provenance::OutputProvenance;
@@ -52,14 +53,13 @@ impl ExecCell {
                         lines.extend(adaptive_wrap_hyperlink_lines(&[detail], wrap_opts.clone()));
                     }
                 }
-                if call.duration.is_some() || output.exit_code != 0 {
-                    let mut result: Line = if output.exit_code == 0 {
-                        Line::from("✓".green().bold())
-                    } else {
-                        Line::from(vec![
-                            "✗".red().bold(),
-                            format!(" ({})", output.exit_code).into(),
-                        ])
+                if call.duration.is_some() || !output.outcome.is_success() {
+                    let mut result: Line = match output.outcome {
+                        CommandOutcome::Exited(0) => Line::from("✓".green().bold()),
+                        CommandOutcome::Exited(code) => {
+                            Line::from(vec!["✗".red().bold(), format!(" ({code})").into()])
+                        }
+                        CommandOutcome::Declined => Line::from("Declined".red().bold()),
                     };
                     if let Some(duration) = call.duration {
                         let duration = format_duration(duration);

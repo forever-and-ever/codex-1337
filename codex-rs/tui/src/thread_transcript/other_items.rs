@@ -88,19 +88,6 @@ pub(super) fn cells(
         ThreadItem::ImageView { path, .. } => {
             cells.push(Arc::new(history_cell::new_view_image_tool_call(path)))
         }
-        ThreadItem::ImageGeneration(item)
-            if !matches!(item.status.as_str(), "completed" | "failed") =>
-        {
-            let status = if item.status.is_empty() {
-                "status unavailable"
-            } else {
-                &item.status
-            };
-            cells.push(Arc::new(history_cell::new_info_event(
-                format!("Image generation · {status}"),
-                /*hint*/ None,
-            )));
-        }
         ThreadItem::ImageGeneration(item) => {
             cells.push(Arc::new(history_cell::new_image_generation_call(
                 item.id,

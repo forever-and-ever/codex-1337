@@ -116,6 +116,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
+#[cfg(test)]
 use url::Url;
 
 const RAW_DIFF_SUMMARY_WIDTH: usize = 10_000;
@@ -138,6 +139,7 @@ mod mcp;
 mod messages;
 pub(crate) use failed_turn::FailedTurnCell;
 
+mod image_generation;
 mod notices;
 mod patches;
 mod plans;

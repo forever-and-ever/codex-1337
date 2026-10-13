@@ -2,6 +2,7 @@
 
 use super::model::ExecCall;
 use super::model::ExecCell;
+use super::outcome::CommandOutcome;
 use super::segments::Connector;
 use super::segments::ShellSegment;
 use super::segments::shell_segments;
@@ -84,14 +85,17 @@ impl ExecCall {
     }
 }
 
-/// One heading for any group of commands: its marker says whether they run or failed.
+/// One heading for a command group, retaining failures and declined execution separately.
 pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHeader) {
     let active = cells.iter().any(|cell| cell.is_active());
-    let failed = cells.iter().flat_map(|cell| cell.iter_calls()).any(|call| {
-        call.output
-            .as_ref()
-            .is_some_and(|output| output.exit_code != 0)
-    });
+    let mut outcomes = cells
+        .iter()
+        .flat_map(|cell| cell.iter_calls())
+        .filter_map(|call| call.output.as_ref().map(|output| output.outcome));
+    let failed = outcomes
+        .clone()
+        .any(|outcome| matches!(outcome, CommandOutcome::Exited(code) if code != 0));
+    let declined = outcomes.any(|outcome| outcome == CommandOutcome::Declined);
     let marker = if active {
         activity_indicator(
             cells.iter().find_map(|cell| cell.active_start_time()),
@@ -99,7 +103,7 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
             ReducedMotionIndicator::StaticBullet,
         )
         .unwrap_or_else(|| "•".dim())
-    } else if failed {
+    } else if failed || declined {
         "•".red().bold()
     } else {
         "•".green().bold()
@@ -109,6 +113,9 @@ pub(crate) fn command_header(cells: &[&ExecCell]) -> (Line<'static>, ActivityHea
     let header = ActivityHeader::at_end(&heading);
     if failed {
         heading.push_span(" · failed".red());
+    }
+    if declined {
+        heading.push_span(" · declined".red());
     }
     (heading, header)
 }

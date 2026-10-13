@@ -11,6 +11,9 @@ use codex_protocol::mcp::is_node_repl_backed_server;
 #[path = "mcp_result.rs"]
 mod result;
 
+#[path = "mcp_outcome.rs"]
+mod outcome;
+
 #[path = "mcp_preview.rs"]
 mod preview;
 
@@ -150,11 +153,7 @@ impl McpToolCallCell {
         )
     }
     fn header_verb(&self) -> &'static str {
-        if self.result.is_some() {
-            "Called"
-        } else {
-            "Calling"
-        }
+        self.outcome_verb()
     }
     pub(crate) fn new(
         call_id: String,
@@ -245,11 +244,7 @@ impl McpToolCallCell {
             mode,
             McpToolCallRenderMode::Summary | McpToolCallRenderMode::NestedArguments
         );
-        let header_text = if nested && status == Some(false) {
-            "Failed"
-        } else {
-            self.header_verb()
-        };
+        let header_text = self.header_verb();
 
         let title = self
             .invocation
@@ -660,11 +655,7 @@ impl HistoryCell for McpToolCallCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        let header_text = if self.success().is_some() {
-            "Called"
-        } else {
-            "Calling"
-        };
+        let header_text = self.header_verb();
         let mut lines = vec![Line::from(format!(
             "{header_text} {}",
             format_mcp_invocation(&self.invocation)
