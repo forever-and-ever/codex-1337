@@ -117,6 +117,45 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
     assert_eq!(layout.rewrap(/*width*/ 24).text(), expected);
 
     assert_layout_paints_like_lines(lines, width);
+    // Human receipt expansion must not disclose the exact, unmasked model result.
+    let capture = serde_json::to_string(&cell.answers).unwrap();
+    let receipt = Arc::new(cell) as Arc<dyn HistoryCell>;
+    let output = Arc::new(
+        crate::history_cell::ToolOutputCell::from_output(
+            "question-result",
+            Some("question-call"),
+            "request_user_input",
+            Some("functions"),
+            &codex_protocol::models::FunctionCallOutputBody::Text(capture.clone()),
+        )
+        .unwrap(),
+    ) as Arc<dyn HistoryCell>;
+    let (range, joined) = crate::history_cell::ToolOutputGroup::attach(&[receipt], output).unwrap();
+    assert_eq!(range, 0..1);
+    let mut expanded = std::collections::HashSet::from_iter(joined[0].activity_ids());
+    let parts = joined[0]
+        .output_parts(
+            200,
+            0,
+            &expanded,
+            crate::history_cell::output_provenance::OutputMode::Raw,
+        )
+        .unwrap();
+    let human = TextLayout::new(parts.lines, 200).text().to_owned();
+    assert!(human.contains("••••••"));
+    assert!(!human.contains("never expose this credential"));
+    assert_eq!(parts.controls.last().unwrap().id, "result:question-result");
+    assert!(!parts.controls.last().unwrap().expanded);
+    expanded.insert("result:question-result".into());
+    let parts = joined[0]
+        .output_parts(
+            200,
+            0,
+            &expanded,
+            crate::history_cell::output_provenance::OutputMode::Raw,
+        )
+        .unwrap();
+    assert!(TextLayout::new(parts.lines, 200).text().contains(&capture));
 }
 
 #[test]

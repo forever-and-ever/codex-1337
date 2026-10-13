@@ -339,16 +339,12 @@ impl CodeModeCell {
             }
         }
         for (_, target) in waits {
-            let mut spans = vec![
+            lines.push(Line::from(vec![
                 marker.clone(),
                 " ".into(),
-                "Waiting for ".bold(),
-                target.map_or_else(|| self.tetrad(), owner_label).into(),
-            ];
-            if target.is_some() {
-                spans.push(format!(" ({})", self.tetrad()).dim());
-            }
-            lines.push(Line::from(spans));
+                "Waiting for".bold(),
+                format!(" ({})", target.map_or_else(|| self.tetrad(), owner_label)).dim(),
+            ]));
         }
         lines
     }
@@ -486,13 +482,9 @@ impl CodeModeCell {
             let parts = if block_expanded
                 && let Some(output) = member.as_any().downcast_ref::<ToolOutputCell>()
             {
-                // Headed, so the result reads apart from the calls' details above it.
-                Some(super::activity_parts::ActivityParts {
-                    lines: output.expanded_output_lines(nested_width, mode),
-                    header: None,
-                    output: None,
-                    controls: Vec::new(),
-                })
+                let mut parts = super::activity_parts::ActivityParts::default();
+                output.append_result_parts(&mut parts, nested_width, expanded, mode);
+                Some(parts)
             } else if block_expanded {
                 member.nested_activity_parts(nested_width, expanded)
             } else {

@@ -232,17 +232,23 @@ pub(crate) fn command_parts(
     if has_output && activity_ids.iter().any(|id| expanded.contains(id)) {
         lines.push("".into());
         if has_batches {
+            let mut parts = ActivityParts {
+                lines,
+                controls,
+                ..ActivityParts::default()
+            };
             for cell in cells {
-                lines.extend(
-                    cell.group
-                        .details
-                        .output_lines(width, mode)
-                        .unwrap_or_default(),
-                );
+                cell.group
+                    .details
+                    .append_result_parts(&mut parts, width, expanded, mode);
             }
             for batch in batches {
-                lines.extend(batch.output_lines(width, mode));
+                if batch.activity_disclosure(width).is_some() {
+                    batch.append_result_parts(&mut parts, width, expanded, mode);
+                }
             }
+            lines = parts.lines;
+            controls = parts.controls;
         } else {
             lines.push(client_notice("  Stored result · exact capture unavailable"));
             for call in calls {

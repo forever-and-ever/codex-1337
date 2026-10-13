@@ -669,8 +669,8 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     );
     let before_completion = Arc::clone(&waiting.block);
     assert!(!live(&waiting.block).contains("Running"));
-    assert!(live(&waiting.block).contains(&format!("Waiting for {target} ({actor})")));
-    assert!(live(&waiting.block).contains(&format!("Waiting for {other_target} ({actor})")));
+    assert!(live(&waiting.block).contains(&format!("Waiting for ({target})")));
+    assert!(live(&waiting.block).contains(&format!("Waiting for ({other_target})")));
     let one_left = apply(
         &a,
         code_mode(
@@ -682,9 +682,9 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         ),
     );
     assert!(one_left.wait.is_none());
-    assert!(!live(&one_left.block).contains(&format!("Waiting for {target} ({actor})")));
-    assert!(live(&one_left.block).contains(&format!("Waiting for {other_target} ({actor})")));
-    assert!(live(&before_completion).contains(&format!("Waiting for {target} ({actor})")));
+    assert!(!live(&one_left.block).contains(&format!("Waiting for ({target})")));
+    assert!(live(&one_left.block).contains(&format!("Waiting for ({other_target})")));
+    assert!(live(&before_completion).contains(&format!("Waiting for ({target})")));
     let resumed = apply(
         &a,
         code_mode(
@@ -808,6 +808,19 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     assert_prompt_arrival_ordering().await;
+    // Explicit functions.wait stores the targetless fact on the awaited owner itself.
+    let explicit = apply(
+        &b,
+        code_mode(
+            "exec-b",
+            CodeModeEvent::WaitStarted {
+                call_id: "explicit-wait".into(),
+                target: None,
+            },
+        ),
+    );
+    assert!(live(&explicit.block).contains(&format!("Waiting for ({target})")));
+    assert!(live(&explicit.block).contains(&format!("Running ({target})")));
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
         app.transcript_cells = thread_items_to_transcript_cells(
@@ -1690,7 +1703,38 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         let expected = project(&app, &current.items);
         assert_eq!(expected.len(), 3);
         // A discarded child may contain anything; only returned batches are output authority.
-        let detail = expected[0].expanded_hyperlink_lines(/*width*/ 240);
+        let mut expanded = HashSet::from_iter(expected[0].activity_ids());
+        let folded = expected[0]
+            .output_parts(
+                240,
+                0,
+                &expanded,
+                history_cell::output_provenance::OutputMode::Raw,
+            )
+            .unwrap();
+        assert!(
+            folded
+                .controls
+                .iter()
+                .filter(|control| control.id.starts_with("result:"))
+                .all(|control| !control.expanded)
+        );
+        assert!(
+            !folded
+                .lines
+                .iter()
+                .any(|line| line.line.to_string().contains("chosen porcelain"))
+        );
+        expanded.extend(["result:a".into(), "result:b".into()]);
+        let detail = expected[0]
+            .output_parts(
+                240,
+                0,
+                &expanded,
+                history_cell::output_provenance::OutputMode::Raw,
+            )
+            .unwrap()
+            .lines;
         let text = detail
             .iter()
             .map(|line| line.line.to_string())

@@ -26,6 +26,7 @@ pub(crate) struct PartControl {
     pub(crate) expanded: bool,
 }
 
+#[derive(Default)]
 pub(crate) struct ActivityParts {
     pub(crate) lines: Vec<HyperlinkLine>,
     pub(crate) header: Option<ActivityHeader>,

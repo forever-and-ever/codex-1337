@@ -20,6 +20,42 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::sync::OnceLock;
 
+pub(super) fn result_parts(
+    owner: Option<&dyn HistoryCell>,
+    outputs: &[&ToolOutputCell],
+    width: u16,
+    expanded: &std::collections::HashSet<String>,
+    mode: OutputMode,
+) -> super::activity_parts::ActivityParts {
+    let first = match (owner, outputs.first()) {
+        (Some(owner), _) => owner,
+        (None, Some(output)) => *output,
+        (None, None) => unreachable!("result disclosure requires an owner or captured output"),
+    };
+    let mut lines = first.compact_hyperlink_lines(width);
+    mark_lines(&mut lines, OutputProvenance::Client);
+    let mut parts = super::activity_parts::ActivityParts {
+        lines,
+        header: first.activity_header(),
+        output: Some(super::ActivityDisclosure::Generic),
+        controls: Vec::new(),
+    };
+    let open = owner
+        .into_iter()
+        .flat_map(HistoryCell::activity_ids)
+        .chain(outputs.iter().flat_map(|output| output.activity_ids()))
+        .any(|id| expanded.contains(&id));
+    if open {
+        if let Some(owner) = owner {
+            parts.lines.extend(owner.activity_argument_lines(width));
+        }
+        for output in outputs {
+            output.append_result_parts(&mut parts, width, expanded, mode);
+        }
+    }
+    parts
+}
+
 #[derive(Debug)]
 pub(crate) struct ToolOutputCell {
     id: String,
@@ -54,16 +90,37 @@ impl ToolOutputCell {
     }
 
     fn heading(&self) -> std::borrow::Cow<'static, str> {
-        if self.has_agent_wait_name() {
+        if self.call_id.is_none() || self.has_agent_wait_name() {
             format!("{} returned", self.name).into()
         } else if self.wait.is_some() {
             "Waited".into()
-        } else {
+        } else if self.code_mode {
             "Returned".into()
+        } else {
+            format!("{} returned", self.name).into()
         }
     }
     pub(crate) fn id(&self) -> &str {
         &self.id
+    }
+    pub(crate) fn append_result_parts(
+        &self,
+        parts: &mut super::activity_parts::ActivityParts,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+        mode: OutputMode,
+    ) {
+        let id = format!("result:{}", self.id());
+        let open = expanded.contains(&id);
+        parts.controls.push(super::activity_parts::PartControl {
+            id,
+            line: parts.lines.len(),
+            expanded: open,
+        });
+        parts.lines.push(client_notice("  Result"));
+        if open {
+            parts.lines.extend(self.output_lines(width, mode));
+        }
     }
 
     pub(crate) fn is_agent_wait(&self) -> bool {
@@ -88,13 +145,17 @@ impl ToolOutputCell {
         namespace: Option<&str>,
         output: &FunctionCallOutputBody,
     ) -> Option<Self> {
-        let tool_name = codex_protocol::ToolName::new(namespace.map(str::to_owned), name);
-        if call_id.is_none() && name != "wait_agent" {
+        if call_id.is_none()
+            && name != "wait_agent"
+            && match output {
+                FunctionCallOutputBody::Text(text) => text.is_empty(),
+                FunctionCallOutputBody::ContentItems(items) => items.is_empty(),
+            }
+        {
             return None;
         }
-        let code_mode = codex_protocol::ToolName::new(namespace.map(str::to_owned), name)
-            .is_default_namespace()
-            && matches!(name, "exec" | "wait");
+        let tool_name = codex_protocol::ToolName::new(namespace.map(str::to_owned), name);
+        let code_mode = tool_name.is_default_namespace() && matches!(name, "exec" | "wait");
         let readable = match output {
             FunctionCallOutputBody::Text(text) => text.clone(),
             FunctionCallOutputBody::ContentItems(items) => items
@@ -255,9 +316,8 @@ impl HistoryCell for ToolOutputCell {
         expanded: &std::collections::HashSet<String>,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
-        self.has_agent_wait_name().then(|| {
-            super::agent_wait_projection::wait_output_parts(None, &[self], width, expanded, mode)
-        })
+        (self.has_agent_wait_name() || self.activity_disclosure(width).is_some())
+            .then(|| result_parts(None, &[self], width, expanded, mode))
     }
     fn expanded_output_lines(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
         let mut lines = self.compact_hyperlink_lines(width);
