@@ -839,7 +839,7 @@ impl App {
     ) -> Result<AppRunControl> {
         let control = self.resume_target_session(tui, server, target).await?;
         if matches!(control, AppRunControl::Continue) {
-            self.settle_navigation(tui, server).await?;
+            return self.settle_navigation(tui, server).await;
         }
         Ok(control)
     }

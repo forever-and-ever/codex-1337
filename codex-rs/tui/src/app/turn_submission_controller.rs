@@ -1097,7 +1097,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
-    ) -> Result<()> {
+    ) -> Result<AppRunControl> {
         tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.navigation.is_empty()
                 || !self.server_operations.control_rx.is_empty()
@@ -1109,14 +1109,14 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.expect("server receipt channel open");
-                        self.handle_server_completion(tui, server, completion).await?;
+                        let control = self.handle_server_completion(tui, server, completion).await?;
+if matches!(control, AppRunControl::Exit(_)) { return Ok(control); }
                     }
                 }
             }
-            Ok::<_, color_eyre::Report>(())
+            Ok::<_, color_eyre::Report>(AppRunControl::Continue)
         })
-        .await??;
-        Ok(())
+        .await?
     }
     #[cfg(test)]
     pub(in crate::app) async fn start_fresh_session_and_settle(
@@ -1141,7 +1141,7 @@ impl App {
         thread_id: ThreadId,
     ) -> Result<()> {
         self.select_agent_thread(tui, server, thread_id).await?;
-        self.settle_navigation(tui, server).await
+        self.settle_navigation(tui, server).await.map(|_| ())
     }
     #[cfg(test)]
     pub(in crate::app) async fn open_agent_picker_and_settle(
@@ -1150,6 +1150,6 @@ impl App {
     ) -> Result<()> {
         self.open_agent_picker(server).await;
         let mut tui = crate::tui::test_support::make_test_tui()?;
-        self.settle_navigation(&mut tui, server).await
+        self.settle_navigation(&mut tui, server).await.map(|_| ())
     }
 }
