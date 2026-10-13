@@ -17,9 +17,11 @@ pub(crate) enum OutputProvenance {
     Captured,
     Formatted,
     Client,
+    /// Client serialization of model-bound definitions, never the provider's hidden prompt.
+    Definitions(OutputMode),
 }
 
-/// Authorship and captured-versus-client provenance are independent.
+/// Authorship is independent of inclusion and capture representation.
 #[derive(Clone, Copy)]
 pub(crate) enum ContextAuthor {
     User,
@@ -99,7 +101,7 @@ pub(crate) fn captured_blocks(
     lines
 }
 
-/// A readable representation is not an exact model-input capture.
+/// Legacy mixed captures have unknown inclusion boundaries; do not guess model authorship.
 pub(crate) fn client_lines(text: &str, mode: OutputMode) -> Vec<HyperlinkLine> {
     let mut lines = captured_lines(text, ContextAuthor::Environment, mode);
     for line in &mut lines {
@@ -132,26 +134,33 @@ pub(crate) fn context_sources(
     use codex_protocol::ContextSource;
     let mut lines = Vec::new();
     for source in sources {
-        let (heading, text, provenance) = match source {
-            ContextSource::Prompt { label, text } => {
-                (label.as_str(), text.as_str(), OutputProvenance::Captured)
-            }
+        let (heading, text) = match source {
+            ContextSource::Prompt { label, text } => (label.as_str(), text.as_str()),
             ContextSource::ToolDeclarations { text } => (
-                "Tool Declarations — client representation of supplied schemas; provider prompt not observable",
+                "Tool Declarations — submitted definitions (client JSON); provider rendering unavailable",
                 text.as_str(),
-                OutputProvenance::Client,
             ),
         };
         if !lines.is_empty() {
-            lines.push("".into());
+            lines.push(client_notice(""));
         }
         let heading = super::sanitize_user_text(heading.into()).replace(['\n', '\t'], " ");
         lines.push(client_notice(&heading));
-        let body = if provenance == OutputProvenance::Client {
-            client_lines(text, mode)
-        } else {
-            captured_lines(text, ContextAuthor::Environment, mode)
-        };
+        let mut body = captured_lines(text, ContextAuthor::Environment, mode);
+        if matches!(source, ContextSource::ToolDeclarations { .. }) {
+            for line in &mut body {
+                let provenance = match line.source.as_ref().map(|source| source.output_provenance) {
+                    Some(OutputProvenance::Captured) => {
+                        OutputProvenance::Definitions(OutputMode::Raw)
+                    }
+                    Some(OutputProvenance::Formatted) => {
+                        OutputProvenance::Definitions(OutputMode::Fmt)
+                    }
+                    _ => continue,
+                };
+                mark_lines(std::slice::from_mut(line), provenance);
+            }
+        }
         lines.extend(body);
     }
     lines
@@ -214,17 +223,15 @@ impl OutputProvenance {
     fn style(self) -> Style {
         match self {
             Self::Unspecified => Style::default(),
-            Self::Captured => crate::style::context_message_style(),
-            Self::Formatted => {
+            Self::Captured | Self::Definitions(OutputMode::Raw) => {
+                crate::style::context_message_style()
+            }
+            Self::Formatted | Self::Definitions(OutputMode::Fmt) => {
                 crate::style::context_message_style().patch(crate::style::formatted_output_style())
             }
-            Self::Client => {
-                if crate::terminal_palette::default_bg().is_some() {
-                    crate::style::aside_style()
-                } else {
-                    Style::default().reversed()
-                }
-            }
+            Self::Client => Style::default()
+                .bg(ratatui::style::Color::Reset)
+                .remove_modifier(ratatui::style::Modifier::REVERSED),
         }
     }
 }
@@ -250,6 +257,16 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
         });
         source.output_provenance = provenance;
         source.line_style = source.line_style.patch(style);
+        if provenance == OutputProvenance::Client {
+            // Span-level paint must not override the human-only background boundary.
+            for span in &mut line.line.spans {
+                span.style = span.style.patch(style);
+            }
+            for (_, span_style) in std::sync::Arc::make_mut(&mut source.styles) {
+                *span_style = span_style.patch(style);
+            }
+            source.span_style = source.span_style.patch(style);
+        }
     }
 }
 

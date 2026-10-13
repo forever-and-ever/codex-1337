@@ -39,9 +39,10 @@ completed plan
     [Captured context]
     Keep these bytes.
 
-
     [Client annotation or representation]
-    Tool Declarations — client representation of supplied schemas; provider prompt not observable
+
+    Tool Declarations — submitted definitions (client JSON); provider rendering unavailable
+    [Submitted tool definitions · client JSON]
     {"tools":[{"name":"tool"}]}
 
 ## Activity

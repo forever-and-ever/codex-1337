@@ -79,6 +79,10 @@ impl ArrivalCell {
         }
     }
 
+    fn raw_fold(&self) -> String {
+        format!("arrival-raw:{}", self.0.id)
+    }
+
     pub(super) fn context_lines(
         &self,
         width: u16,
@@ -99,15 +103,37 @@ impl FeedEntry for ArrivalCell {
     fn feed_body(
         &self,
         width: u16,
-        _expanded: &HashSet<String>,
+        expanded: &HashSet<String>,
         mode: super::output_provenance::OutputMode,
     ) -> ActivityParts {
-        let mut lines = vec![HyperlinkLine::from("Context")];
-        super::output_provenance::mark_lines(
-            &mut lines,
-            super::output_provenance::OutputProvenance::Client,
+        use super::activity_parts::PartControl;
+        use super::output_provenance::{OutputProvenance, mark_lines};
+        let declarations = matches!(
+            self.0.source,
+            codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. }
         );
-        lines.extend(self.context_lines(width, mode));
+        let heading = if declarations {
+            "Raw Context"
+        } else {
+            "Context"
+        };
+        let mut lines = vec![HyperlinkLine::from(heading)];
+        mark_lines(&mut lines, OutputProvenance::Client);
+        let mut controls = Vec::new();
+        if declarations {
+            let id = self.raw_fold();
+            let expanded = expanded.contains(&id);
+            controls.push(PartControl {
+                id,
+                line: 0,
+                expanded,
+            });
+            if expanded {
+                lines.extend(self.context_lines(width, mode));
+            }
+        } else {
+            lines.extend(self.context_lines(width, mode));
+        }
         ActivityParts {
             lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
                 lines,
@@ -115,11 +141,11 @@ impl FeedEntry for ArrivalCell {
                 "  ".into(),
             ),
             header: Some(ActivityHeader {
-                source_offset: "Context".len(),
+                source_offset: heading.len(),
                 expand_on_truncation: false,
             }),
             output: None,
-            controls: Vec::new(),
+            controls,
         }
     }
 }

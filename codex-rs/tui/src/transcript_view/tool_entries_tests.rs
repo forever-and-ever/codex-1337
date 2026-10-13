@@ -94,6 +94,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     use crate::history_cell::output_provenance::OutputMode;
     use crate::history_cell::output_provenance::OutputProvenance;
     use crate::history_cell::output_provenance::client_notice;
+    use std::collections::HashSet;
     let json = r#"{"a":9007199254740993123456789,"a":1.2300e+04,"text":"first\nsecond\tend","literal":"\\n","key\n":"\u0061"}"#;
     let plain = "prefix {\"embedded\":true}";
     let invalid = "{\"truncated\":";
@@ -346,8 +347,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         painted.push(format!("escaped capture\n{buffer:?}"));
     }
     // Context inspectors and replay use the same evidence boundary as tool output.
-    // A declaration representation must never become captured context merely because its
-    // arrival kind is Injection; old records retain explicit uncertainty.
+    // Submitted definitions are model-bound, but their client JSON is not a provider prompt.
+    // Preserve that evidence distinction through replay, formatting and selection.
     use codex_protocol::step_admission::{ArrivalItem, ArrivalKind, ArrivalSource};
     for (source, kind, expected) in [
         (
@@ -367,7 +368,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         (
             ArrivalSource::ToolDeclarations { text: json.into() },
             ArrivalKind::Injection,
-            OutputProvenance::Client,
+            OutputProvenance::Definitions(OutputMode::Raw),
         ),
         (
             ArrivalSource::Legacy,
@@ -409,7 +410,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             let body = crate::transcript_view::FeedEntry::feed_body(
                 &replay,
                 u16::MAX,
-                &Default::default(),
+                &HashSet::from(["arrival-raw:arrival-provenance".into()]),
                 mode,
             );
             let layout = TextLayout::new(body.lines, u16::MAX);
@@ -453,6 +454,27 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 );
                 backgrounds.push(styles[0].1);
             }
+            // A renderer's span-level background/reverse must not leak through Client provenance.
+            let mut decorated = vec![crate::terminal_hyperlinks::HyperlinkLine::from(
+                ratatui::text::Line::from(ratatui::text::Span::styled(
+                    "human-only annotation",
+                    ratatui::style::Style::default()
+                        .bg(ratatui::style::Color::Red)
+                        .add_modifier(ratatui::style::Modifier::REVERSED),
+                )),
+            )];
+            crate::history_cell::output_provenance::mark_lines(
+                &mut decorated,
+                OutputProvenance::Client,
+            );
+            let layout = TextLayout::new(decorated, 8);
+            let area = Rect::new(0, 0, 8, 4);
+            let mut buffer = Buffer::empty(area);
+            layout.render(area, &mut buffer, 0);
+            for cell in &buffer.content {
+                assert_eq!(cell.bg, ratatui::style::Color::Reset);
+                assert!(!cell.modifier.contains(ratatui::style::Modifier::REVERSED));
+            }
             // Authorship survives source-backed and streaming raw projections alike;
             // treating every non-message cell as a client annotation repaints plans/reasoning.
             let cwd = std::path::Path::new(".");
@@ -490,6 +512,153 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     ));
                 }
             }
+            // The same submitted definitions cross Preamble, /context and Injection surfaces.
+            // Rewrapping must retain purple payloads and default-background, uncopyable headings.
+            let sources = vec![
+                codex_protocol::ContextSource::Prompt {
+                    label: "Base instructions".into(),
+                    text: json.into(),
+                },
+                codex_protocol::ContextSource::ToolDeclarations { text: json.into() },
+            ];
+            let parts = vec![codex_protocol::PreamblePart {
+                section: codex_protocol::PreambleSection::Tools,
+                group: None,
+                label: "tool".into(),
+                tokens: codex_protocol::CensusCount::Counted(12),
+            }];
+            let preamble = crate::history_cell::PreambleCell::from_item(ThreadItem::Preamble {
+                id: "provenance-preamble".into(),
+                response_id: "response".into(),
+                completed_at_ms: 0,
+                parts: parts.clone(),
+                sources: sources.clone(),
+                raw: None,
+                window_id: None,
+                change: None,
+                reported_input_tokens: None,
+            });
+            let inventory =
+                crate::history_cell::PreambleCell::inventory(codex_protocol::ContextInventory {
+                    parts,
+                    sources,
+                    raw: String::new(),
+                });
+            let arrival = crate::history_cell::ArrivalCell::new(ArrivalItem {
+                id: "provenance-definitions".into(),
+                response_id: "response".into(),
+                announced_at_ms: 0,
+                kind: ArrivalKind::Injection,
+                label: "Additional tools".into(),
+                text: None,
+                source: ArrivalSource::ToolDeclarations { text: json.into() },
+            });
+            for mode in [OutputMode::Raw, OutputMode::Fmt] {
+                let expanded = HashSet::from([
+                    "preamble-raw:provenance-preamble".into(),
+                    "preamble-raw:context-inventory".into(),
+                    "arrival-raw:provenance-definitions".into(),
+                ]);
+                for (entry, captures) in [
+                    (&preamble as &dyn FeedEntry, 2),
+                    (&inventory as &dyn FeedEntry, 2),
+                    (&arrival as &dyn FeedEntry, 1),
+                ] {
+                    let lines = entry.feed_body(u16::MAX, &expanded, mode).lines;
+                    let definitions: Vec<_> = lines
+                        .iter()
+                        .filter(|line| {
+                            line.source.as_ref().is_some_and(|source| {
+                                source.output_provenance == OutputProvenance::Definitions(mode)
+                            })
+                        })
+                        .collect();
+                    assert!(!definitions.is_empty());
+                    assert!(definitions.iter().all(|line| {
+                        line.line.style.bg == crate::style::context_message_style().bg
+                    }));
+                    for line in &lines {
+                        let Some(source) = line.source.as_ref() else {
+                            continue;
+                        };
+                        if source.output_provenance != OutputProvenance::Client {
+                            continue;
+                        }
+                        assert_eq!(source.line_style.bg, Some(ratatui::style::Color::Reset));
+                        assert!(
+                            !source
+                                .line_style
+                                .add_modifier
+                                .contains(ratatui::style::Modifier::REVERSED)
+                        );
+                    }
+                    let layout = TextLayout::new(lines, u16::MAX).rewrap(24);
+                    assert!(!layout.text().contains("Tool Declarations"));
+
+                    assert_eq!(
+                        layout.text().matches("9007199254740993123456789").count(),
+                        captures
+                    );
+                    let area = Rect::new(0, 0, 24, 18);
+                    let mut buffer = Buffer::empty(area);
+                    layout.render(area, &mut buffer, 0);
+                    if captures == 1 {
+                        painted.push(format!("{mode:?} submitted definitions\n{buffer:?}"));
+                    }
+                }
+            }
+            // AdditionalTools arrivals must not dump their definitions into an otherwise open feed.
+            let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(arrival)];
+            let mut view = TranscriptView::default();
+            let folded = tests::render(&mut view, &cells, 64, 6);
+            assert!(tests::text(&folded).contains("Raw Context"));
+            assert!(
+                !view
+                    .current_layout(&cells, 0)
+                    .unwrap()
+                    .text()
+                    .contains(json)
+            );
+            painted.push(format!("definitions folded\n{folded:?}"));
+            assert!(view.focus_fold(
+                &cells,
+                0,
+                FoldTarget::Part("arrival-raw:provenance-definitions".into())
+            ));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            tests::render(&mut view, &cells, 64, 12);
+            let layout = view.current_layout(&cells, 0).unwrap();
+            let start = layout.text().find(json).unwrap();
+            assert!(!layout.text().contains("Tool Declarations"));
+            view.begin_selection(&cells, 6, 1, 1);
+            let selection = view.selection.as_mut().unwrap();
+            selection.start.offset = start;
+            selection.end.offset = start + json.len();
+            tests::render(&mut view, &cells, 32, 16);
+            assert_eq!(view.selected_text(&cells), Some(json.into()));
+            view.end_selection(&cells);
+            assert!(view.focus_fold(&cells, 0, FoldTarget::OutputMode(OutputMode::Fmt)));
+            view.handle_key(crossterm::event::KeyCode::Right.into(), &cells);
+            tests::render(&mut view, &cells, 64, 16);
+            let formatted = view.current_layout(&cells, 0).unwrap();
+            assert!(formatted.text().contains("9007199254740993123456789"));
+            assert!(formatted.text().contains("1.2300e+04"));
+            assert_eq!(formatted.text().matches("\"a\":").count(), 2);
+            assert!(view.focus_fold(
+                &cells,
+                0,
+                FoldTarget::Part("arrival-raw:provenance-definitions".into())
+            ));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let folded = tests::render(&mut view, &cells, 32, 8);
+            assert!(
+                !view
+                    .current_layout(&cells, 0)
+                    .unwrap()
+                    .text()
+                    .contains(json)
+            );
+            assert!(tests::text(&folded).contains("Raw Context"));
             let thought = crate::history_cell::ThoughtCell::from_item(
                 codex_app_server_protocol::ThreadItem::Thought {
                     id: "thought-author".into(),
@@ -549,7 +718,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     assert_eq!(
         evidence[1].source.as_ref().unwrap().output_provenance,
-        OutputProvenance::Client
+        OutputProvenance::Definitions(OutputMode::Raw)
     );
     insta::assert_snapshot!(painted.join("\n"));
 }

@@ -258,6 +258,12 @@ fn context_export_lines(cell: &dyn HistoryCell) -> Option<Vec<ratatui::text::Lin
             OutputProvenance::Captured => Some("[Captured context]"),
             OutputProvenance::Formatted => Some("[Context with control characters escaped]"),
             OutputProvenance::Client => Some("[Client annotation or representation]"),
+            OutputProvenance::Definitions(OutputMode::Raw) => {
+                Some("[Submitted tool definitions · client JSON]")
+            }
+            OutputProvenance::Definitions(OutputMode::Fmt) => {
+                Some("[Submitted tool definitions · client JSON with control characters escaped]")
+            }
             OutputProvenance::Unspecified => None,
         };
         if let Some(label) = label.filter(|_| previous != Some(provenance)) {
