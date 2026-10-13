@@ -449,7 +449,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     if history_capabilities == HistoryCapabilities::TurnSubmissionStalls {
                         let seen = request_sink.lock().expect("request recorder lock");
                         let after_voice = seen.iter().skip_while(|seen| seen.method != "thread/realtime/listVoices").collect::<Vec<_>>();
-                        if !after_voice.is_empty() && (matches!(request.method.as_str(), "thread/resume" | "config/read") || (request.method == "thread/read" && after_voice.iter().filter(|seen| seen.method == "thread/read").count() == 1)) {
+                        if !after_voice.is_empty() && (matches!(request.method.as_str(), "thread/resume" | "thread/fork" | "config/read") || (request.method == "thread/read" && after_voice.iter().filter(|seen| seen.method == "thread/read").count() == 1)) {
                             continue;
                         }
                     }
@@ -3221,7 +3221,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 let mut tui = crate::tui::test_support::make_test_tui()?;
                 take_backfill_counts(&requests);
 
-                let control = Box::pin(app.handle_event(
+                let control = Box::pin(app.handle_event_and_settle_navigation(
                     &mut tui,
                     &mut app_server,
                     AppEvent::ForkCurrentSession {
@@ -3252,7 +3252,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                 assert_eq!(named_fork.name.as_deref(), Some("Add User Fork"));
                 take_backfill_counts(&requests);
 
-                let control = Box::pin(app.handle_event(
+                let control = Box::pin(app.handle_event_and_settle_navigation(
                     &mut tui,
                     &mut app_server,
                     AppEvent::ForkCurrentSession {
@@ -3422,7 +3422,7 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                     };
                     refresh.threads.push(discovered);
                 }
-                Box::pin(app.handle_event(&mut tui, &mut app_server, completion)).await?;
+                Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut app_server, completion)).await?;
                 assert_eq!(
                     app.agent_navigation
                         .ordered_threads()

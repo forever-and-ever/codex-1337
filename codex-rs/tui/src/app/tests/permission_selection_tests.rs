@@ -273,7 +273,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     // Both the accepted request and its confirmed descendant remain server-owned.
     for _ in 0..2 {
         let previous_thread_id = app.chat_widget.thread_id();
-        app.handle_event(
+        app.handle_event_and_settle_navigation(
             &mut tui,
             &mut server,
             AppEvent::ForkCurrentSession { name: None },

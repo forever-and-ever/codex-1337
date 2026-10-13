@@ -404,6 +404,54 @@ pub(crate) struct SessionObservations {
     pub(super) history_support: ThreadHistorySupport,
 }
 
+pub(crate) struct SafetyHistoryPreparation {
+    handle: AppServerRequestHandle,
+    policy: RequestPolicy,
+    thread_id: ThreadId,
+    turn_id: String,
+    history_support: ThreadHistorySupport,
+}
+
+pub(crate) struct PreparedSafetyHistory {
+    pub(crate) result: Result<Thread>,
+    pub(crate) observations: SessionObservations,
+}
+
+impl AppServerSession {
+    pub(crate) fn prepare_safety_retry_history(
+        &self,
+        policy: RequestPolicy,
+        thread_id: ThreadId,
+        turn_id: String,
+    ) -> SafetyHistoryPreparation {
+        SafetyHistoryPreparation {
+            handle: self.request_handle(),
+            policy,
+            thread_id,
+            turn_id,
+            history_support: self.history_support,
+        }
+    }
+}
+
+impl SafetyHistoryPreparation {
+    pub(crate) async fn run(self) -> PreparedSafetyHistory {
+        PreparedSafetyHistory {
+            result: history::preparation::prepare_safety_retry_history(
+                self.policy,
+                &self.handle,
+                self.thread_id,
+                &self.turn_id,
+            )
+            .await,
+            observations: SessionObservations {
+                history: HistoryPaginationUpdate::Untracked,
+                history_support: self.history_support,
+            },
+        }
+    }
+}
+
 pub(crate) struct PreparedSession {
     pub(crate) result: Result<AppServerStartedThread>,
     pub(crate) custody: SubscriptionCustody,

@@ -1,6 +1,4 @@
 use super::*;
-use crate::app_server_session::ForkGoalContinuation;
-use crate::app_server_session::ForkName;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::render::renderable::Renderable;
@@ -186,144 +184,10 @@ impl App {
                 .add_error_message("Wait for permissions to update before forking.".into());
             return Ok(());
         }
-        self.chat_widget.fork_in_progress = true;
-        let screen_size = tui.terminal.last_known_screen_size;
-        self.handle_draw_pre_render(tui, screen_size)?;
-        self.chat_widget.pre_draw_tick();
-        self.render_chat_widget_frame(tui, screen_size)?;
-        self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
+
+        self.enqueue_ordinary_fork(app_server, name, conflict_thread_ids, from_agents_overview)
             .await;
-        let mut config = if self.chat_widget.is_parent_owned_thread() {
-            let mut config = self.chat_widget.config_ref().clone();
-            config.service_tier = self.chat_widget.current_service_tier().map(str::to_string);
-            config
-        } else {
-            self.config.clone()
-        };
-        if app_server.uses_remote_workspace() {
-            config
-                .workspace_roots
-                .clone_from(&self.chat_widget.config_ref().workspace_roots);
-        }
-        config
-            .model_provider_id
-            .clone_from(&self.chat_widget.config_ref().model_provider_id);
-        config.model = Some(self.chat_widget.current_model().to_string());
-        config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
-        config.daybreak_enabled = self.chat_widget.daybreak_enabled;
-        let selected_profile = self.selected_server_profile(thread_id);
-        // Sampled once: the source turn may finish while the fork request is in flight.
-        let source_turn_running = self.chat_widget.is_agent_turn_running();
-        let goal_continuation = if source_turn_running {
-            ForkGoalContinuation::DeferUntilNextTurn
-        } else {
-            ForkGoalContinuation::StartIfIdle
-        };
-        let result = app_server
-            .fork_thread_at(
-                &self.local_settings,
-                config,
-                thread_id,
-                /*last_turn_id*/ None,
-                /*before_turn_id*/ None,
-                goal_continuation,
-                selected_profile.as_ref(),
-                name.clone().map(|name| ForkName {
-                    name,
-                    conflict_thread_ids,
-                }),
-            )
-            .await;
-        self.chat_widget.fork_in_progress = false;
-        match result {
-            Ok(forked) => {
-                if let Some(profile) = &selected_profile {
-                    self.agents_overview
-                        .selected_permission_profiles
-                        .insert(forked.session.thread_id, profile.profile_id.clone());
-                }
-                // In-flight input stays with its source; only idle locked drafts follow the fork.
-                let retained_input = (from_locked_thread && !source_turn_running)
-                    .then(|| self.chat_widget.capture_thread_input_state())
-                    .flatten();
-                // Fork changes the foreground, not the source family's lifetime or approvals.
-                let mut retained_threads = self.agent_navigation.tracked_thread_ids();
-                retained_threads.push(thread_id);
-                retained_threads.extend(
-                    self.thread_event_channels
-                        .keys()
-                        .copied()
-                        .filter(|id| self.is_family_thread(*id)),
-                );
-                for id in retained_threads {
-                    if !self.side_threads.contains_key(&id) {
-                        self.agents_overview
-                            .dispatched_requests
-                            .entry(id)
-                            .or_default();
-                        if let Some(channel) = self.thread_event_channels.get(&id)
-                            && let Some(input) = channel.store.lock().await.input_state.clone()
-                        {
-                            self.agents_overview.input_states.insert(id, input);
-                        }
-                    }
-                }
-                if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                    self.agents_overview.input_states.insert(thread_id, input);
-                }
-                self.detach_current_thread_for_navigation(
-                    app_server,
-                    Some(forked.session.thread_id),
-                )
-                .await;
-                match self
-                    .replace_chat_widget_with_app_server_thread(
-                        tui,
-                        forked,
-                        super::session_lifecycle::ThreadAttachPresentation::SessionLineage,
-                        /*initial_user_message*/ None,
-                    )
-                    .await
-                {
-                    Ok(()) => {
-                        self.chat_widget
-                            .restore_reconnected_input(retained_input, &[]);
-                        self.chat_widget.add_info_message(
-                            "Fork created. You can continue here.".to_string(),
-                            /*hint*/ None,
-                        );
-                    }
-                    Err(error) => self.chat_widget.add_error_message(format!(
-                        "Failed to attach to forked app-server thread: {error}"
-                    )),
-                }
-            }
-            Err(error) => {
-                let confirmed = name.is_some_and(|name| {
-                    error
-                        .downcast_ref::<TypedRequestError>()
-                        .is_some_and(|error| {
-                            self.confirm_thread_name_conflict(
-                                error,
-                                ThreadNameRequest::Fork { thread_id, name },
-                            )
-                        })
-                });
-                if !confirmed {
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to fork current session through the app server: {error}"
-                    ));
-                }
-            }
-        }
-        if (from_locked_thread || from_agents_overview)
-            && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
-        {
-            if let Err(error) = tui.discard_pending_input_before_interactive_screen() {
-                tracing::warn!(%error, "failed to discard input after forking");
-            }
-            tui.schedule_screen_size_recheck(Duration::ZERO);
-        }
+        tui.frame_requester().schedule_frame();
         Ok(())
     }
 }

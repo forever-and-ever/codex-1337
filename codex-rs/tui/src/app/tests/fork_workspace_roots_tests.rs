@@ -122,7 +122,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
         .chat_widget
         .capture_thread_input_state()
         .expect("source draft");
-    Box::pin(app.handle_event(
+    Box::pin(app.handle_event_and_settle_navigation(
         &mut tui,
         &mut server,
         AppEvent::ForkCurrentSession { name: None },

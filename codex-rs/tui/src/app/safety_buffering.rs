@@ -1,17 +1,10 @@
 //! Safety-buffered turn retries that preserve the source thread.
 
-use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
-use crate::app_server_session::ForkGoalContinuation;
-use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
-use crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::chatwidget::ThreadInputState;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use crate::chatwidget::UserMessage;
-use codex_app_server_protocol::ThreadHistoryMode;
-use codex_app_server_protocol::TurnItemsView;
-use codex_app_server_protocol::UserInput;
 
 pub(super) struct SafetyBufferedRetry {
     pub(super) thread_id: ThreadId,
@@ -24,7 +17,7 @@ pub(super) struct SafetyBufferedRetry {
 impl App {
     pub(super) async fn retry_safety_buffered_turn(
         &mut self,
-        tui: &mut tui::Tui,
+        _tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         retry: SafetyBufferedRetry,
     ) {
@@ -57,11 +50,8 @@ impl App {
         }
 
         let AppCommand::UserTurn {
-            items,
             cwd,
             active_permission_profile,
-            approval_policy,
-            approvals_reviewer,
             model: turn_model,
             effort,
             collaboration_mode,
@@ -108,154 +98,21 @@ impl App {
             )
         });
 
-        if let Err(err) = app_server.turn_interrupt(thread_id, turn_id.clone()).await {
-            self.chat_widget
-                .add_error_message(format!("Failed to retry with a faster model: {err}"));
-            return;
-        }
-
-        let thread = match async {
-            let mut thread = app_server
-                .thread_read(thread_id, /*include_turns*/ false)
-                .await?;
-            if thread.history_mode == ThreadHistoryMode::Legacy {
-                app_server
-                    .hydrate_initial_thread_history(
-                        &mut thread,
-                        /*turn_cursor*/ None,
-                        /*item_cursor*/ None,
-                        /*config*/ None,
-                        /*local_settings*/ None,
-                        crate::app_server_session::HistoryHydrationScope::Initial,
-                    )
-                    .await?;
-            } else {
-                let page = app_server
-                    .thread_turns_page(thread_id, /*cursor*/ None, INITIAL_HISTORY_TURN_LIMIT)
-                    .await?;
-                thread.turns = page.data.into_iter().rev().collect();
-                if let Some(turn_index) = thread.turns.iter().position(|turn| turn.id == turn_id) {
-                    let page = app_server
-                        .thread_items_page(
-                            thread_id,
-                            Some(&turn_id),
-                            /*cursor*/ None,
-                            HISTORY_ITEM_PAGE_LIMIT,
-                        )
-                        .await?;
-                    if page.next_cursor.is_some() {
-                        color_eyre::eyre::bail!(
-                            "Cannot safely retry a turn whose input exceeds the bounded history page."
-                        );
-                    }
-                    let turn = &mut thread.turns[turn_index];
-                    turn.items = page
-                        .data
-                        .into_iter()
-                        .rev()
-                        .map(|entry| entry.item)
-                        .collect();
-                    turn.items_view = TurnItemsView::Full;
-                }
-            }
-            Ok::<_, color_eyre::Report>(thread)
-        }
-        .await
-        {
-            Ok(thread) => thread,
-            Err(err) => {
-                self.fail_safety_buffered_branch(input_state, prompt, err);
-                return;
-            }
-        };
-        if let Err(err) = safety_retry_fork_point(&thread.turns, &turn_id) {
-            self.fail_safety_buffered_branch(input_state, prompt, err);
-            return;
-        }
-        items.extend(
-            thread
-                .turns
-                .iter()
-                .find(|turn| turn.id == turn_id)
-                .into_iter()
-                .flat_map(|turn| &turn.items)
-                .filter_map(|item| match item {
-                    ThreadItem::UserMessage { content, .. } => Some(content),
-                    _ => None,
-                })
-                .skip(/*n*/ 1)
-                .flat_map(|content| {
-                    std::iter::once(UserInput::Text {
-                        text: "\n".to_string(),
-                        text_elements: Vec::new(),
-                    })
-                    .chain(content.iter().cloned())
-                }),
-        );
-        let retry_display = ChatWidget::user_message_display_from_inputs(items);
-
-        self.config = retry_config.clone();
-        let selected_profile = self.selected_server_profile(thread_id);
-        let started = app_server
-            .fork_thread_at(
-                &self.local_settings,
-                retry_config,
-                thread_id,
-                /*last_turn_id*/ None,
-                /*before_turn_id*/ Some(turn_id),
-                ForkGoalContinuation::DeferUntilNextTurn,
-                selected_profile.as_ref(),
-                /*name*/ None,
-            )
+        self.enqueue_safety_fork(app_server, thread_id, turn_id, turn, prompt)
             .await;
-        let started = match started {
-            Ok(started) => started,
-            Err(err) => {
-                self.fail_safety_buffered_branch(input_state, prompt, err);
-                return;
-            }
-        };
-        let retry_thread_id = started.session.thread_id;
-        *approval_policy = started.session.approval_policy;
-        *approvals_reviewer = Some(started.session.approvals_reviewer);
-        *active_permission_profile = started.session.active_permission_profile.clone();
+    }
 
-        self.detach_current_thread_for_navigation(app_server, Some(retry_thread_id))
-            .await;
-        if let Err(err) = self
-            .replace_chat_widget_with_app_server_thread(
-                tui,
-                started,
-                ThreadAttachPresentation::SessionLineage,
-                /*initial_user_message*/ None,
-            )
+    #[cfg(test)]
+    pub(super) async fn retry_safety_buffered_turn_and_settle(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        retry: SafetyBufferedRetry,
+    ) {
+        self.retry_safety_buffered_turn(tui, server, retry).await;
+        self.settle_navigation(tui, server)
             .await
-        {
-            self.fail_safety_buffered_branch(input_state, prompt, err);
-            return;
-        }
-
-        if selected_profile.is_some() {
-            self.adopt_inherited_server_selection();
-        }
-        let failure_input_state = input_state.clone();
-        self.chat_widget.restore_thread_input_state(
-            input_state,
-            ThreadInputStateRestoreMode {
-                preserve_in_flight_turn: false,
-            },
-        );
-        self.chat_widget
-            .prepare_safety_buffered_retry_submission(prompt.clone());
-        if let Err(err) = self
-            .submit_thread_op(app_server, retry_thread_id, turn)
-            .await
-        {
-            self.fail_safety_buffered_branch(failure_input_state, prompt, err);
-            return;
-        }
-        self.chat_widget
-            .commit_safety_buffered_retry_submission(retry_display);
+            .expect("safety fork settles");
     }
 
     fn fail_safety_buffered_branch(
@@ -277,7 +134,7 @@ impl App {
     }
 }
 
-fn safety_retry_fork_point(turns: &[Turn], turn_id: &str) -> Result<()> {
+pub(super) fn safety_retry_fork_point(turns: &[Turn], turn_id: &str) -> Result<()> {
     let Some(turn_index) = turns.iter().position(|turn| turn.id == turn_id) else {
         return Err(color_eyre::eyre::eyre!(
             "interrupted turn {turn_id} is missing from the source thread"

@@ -3071,7 +3071,7 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         let child_model = app.chat_widget.current_model().to_string();
         app.config.cwd = app.config.codex_home.abs();
         app.config.service_tier = Some("fast".to_string());
-        Box::pin(app.handle_event(&mut tui, &mut app_server,
+        Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut app_server,
             AppEvent::ForkCurrentSession { name: Some("investigation".to_string()) })).await?;
         let fork_id = app.chat_widget.thread_id().expect("fork thread");
         assert_ne!(fork_id, child_thread_ids[1]);

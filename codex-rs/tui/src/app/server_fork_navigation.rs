@@ -1,0 +1,896 @@
+//! Ordinary forks and explicitly authorized safety retries share acquisition custody.
+
+use super::*;
+use crate::app::safety_buffering::safety_retry_fork_point;
+use crate::app::thread_name::ThreadNameRequest;
+use crate::app_server_session::fork_preparation::ForkPreparation;
+use crate::app_server_session::session_preparation::{
+    self as preparation, PreparedSafetyHistory, PreparedSession, RequestPolicy,
+    SafetyHistoryPreparation, SubscriptionCustody,
+};
+use crate::app_server_session::{ForkGoalContinuation, ForkName};
+use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
+use codex_app_server_protocol as api;
+
+pub(super) struct ForkInput {
+    origin: OperationOrigin,
+    permissions: PermissionAuthority,
+    purpose: ForkPurpose,
+}
+
+impl ForkInput {
+    fn thread_id(&self) -> ThreadId {
+        self.origin.thread_id().expect("fork has a source thread")
+    }
+    fn take_draft(&mut self) -> Option<LocalDraftRecovery> {
+        if let ForkPurpose::Safety(retry) = &mut self.purpose {
+            retry.prompt.take().map(|message| LocalDraftRecovery {
+                origin: self.origin.clone(),
+                message,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+enum ForkPurpose {
+    Ordinary {
+        name: Option<ForkName>,
+        from_locked_thread: bool,
+        from_agents_overview: bool,
+        source_turn_running: bool,
+    },
+    Safety(SafetyContinuation),
+}
+
+struct SafetyContinuation {
+    turn_id: String,
+    turn: UserTurnReplay,
+    prompt: Option<UserMessage>,
+    latest_turn_id: Option<String>,
+}
+
+pub(super) struct ForkContext {
+    input: ForkInput,
+    config: Config,
+}
+pub(super) struct ForkReady {
+    context: ForkContext,
+    started: AppServerStartedThread,
+}
+pub(super) enum ForkStage {
+    Admitted(Box<ForkInput>),
+    Config(Box<ForkInput>),
+    Interrupting(Box<ForkContext>),
+    History(Box<ForkContext>),
+    Acquiring(Box<ForkContext>),
+    Detaching {
+        ready: Box<ForkReady>,
+        plan: detach::DetachPlan,
+    },
+}
+impl ForkStage {
+    pub(super) fn thread_id(&self) -> ThreadId {
+        match self {
+            Self::Admitted(input) | Self::Config(input) => input.thread_id(),
+            Self::Interrupting(context) | Self::History(context) | Self::Acquiring(context) => {
+                context.input.thread_id()
+            }
+            Self::Detaching { ready, .. } => ready.context.input.thread_id(),
+        }
+    }
+    pub(super) fn fences_thread(&self, id: ThreadId) -> bool {
+        self.thread_id() == id
+            || matches!(self, Self::Detaching { ready, plan } if ready.started.session.thread_id == id || plan.targets.iter().any(|target| target.thread_id == id))
+    }
+    pub(super) fn is_read_only(&self) -> bool {
+        matches!(self, Self::Admitted(_) | Self::Config(_) | Self::History(_))
+    }
+    pub(super) fn take_draft(&mut self) -> Option<LocalDraftRecovery> {
+        match self {
+            Self::Admitted(input) | Self::Config(input) => input.take_draft(),
+            Self::Interrupting(context) | Self::History(context) | Self::Acquiring(context) => {
+                context.input.take_draft()
+            }
+            Self::Detaching { ready, .. } => ready.context.input.take_draft(),
+        }
+    }
+}
+
+enum ForkEffect {
+    Begin,
+    Interrupt {
+        thread_id: ThreadId,
+        turn_id: String,
+    },
+    History(SafetyHistoryPreparation),
+    Acquire(ForkPreparation),
+    Detach(detach::DetachPlan),
+}
+enum ForkOutcome {
+    Begin,
+    Interrupted(std::result::Result<(), TypedRequestError>),
+    History(PreparedSafetyHistory),
+    Acquired(PreparedSession),
+    Detached(detach::DetachReceipt),
+    Terminated,
+}
+pub(super) struct ForkReceipt {
+    handle: AppServerRequestHandle,
+    outcome: ForkOutcome,
+}
+impl ForkReceipt {
+    pub(super) fn requires_owner(&self) -> bool {
+        matches!(
+            self.outcome,
+            ForkOutcome::Interrupted(_) | ForkOutcome::Acquired(_) | ForkOutcome::Detached(_)
+        )
+    }
+}
+
+impl App {
+    pub(in crate::app) async fn enqueue_ordinary_fork(
+        &mut self,
+        server: &AppServerSession,
+        name: Option<String>,
+        conflict_thread_ids: Vec<String>,
+        from_agents_overview: bool,
+    ) {
+        let Some(thread_id) = self.chat_widget.thread_id() else {
+            return;
+        };
+        let input = ForkInput {
+            origin: OperationOrigin::Thread {
+                thread_id,
+                store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
+            },
+            permissions: PermissionAuthority::capture(
+                self.chat_widget.config_ref(),
+                self.selected_server_profile(thread_id),
+            ),
+            purpose: ForkPurpose::Ordinary {
+                name: name.map(|name| ForkName {
+                    name,
+                    conflict_thread_ids,
+                }),
+                from_locked_thread: self.chat_widget.is_external_writer_view(),
+                from_agents_overview,
+                source_turn_running: self.chat_widget.is_agent_turn_running(),
+            },
+        };
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+        );
+        self.chat_widget.fork_in_progress = true;
+    }
+
+    pub(in crate::app) async fn enqueue_safety_fork(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        turn_id: String,
+        turn: AppCommand,
+        prompt: UserMessage,
+    ) {
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
+        let latest_turn_id = store.lock().await.latest_turn_id.clone();
+        let input = ForkInput {
+            origin: OperationOrigin::Thread { thread_id, store },
+            permissions: PermissionAuthority::capture(
+                self.chat_widget.config_ref(),
+                self.selected_server_profile(thread_id),
+            ),
+            purpose: ForkPurpose::Safety(SafetyContinuation {
+                turn_id,
+                turn: UserTurnReplay::new(turn).expect("safety producer validated a user turn"),
+                prompt: Some(prompt),
+                latest_turn_id,
+            }),
+        };
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+        );
+    }
+
+    pub(super) fn cancel_fork_projection(&mut self, source: ThreadId) {
+        if self.chat_widget.thread_id() == Some(source) {
+            self.chat_widget.fork_in_progress = false;
+        }
+    }
+
+    pub(super) fn dispatch_fork_navigation(
+        &self,
+        server: &AppServerSession,
+        operation: &mut PendingNavigation,
+    ) {
+        let NavigationIntent::Fork(ForkStage::Admitted(input)) =
+            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("fork dispatch requires admission");
+        };
+        operation.intent = NavigationIntent::Fork(ForkStage::Config(input));
+        self.spawn_fork_effect(operation, server.request_handle(), ForkEffect::Begin);
+    }
+
+    fn spawn_fork_effect(
+        &self,
+        operation: &mut PendingNavigation,
+        handle: AppServerRequestHandle,
+        effect: ForkEffect,
+    ) {
+        let completions = self.server_operations.control_tx.clone();
+        let (id, order, epoch, generation) = (
+            operation.id,
+            operation.order,
+            operation.epoch,
+            operation.generation,
+        );
+        operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
+            let outcome = std::panic::AssertUnwindSafe(async {
+                match effect {
+                    ForkEffect::Begin => ForkOutcome::Begin,
+                    ForkEffect::Interrupt { thread_id, turn_id } => ForkOutcome::Interrupted(
+                        preparation::request::<api::TurnInterruptResponse>(
+                            RequestPolicy::Interactive,
+                            &handle,
+                            api::ClientRequest::TurnInterrupt {
+                                request_id: api::RequestId::String(format!(
+                                    "tui-safety-interrupt-{id}"
+                                )),
+                                params: api::TurnInterruptParams {
+                                    thread_id: thread_id.to_string(),
+                                    turn_id,
+                                },
+                            },
+                        )
+                        .await
+                        .map(|_| ()),
+                    ),
+                    ForkEffect::History(plan) => ForkOutcome::History(plan.run().await),
+                    ForkEffect::Acquire(plan) => ForkOutcome::Acquired(plan.run().await),
+                    ForkEffect::Detach(plan) => ForkOutcome::Detached(match tokio::time::timeout(
+                        ACK_TIMEOUT,
+                        detach::send(&handle, id, &plan),
+                    )
+                    .await
+                    {
+                        Ok(results) => detach::DetachReceipt::Complete(results),
+                        Err(_) => detach::DetachReceipt::BudgetExpired,
+                    }),
+                }
+            })
+            .catch_unwind()
+            .await
+            .unwrap_or(ForkOutcome::Terminated);
+            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
+                id,
+                order,
+                epoch,
+                generation,
+                receipt: NavigationReceipt::Fork(ForkReceipt { handle, outcome }),
+            }));
+        })));
+    }
+
+    fn continue_fork_effect(
+        &self,
+        mut operation: PendingNavigation,
+        handle: AppServerRequestHandle,
+        stage: ForkStage,
+        effect: ForkEffect,
+    ) -> PendingNavigation {
+        operation.intent = NavigationIntent::Fork(stage);
+        self.spawn_fork_effect(&mut operation, handle, effect);
+        operation
+    }
+
+    async fn fork_authority_matches(&self, input: &ForkInput) -> bool {
+        let (source, store) = input.origin.thread();
+        if self.current_displayed_thread_id() != Some(source)
+            || self.chat_widget.thread_id() != Some(source)
+            || self.pending_server_profiles.contains_key(&source)
+            || !input.permissions.matches(
+                self.chat_widget.config_ref(),
+                self.agents_overview
+                    .requested_permission_profiles
+                    .get(&source),
+            )
+            || !self
+                .thread_event_channels
+                .get(&source)
+                .is_some_and(|channel| Arc::ptr_eq(&channel.store, store))
+        {
+            return false;
+        }
+        if let ForkPurpose::Safety(retry) = &input.purpose {
+            let store = store.lock().await;
+            self.primary_thread_id == Some(source)
+                && self.active_thread_id == Some(source)
+                && store.latest_turn_id == retry.latest_turn_id
+                && store.active_turn_id().is_none_or(|id| id == retry.turn_id)
+                && retry.prompt.is_some()
+        } else {
+            true
+        }
+    }
+
+    fn recover_fork_input(&mut self, input: &mut ForkInput) {
+        if let Some(recovery) = input.take_draft() {
+            self.queue_local_draft_recovery(recovery);
+        }
+    }
+
+    fn fork_failure(
+        &mut self,
+        input: &mut ForkInput,
+        error: impl std::fmt::Display,
+        matching: bool,
+    ) {
+        self.recover_fork_input(input);
+        if matching {
+            self.cancel_fork_projection(input.thread_id());
+            let text = match input.purpose {
+                ForkPurpose::Safety(_) => format!("Failed to retry with a faster model: {error}"),
+                ForkPurpose::Ordinary { .. } => {
+                    format!("Failed to fork current session through the app server: {error}")
+                }
+            };
+            self.chat_widget.add_error_message(text);
+        }
+    }
+
+    fn acquire_fork_navigation(
+        &mut self,
+        server: &AppServerSession,
+        operation: PendingNavigation,
+        context: Box<ForkContext>,
+    ) {
+        let (before_turn_id, goal_continuation, name) = match &context.input.purpose {
+            ForkPurpose::Ordinary {
+                name,
+                source_turn_running,
+                ..
+            } => (
+                None,
+                if *source_turn_running {
+                    ForkGoalContinuation::DeferUntilNextTurn
+                } else {
+                    ForkGoalContinuation::StartIfIdle
+                },
+                name.clone(),
+            ),
+            ForkPurpose::Safety(retry) => (
+                Some(retry.turn_id.clone()),
+                ForkGoalContinuation::DeferUntilNextTurn,
+                None,
+            ),
+        };
+        let plan = server.prepare_fork_thread(
+            RequestPolicy::Interactive,
+            &self.local_settings,
+            context.config.clone(),
+            context.input.thread_id(),
+            None,
+            before_turn_id,
+            goal_continuation,
+            context.input.permissions.selection(),
+            name,
+        );
+        self.server_operations.navigation.current = Some(self.continue_fork_effect(
+            operation,
+            server.request_handle(),
+            ForkStage::Acquiring(context),
+            ForkEffect::Acquire(plan),
+        ));
+    }
+}
+
+impl App {
+    async fn retain_fork_origin(&mut self, source: ThreadId) {
+        let mut retained = self.agent_navigation.tracked_thread_ids();
+        retained.push(source);
+        retained.extend(
+            self.thread_event_channels
+                .keys()
+                .copied()
+                .filter(|id| self.is_family_thread(*id)),
+        );
+        for thread_id in retained {
+            if !self.side_threads.contains_key(&thread_id) {
+                self.agents_overview
+                    .dispatched_requests
+                    .entry(thread_id)
+                    .or_default();
+                if let Some(channel) = self.thread_event_channels.get(&thread_id)
+                    && let Some(input) = channel.store.lock().await.input_state.clone()
+                {
+                    self.agents_overview.input_states.insert(thread_id, input);
+                }
+            }
+        }
+        if let Some(input) = self.chat_widget.capture_thread_input_state() {
+            self.agents_overview.input_states.insert(source, input);
+        }
+    }
+
+    async fn detach_for_fork(
+        &mut self,
+        server: &AppServerSession,
+        operation: PendingNavigation,
+        handle: AppServerRequestHandle,
+        mut ready: Box<ForkReady>,
+    ) {
+        if !self.fork_authority_matches(&ready.context.input).await {
+            self.fork_failure(
+                &mut ready.context.input,
+                "Fork canceled because its source task changed.",
+                true,
+            );
+            self.start_navigation_cleanup(
+                operation,
+                handle,
+                ready.started.session.thread_id,
+                Vec::new(),
+                CleanupContinuation::Done,
+                false,
+            );
+            return;
+        }
+        if matches!(ready.context.input.purpose, ForkPurpose::Ordinary { .. }) {
+            self.retain_fork_origin(ready.context.input.thread_id())
+                .await;
+        }
+        let target = ready.started.session.thread_id;
+        let plan = self
+            .prepare_detach_plan(DetachScope::Navigation {
+                destination: Some(target),
+            })
+            .await;
+        let effect = ForkEffect::Detach(plan.clone());
+        self.server_operations.navigation.current = Some(self.continue_fork_effect(
+            operation,
+            server.request_handle(),
+            ForkStage::Detaching { ready, plan },
+            effect,
+        ));
+    }
+
+    async fn commit_fork_navigation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        operation: PendingNavigation,
+        handle: AppServerRequestHandle,
+        mut ready: ForkReady,
+    ) -> Result<()> {
+        let target = ready.started.session.thread_id;
+        let retained_input = match &ready.context.input.purpose {
+            ForkPurpose::Ordinary {
+                from_locked_thread: true,
+                source_turn_running: false,
+                ..
+            }
+            | ForkPurpose::Safety(_) => self.chat_widget.capture_thread_input_state(),
+            ForkPurpose::Ordinary { .. } => None,
+        };
+        if let Some(profile) = ready.context.input.permissions.selection() {
+            self.agents_overview
+                .selected_permission_profiles
+                .insert(target, profile.profile_id.clone());
+        }
+        if matches!(ready.context.input.purpose, ForkPurpose::Safety(_)) {
+            self.config = ready.context.config.clone();
+        }
+        let attached = self
+            .replace_chat_widget_with_app_server_thread(
+                tui,
+                ready.started,
+                crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
+                None,
+            )
+            .await;
+        if let Err(error) = attached {
+            self.fork_failure(
+                &mut ready.context.input,
+                format!("Failed to attach fork: {error}"),
+                true,
+            );
+            if self.current_displayed_thread_id() != Some(target) {
+                self.start_navigation_cleanup(
+                    operation,
+                    handle,
+                    target,
+                    Vec::new(),
+                    CleanupContinuation::Done,
+                    false,
+                );
+            }
+            return Ok(());
+        }
+        if ready.context.input.permissions.selection().is_some() {
+            self.adopt_inherited_server_selection();
+        }
+        match ready.context.input.purpose {
+            ForkPurpose::Ordinary {
+                from_locked_thread,
+                from_agents_overview,
+                ..
+            } => {
+                self.chat_widget
+                    .restore_reconnected_input(retained_input, &[]);
+                self.chat_widget
+                    .add_info_message("Fork created. You can continue here.".into(), None);
+                if (from_locked_thread || from_agents_overview)
+                    && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
+                {
+                    if let Err(error) = tui.discard_pending_input_before_interactive_screen() {
+                        tracing::warn!(%error, "failed to discard input after forking");
+                    }
+                    tui.schedule_screen_size_recheck(Duration::ZERO);
+                }
+            }
+            ForkPurpose::Safety(mut retry) => {
+                let Some(prompt) = retry.prompt.take() else {
+                    unreachable!("matching retry consumed its prompt before installation");
+                };
+                let retry_display =
+                    ChatWidget::user_message_display_from_inputs(retry.turn.input());
+                let session = self.thread_event_channels[&target]
+                    .store
+                    .lock()
+                    .await
+                    .session
+                    .clone()
+                    .expect("installed fork session");
+                retry.turn.inherit_permissions(&session);
+                self.chat_widget.restore_thread_input_state(
+                    retained_input,
+                    crate::chatwidget::ThreadInputStateRestoreMode {
+                        preserve_in_flight_turn: false,
+                    },
+                );
+                self.chat_widget
+                    .prepare_safety_buffered_retry_submission(prompt.clone());
+                if let Err(error) = self
+                    .submit_thread_op(server, target, retry.turn.into_command())
+                    .await
+                {
+                    self.chat_widget.cancel_safety_buffered_retry_submission();
+                    self.chat_widget.restore_user_message_to_composer(prompt);
+                    self.chat_widget
+                        .add_error_message(format!("Failed to retry with a faster model: {error}"));
+                } else {
+                    self.chat_widget
+                        .commit_safety_buffered_retry_submission(retry_display);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) async fn finish_fork_navigation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        matching: bool,
+        receipt: ForkReceipt,
+    ) -> Result<()> {
+        let same_epoch = operation.epoch == self.server_operations.epoch;
+        let NavigationIntent::Fork(stage) =
+            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("fork receipt without fork stage");
+        };
+        let ForkReceipt { handle, outcome } = receipt;
+        match (stage, outcome) {
+            (ForkStage::Config(mut input), ForkOutcome::Begin) if matching => {
+                if !self.fork_authority_matches(&input).await {
+                    self.fork_failure(
+                        &mut input,
+                        "Fork canceled because its source task changed.",
+                        true,
+                    );
+                    return Ok(());
+                }
+                let config = match input.purpose {
+                    ForkPurpose::Ordinary { .. } => {
+                        self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
+                            .await;
+                        let mut config = if self.chat_widget.is_parent_owned_thread() {
+                            let mut config = self.chat_widget.config_ref().clone();
+                            config.service_tier =
+                                self.chat_widget.current_service_tier().map(str::to_string);
+                            config
+                        } else {
+                            self.config.clone()
+                        };
+                        if server.uses_remote_workspace() {
+                            config
+                                .workspace_roots
+                                .clone_from(&self.chat_widget.config_ref().workspace_roots);
+                        }
+                        config
+                            .model_provider_id
+                            .clone_from(&self.chat_widget.config_ref().model_provider_id);
+                        config.model = Some(self.chat_widget.current_model().to_string());
+                        config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
+                        config.daybreak_enabled = self.chat_widget.daybreak_enabled;
+                        config
+                    }
+                    ForkPurpose::Safety(_) => self.chat_widget.config_ref().clone(),
+                };
+                let context = Box::new(ForkContext {
+                    input: *input,
+                    config,
+                });
+                if let ForkPurpose::Safety(retry) = &context.input.purpose {
+                    let effect = ForkEffect::Interrupt {
+                        thread_id: context.input.thread_id(),
+                        turn_id: retry.turn_id.clone(),
+                    };
+                    self.server_operations.navigation.current = Some(self.continue_fork_effect(
+                        operation,
+                        handle,
+                        ForkStage::Interrupting(context),
+                        effect,
+                    ));
+                } else {
+                    self.acquire_fork_navigation(server, operation, context);
+                }
+            }
+            (ForkStage::Interrupting(mut context), ForkOutcome::Interrupted(result)) => {
+                match result {
+                    Ok(()) if matching && self.fork_authority_matches(&context.input).await => {
+                        let ForkPurpose::Safety(retry) = &context.input.purpose else {
+                            unreachable!("ordinary fork cannot interrupt");
+                        };
+                        let plan = server.prepare_safety_retry_history(
+                            RequestPolicy::Interactive,
+                            context.input.thread_id(),
+                            retry.turn_id.clone(),
+                        );
+                        self.server_operations.navigation.current =
+                            Some(self.continue_fork_effect(
+                                operation,
+                                handle,
+                                ForkStage::History(context),
+                                ForkEffect::History(plan),
+                            ));
+                    }
+                    result => {
+                        let uncertain = result
+                            .as_ref()
+                            .is_err_and(|error| !matches!(error, TypedRequestError::Server { .. }));
+                        let error =
+                            result
+                                .err()
+                                .map(|error| error.to_string())
+                                .unwrap_or_else(|| {
+                                    "Retry canceled after stopping the original attempt.".into()
+                                });
+                        self.fork_failure(&mut context.input, error, matching);
+                        if uncertain && same_epoch {
+                            let source = context.input.thread_id();
+                            self.retain_navigation_uncertainty(operation, vec![source], false);
+                        }
+                    }
+                }
+            }
+            (ForkStage::History(mut context), ForkOutcome::History(prepared)) if matching => {
+                server.apply_session_observations(prepared.observations);
+                let thread = match prepared.result {
+                    Ok(thread) => thread,
+                    Err(error) => {
+                        self.fork_failure(&mut context.input, error, true);
+                        return Ok(());
+                    }
+                };
+                let ForkPurpose::Safety(retry) = &mut context.input.purpose else {
+                    unreachable!("ordinary fork cannot read retry history");
+                };
+                if let Err(error) = safety_retry_fork_point(&thread.turns, &retry.turn_id) {
+                    self.fork_failure(&mut context.input, error, true);
+                    return Ok(());
+                }
+                retry.turn.extend_input(
+                    thread
+                        .turns
+                        .iter()
+                        .find(|turn| turn.id == retry.turn_id)
+                        .into_iter()
+                        .flat_map(|turn| &turn.items)
+                        .filter_map(|item| match item {
+                            api::ThreadItem::UserMessage { content, .. } => Some(content),
+                            _ => None,
+                        })
+                        .skip(1)
+                        .flat_map(|content| {
+                            std::iter::once(api::UserInput::Text {
+                                text: "\n".into(),
+                                text_elements: Vec::new(),
+                            })
+                            .chain(content.iter().cloned())
+                        }),
+                );
+                if !self.fork_authority_matches(&context.input).await {
+                    self.fork_failure(
+                        &mut context.input,
+                        "Retry canceled because its source task changed.",
+                        true,
+                    );
+                } else {
+                    self.acquire_fork_navigation(server, operation, context);
+                }
+            }
+            (ForkStage::Acquiring(mut context), ForkOutcome::Acquired(prepared)) => {
+                let PreparedSession {
+                    result,
+                    custody,
+                    observations,
+                } = prepared;
+                if same_epoch {
+                    server.apply_session_observations(observations);
+                }
+                if matching {
+                    self.cancel_fork_projection(context.input.thread_id());
+                }
+                match result {
+                    Ok(started)
+                        if matching && self.fork_authority_matches(&context.input).await =>
+                    {
+                        if started.session.thread_id == context.input.thread_id() {
+                            self.fork_failure(
+                                &mut context.input,
+                                "Fork response returned its source instead of a new thread.",
+                                true,
+                            );
+                        } else {
+                            self.detach_for_fork(
+                                server,
+                                operation,
+                                handle,
+                                Box::new(ForkReady {
+                                    context: *context,
+                                    started,
+                                }),
+                            )
+                            .await;
+                        }
+                    }
+                    result => {
+                        let mut name_conflict = false;
+                        if matching
+                            && let Err(error) = &result
+                            && let ForkPurpose::Ordinary {
+                                name: Some(name), ..
+                            } = &context.input.purpose
+                            && let Some(error) = error.downcast_ref::<TypedRequestError>()
+                        {
+                            name_conflict = self.confirm_thread_name_conflict(
+                                error,
+                                ThreadNameRequest::Fork {
+                                    thread_id: context.input.thread_id(),
+                                    name: name.name.clone(),
+                                },
+                            );
+                        }
+                        if !name_conflict {
+                            self.fork_failure(
+                                &mut context.input,
+                                result
+                                    .err()
+                                    .map(|error| error.to_string())
+                                    .unwrap_or_else(|| {
+                                        "Fork canceled because its source task changed.".into()
+                                    }),
+                                matching,
+                            );
+                        }
+                        match custody {
+                            SubscriptionCustody::Subscribed(target)
+                                if target != context.input.thread_id() =>
+                            {
+                                self.start_navigation_cleanup(
+                                    operation,
+                                    handle,
+                                    target,
+                                    Vec::new(),
+                                    CleanupContinuation::Done,
+                                    false,
+                                )
+                            }
+                            SubscriptionCustody::Uncertain(target) if same_epoch => {
+                                self.retain_navigation_uncertainty(operation, vec![target], false)
+                            }
+                            SubscriptionCustody::NewThreadUncertain if same_epoch => {
+                                self.retain_navigation_uncertainty(operation, Vec::new(), false)
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            (ForkStage::Detaching { mut ready, plan }, ForkOutcome::Detached(receipt)) => {
+                let fences = match &receipt {
+                    detach::DetachReceipt::Complete(results) => results
+                        .iter()
+                        .filter(|result| result.result.is_err())
+                        .map(|result| result.thread_id)
+                        .collect::<Vec<_>>(),
+                    detach::DetachReceipt::BudgetExpired => {
+                        plan.targets.iter().map(|target| target.thread_id).collect()
+                    }
+                };
+                if same_epoch && let detach::DetachReceipt::Complete(results) = receipt {
+                    self.finish_detach_plan(
+                        &plan,
+                        detach::DetachReceipt::Complete(
+                            results
+                                .into_iter()
+                                .filter(|result| result.result.is_ok())
+                                .collect(),
+                        ),
+                    )
+                    .await;
+                }
+                if matching
+                    && fences.is_empty()
+                    && self.fork_authority_matches(&ready.context.input).await
+                {
+                    self.commit_fork_navigation(tui, server, operation, handle, *ready)
+                        .await?;
+                } else {
+                    self.fork_failure(&mut ready.context.input, "Fork was not installed. Confirmed source detachments remain detached; drafts are retained. Reopen the source to continue. Close and reopen this TUI to resynchronize unknown detachments; no request was retried.", matching);
+                    self.start_navigation_cleanup(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        if same_epoch { fences } else { Vec::new() },
+                        CleanupContinuation::Done,
+                        false,
+                    );
+                }
+            }
+            (mut stage, ForkOutcome::Terminated) => {
+                let source = stage.thread_id();
+                let resource = !stage.is_read_only();
+                if let Some(recovery) = stage.take_draft() {
+                    self.queue_local_draft_recovery(recovery);
+                }
+                if matching {
+                    self.cancel_fork_projection(source);
+                    self.chat_widget.add_error_message("Fork preparation terminated unexpectedly. No request was retried; close and reopen this TUI to resynchronize.".into());
+                }
+                match stage {
+                    ForkStage::Detaching { ready, plan } => self.start_navigation_cleanup(
+                        operation,
+                        handle,
+                        ready.started.session.thread_id,
+                        if same_epoch {
+                            plan.targets.iter().map(|target| target.thread_id).collect()
+                        } else {
+                            Vec::new()
+                        },
+                        CleanupContinuation::Done,
+                        false,
+                    ),
+                    _ if resource && same_epoch => {
+                        self.retain_navigation_uncertainty(operation, vec![source], false)
+                    }
+                    _ => {}
+                }
+            }
+            (mut stage, _) if !matching && stage.is_read_only() => {
+                if let Some(recovery) = stage.take_draft() {
+                    self.queue_local_draft_recovery(recovery);
+                }
+            }
+            _ => unreachable!("fork stage received another stage's receipt"),
+        }
+        Ok(())
+    }
+}

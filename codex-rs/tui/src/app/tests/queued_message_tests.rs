@@ -1010,6 +1010,52 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     assert_eq!(resumes_for(acquisition_x), 1);
     assert_eq!(resumes_for(acquisition_y), 1);
+
+    // A real fork acquisition also retains its original resource-producing future after
+    // cancellation; typing remains live and the source draft/lease cannot be replaced late.
+    server.thread_inject_items(other_id, vec![serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "fork source" }]
+    }))?]).await?;
+    let forks_before = recorded_params(&requests, "thread/fork").len();
+    let source_draft = recovered_message(&mut app);
+    app.fork_current_thread(&mut tui, &mut server, None, Vec::new(), false)
+        .await?;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while recorded_params(&requests, "thread/fork").len() == forks_before {
+            tokio::select! {
+                completion = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation")).await?;
+                }
+                _ = tokio::task::yield_now() => {}
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
+    assert!(app.chat_widget.fork_in_progress);
+    assert_eq!(app.current_displayed_thread_id(), Some(other_id));
+    assert_eq!(recovered_message(&mut app), source_draft);
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    let pending = match app.server_operations.preview(Some(other_id)).navigation {
+        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        preview => panic!("fork acquisition remains owned: {preview:?}"),
+    };
+    app.handle_submission_event(
+        &server,
+        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+    )
+    .await;
+    assert!(!app.chat_widget.fork_in_progress);
+    assert_eq!(app.current_displayed_thread_id(), Some(other_id));
+    assert!(app.chat_widget.composer_text_with_pending().contains('x'));
+    assert_eq!(
+        recorded_params(&requests, "thread/fork").len(),
+        forks_before + 1
+    );
     // Partial detachment changes local attachment truth only for confirmed targets.
     // The recorder rejects the original thread's unsubscribe, but confirms the visible one.
     // A connection barrier keeps this side turn definitively unsent. Confirmed closure must

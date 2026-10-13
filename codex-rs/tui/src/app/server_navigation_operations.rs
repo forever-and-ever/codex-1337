@@ -10,6 +10,11 @@ mod cleanup;
 mod directory;
 #[path = "server_agent_discovery.rs"]
 mod discovery;
+#[path = "server_fork_navigation.rs"]
+mod fork;
+#[path = "server_navigation_permissions.rs"]
+mod permissions;
+use permissions::PermissionAuthority;
 #[path = "server_fresh_navigation.rs"]
 mod fresh;
 #[path = "server_resume_navigation.rs"]
@@ -57,6 +62,7 @@ enum NavigationIntent {
     Uncertain(Vec<ThreadId>),
     Resume(resume::ResumeStage),
     Directory(directory::DirectoryStage),
+    Fork(fork::ForkStage),
 }
 
 struct PickerPreparation {
@@ -86,6 +92,7 @@ enum NavigationReceipt {
     Cleaned(Result<(), String>),
     Resumed(resume::ResumeReceipt),
     Directory(directory::DirectoryReceipt),
+    Fork(fork::ForkReceipt),
 }
 
 impl std::fmt::Debug for NavigationCompletion {
@@ -124,6 +131,7 @@ impl NavigationOwner {
                     NavigationIntent::Fresh(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Resume(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Directory(stage) => stage.fences_thread(thread_id),
+                    NavigationIntent::Fork(stage) => stage.fences_thread(thread_id),
                     NavigationIntent::Cleanup {
                         thread_id: target,
                         fences,
@@ -170,6 +178,7 @@ impl NavigationOwner {
             && !matches!(&operation.intent, NavigationIntent::Fresh(stage) if stage.is_read_only())
             && !matches!(&operation.intent, NavigationIntent::Resume(stage) if stage.is_read_only())
             && !matches!(&operation.intent, NavigationIntent::Directory(stage) if stage.is_read_only())
+            && !matches!(&operation.intent, NavigationIntent::Fork(stage) if stage.is_read_only())
             && !matches!(
                 operation.intent,
                 NavigationIntent::Discover(_)
@@ -207,6 +216,15 @@ impl NavigationOwner {
 
 impl App {
     fn recover_pending_navigation_draft(&mut self) {
+        let fork_source = self.server_operations.navigation.current.as_ref().and_then(
+            |operation| match &operation.intent {
+                NavigationIntent::Fork(stage) => Some(stage.thread_id()),
+                _ => None,
+            },
+        );
+        if let Some(source) = fork_source {
+            self.cancel_fork_projection(source);
+        }
         let recovery = self
             .server_operations
             .navigation
@@ -214,6 +232,7 @@ impl App {
             .as_mut()
             .and_then(|operation| match &mut operation.intent {
                 NavigationIntent::Fresh(stage) => stage.take_draft(),
+                NavigationIntent::Fork(stage) => stage.take_draft(),
                 _ => None,
             });
         if let Some(recovery) = recovery {
@@ -347,6 +366,7 @@ impl App {
             NavigationIntent::Select(stage) => Some(stage.thread_id()),
             NavigationIntent::Resume(stage) => Some(stage.thread_id()),
             NavigationIntent::Directory(stage) => Some(stage.thread_id()),
+            NavigationIntent::Fork(stage) => Some(stage.thread_id()),
             _ => None,
         };
         let thread_blocked = thread_target.is_some_and(|thread_id| {
@@ -364,6 +384,11 @@ impl App {
         {
             let thread_id = *thread_id;
             self.dispatch_selection_liveness(server, &mut operation, thread_id);
+            self.server_operations.navigation.current = Some(operation);
+            return;
+        }
+        if matches!(operation.intent, NavigationIntent::Fork(_)) {
+            self.dispatch_fork_navigation(server, &mut operation);
             self.server_operations.navigation.current = Some(operation);
             return;
         }
@@ -466,6 +491,10 @@ impl App {
         };
         let Some(mut operation) = operation else {
             assert!(
+                !matches!(&completion.receipt, NavigationReceipt::Fork(receipt) if receipt.requires_owner()),
+                "fork effect lost its owner"
+            );
+            assert!(
                 !matches!(&completion.receipt, NavigationReceipt::Directory(receipt) if receipt.requires_owner()),
                 "directory resource receipt lost its owner"
             );
@@ -504,6 +533,10 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         match completion.receipt {
+            NavigationReceipt::Fork(receipt) => {
+                self.finish_fork_navigation(tui, server, operation, matching, receipt)
+                    .await?;
+            }
             NavigationReceipt::Directory(receipt) => {
                 self.finish_directory_navigation(tui, server, operation, matching, receipt)
                     .await?;

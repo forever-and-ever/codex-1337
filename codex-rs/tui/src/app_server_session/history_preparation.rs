@@ -327,3 +327,55 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     };
     (result, update)
 }
+
+pub(in crate::app_server_session) async fn prepare_safety_retry_history(
+    policy: RequestPolicy,
+    handle: &codex_app_server_client::AppServerRequestHandle,
+    thread_id: ThreadId,
+    turn_id: &str,
+) -> Result<Thread> {
+    let mut thread = read_thread(policy, handle, thread_id, false).await?;
+    if thread.history_mode == ThreadHistoryMode::Legacy {
+        let (result, _) = prepare_initial_thread_history(
+            policy,
+            handle,
+            &mut thread,
+            None,
+            None,
+            None,
+            None,
+            HistoryHydrationScope::Initial,
+        )
+        .await;
+        result?;
+    } else {
+        let page =
+            thread_turns_page(policy, handle, thread_id, None, INITIAL_HISTORY_TURN_LIMIT).await?;
+        thread.turns = page.data.into_iter().rev().collect();
+        if let Some(turn_index) = thread.turns.iter().position(|turn| turn.id == turn_id) {
+            let page = thread_items_page(
+                policy,
+                handle,
+                thread_id,
+                Some(turn_id),
+                None,
+                HISTORY_ITEM_PAGE_LIMIT,
+            )
+            .await?;
+            if page.next_cursor.is_some() {
+                color_eyre::eyre::bail!(
+                    "Cannot safely retry a turn whose input exceeds the bounded history page."
+                );
+            }
+            let turn = &mut thread.turns[turn_index];
+            turn.items = page
+                .data
+                .into_iter()
+                .rev()
+                .map(|entry| entry.item)
+                .collect();
+            turn.items_view = TurnItemsView::Full;
+        }
+    }
+    Ok(thread)
+}

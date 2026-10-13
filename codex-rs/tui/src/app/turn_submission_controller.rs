@@ -1145,6 +1145,19 @@ impl App {
         .await?
     }
     #[cfg(test)]
+    pub(in crate::app) async fn handle_event_and_settle_navigation(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        event: AppEvent,
+    ) -> Result<AppRunControl> {
+        let control = Box::pin(self.handle_event(tui, server, event)).await?;
+        if matches!(control, AppRunControl::Exit(_)) {
+            return Ok(control);
+        }
+        self.settle_navigation(tui, server).await
+    }
+    #[cfg(test)]
     pub(in crate::app) async fn start_fresh_session_and_settle(
         &mut self,
         tui: &mut tui::Tui,

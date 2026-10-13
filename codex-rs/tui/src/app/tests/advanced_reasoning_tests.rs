@@ -31,7 +31,7 @@ async fn fork_current_session_preserves_conversation_ultra() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
 
-    let control = Box::pin(app.handle_event(
+    let control = Box::pin(app.handle_event_and_settle_navigation(
         &mut tui,
         &mut app_server,
         AppEvent::ForkCurrentSession { name: None },

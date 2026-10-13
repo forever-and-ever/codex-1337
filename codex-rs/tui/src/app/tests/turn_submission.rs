@@ -155,7 +155,8 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
         AppEvent::OpenAgentPicker,
         AppEvent::SelectAgentThread(thread_id),
     ] {
-        app.handle_event(&mut tui, &mut app_server, event).await?;
+        app.handle_event_and_settle_navigation(&mut tui, &mut app_server, event)
+            .await?;
     }
 
     assert_eq!(

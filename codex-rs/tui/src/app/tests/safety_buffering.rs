@@ -803,7 +803,7 @@ goals = true
     crate::chatwidget::activate_voice_for_thread(&mut owner, voice_owner);
     owner.park_voice();
     app.background_voice = Some(Box::new(owner));
-    Box::pin(app.retry_safety_buffered_turn(
+    Box::pin(app.retry_safety_buffered_turn_and_settle(
         &mut tui,
         &mut app_server,
         SafetyBufferedRetry {
@@ -840,7 +840,7 @@ goals = true
         app.chat_widget
             .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
         app.chat_widget.set_daybreak_enabled(/*enabled*/ true);
-        Box::pin(app.retry_safety_buffered_turn(
+        Box::pin(app.retry_safety_buffered_turn_and_settle(
             &mut tui,
             &mut app_server,
             SafetyBufferedRetry {
@@ -930,7 +930,7 @@ goals = true
         .await;
     }
 
-    Box::pin(app.retry_safety_buffered_turn(
+    Box::pin(app.retry_safety_buffered_turn_and_settle(
         &mut tui,
         &mut app_server,
         SafetyBufferedRetry {
@@ -1050,7 +1050,12 @@ goals = true
         assert!(items.iter().any(
             |item| matches!(item, AppServerUserInput::Text { text, .. } if text == RETRY_PROMPT)
         ));
-        Box::pin(app.retry_safety_buffered_turn(&mut tui, &mut app_server, second_retry)).await;
+        Box::pin(app.retry_safety_buffered_turn_and_settle(
+            &mut tui,
+            &mut app_server,
+            second_retry,
+        ))
+        .await;
         app.settle_turn_submissions(&mut app_server).await?;
     }
 

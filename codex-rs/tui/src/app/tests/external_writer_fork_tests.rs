@@ -177,7 +177,7 @@ async fn external_writer_fork_opens_editable_thread_without_taking_source_lease(
     .await?;
     let event = events.try_recv()?;
     assert!(matches!(event, AppEvent::ForkCurrentSession { name: None }));
-    Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut server, event)).await?;
 
     assert_eq!(app.chat_widget.capture_thread_input_state(), retained_input);
     assert_ne!(app.chat_widget.thread_id(), Some(thread_id));
@@ -248,7 +248,7 @@ async fn external_writer_fork_failure_keeps_the_locked_view_and_draft() -> Resul
     .await?;
     let event = events.try_recv()?;
     assert!(matches!(event, AppEvent::ForkCurrentSession { name: None }));
-    Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    Box::pin(app.handle_event_and_settle_navigation(&mut tui, &mut server, event)).await?;
     assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
     assert!(app.chat_widget.is_external_writer_view());
     assert!(!app.chat_widget.fork_in_progress);

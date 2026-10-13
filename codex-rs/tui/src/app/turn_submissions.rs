@@ -222,6 +222,42 @@ impl UserTurnReplay {
         &self.0
     }
 
+    fn input(&self) -> &[codex_app_server_protocol::UserInput] {
+        let AppCommand::UserTurn { items, .. } = &self.0 else {
+            unreachable!("validated user turn replay");
+        };
+        items
+    }
+
+    fn extend_input(
+        &mut self,
+        input: impl IntoIterator<Item = codex_app_server_protocol::UserInput>,
+    ) {
+        let AppCommand::UserTurn { items, .. } = &mut self.0 else {
+            unreachable!("validated user turn replay");
+        };
+        items.extend(input);
+    }
+
+    fn inherit_permissions(&mut self, session: &crate::session_state::ThreadSessionState) {
+        let AppCommand::UserTurn {
+            approval_policy,
+            approvals_reviewer,
+            active_permission_profile,
+            ..
+        } = &mut self.0
+        else {
+            unreachable!("validated user turn replay");
+        };
+        *approval_policy = session.approval_policy;
+        *approvals_reviewer = Some(session.approvals_reviewer);
+        *active_permission_profile = session.active_permission_profile.clone();
+    }
+
+    fn into_command(self) -> AppCommand {
+        self.0
+    }
+
     fn replacement(&self) -> Option<&crate::app_command::PendingSteerReplacement> {
         match &self.0 {
             AppCommand::UserTurn {
