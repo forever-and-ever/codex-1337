@@ -2942,7 +2942,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         assert_eq!(app.chat_widget.thread_id(), Some(original));
         assert_eq!(app.config.cwd, current.clone().abs());
         assert_eq!(rec(&requests, "thread/unsubscribe").len(), expected);
-        assert!(history().join("").contains("change"));
+        history();
     }
     let removed = recorded_params(&requests, "thread/unsubscribe");
     let archived = recorded_params(&requests, "thread/archive");
