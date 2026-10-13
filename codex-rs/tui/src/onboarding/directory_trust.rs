@@ -27,12 +27,81 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[derive(Clone)]
+pub(crate) enum DirectoryTrustConsent {
+    Path(PathBuf),
+    Key(String),
+}
+impl DirectoryTrustConsent {
+    pub(crate) async fn send(
+        self,
+        handle: AppServerRequestHandle,
+        id: uuid::Uuid,
+    ) -> std::result::Result<(), codex_app_server_client::TypedRequestError> {
+        match self {
+            Self::Path(path) => crate::config_update::write_config_batch_typed(
+                handle,
+                vec![crate::config_update::trusted_project_edit(&path)],
+            )
+            .await
+            .map(|_| ()),
+            Self::Key(key) => {
+                let key = key.replace('\\', "\\\\").replace('"', "\\\"");
+                handle
+                    .request_typed::<serde_json::Value>(
+                        codex_app_server_protocol::ClientRequest::ConfigBatchWrite {
+                            request_id: codex_app_server_protocol::RequestId::String(format!(
+                                "tui-project-trust-write-{id}"
+                            )),
+                            params: codex_app_server_protocol::ConfigBatchWriteParams {
+                                edits: vec![crate::config_update::replace_config_value(
+                                    format!("projects.\"{key}\".trust_level"),
+                                    serde_json::json!("trusted"),
+                                )],
+                                file_path: None,
+                                expected_version: None,
+                                reload_user_config: true,
+                            },
+                        },
+                    )
+                    .await
+                    .map(|_| ())
+            }
+        }
+    }
+}
+pub(crate) enum DirectoryTrustDecision {
+    Confirmed(OnboardingResult),
+    Consent(DirectoryTrustConsent),
+}
+#[derive(Clone, Copy)]
+pub(super) enum TrustPersistence {
+    Immediate,
+    Deferred,
+}
+pub(super) fn selected_trust_consent(screen: &OnboardingScreen) -> Option<DirectoryTrustConsent> {
+    screen.steps.iter().find_map(|step| {
+        if let Step::TrustDirectory(widget) = step
+            && widget.selection == Some(TrustDirectorySelection::Trust)
+            && !widget.restricted
+        {
+            Some(match &screen.remote_trust_key {
+                Some(key) => DirectoryTrustConsent::Key(key.clone()),
+                None => DirectoryTrustConsent::Path(widget.trust_target.clone()),
+            })
+        } else {
+            None
+        }
+    })
+}
+
 #[derive(Clone, Copy, Default)]
 pub(crate) struct DirectoryTrustOptions<'a> {
     pub resumed_thread: Option<&'a Thread>,
     pub cancel: Option<TrustCancelAction>,
 }
 
+#[derive(Clone)]
 pub(crate) struct DirectoryTrustPreparation {
     target: AppServerTarget,
     resumed_thread: Option<ThreadId>,
@@ -112,16 +181,11 @@ impl DirectoryTrustPreparation {
         Ok(Some(project))
     }
 
-    pub(crate) async fn prompt(
-        &self,
-        tui: &mut Tui,
-        handle: AppServerRequestHandle,
-        project: RemoteProjectTrust,
-    ) -> Result<OnboardingResult> {
+    fn screen(&self, tui: &Tui, project: RemoteProjectTrust) -> OnboardingScreen {
         let connected = !matches!(self.target, AppServerTarget::Embedded);
         let remote_trust_key =
             connected.then(|| project.trust_target.to_string_lossy().into_owned());
-        let screen = OnboardingScreen {
+        OnboardingScreen {
             request_frame: tui.frame_requester(),
             steps: vec![Step::TrustDirectory(TrustDirectoryWidget {
                 restricted: project.trust_level == Some(TrustLevel::Untrusted),
@@ -142,8 +206,36 @@ impl DirectoryTrustPreparation {
             remote_trust_key,
             is_done: false,
             should_exit: false,
-        };
-        let result = run_onboarding_screen(screen, Some(handle), None, tui).await?;
+        }
+    }
+
+    pub(crate) async fn prompt(
+        &self,
+        tui: &mut Tui,
+        handle: AppServerRequestHandle,
+        project: RemoteProjectTrust,
+    ) -> Result<OnboardingResult> {
+        let result =
+            run_onboarding_screen(self.screen(tui, project), Some(handle), None, tui).await?;
+        tui.terminal.clear()?;
+        tui.frame_requester().schedule_frame();
+        Ok(result)
+    }
+
+    pub(crate) async fn choose(
+        &self,
+        tui: &mut Tui,
+        handle: AppServerRequestHandle,
+        project: RemoteProjectTrust,
+    ) -> Result<DirectoryTrustDecision> {
+        let result = super::run_onboarding_screen_with_policy(
+            self.screen(tui, project),
+            Some(handle),
+            None,
+            tui,
+            TrustPersistence::Deferred,
+        )
+        .await?;
         tui.terminal.clear()?;
         tui.frame_requester().schedule_frame();
         Ok(result)

@@ -43,6 +43,7 @@ pub(in crate::app) enum ConnectionMutation {
         setting: String,
     },
     Removal(super::removal::RemovalOperation),
+    Trust(super::navigation::trust::TrustOperation),
 }
 
 #[derive(Clone)]
@@ -101,6 +102,7 @@ pub(in crate::app) enum OperationReceipt {
     ServerRequestDelivered,
     ModelDefaultsSaved(api::ConfigWriteResponse),
     Removal(super::removal::RemovalReceipt),
+    TrustSaved,
 }
 
 impl ServerOperation {
@@ -127,6 +129,7 @@ impl ServerOperation {
                 ThreadMutation::GuardianApproval(_) => "Approving reviewed action",
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
+            Self::Connection(ConnectionMutation::Trust(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
             Self::Connection(ConnectionMutation::Removal(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ModelDefaults { .. }) => "Saving default model",
@@ -191,6 +194,9 @@ pub(super) async fn send(
                     source,
                 })?;
             return Ok(OperationReceipt::ServerRequestDelivered);
+        }
+        ServerOperation::Connection(ConnectionMutation::Trust(operation)) => {
+            return operation.send(handle, id).await;
         }
         ServerOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
             let _: api::ConfigWriteResponse = handle
@@ -477,6 +483,7 @@ impl App {
                 }
             }
             OperationReceipt::SettingsUnsupported => {}
+            OperationReceipt::TrustSaved => unreachable!("trust writes have connection origin"),
             OperationReceipt::ModelDefaultsSaved(_) => {
                 unreachable!("model defaults handled before origin projection")
             }
@@ -499,6 +506,22 @@ impl App {
         operation: &ServerOperation,
         failure: &SubmissionFailure,
     ) {
+        if let ServerOperation::Connection(ConnectionMutation::Trust(operation)) = operation {
+            let scope = operation.scope();
+            let message = match failure {
+                SubmissionFailure::Rejected(error) => format!(
+                    "Trust could not be saved for {scope}: {error}. The navigation was not resumed."
+                ),
+                SubmissionFailure::Uncertain(error) => format!(
+                    "Trust save outcome for {scope} is unknown: {error}. No write was retried. Close and reopen this TUI to reread trust settings; the earlier write may still complete."
+                ),
+                SubmissionFailure::TimedOut => format!(
+                    "Trust save acknowledgement for {scope} timed out. No write was retried. Close and reopen this TUI to reread trust settings; the earlier write may still complete."
+                ),
+            };
+            self.chat_widget.add_error_message(message);
+            return;
+        }
         if let ServerOperation::Connection(ConnectionMutation::Voice(
             super::voice_preferences::VoicePreferenceOperation::Confirm { .. },
         )) = operation

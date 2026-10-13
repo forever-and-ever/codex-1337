@@ -14,6 +14,8 @@ mod fresh;
 mod resume;
 #[path = "server_thread_selection.rs"]
 mod selection;
+#[path = "server_trust_operations.rs"]
+pub(super) mod trust;
 use cleanup::CleanupContinuation;
 
 use selection::SelectStage;

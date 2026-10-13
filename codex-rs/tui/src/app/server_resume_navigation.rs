@@ -1,3 +1,4 @@
+use super::trust::TrustWrite;
 use super::*;
 use crate::app::resume_config::ResumeCwdBasis;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
@@ -10,18 +11,44 @@ use crate::config_update::{
     ProjectTrustHost, RemoteProjectTrust, read_remote_project_trust_with_policy,
 };
 use crate::local_settings::LocalSettings;
+use crate::onboarding::onboarding_screen::DirectoryTrustDecision;
 use crate::onboarding::onboarding_screen::DirectoryTrustPreparation;
+use crate::startup_hooks_review::load_startup_hooks_review_entry;
 use crate::startup_hooks_review::{
-    StartupHooksReviewOutcome, load_startup_hooks_review_entry, maybe_run_startup_hooks_review,
+    HooksReviewDecision, choose_startup_hooks_review, hook_trust_updates,
 };
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_config::types::ResumeCwdMode;
 
+#[derive(Clone)]
 pub(super) struct ResumeContext {
     target: SessionTarget,
     config: Config,
     settings: LocalSettings,
+}
+
+#[derive(Clone)]
+pub(super) struct ResumeTrustContinuation {
+    pub(super) generation: u64,
+    pub(super) next: ResumeTrustNext,
+}
+#[derive(Clone)]
+pub(super) enum ResumeTrustNext {
+    Directory {
+        context: Box<ResumeContext>,
+        plan: DirectoryTrustPreparation,
+    },
+    Hooks(Box<ResumeContext>),
+}
+
+impl ResumeTrustNext {
+    pub(super) fn hook_scope(&self) -> String {
+        let Self::Hooks(context) = self else {
+            unreachable!("hook trust must retain its hook review continuation");
+        };
+        format!("hooks in {}", context.config.cwd.to_path_buf().display())
+    }
 }
 
 pub(super) struct ResumeReady {
@@ -332,6 +359,79 @@ impl App {
         Ok(())
     }
 
+    async fn review_resume_hooks(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+        operation: PendingNavigation,
+        context: Box<ResumeContext>,
+        hooks: api::HooksListEntry,
+    ) -> Result<()> {
+        let decision = match choose_startup_hooks_review(tui, &context.config, hooks, None).await {
+            Ok(decision) => decision,
+            Err(error) => {
+                self.add_session_picker_error(format!("Unable to review folder hooks: {error}"));
+                return Ok(());
+            }
+        };
+        match decision {
+            HooksReviewDecision::Continue => {
+                self.acquire_resumed_thread(server, operation, context)
+            }
+            HooksReviewDecision::OpenHooksBrowser(hooks) => {
+                self.chat_widget.open_hooks_browser(hooks)
+            }
+            HooksReviewDecision::TrustAll(hooks) => self.transfer_navigation_trust(
+                server,
+                operation,
+                TrustWrite::Hooks(hook_trust_updates(&hooks)),
+                ResumeTrustNext::Hooks(context),
+            ),
+        }
+        Ok(())
+    }
+
+    pub(super) async fn continue_resume_trust_saved(
+        &mut self,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        next: ResumeTrustNext,
+    ) -> Result<()> {
+        match next {
+            ResumeTrustNext::Hooks(context) => {
+                self.acquire_resumed_thread(server, operation, context)
+            }
+            ResumeTrustNext::Directory { context, mut plan } => {
+                let exit =
+                    plan.note_consent(crate::onboarding::onboarding_screen::OnboardingResult {
+                        directory_trust_persisted: true,
+                        should_exit: false,
+                    });
+                assert!(
+                    exit.is_none(),
+                    "confirmed trust write cannot cancel its consent"
+                );
+                if let Some(thread_id) = plan.recheck_thread() {
+                    operation.intent =
+                        NavigationIntent::Resume(ResumeStage::Trust { context, plan });
+                    self.spawn_resume_effect(
+                        &mut operation,
+                        server.request_handle(),
+                        ResumeEffect::Recheck(thread_id),
+                    );
+                    self.server_operations.navigation.current = Some(operation);
+                } else {
+                    self.advance_resume_trust(server, &mut operation, context, plan)
+                        .await?;
+                    if matches!(operation.intent, NavigationIntent::Resume(_)) {
+                        self.server_operations.navigation.current = Some(operation);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn prepare_resume_acquisition(
         &mut self,
         server: &mut AppServerSession,
@@ -476,8 +576,17 @@ impl App {
                     }
                 };
                 if let Some(project) = project {
-                    let consent = match plan.prompt(tui, handle.clone(), project).await {
-                        Ok(consent) => consent,
+                    let consent = match plan.choose(tui, handle.clone(), project).await {
+                        Ok(DirectoryTrustDecision::Confirmed(consent)) => consent,
+                        Ok(DirectoryTrustDecision::Consent(consent)) => {
+                            self.transfer_navigation_trust(
+                                server,
+                                operation,
+                                TrustWrite::Directory(consent),
+                                ResumeTrustNext::Directory { context, plan },
+                            );
+                            return Ok(AppRunControl::Continue);
+                        }
                         Err(error) => {
                             self.add_session_picker_error(format!(
                                 "Unable to check folder trust: {error}"
@@ -536,22 +645,10 @@ impl App {
             }
             (ResumeStage::Hooks(context), ResumeOutcome::Hooks(result)) if matching => {
                 match result {
-                    Ok(hooks) => match maybe_run_startup_hooks_review(
-                        server,
-                        tui,
-                        &context.config,
-                        context.config.bypass_hook_trust,
-                        hooks,
-                    )
-                    .await?
-                    {
-                        StartupHooksReviewOutcome::Continue => {
-                            self.acquire_resumed_thread(server, operation, context)
-                        }
-                        StartupHooksReviewOutcome::OpenHooksBrowser(hooks) => {
-                            self.chat_widget.open_hooks_browser(hooks)
-                        }
-                    },
+                    Ok(hooks) => {
+                        self.review_resume_hooks(tui, server, operation, context, hooks)
+                            .await?
+                    }
                     Err(error) => self
                         .add_session_picker_error(format!("Unable to load folder hooks: {error}")),
                 }

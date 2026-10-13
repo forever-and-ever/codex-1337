@@ -74,7 +74,7 @@ pub(crate) fn format_config_error(err: &impl Display) -> String {
     format!("{err:#}")
 }
 
-fn trusted_project_edit(project_path: &Path) -> ConfigEdit {
+pub(crate) fn trusted_project_edit(project_path: &Path) -> ConfigEdit {
     let project_key = project_trust_key(project_path)
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
@@ -158,6 +158,15 @@ pub(crate) async fn write_config_batch(
     request_handle: AppServerRequestHandle,
     edits: Vec<ConfigEdit>,
 ) -> Result<ConfigWriteResponse> {
+    write_config_batch_typed(request_handle, edits)
+        .await
+        .wrap_err("config/batchWrite failed in TUI")
+}
+
+pub(crate) async fn write_config_batch_typed(
+    request_handle: AppServerRequestHandle,
+    edits: Vec<ConfigEdit>,
+) -> std::result::Result<ConfigWriteResponse, codex_app_server_client::TypedRequestError> {
     let request_id = RequestId::String(format!("tui-config-write-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::ConfigBatchWrite {
@@ -170,7 +179,6 @@ pub(crate) async fn write_config_batch(
             },
         })
         .await
-        .wrap_err("config/batchWrite failed in TUI")
 }
 
 pub(crate) async fn write_trusted_project(

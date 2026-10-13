@@ -22,6 +22,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+pub(crate) use directory_trust::DirectoryTrustConsent;
+pub(crate) use directory_trust::DirectoryTrustDecision;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::prelude::Widget;
@@ -106,7 +108,7 @@ pub(crate) struct OnboardingScreenArgs {
     pub config: Config,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct OnboardingResult {
     pub directory_trust_persisted: bool,
     pub should_exit: bool,
@@ -545,11 +547,34 @@ pub(crate) async fn run_onboarding_app(
 }
 
 async fn run_onboarding_screen(
+    screen: OnboardingScreen,
+    handle: Option<AppServerRequestHandle>,
+    server: Option<&mut AppServerSession>,
+    tui: &mut Tui,
+) -> Result<OnboardingResult> {
+    match run_onboarding_screen_with_policy(
+        screen,
+        handle,
+        server,
+        tui,
+        directory_trust::TrustPersistence::Immediate,
+    )
+    .await?
+    {
+        directory_trust::DirectoryTrustDecision::Confirmed(result) => Ok(result),
+        directory_trust::DirectoryTrustDecision::Consent(_) => {
+            unreachable!("immediate startup driver owns trust persistence")
+        }
+    }
+}
+
+async fn run_onboarding_screen_with_policy(
     onboarding_screen: OnboardingScreen,
     app_server_request_handle: Option<AppServerRequestHandle>,
     app_server: Option<&mut AppServerSession>,
     tui: &mut Tui,
-) -> Result<OnboardingResult> {
+    persistence: directory_trust::TrustPersistence,
+) -> Result<directory_trust::DirectoryTrustDecision> {
     // Let the terminal select and copy login URLs and device codes, even in fullscreen mode.
     let previous_input = tui.overlay_input;
     let result = match tui.set_overlay_input(OverlayInput::Onboarding) {
@@ -559,6 +584,7 @@ async fn run_onboarding_screen(
                 app_server_request_handle,
                 app_server,
                 tui,
+                persistence,
             )
             .await
         }
@@ -573,7 +599,8 @@ async fn run_onboarding_screen_inner(
     app_server_request_handle: Option<AppServerRequestHandle>,
     mut app_server: Option<&mut AppServerSession>,
     tui: &mut Tui,
-) -> Result<OnboardingResult> {
+    persistence: directory_trust::TrustPersistence,
+) -> Result<directory_trust::DirectoryTrustDecision> {
     use tokio_stream::StreamExt;
     let mut directory_trust_persisted = false;
     // One-time guard to fully clear the screen after ChatGPT login success message is shown
@@ -627,6 +654,10 @@ async fn run_onboarding_screen_inner(
                                 onboarding_screen.handle_key_event(key_event);
                             }
                             if !directory_trust_persisted {
+                                if matches!(persistence, directory_trust::TrustPersistence::Deferred)
+                                    && let Some(consent) = directory_trust::selected_trust_consent(&onboarding_screen) {
+                                    return Ok(directory_trust::DirectoryTrustDecision::Consent(consent));
+                                }
                                 directory_trust_persisted = persist_selected_trust(
                                     &mut onboarding_screen,
                                     app_server_request_handle.clone(),
@@ -743,10 +774,12 @@ async fn run_onboarding_screen_inner(
             },
         )?;
     }
-    Ok(OnboardingResult {
-        directory_trust_persisted,
-        should_exit: onboarding_screen.should_exit(),
-    })
+    Ok(directory_trust::DirectoryTrustDecision::Confirmed(
+        OnboardingResult {
+            directory_trust_persisted,
+            should_exit: onboarding_screen.should_exit(),
+        },
+    ))
 }
 
 /// Render a newly activated trust step before discarding keys from the preceding screen.

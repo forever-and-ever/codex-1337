@@ -645,6 +645,7 @@ impl App {
                     .await
             }
             ServerCompletion::Request(completion) => {
+                self.continue_confirmed_trust(server, &completion).await?;
                 self.finish_submission(
                     server,
                     completion.scope,
