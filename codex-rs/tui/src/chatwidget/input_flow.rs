@@ -11,6 +11,13 @@ use crate::bottom_pane::prompt_args::parse_slash_name;
 use crate::bottom_pane::slash_commands::SlashCommandItem;
 use crate::bottom_pane::slash_commands::find_slash_command;
 
+pub(super) struct PreparedSubagentText {
+    thread_id: ThreadId,
+    expected_turn_id: Option<String>,
+    source: UserMessageSource,
+    input: Vec<codex_app_server_protocol::UserInput>,
+}
+
 impl ChatWidget {
     pub(crate) fn is_parent_owned_thread(&self) -> bool {
         self.blocks_direct_input && !self.active_side_conversation
@@ -24,6 +31,72 @@ impl ChatWidget {
 
     pub(crate) fn set_child_text_input_enabled(&mut self) {
         self.bottom_pane.set_child_text_input_enabled();
+    }
+
+    pub(super) fn submit_subagent_text(
+        &mut self,
+        text: String,
+        text_elements: Vec<TextElement>,
+        source: UserMessageSource,
+    ) -> bool {
+        if self.external_writer_view || self.has_misalignment_policy_violation() {
+            return false;
+        }
+        match self.prepare_subagent_text(text, text_elements, source) {
+            Ok(input) => {
+                self.emit_subagent_text(input);
+                true
+            }
+            Err(message) => {
+                self.add_error_message(message.into());
+                false
+            }
+        }
+    }
+
+    pub(super) fn prepare_subagent_text(
+        &self,
+        text: String,
+        text_elements: Vec<TextElement>,
+        source: UserMessageSource,
+    ) -> Result<PreparedSubagentText, &'static str> {
+        if self.turn_lifecycle.agent_turn_running && self.turn_lifecycle.last_turn_id.is_none() {
+            return Err("Turn is not ready; send again");
+        }
+        let Some(thread_id) = self.thread_id else {
+            return Err("Thread is not ready; send again");
+        };
+        Ok(PreparedSubagentText {
+            thread_id,
+            source,
+            expected_turn_id: self
+                .turn_lifecycle
+                .agent_turn_running
+                .then(|| self.turn_lifecycle.last_turn_id.clone())
+                .flatten(),
+            input: vec![codex_app_server_protocol::UserInput::Text {
+                text,
+                text_elements: text_elements.into_iter().map(Into::into).collect(),
+            }],
+        })
+    }
+
+    pub(super) fn emit_subagent_text(&mut self, input: PreparedSubagentText) {
+        let source = match input.source {
+            UserMessageSource::Prompt => crate::app::turn_submissions::SubagentTextSource::Prompt,
+            UserMessageSource::QuestionAnswer => {
+                crate::app::turn_submissions::SubagentTextSource::QuestionAnswer(Box::new(
+                    self.capture_thread_input_state()
+                        .expect("selected child input state"),
+                ))
+            }
+        };
+        self.app_event_tx.send(AppEvent::SubagentTextInput {
+            thread_id: input.thread_id,
+            expected_turn_id: input.expected_turn_id,
+            source,
+            input: input.input,
+        });
     }
 
     pub(super) fn handle_composer_input_result(
@@ -71,26 +144,7 @@ impl ChatWidget {
                 text_elements,
             } => {
                 if self.is_parent_owned_thread() {
-                    if self.turn_lifecycle.agent_turn_running
-                        && self.turn_lifecycle.last_turn_id.is_none()
-                    {
-                        self.add_error_message("Turn is not ready; send again".to_string());
-                        return;
-                    }
-                    if let Some(thread_id) = self.thread_id {
-                        self.app_event_tx.send(AppEvent::SubagentTextInput {
-                            thread_id,
-                            expected_turn_id: self
-                                .turn_lifecycle
-                                .agent_turn_running
-                                .then(|| self.turn_lifecycle.last_turn_id.clone())
-                                .flatten(),
-                            input: vec![codex_app_server_protocol::UserInput::Text {
-                                text,
-                                text_elements: text_elements.into_iter().map(Into::into).collect(),
-                            }],
-                        });
-                    }
+                    self.submit_subagent_text(text, text_elements, UserMessageSource::Prompt);
                     return;
                 }
                 let user_message = self.user_message_from_submission(text, text_elements);
@@ -258,7 +312,9 @@ impl ChatWidget {
             if model_prompt && !should_run_now {
                 self.bottom_pane.clear_pending_questions();
             }
-            if should_run_now {
+            if should_run_now
+                && !(self.is_parent_owned_thread() && source == UserMessageSource::QuestionAnswer)
+            {
                 self.maybe_send_next_queued_input();
             }
             self.request_draft_session();
@@ -286,11 +342,34 @@ impl ChatWidget {
         {
             return false;
         }
-        if self.blocks_direct_input {
+        if self.blocks_direct_input
+            && !(self.is_parent_owned_thread()
+                && self
+                    .input_queue
+                    .queued_user_messages
+                    .front()
+                    .is_some_and(|message| message.source == UserMessageSource::QuestionAnswer))
+        {
             return false;
         }
         if self.is_user_turn_pending_or_running() {
             return false;
+        }
+        if self.is_parent_owned_thread() {
+            let Some(message) = self.input_queue.queued_user_messages.pop_front() else {
+                return false;
+            };
+            let submitted = self.submit_subagent_text(
+                message.user_message.text.clone(),
+                message.user_message.text_elements.clone(),
+                message.source,
+            );
+            if !submitted {
+                self.input_queue.queued_user_messages.push_front(message);
+            }
+            self.refresh_pending_input_preview();
+            self.request_draft_session();
+            return submitted;
         }
         let mut submitted_follow_up = false;
         while !self.is_user_turn_pending_or_running() {

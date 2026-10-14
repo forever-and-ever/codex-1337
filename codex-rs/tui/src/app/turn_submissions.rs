@@ -200,9 +200,27 @@ struct ReadyTurn {
     draft: SubmissionDraft,
 }
 
+#[derive(Debug)]
+pub(crate) enum SubagentTextSource {
+    Prompt,
+    QuestionAnswer(Box<crate::chatwidget::ThreadInputState>),
+}
+
+impl SubagentTextSource {
+    pub(crate) fn message_source(&self) -> crate::chatwidget::UserMessageSource {
+        match self {
+            Self::Prompt => crate::chatwidget::UserMessageSource::Prompt,
+            Self::QuestionAnswer(_) => crate::chatwidget::UserMessageSource::QuestionAnswer,
+        }
+    }
+}
+
 enum TurnOrigin {
     User(Box<UserTurnReplay>),
-    Subagent { expected_turn_id: Option<String> },
+    Subagent {
+        expected_turn_id: Option<String>,
+        source: crate::app::turn_submissions::SubagentTextSource,
+    },
 }
 
 struct UserTurnReplay(AppCommand);
@@ -499,7 +517,9 @@ impl PendingSubmission {
                     TurnOrigin::User(replay) => WorkerCommand::User {
                         replacement: replay.replacement().cloned(),
                     },
-                    TurnOrigin::Subagent { expected_turn_id } => WorkerCommand::Subagent {
+                    TurnOrigin::Subagent {
+                        expected_turn_id, ..
+                    } => WorkerCommand::Subagent {
                         expected_turn_id: expected_turn_id.clone(),
                     },
                 },
@@ -668,7 +688,31 @@ impl ServerOperations {
     }
 }
 
-fn recoverable_drafts(entries: impl Iterator<Item = PendingSubmission>) -> Vec<SubmissionDraft> {
+async fn recoverable_drafts(
+    origin: &OperationOrigin,
+    entries: impl Iterator<Item = PendingSubmission>,
+) -> Vec<SubmissionDraft> {
+    let entries = entries.collect::<Vec<_>>();
+    // Navigation-captured original state wins. The last serialized fallback
+    // excludes earlier admitted replies and cannot resurrect accepted questions.
+    for entry in entries.iter().rev() {
+        if let SubmissionRequest::Turn(turn) = &entry.request
+            && let TurnOrigin::Subagent {
+                source: crate::app::turn_submissions::SubagentTextSource::QuestionAnswer(input),
+                ..
+            } = &turn.origin
+        {
+            if let OperationOrigin::Thread { store, .. } = origin {
+                let mut store = store.lock().await;
+                // A selected store's snapshot is only a stale projection. Inactive
+                // stores were refreshed at navigation and remain the actual owner.
+                if store.active || store.input_state.is_none() {
+                    store.input_state = Some((**input).clone());
+                }
+            }
+            break;
+        }
+    }
     let mut drafts: Vec<SubmissionDraft> = Vec::new();
     for entry in entries {
         let cancellation = matches!(entry.request, SubmissionRequest::Cancel { .. });

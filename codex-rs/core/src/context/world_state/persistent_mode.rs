@@ -52,13 +52,13 @@ impl PersistentModeState {
     pub(crate) fn new(
         enabled: bool,
         instructions_template: &str,
-        send_user_message_async_available: bool,
+        request_user_input_async_available: bool,
     ) -> Self {
         let instructions = if enabled {
             instructions_template.trim().replace(
                 "{{ approval_request_channel }}",
-                if send_user_message_async_available {
-                    " via functions.send_user_message_async"
+                if request_user_input_async_available {
+                    " via functions.request_user_input_async"
                 } else {
                     ""
                 },

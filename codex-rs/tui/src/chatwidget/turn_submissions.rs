@@ -198,20 +198,37 @@ impl ChatWidget {
             unreachable!("user-turn draft")
         };
         let _ = pending_steer_replacement;
-        Self::submission_draft_from_inputs(client_user_message_id.clone(), items)
+        Self::submission_draft_from_inputs(
+            client_user_message_id.clone(),
+            items,
+            UserMessageSource::Prompt,
+        )
     }
 
     pub(crate) fn submission_draft_from_inputs(
         client_id: String,
         input: &[codex_app_server_protocol::UserInput],
+        source: UserMessageSource,
     ) -> SubmissionDraft {
-        let display = Self::user_message_display_from_inputs(input);
+        let mut display = Self::user_message_display_from_inputs(input);
+        // The readable projection cannot reconstruct question identity after rejected delivery.
+        if source == UserMessageSource::QuestionAnswer {
+            display.message = input
+                .iter()
+                .filter_map(|item| {
+                    if let codex_app_server_protocol::UserInput::Text { text, .. } = item {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            display.text_elements.clear();
+        }
         let mention_bindings = mention_bindings_from_user_inputs(input, &display.message);
         SubmissionDraft {
             client_id,
-            origin: DraftOrigin::Message {
-                source: UserMessageSource::Prompt,
-            },
+            origin: DraftOrigin::Message { source },
             message: UserMessage {
                 text: display.message,
                 text_elements: display.text_elements,

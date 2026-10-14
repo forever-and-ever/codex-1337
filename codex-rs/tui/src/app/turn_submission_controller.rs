@@ -101,11 +101,19 @@ impl App {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
         input: Vec<codex_app_server_protocol::UserInput>,
+        source: crate::app::turn_submissions::SubagentTextSource,
     ) {
         let client_id = Uuid::new_v4().to_string();
-        let draft = ChatWidget::submission_draft_from_inputs(client_id.clone(), &input);
+        let draft = ChatWidget::submission_draft_from_inputs(
+            client_id.clone(),
+            &input,
+            source.message_source(),
+        );
         let turn = ReadyTurn {
-            origin: TurnOrigin::Subagent { expected_turn_id },
+            origin: TurnOrigin::Subagent {
+                expected_turn_id,
+                source,
+            },
             params: TurnStartParams {
                 thread_id: thread_id.to_string(),
                 client_user_message_id: Some(client_id),
@@ -499,7 +507,14 @@ impl App {
         removed.sort_by_key(|entry| entry.order);
         self.cleanup_unsent_operations(removed.iter(), &protected_starts)
             .await;
-        recoverable_drafts(removed.into_iter())
+        recoverable_drafts(
+            &OperationOrigin::Thread {
+                thread_id,
+                store: Arc::clone(store),
+            },
+            removed.into_iter(),
+        )
+        .await
     }
 
     pub(in crate::app) async fn handle_submission_event(
@@ -515,7 +530,7 @@ impl App {
             } => {
                 let entry = self.server_operations.take_unsent(thread_id, id, action);
                 if let Some(entry) = entry {
-                    let origin = entry.origin.thread_id();
+                    let origin = entry.origin.clone();
                     self.cleanup_unsent_operations(std::iter::once(&entry), &HashSet::new())
                         .await;
                     if let SubmissionRequest::Operation(operation) = &entry.request {
@@ -524,11 +539,15 @@ impl App {
                             None,
                         );
                     }
-                    if let Some(origin) = origin
-                        && let Some(draft) = entry.into_draft()
-                    {
-                        self.restore_submission_drafts(origin, vec![draft], action.into())
-                            .await;
+                    let drafts = recoverable_drafts(&origin, std::iter::once(entry)).await;
+                    if let Some(thread_id) = origin.thread_id() {
+                        self.restore_submission_drafts(
+                            thread_id,
+                            origin.thread().1,
+                            drafts,
+                            action.into(),
+                        )
+                        .await;
                     }
                 } else {
                     self.chat_widget.add_info_message(
@@ -565,7 +584,8 @@ impl App {
                     self.chat_widget.add_error_message("Connection changed while sending. The original may still be delivered; pending messages return as drafts and have not been resent.".into());
                 }
                 for (_, lane) in lanes {
-                    let thread_id = lane.active.origin.thread_id();
+                    let origin = lane.active.origin.clone();
+                    let thread_id = origin.thread_id();
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation) if matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(_))))
                     {
                         self.chat_widget.add_error_message("Task removal was interrupted by a connection change. Refresh the task list before trying again; no action was retried.".into());
@@ -612,11 +632,15 @@ impl App {
                             .await
                             .pending_interrupt_turn_id = None;
                     }
-                    let drafts =
-                        recoverable_drafts(std::iter::once(lane.active).chain(lane.waiting));
+                    let drafts = recoverable_drafts(
+                        &origin,
+                        std::iter::once(lane.active).chain(lane.waiting),
+                    )
+                    .await;
                     if let Some(thread_id) = thread_id {
                         self.restore_submission_drafts(
                             thread_id,
+                            origin.thread().1,
                             drafts,
                             DraftDisposition::Recover { uncertain_id },
                         )
@@ -715,9 +739,10 @@ impl App {
             }.into());
             self.cleanup_unsent_operations(waiting.iter(), &HashSet::new())
                 .await;
-            let drafts = recoverable_drafts(waiting.drain(..));
+            let drafts = recoverable_drafts(&origin, waiting.drain(..)).await;
             self.restore_submission_drafts(
                 thread_id,
+                origin.thread().1,
                 drafts,
                 DraftDisposition::Recover { uncertain_id: None },
             )
@@ -850,10 +875,11 @@ impl App {
                         if !matches!(&**operation, ServerOperation::Response(_)) {
                             self.cleanup_unsent_operations(waiting.iter(), &protected)
                                 .await;
-                            let drafts = recoverable_drafts(waiting.drain(..));
+                            let drafts = recoverable_drafts(&origin, waiting.drain(..)).await;
                             if let Some(thread_id) = origin.thread_id() {
                                 self.restore_submission_drafts(
                                     thread_id,
+                                    origin.thread().1,
                                     drafts,
                                     DraftDisposition::Recover { uncertain_id: None },
                                 )
@@ -979,9 +1005,10 @@ impl App {
         if let Some(error) = failure {
             self.cleanup_unsent_operations(waiting.iter(), &HashSet::new())
                 .await;
-            let drafts = recoverable_drafts(std::iter::once(active).chain(waiting));
+            let drafts = recoverable_drafts(&origin, std::iter::once(active).chain(waiting)).await;
             self.restore_submission_drafts(
                 thread_id,
+                origin.thread().1,
                 drafts,
                 DraftDisposition::Recover { uncertain_id },
             )
@@ -1023,6 +1050,7 @@ impl App {
     pub(super) async fn restore_submission_drafts(
         &mut self,
         thread_id: ThreadId,
+        origin_store: &Arc<Mutex<ThreadEventStore>>,
         drafts: Vec<SubmissionDraft>,
         action: DraftDisposition,
     ) {
@@ -1037,6 +1065,13 @@ impl App {
             && let Some(input) = channel.store.lock().await.input_state.as_mut()
         {
             input.recover_submission_drafts(drafts, action);
+        } else if let Some(input) = origin_store.lock().await.input_state.as_mut() {
+            // The retained original store outlives channel-map removal. Child question
+            // submissions seed it from their exact emitter only when no state survived.
+            input.recover_submission_drafts(drafts, action);
+            self.agents_overview
+                .input_states
+                .insert(thread_id, input.clone());
         } else {
             self.chat_widget.recover_submission_drafts(drafts, action);
             self.chat_widget.add_warning_message(format!("The original thread {thread_id} is no longer open. Its unsent messages were recovered into this draft."));

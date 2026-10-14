@@ -127,7 +127,9 @@ impl ChatWidget {
                     QuestionSubmission::Submit(text) => (text, false),
                     QuestionSubmission::Queue(text) => (text, true),
                 };
-                if self.blocks_direct_input {
+                if self.blocks_direct_input
+                    && (!self.is_parent_owned_thread() || self.external_writer_view)
+                {
                     self.add_error_message(PARENT_OWNED_INPUT_MESSAGE.to_string());
                     return true;
                 }
@@ -143,10 +145,33 @@ impl ChatWidget {
                 {
                     self.queue_user_message_with_options_and_source(
                         UserMessage::from(text),
-                        QueuedInputAction::Plain,
+                        if self.is_parent_owned_thread() {
+                            QueuedInputAction::Literal
+                        } else {
+                            QueuedInputAction::Plain
+                        },
                         Vec::new(),
                         UserMessageSource::QuestionAnswer,
                     )
+                } else if self.is_parent_owned_thread() {
+                    match self.prepare_subagent_text(
+                        text,
+                        Vec::new(),
+                        UserMessageSource::QuestionAnswer,
+                    ) {
+                        Ok(input) => {
+                            if let Some(questions) = &mut self.bottom_pane.questions {
+                                questions.accept_answer();
+                            }
+                            self.emit_subagent_text(input);
+                            self.request_redraw();
+                            return true;
+                        }
+                        Err(message) => {
+                            self.add_error_message(message.into());
+                            false
+                        }
+                    }
                 } else {
                     self.submit_user_message_with_history_and_shell_escape_policy(
                         UserMessage::from(text),
@@ -159,6 +184,9 @@ impl ChatWidget {
                 if accepted {
                     if let Some(questions) = &mut self.bottom_pane.questions {
                         questions.accept_answer();
+                    }
+                    if self.is_parent_owned_thread() {
+                        self.maybe_send_next_queued_input();
                     }
                 } else if self.bottom_pane.composer_draft_snapshot() != main {
                     let cursor = main.cursor;

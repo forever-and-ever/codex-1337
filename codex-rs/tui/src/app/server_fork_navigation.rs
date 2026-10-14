@@ -470,7 +470,7 @@ impl App {
         if matches!(ready.context.input.purpose, ForkPurpose::Ordinary { .. }) {
             let (source, store) = ready.context.input.origin.thread();
             let drafts = self.take_unsent_thread_operations(source, store).await;
-            self.restore_submission_drafts(source, drafts, DraftDisposition::Edit)
+            self.restore_submission_drafts(source, store, drafts, DraftDisposition::Edit)
                 .await;
         }
         let retained_input = match &ready.context.input.purpose {

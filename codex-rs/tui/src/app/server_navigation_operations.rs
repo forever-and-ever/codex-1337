@@ -312,9 +312,14 @@ impl App {
     pub(super) async fn recover_local_navigation_draft(&mut self, recovery: LocalDraftRecovery) {
         let draft = Self::recovery_draft(recovery.message);
         match recovery.origin {
-            OperationOrigin::Thread { thread_id, .. } => {
-                self.restore_submission_drafts(thread_id, vec![draft], DraftDisposition::Edit)
-                    .await
+            OperationOrigin::Thread { thread_id, store } => {
+                self.restore_submission_drafts(
+                    thread_id,
+                    &store,
+                    vec![draft],
+                    DraftDisposition::Edit,
+                )
+                .await
             }
             OperationOrigin::Connection => self
                 .chat_widget

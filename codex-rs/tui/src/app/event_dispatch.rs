@@ -663,8 +663,8 @@ impl App {
                 self.transcript_view.jump_to_latest();
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::SubagentTextInput { thread_id, expected_turn_id, input } => {
-                self.enqueue_subagent_turn(app_server, thread_id, expected_turn_id, input);
+            AppEvent::SubagentTextInput { thread_id, expected_turn_id, source, input } => {
+                self.enqueue_subagent_turn(app_server, thread_id, expected_turn_id, input, source);
             }
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);

@@ -168,6 +168,7 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
                 text: "unsent after fork admission".into(),
                 text_elements: Vec::new(),
             }],
+            crate::app::turn_submissions::SubagentTextSource::Prompt,
         );
     }
     app.settle_navigation(&mut tui, &mut server).await?;

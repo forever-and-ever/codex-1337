@@ -57,6 +57,156 @@ async fn turn_start_failure_is_shown_without_exiting() -> Result<()> {
     ■ Failed to start turn: turn/start failed in TUI: turn/start failed: thread not found: 123e4567-e89b-12d3-a456-426614174000 (code -32600)
     ");
 
+    use crate::chatwidget::UserMessageSource;
+
+    app.chat_widget.set_parent_owned_thread();
+    app.chat_widget.apply_external_edit("child draft".into());
+    let question_notification =
+        ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            thread_id: thread_id.to_string(),
+            turn_id: "questions-turn".into(),
+            completed_at_ms: 0,
+            item: serde_json::from_value(serde_json::json!({
+                "type": "agentMessage",
+                "id": "child-questions",
+                "text": "",
+                "questions": [
+                    { "title": "First?", "options": ["Retained child answer"] },
+                    { "title": "Second?", "options": ["Retained child answer"] }
+                ]
+            }))?,
+        });
+    app.chat_widget
+        .handle_server_notification(question_notification.clone(), None);
+    // Reselecting a thread leaves its prior inactive snapshot in the active store.
+    app.store_active_thread_receiver().await;
+    app.set_thread_active(thread_id, true).await;
+    app.chat_widget
+        .handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    for _ in 0..2 {
+        render_bottom_popup(&app.chat_widget, 80);
+        app.chat_widget
+            .handle_key_event(KeyEvent::from(KeyCode::Enter));
+    }
+    let answers = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .filter(|event| matches!(event, AppEvent::SubagentTextInput { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(answers.len(), 2);
+    let replies = answers
+        .iter()
+        .map(|event| {
+            let AppEvent::SubagentTextInput { input, .. } = event else {
+                unreachable!()
+            };
+            let [codex_app_server_protocol::UserInput::Text { text, .. }] = input.as_slice() else {
+                unreachable!()
+            };
+            text.clone()
+        })
+        .collect::<Vec<_>>();
+
+    let mut answers = answers.into_iter();
+    app.handle_event(&mut tui, &mut app_server, answers.next().unwrap())
+        .await?;
+
+    // Close the selected source before the second AppEvent is admitted.
+    app.discard_thread_local_state(thread_id).await;
+    let unrelated = app_server.start_thread(&app.config).await?;
+    app.replace_chat_widget_with_app_server_thread(
+        &mut tui,
+        unrelated,
+        super::super::session_lifecycle::ThreadAttachPresentation::Fresh,
+        None,
+    )
+    .await?;
+    app.chat_widget
+        .apply_external_edit("unrelated draft".into());
+    let unrelated_input = app.chat_widget.capture_thread_input_state().unwrap();
+    // This recreated channel shares the thread ID, not the active operation's Arc.
+    app.handle_event(&mut tui, &mut app_server, answers.next().unwrap())
+        .await?;
+    assert!(answers.next().is_none());
+    let crate::app::turn_submissions::ThreadSubmissionPreview::Sending { waiting, .. } =
+        app.server_operations.thread_preview(Some(thread_id))
+    else {
+        panic!("child answer delivery is active");
+    };
+    assert_eq!(
+        waiting.len(),
+        1,
+        "child answers use one serialized delivery lane"
+    );
+    // Remove the newly created channel before its rejection callback runs as well.
+    app.discard_thread_local_state(thread_id).await;
+    app.settle_turn_submissions(&mut app_server).await?;
+    assert_eq!(
+        app.chat_widget.capture_thread_input_state().unwrap(),
+        unrelated_input
+    );
+
+    let mut recovered = app
+        .agents_overview
+        .input_states
+        .remove(&thread_id)
+        .expect("closed source retains its own rejected answers");
+    let saved = serde_json::to_value(&recovered)?;
+    assert_eq!(saved["questions"]["pending"].as_array().unwrap().len(), 0);
+    app.chat_widget
+        .handle_thread_session(test_thread_session(thread_id, app.config.cwd.to_path_buf()));
+    app.chat_widget.set_parent_owned_thread();
+    app.chat_widget.restore_thread_input_state(
+        Some(recovered.clone()),
+        crate::chatwidget::ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: true,
+        },
+    );
+    let queued = app.chat_widget.queued_user_message_texts();
+    assert_eq!(&queued[..2], &replies);
+    for reply in &replies {
+        assert_eq!(queued.iter().filter(|text| *text == reply).count(), 1);
+    }
+    assert!(
+        !app.chat_widget.maybe_send_next_queued_input(),
+        "recovery never autosends"
+    );
+    app.chat_widget
+        .handle_server_notification(question_notification, None);
+    let replayed = serde_json::to_value(app.chat_widget.capture_thread_input_state())?;
+    assert_eq!(
+        replayed["questions"]["pending"].as_array().unwrap().len(),
+        0
+    );
+
+    recovered.input_queue.recovered_queue = false;
+    app.chat_widget.restore_thread_input_state(
+        Some(recovered),
+        crate::chatwidget::ThreadInputStateRestoreMode {
+            preserve_in_flight_turn: true,
+        },
+    );
+    while app_event_rx.try_recv().is_ok() {}
+    assert!(app.chat_widget.maybe_send_next_queued_input());
+    let retry = std::iter::from_fn(|| app_event_rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::SubagentTextInput { .. }))
+        .expect("recovered child answer retries through its delivery owner");
+    let AppEvent::SubagentTextInput {
+        thread_id: target,
+        source,
+        input,
+        ..
+    } = &retry
+    else {
+        unreachable!()
+    };
+    assert_eq!(*target, thread_id);
+    assert_eq!(source.message_source(), UserMessageSource::QuestionAnswer);
+    assert_eq!(
+        crate::async_question_reply::parse_input(input).unwrap()[0].question_item_id,
+        serde_json::json!(["request_user_input_async", "child-questions", 0]).to_string()
+    );
+    app.handle_event(&mut tui, &mut app_server, retry).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
+
     app_server.shutdown().await?;
     Ok(())
 }

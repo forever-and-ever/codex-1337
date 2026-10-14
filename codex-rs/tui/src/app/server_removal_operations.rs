@@ -697,7 +697,7 @@ impl App {
                 channel.mark_replay_only();
                 let store = Arc::clone(&channel.store);
                 let drafts = self.take_unsent_thread_operations(id, &store).await;
-                self.restore_submission_drafts(id, drafts, DraftDisposition::Edit)
+                self.restore_submission_drafts(id, &store, drafts, DraftDisposition::Edit)
                     .await;
             }
             if self.chat_widget.thread_id() == Some(id) {

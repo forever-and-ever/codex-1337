@@ -26,37 +26,112 @@ async fn unavailable_send_keeps_answer_and_skip_remains_available() {
 
 #[tokio::test]
 async fn accepted_question_answer_uses_existing_delivery_and_keeps_main_draft() {
-    for queued in [false, true] {
-        let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-        chat.thread_id = Some(ThreadId::new());
-        chat.bottom_pane
-            .set_composer_text("main draft".into(), Vec::new(), Vec::new());
-        chat.input_queue_frontend.suppress_queue_autosend = queued;
-        chat.add_async_questions("message", &questions());
-        chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
-        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(question_count(&chat), 2);
-        if !queued {
-            insta::assert_snapshot!(
-                "freeform_question",
-                render_bottom_popup(&chat, /*width*/ 80)
-            );
-        }
-        chat.bottom_pane.handle_paste("!literal answer".into());
-        chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(question_count(&chat), 1);
-        assert_eq!(chat.bottom_pane.composer_text(), "main draft");
-        let expected = "> Which way?\n\n!literal answer";
-        if queued {
-            insta::assert_snapshot!(
-                "queued_async_question_reply",
-                render_bottom_popup(&chat, /*width*/ 80)
-            );
-            let restored = chat.pop_latest_queued_composer_state().unwrap();
-            assert_eq!(restored.text, expected);
-            assert!(op_rx.try_recv().is_err());
-        } else {
-            assert_answer(op_rx.try_recv().unwrap(), expected);
+    for parent_owned in [false, true] {
+        for queued in [false, true] {
+            let (mut chat, mut rx, mut op_rx) =
+                make_chatwidget_manual(/*model_override*/ None).await;
+            let thread_id = ThreadId::new();
+            chat.thread_id = Some(thread_id);
+            if parent_owned {
+                chat.set_parent_owned_thread();
+            }
+            chat.bottom_pane
+                .set_composer_text("main draft".into(), Vec::new(), Vec::new());
+            chat.input_queue_frontend.suppress_queue_autosend = queued;
+            chat.add_async_questions("message", &questions());
+            chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+            chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+            assert_eq!(question_count(&chat), 2);
+            if !queued && !parent_owned {
+                insta::assert_snapshot!(
+                    "freeform_question",
+                    render_bottom_popup(&chat, /*width*/ 80)
+                );
+            }
+            chat.bottom_pane.handle_paste("!literal answer".into());
+            if parent_owned && !queued {
+                chat.on_task_started();
+                chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+                assert_eq!(question_count(&chat), 2);
+                chat.turn_lifecycle.last_turn_id = Some("child-turn".into());
+            }
+            chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+            assert_eq!(question_count(&chat), 1);
+            assert_eq!(chat.bottom_pane.composer_text(), "main draft");
+            let expected = "> Which way?\n\n!literal answer";
+            if queued {
+                if !parent_owned {
+                    insta::assert_snapshot!(
+                        "queued_async_question_reply",
+                        render_bottom_popup(&chat, /*width*/ 80)
+                    );
+                    let restored = chat.pop_latest_queued_composer_state().unwrap();
+                    assert_eq!(restored.text, expected);
+                } else {
+                    assert!(
+                        !std::iter::from_fn(|| rx.try_recv().ok())
+                            .any(|event| matches!(event, AppEvent::SubagentTextInput { .. }))
+                    );
+                    chat.input_queue_frontend.suppress_queue_autosend = false;
+                    assert!(chat.maybe_send_next_queued_input());
+                }
+                assert!(op_rx.try_recv().is_err());
+            }
+            if parent_owned {
+                let input = std::iter::from_fn(|| rx.try_recv().ok())
+                    .find_map(|event| {
+                        if let AppEvent::SubagentTextInput {
+                            thread_id: target,
+                            expected_turn_id,
+                            source,
+                            input,
+                        } = event
+                        {
+                            assert_eq!(target, thread_id);
+                            assert_eq!(source.message_source(), UserMessageSource::QuestionAnswer);
+                            let crate::app::turn_submissions::SubagentTextSource::QuestionAnswer(
+                                snapshot,
+                            ) = source
+                            else {
+                                unreachable!()
+                            };
+                            let state = serde_json::to_value(snapshot).unwrap();
+                            assert_eq!(state["questions"]["pending"].as_array().unwrap().len(), 1);
+                            assert_eq!(
+                                state["input_queue"]["queued_user_messages"]
+                                    .as_array()
+                                    .unwrap()
+                                    .len(),
+                                0
+                            );
+                            assert_eq!(
+                                expected_turn_id.as_deref(),
+                                (!queued).then_some("child-turn")
+                            );
+                            Some(input)
+                        } else {
+                            None
+                        }
+                    })
+                    .expect("child-owned question answer");
+                let [
+                    codex_app_server_protocol::UserInput::Text {
+                        text,
+                        text_elements,
+                    },
+                ] = input.as_slice()
+                else {
+                    panic!("text-only child answer");
+                };
+                assert_eq!(
+                    crate::async_question_reply::display_text(text).as_deref(),
+                    Some(expected)
+                );
+                assert!(text_elements.is_empty());
+                assert!(op_rx.try_recv().is_err());
+            } else if !queued {
+                assert_answer(op_rx.try_recv().unwrap(), expected);
+            }
         }
     }
 }

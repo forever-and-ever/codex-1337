@@ -268,20 +268,23 @@ impl Session {
             ));
         }
         if !crate::guardian::is_basic_session_source(&turn_context.session_source) {
-            let send_user_message_async_available =
-                !turn_context.session_source.is_non_root_agent()
-                    && step_context
-                        .settings
-                        .model_info
-                        .experimental_supported_tools
-                        .iter()
-                        .any(|tool| tool == "send_user_message_async");
+            let request_user_input_async_available = step_context
+                .settings
+                .model_info
+                .experimental_supported_tools
+                .iter()
+                .any(|tool| {
+                    matches!(
+                        tool.as_str(),
+                        "request_user_input_async" | "send_user_message_async"
+                    )
+                });
             world_state.add_section(PersistentModeState::new(
                 turn_context.config.features.persistent_execution_enabled(
                     step_context.settings.effective_reasoning_effort().as_ref(),
                 ),
                 model_messages.persistent_instructions(),
-                send_user_message_async_available,
+                request_user_input_async_available,
             ));
         }
         if turn_context.config.include_environment_context {

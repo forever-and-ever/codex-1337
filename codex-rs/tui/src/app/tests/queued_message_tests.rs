@@ -135,6 +135,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let rich_prompt = ChatWidget::submission_draft_from_inputs(
         "fixture".into(),
         &rich_inputs("stalled ordinary prompt"),
+        crate::chatwidget::UserMessageSource::Prompt,
     )
     .message;
     app.chat_widget.snapshot_local_images = false;
@@ -165,6 +166,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             text: "waiting follow-up".into(),
             text_elements: Vec::new(),
         }],
+        crate::app::turn_submissions::SubagentTextSource::Prompt,
     );
     assert_eq!(recorded_params(&requests, "turn/start").len(), 1);
     let preview = render_bottom_popup(&app.chat_widget, 80);
@@ -233,6 +235,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             text: "unsent successor".into(),
             text_elements: Vec::new(),
         }],
+        crate::app::turn_submissions::SubagentTextSource::Prompt,
     );
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(31)).await;
@@ -273,7 +276,13 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // A reconnect retires the original thread's lane even after its widget was replaced.
     app.chat_widget.apply_external_edit("original draft".into());
     for text in ["disconnected send", "queued after disconnect"] {
-        app.enqueue_subagent_turn(&server, thread_id, None, rich_inputs(text));
+        app.enqueue_subagent_turn(
+            &server,
+            thread_id,
+            None,
+            rich_inputs(text),
+            crate::app::turn_submissions::SubagentTextSource::Prompt,
+        );
     }
     tokio::time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/start").len() < 2 {
@@ -335,9 +344,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         )
         .await?;
         assert_eq!(app.chat_widget.composer_text_with_pending(), expected);
-        let rich =
-            ChatWidget::submission_draft_from_inputs("fixture".into(), &rich_inputs(expected))
-                .message;
+        let rich = ChatWidget::submission_draft_from_inputs(
+            "fixture".into(),
+            &rich_inputs(expected),
+            crate::chatwidget::UserMessageSource::Prompt,
+        )
+        .message;
         assert_eq!(recovered_message(&mut app), rich);
     }
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
@@ -1089,6 +1101,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             text: "unsent closed-side draft".into(),
             text_elements: Vec::new(),
         }],
+        crate::app::turn_submissions::SubagentTextSource::Prompt,
     );
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     let draft_before_detach = recovered_message(&mut app);

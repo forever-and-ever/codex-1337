@@ -256,6 +256,7 @@ pub(crate) enum AppEvent {
     SubagentTextInput {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
+        source: crate::app::turn_submissions::SubagentTextSource,
         input: Vec<codex_app_server_protocol::UserInput>,
     },
     AccountEmailLoaded {

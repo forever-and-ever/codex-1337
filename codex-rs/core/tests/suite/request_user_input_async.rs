@@ -36,7 +36,7 @@ use test_case::test_case;
 
 #[test_case(SessionSource::Exec, false, false; "root_without_tool")]
 #[test_case(SessionSource::Exec, true, true; "root_with_tool")]
-#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), true, false; "subagent")]
+#[test_case(SessionSource::SubAgent(SubAgentSource::Other("test".to_string())), true, true; "subagent")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persistent_async_message_guidance_follows_tool_availability(
     session_source: SessionSource,
@@ -109,7 +109,7 @@ async fn persistent_async_message_guidance_follows_tool_availability(
         .find(|text| text.starts_with("<persistent_mode>"))
         .expect("persistent guidance should remain available to every agent");
     assert_eq!(
-        persistent_instructions.contains("via functions.send_user_message_async"),
+        persistent_instructions.contains("via functions.request_user_input_async"),
         expect_tool_guidance,
     );
     assert_eq!(
@@ -452,14 +452,24 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         .build_with_auto_env(&server)
         .await?;
 
-    test.codex
+    let thread = test.thread_manager.start_thread(StartThreadOptions {
+        session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: test.session_configured.thread_id,
+            depth: 1,
+            agent_path: None,
+            agent_nickname: None,
+            agent_role: None,
+        })),
+        ..StartThreadOptions::new(test.config.clone())
+    }).await?.thread;
+    thread
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Keep me updated.".to_string(),
             text_elements: Vec::new(),
         }]))
         .await?;
 
-    let started = wait_for_event_match(test.codex.as_ref(), |event| {
+    let started = wait_for_event_match(thread.as_ref(), |event| {
         let EventMsg::ItemStarted(event) = event else {
             return None;
         };
@@ -486,7 +496,7 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         })?
     );
 
-    let completed = wait_for_event_match(test.codex.as_ref(), |event| {
+    let completed = wait_for_event_match(thread.as_ref(), |event| {
         let EventMsg::ItemCompleted(event) = event else {
             return None;
         };
@@ -504,7 +514,7 @@ async fn request_user_input_async_emits_item_and_does_not_end_the_turn(
         serde_json::to_value(started)?
     );
 
-    wait_for_event(test.codex.as_ref(), |event| {
+    wait_for_event(thread.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;

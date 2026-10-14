@@ -230,6 +230,7 @@ impl App {
                     self.discard_thread_local_state(target.thread_id).await;
                     self.restore_submission_drafts(
                         target.thread_id,
+                        &target.store,
                         drafts,
                         DraftDisposition::Edit,
                     )
@@ -253,8 +254,13 @@ impl App {
                     self.abort_thread_event_listener(thread_id);
                     self.pending_server_profiles.remove(&thread_id);
                     self.pause_detached_thread_input(target).await;
-                    self.restore_submission_drafts(thread_id, drafts, DraftDisposition::Edit)
-                        .await;
+                    self.restore_submission_drafts(
+                        thread_id,
+                        &target.store,
+                        drafts,
+                        DraftDisposition::Edit,
+                    )
+                    .await;
                 }
                 (DetachKind::Conversation, Err(error)) => {
                     tracing::warn!(thread_id = %target.thread_id, %error, "unsubscribe not confirmed; local attachment retained");

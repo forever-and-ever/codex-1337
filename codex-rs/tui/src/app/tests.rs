@@ -3066,6 +3066,36 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             .any(|event| matches!(event, AppEvent::SubagentTextInput { thread_id, .. }
                 if thread_id == child_thread_ids[1])));
         assert_eq!(app.chat_widget.thread_id(), Some(child_thread_ids[1]));
+        let mut request = request_user_input_request(child_thread_ids[1], "child-question-turn", "child-question");
+        if let ServerRequest::ToolRequestUserInput { params, .. } = &mut request {
+            params.questions.push(codex_app_server_protocol::ToolRequestUserInputQuestion {
+                id: "choice".into(),
+                header: "Choice".into(),
+                question: "Which?".into(),
+                is_other: true,
+                is_secret: false,
+                options: Some(vec![codex_app_server_protocol::ToolRequestUserInputOption {
+                    label: "Child answer".into(),
+                    description: "Answer this child".into(),
+                }]),
+            });
+        }
+        assert!(app.pending_app_server_requests.note_server_request(&request).is_none());
+        app.chat_widget.handle_server_request(request, None);
+        app.chat_widget.handle_key_event(KeyEvent::from(KeyCode::Enter));
+        let answer = std::iter::from_fn(|| app_event_rx.try_recv().ok()).find_map(|event| {
+            if let AppEvent::CodexOp(op @ AppCommand::UserInputAnswer { .. }) = event {
+                Some(op)
+            } else {
+                None
+            }
+        }).expect("selected V2 child accepts its synchronous question");
+        let AppCommand::UserInputAnswer { id, response } = &answer else { unreachable!() };
+        assert_eq!(id, "child-question-turn");
+        assert_eq!(response.answers["choice"].answers, vec!["Child answer"]);
+        let resolution = app.pending_app_server_requests.take_resolution(&child_thread_ids[1].to_string(), answer).expect("question answer serializes")
+            .expect("child server request resolution");
+        assert_eq!(resolution.request_id, AppServerRequestId::Integer(2));
         app.chat_widget.restore_user_message_to_composer("/fork investigation".into());
         app.chat_widget.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(std::iter::from_fn(|| app_event_rx.try_recv().ok()).any(|event|
