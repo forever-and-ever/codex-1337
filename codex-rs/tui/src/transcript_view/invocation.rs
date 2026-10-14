@@ -14,6 +14,7 @@ use crate::history_cell::invocation::collect;
 use crate::history_cell::output_provenance::OutputMode;
 use crate::history_cell::output_provenance::client_notice;
 use crate::terminal_hyperlinks::HyperlinkLine;
+use codex_protocol::ToolName;
 use codex_protocol::tool_input::ToolInput;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -21,6 +22,14 @@ use ratatui::text::Span;
 use std::collections::HashMap;
 
 pub(super) const CONTROL_COLUMNS: usize = "[in [raw] [fmt]] [out [raw] [fmt]]".len();
+
+fn input_open_by_default(name: Option<&ToolName>) -> bool {
+    // Tool-specific presentation policy; explicit port choices always win.
+    const HIDDEN_INPUT_TOOLS: &[&str] = &["write_stdin"];
+    !name.is_some_and(|name| {
+        name.is_default_namespace() && HIDDEN_INPUT_TOOLS.contains(&name.name.as_str())
+    })
+}
 
 #[derive(Default)]
 struct Choices {
@@ -78,7 +87,10 @@ impl Invocations {
             OutputMode::Raw
         };
         let preferred = choices.and_then(|choice| choice.input).unwrap_or(
-            if open && (formatted || call.raw_source(self.input(call.id)).is_some()) {
+            if open
+                && input_open_by_default(call.name(self.input(call.id)))
+                && (formatted || call.raw_source(self.input(call.id)).is_some())
+            {
                 Panel::Visible(mode)
             } else {
                 Panel::Hidden(mode)
