@@ -14,6 +14,8 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadAlarmsUpdatedNotification;
+use codex_app_server_protocol::ThreadBackgroundTerminalsListResponse;
+use codex_app_server_protocol::ThreadBackgroundTerminalsTerminateResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
@@ -24,7 +26,9 @@ use codex_app_server_protocol::UserInput;
 use codex_app_server_protocol::alarm_sounding::AlarmCause;
 use codex_app_server_protocol::alarm_sounding::AlarmSounding;
 use codex_features::Feature;
+use codex_protocol::ThreadId;
 use codex_protocol::models::ResponseItem;
+use codex_state::DirectionalThreadSpawnEdgeStatus;
 use codex_uds::UnixStream;
 use core_test_support::responses;
 use futures::SinkExt;
@@ -50,6 +54,7 @@ use super::daemon_update_recovery::spawn_server;
 use super::daemon_update_recovery::wait_success;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 const READY_COMMAND: &str = "printf 'warming\\n'; sleep 1; printf 'ready\\n'; sleep 30";
 
 struct AlarmApp {
@@ -363,8 +368,30 @@ async fn terminal_model(server: &MockServer, scenario: TerminalScenario) {
 async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()> {
     let server = responses::start_mock_server().await;
     terminal_model(&server, TerminalScenario::Ready).await;
-    let (mut app, _home) = alarm_app(&server).await?;
+    let (mut app, home) = alarm_app(&server).await?;
+    let selected = start(&mut app).await?;
+    let middle = start(&mut app).await?;
+    let unrelated = start(&mut app).await?;
     let thread_id = start(&mut app).await?;
+    let config = core_test_support::load_default_config_for_test(&home).await;
+    let db =
+        codex_state::StateRuntime::init(config.sqlite.clone(), config.model_provider_id.clone())
+            .await?;
+    // Persisted family membership, not frontend attachment, determines which
+    // live sessions belong to an ancestor's inventory.
+    db.upsert_thread_spawn_edge(
+        ThreadId::from_string(&selected)?,
+        ThreadId::from_string(&middle)?,
+        DirectionalThreadSpawnEdgeStatus::Open,
+    )
+    .await?;
+    db.upsert_thread_spawn_edge(
+        ThreadId::from_string(&middle)?,
+        ThreadId::from_string(&thread_id)?,
+        DirectionalThreadSpawnEdgeStatus::Open,
+    )
+    .await?;
+    db.close().await;
     arm_turn(&mut app, &thread_id).await?;
     let armed = alarms(&mut app, 1).await?;
     let soundings = wait_for_soundings(&mut app, &server, 1).await?;
@@ -376,6 +403,55 @@ async fn terminal_alarm_matches_a_line_after_the_arming_turn_ends() -> Result<()
     assert_eq!((command.as_str(), line.as_str()), (READY_COMMAND, "ready"));
     assert!(soundings[0].still_armed.is_empty());
     assert_eq!(alarms(&mut app, 0).await?.thread_id, thread_id);
+
+    let local: ThreadBackgroundTerminalsListResponse = app
+        .request(
+            "thread/backgroundTerminals/list",
+            json!({"threadId": selected}),
+        )
+        .await?;
+    assert!(
+        local.data.is_empty(),
+        "the default inventory remains per-thread"
+    );
+    let subtree: ThreadBackgroundTerminalsListResponse = app
+        .request(
+            "thread/backgroundTerminals/list",
+            json!({"threadId": selected, "scope": "subtree"}),
+        )
+        .await?;
+    assert_eq!(subtree.data.len(), 1);
+    let session = &subtree.data[0];
+    assert_eq!(session.thread_id, thread_id);
+    assert_eq!(session.command, READY_COMMAND);
+    let direct: ThreadBackgroundTerminalsListResponse = app
+        .request(
+            "thread/backgroundTerminals/list",
+            json!({"threadId": thread_id}),
+        )
+        .await?;
+    assert_eq!(direct, subtree);
+    let isolated: ThreadBackgroundTerminalsListResponse = app
+        .request(
+            "thread/backgroundTerminals/list",
+            json!({"threadId": unrelated, "scope": "subtree"}),
+        )
+        .await?;
+    assert!(isolated.data.is_empty());
+    let stopped: ThreadBackgroundTerminalsTerminateResponse = app
+        .request(
+            "thread/backgroundTerminals/terminate",
+            json!({"threadId": session.thread_id, "processId": session.process_id}),
+        )
+        .await?;
+    assert!(stopped.terminated);
+    let remaining: ThreadBackgroundTerminalsListResponse = app
+        .request(
+            "thread/backgroundTerminals/list",
+            json!({"threadId": selected, "scope": "subtree"}),
+        )
+        .await?;
+    assert!(remaining.data.is_empty());
     Ok(())
 }
 

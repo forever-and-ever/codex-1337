@@ -38,6 +38,9 @@ mod thread_resume;
 #[path = "thread_fork.rs"]
 mod thread_fork;
 
+#[path = "thread_processes.rs"]
+mod thread_processes;
+
 use thread_fork::ThreadForkOrigin;
 pub(crate) use thread_resume::ServerResume;
 pub(crate) use thread_resume::ThreadResumeTarget;
@@ -2408,31 +2411,7 @@ impl ThreadRequestProcessor {
         &self,
         params: ThreadBackgroundTerminalsListParams,
     ) -> Result<ThreadBackgroundTerminalsListResponse, JSONRPCErrorError> {
-        let ThreadBackgroundTerminalsListParams {
-            thread_id,
-            cursor,
-            limit,
-        } = params;
-
-        let (_, thread) = self.load_thread(&thread_id).await?;
-        let terminals = thread
-            .list_background_terminals()
-            .await
-            .into_iter()
-            .map(|terminal| ThreadBackgroundTerminal {
-                item_id: terminal.item_id,
-                process_id: terminal.process_id,
-                command: terminal.command,
-                cwd: terminal.cwd.into(),
-                os_pid: None,
-                cpu_percent: None,
-                rss_kb: None,
-            })
-            .collect::<Vec<_>>();
-
-        let (data, next_cursor) = paginate_background_terminals(&terminals, cursor, limit)?;
-
-        Ok(ThreadBackgroundTerminalsListResponse { data, next_cursor })
+        self.list_owned_background_terminals(params).await
     }
 
     async fn thread_background_terminals_terminate_inner(

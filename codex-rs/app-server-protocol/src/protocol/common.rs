@@ -3978,6 +3978,7 @@ mod tests {
             request_id: RequestId::Integer(8),
             params: v2::ThreadBackgroundTerminalsListParams {
                 thread_id: "thr_123".to_string(),
+                scope: v2::ThreadBackgroundTerminalsScope::Thread,
                 cursor: None,
                 limit: None,
             },
@@ -3988,12 +3989,17 @@ mod tests {
                 "id": 8,
                 "params": {
                     "threadId": "thr_123",
+                    "scope": "thread",
                     "cursor": null,
                     "limit": null
                 }
             }),
             serde_json::to_value(&request)?,
         );
+        let legacy: v2::ThreadBackgroundTerminalsListParams = serde_json::from_value(json!({
+            "threadId": "thr_123"
+        }))?;
+        assert_eq!(legacy.scope, v2::ThreadBackgroundTerminalsScope::Thread);
         Ok(())
     }
 

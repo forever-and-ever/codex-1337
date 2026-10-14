@@ -46,6 +46,7 @@ mod background_terminal_pagination_tests {
         let cwd = if cfg!(windows) { r"C:\tmp" } else { "/tmp" };
 
         ThreadBackgroundTerminal {
+            thread_id: "00000000-0000-0000-0000-000000000001".to_string(),
             item_id: format!("item-{process_id}"),
             process_id: process_id.to_string(),
             command: format!("command-{process_id}"),
@@ -92,6 +93,31 @@ mod background_terminal_pagination_tests {
             paginate_background_terminals(&terminals, Some("missing".to_string()), Some(1))
                 .is_err()
         );
+
+        // Process IDs are local to each owner. Subtree pagination must preserve
+        // collisions and still advance after a session or its owner disappears.
+        let child_terminal = |process_id: &str| ThreadBackgroundTerminal {
+            thread_id: "00000000-0000-0000-0000-000000000002".to_string(),
+            ..terminal(process_id)
+        };
+        let terminals = vec![
+            terminal("2"),
+            terminal("10"),
+            child_terminal("2"),
+            child_terminal("10"),
+        ];
+        let paginate = super::super::thread_processes::paginate_subtree_background_terminals;
+        let (data, first_cursor) = paginate(&terminals, None, Some(1)).expect("first subtree page");
+        assert_eq!(data, vec![terminal("2")]);
+        let without_anchor = terminals[1..].to_vec();
+        let (data, next_cursor) = paginate(&without_anchor, first_cursor, Some(2))
+            .expect("subtree page after exited anchor");
+        assert_eq!(data, vec![terminal("10"), child_terminal("2")]);
+        let (data, next_cursor) =
+            paginate(&terminals, next_cursor, Some(2)).expect("last subtree page");
+        assert_eq!(data, vec![child_terminal("10")]);
+        assert_eq!(next_cursor, None);
+        assert!(paginate(&terminals, Some("missing".to_string()), Some(1)).is_err());
     }
 }
 

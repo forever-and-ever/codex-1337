@@ -1355,6 +1355,9 @@ pub struct ThreadBackgroundTerminalsCleanResponse {}
 #[ts(export_to = "v2/")]
 pub struct ThreadBackgroundTerminalsListParams {
     pub thread_id: String,
+    /// Defaults to this thread alone; subtree also includes its spawned descendants.
+    #[serde(default)]
+    pub scope: super::ThreadBackgroundTerminalsScope,
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
@@ -1367,6 +1370,8 @@ pub struct ThreadBackgroundTerminalsListParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadBackgroundTerminal {
+    /// The thread that owns this managed execution session.
+    pub thread_id: String,
     pub item_id: String,
     pub process_id: String,
     pub command: String,
