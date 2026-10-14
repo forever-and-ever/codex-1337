@@ -191,6 +191,7 @@ async fn terminals(
                     thread_id: thread_id.to_string(),
                     cursor: None,
                     limit: Some(1),
+                    scope: api::ThreadBackgroundTerminalsScope::Thread,
                 },
             },
         )

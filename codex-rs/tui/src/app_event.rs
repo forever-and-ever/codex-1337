@@ -1755,6 +1755,7 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         id: String,
     },
+    LiveWork(crate::app::live_work::Event),
     LocalShellRequest(crate::local_shell::LocalShellRequest),
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
 }

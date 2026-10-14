@@ -92,6 +92,7 @@ impl App {
         tui: &mut tui::Tui,
         screen_size: Size,
     ) -> Result<Rect> {
+        self.prepare_live_work();
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(
             self.local_settings.tui.animations
@@ -122,6 +123,10 @@ impl App {
         .then(crate::bottom_pane::ComposerGap::default);
         let mut prompt_footer =
             self.prompt_navigation_footer(screen_size.width.saturating_sub(/*rhs*/ 2));
+        if let Some(gap) = &mut composer_gap {
+            gap.live_height = self.live_work.desired_height(transcript_width);
+        }
+        let live_work = &mut self.live_work;
         let chat_widget = &self.chat_widget;
         let view = &mut self.transcript_view;
         let active_key = chat_widget.active_cell_transcript_key();
@@ -147,34 +152,6 @@ impl App {
         } else {
             crate::bottom_pane::CommandPopupPlacement::Overlay
         };
-        let live_work = self
-            .transcript_cells
-            .iter()
-            .filter_map(|cell| {
-                cell.as_any()
-                    .downcast_ref::<crate::history_cell::CodeModeCell>()
-            })
-            .flat_map(crate::history_cell::CodeModeCell::live_lines)
-            .collect::<Vec<_>>();
-        if !live_work.is_empty() && composer_gap.is_some() {
-            // Live work takes at most half the rows the transcript would have without it.
-            let without = chat_widget
-                .bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions {
-                    max_height: Some(max_composer_height),
-                    footer: prompt_footer.as_ref().or(footer.as_ref()),
-                    command_popup_placement: popup_placement,
-                    hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,
-                    composer_gap: composer_gap.as_ref(),
-                    working_tip,
-                    ..Default::default()
-                })
-                .desired_height(screen_size.width);
-            let room = usize::from(screen_size.height.saturating_sub(without) / 2);
-            if let Some(gap) = composer_gap.as_mut() {
-                gap.live = live_work;
-                gap.live.truncate(room);
-            }
-        }
         let bottom =
             chat_widget.bottom_pane_renderable(crate::bottom_pane::ComposerRenderOptions {
                 max_height: Some(max_composer_height),
@@ -312,6 +289,15 @@ impl App {
                 .borrow_mut()
                 .render_first_screen(view.remaining_area(), frame.buffer, composer);
             bottom.render(bottom_area, frame.buffer);
+            if let Some(gap) = &composer_gap {
+                live_work.render(
+                    Rect {
+                        width: transcript_width,
+                        ..gap.live_area.get()
+                    },
+                    frame.buffer,
+                );
+            }
             if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
                 tip.render(area, frame.buffer);
             }
@@ -384,6 +370,9 @@ impl App {
             tui.frame_requester()
                 .schedule_frame_in(Duration::from_millis(/*millis*/ 50));
         }
+        if let Some(delay) = self.live_work.refresh_in() {
+            tui.frame_requester().schedule_frame_in(delay);
+        }
         self.refresh_link_hover(tui)?;
         Ok(bottom_area)
     }
@@ -396,6 +385,15 @@ impl App {
         event: &TuiEvent,
     ) -> Result<bool> {
         let has_modal = self.chat_widget.has_active_modal();
+        if !self.chat_widget.no_modal_or_popup_active()
+            || self.chat_widget.is_external_writer_view()
+            || self.overlay.is_some()
+        {
+            self.live_work.blur();
+        }
+        if matches!(event, TuiEvent::FocusLost | TuiEvent::Resume) {
+            self.handle_live_work_input(event);
+        }
         let modal_transcript_mouse = has_modal
             && matches!(event, TuiEvent::Mouse(mouse)
                 if self.chat_widget.centered_dialog().is_none()
@@ -458,6 +456,13 @@ impl App {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
+            if self.handle_live_work_input(event) {
+                self.transcript_view.end_selection(&self.transcript_cells);
+                self.transcript_view.cancel_search();
+                self.transcript_view.clear_activity_focus();
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
+            }
             if self.chat_widget.no_modal_or_popup_active()
                 && self
                     .chat_widget
@@ -509,6 +514,10 @@ impl App {
         if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
             let size = tui.prepare_draw_size()?;
             self.render_owned_transcript(tui, size)?;
+            if self.handle_live_work_input(event) {
+                tui.frame_requester().schedule_frame();
+                return Ok(true);
+            }
         }
         if matches!(event, TuiEvent::Key(_))
             || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(_)))

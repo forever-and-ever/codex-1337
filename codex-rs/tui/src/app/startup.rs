@@ -879,6 +879,7 @@ See the Codex keymap documentation for supported actions and examples."
             key_chord_matcher: KeyChordMatcher::default(),
             transcript_cells: Vec::new(),
             code_mode_transcript: Default::default(),
+            live_work: Default::default(),
             native_history: Default::default(),
             turn_tips: Default::default(),
             transcript_view: Default::default(),

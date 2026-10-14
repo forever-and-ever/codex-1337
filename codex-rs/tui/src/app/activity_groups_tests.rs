@@ -287,11 +287,6 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .unwrap();
     assert!(background.terminal());
     assert!(background.is_active());
-    assert!(
-        background.live_lines()[0]
-            .to_string()
-            .contains(&format!("Running ({})", background.tetrad()))
-    );
 
     for item in [
         call("child-a", ActivityKind::Exploration, "completed"),
@@ -357,7 +352,6 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         .unwrap()
         .clone();
     assert!(!terminal.is_active());
-    assert!(terminal.live_lines().is_empty());
     let before_child = terminal.members().to_vec();
     assert_eq!(
         app.transcript_view
@@ -589,160 +583,6 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     });
     assert!(Admission::notification(&misrouted, Source::Live).is_err());
 
-    // Concurrent process waits belong to their actor, not to the target's command.
-    let mut wait_bank = Reducers::default();
-    let mut apply = |owner: &CodeModeOwner, item| {
-        wait_bank
-            .admit(
-                thread,
-                Admission::notification(&notification(owner, item), Source::Live)
-                    .unwrap()
-                    .unwrap(),
-                &app.chat_widget.config_ref().cwd,
-                false,
-                &|_| crate::multi_agents::AgentMetadata::default(),
-            )
-            .unwrap()
-    };
-    let live = |block: &Arc<dyn HistoryCell>| {
-        block
-            .as_any()
-            .downcast_ref::<history_cell::CodeModeCell>()
-            .unwrap()
-            .live_lines()
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let c = owner("exec-c");
-    let actor = history_cell::CodeModeCell::owned(a.clone(), false).tetrad();
-    let target = history_cell::CodeModeCell::owned(b.clone(), false).tetrad();
-    let other_target = history_cell::CodeModeCell::owned(c.clone(), false).tetrad();
-    for owner in [&a, &b] {
-        apply(
-            owner,
-            code_mode(
-                &owner.exec_call_id,
-                CodeModeEvent::Started {
-                    call_id: owner.exec_call_id.clone(),
-                    script: None,
-                },
-            ),
-        );
-    }
-    apply(
-        &b,
-        call("background-b", ActivityKind::Exploration, "inProgress"),
-    );
-    let background_b = apply(
-        &b,
-        code_mode(
-            "exec-b",
-            CodeModeEvent::Finished {
-                status: CodeModeStatus::Completed,
-            },
-        ),
-    );
-    assert!(live(&background_b.block).contains(&format!("Running ({target})")));
-    for (call, target) in [("poll-1", &b), ("poll-2", &c)] {
-        let waiting = apply(
-            &a,
-            code_mode(
-                "exec-a",
-                CodeModeEvent::WaitStarted {
-                    call_id: call.into(),
-                    target: Some(target.clone()),
-                },
-            ),
-        );
-        assert!(waiting.wait.is_none());
-    }
-    let concurrent = apply(
-        &a,
-        call("concurrent-a", ActivityKind::Computer, "inProgress"),
-    );
-    assert!(live(&concurrent.block).contains(&format!("Running ({actor})")));
-    let waiting = apply(
-        &a,
-        call("concurrent-a", ActivityKind::Computer, "completed"),
-    );
-    let before_completion = Arc::clone(&waiting.block);
-    assert!(!live(&waiting.block).contains("Running"));
-    assert!(live(&waiting.block).contains(&format!("Waiting for ({target})")));
-    assert!(live(&waiting.block).contains(&format!("Waiting for ({other_target})")));
-    let one_left = apply(
-        &a,
-        code_mode(
-            "exec-a",
-            CodeModeEvent::WaitCompleted {
-                call_id: "poll-1".into(),
-                target: Some(b.clone()),
-            },
-        ),
-    );
-    assert!(one_left.wait.is_none());
-    assert!(!live(&one_left.block).contains(&format!("Waiting for ({target})")));
-    assert!(live(&one_left.block).contains(&format!("Waiting for ({other_target})")));
-    assert!(live(&before_completion).contains(&format!("Waiting for ({target})")));
-    let resumed = apply(
-        &a,
-        code_mode(
-            "exec-a",
-            CodeModeEvent::WaitCompleted {
-                call_id: "poll-2".into(),
-                target: Some(c.clone()),
-            },
-        ),
-    );
-    assert_eq!(live(&resumed.block), format!("• Running ({actor})"));
-    let exited = apply(
-        &b,
-        call("background-b", ActivityKind::Exploration, "completed"),
-    );
-    assert!(live(&exited.block).is_empty());
-    assert!(live(&background_b.block).contains(&format!("Running ({target})")));
-
-    // A suffix is self-describing, and loading its older start cannot resurrect a wait.
-    let mut late_wait = Reducers::default();
-    for (source, event) in [
-        (
-            Source::Historical,
-            CodeModeEvent::WaitCompleted {
-                call_id: "late-poll".into(),
-                target: Some(b.clone()),
-            },
-        ),
-        (
-            Source::Live,
-            CodeModeEvent::Started {
-                call_id: "exec-a".into(),
-                script: None,
-            },
-        ),
-        (
-            Source::Historical,
-            CodeModeEvent::WaitStarted {
-                call_id: "late-poll".into(),
-                target: Some(b.clone()),
-            },
-        ),
-    ] {
-        let projected = late_wait
-            .admit(
-                thread,
-                Admission::notification(&notification(&a, code_mode("exec-a", event)), source)
-                    .unwrap()
-                    .unwrap(),
-                &app.chat_widget.config_ref().cwd,
-                false,
-                &|_| crate::multi_agents::AgentMetadata::default(),
-            )
-            .unwrap();
-        assert!(projected.wait.is_none());
-        assert!(!live(&projected.block).contains("Waiting"));
-    }
-
     let history = vec![
         owned_item(
             &a,
@@ -808,31 +648,6 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     assert_prompt_arrival_ordering().await;
-    // Explicit functions.wait stores the targetless fact on the awaited owner itself.
-    let awaited = owner("exec-explicit");
-    apply(
-        &awaited,
-        code_mode(
-            "exec-explicit",
-            CodeModeEvent::Started {
-                call_id: "exec-explicit".into(),
-                script: None,
-            },
-        ),
-    );
-    let explicit = apply(
-        &awaited,
-        code_mode(
-            "exec-explicit",
-            CodeModeEvent::WaitStarted {
-                call_id: "explicit-wait".into(),
-                target: None,
-            },
-        ),
-    );
-    let explicit_target = history_cell::CodeModeCell::owned(awaited, false).tetrad();
-    assert!(live(&explicit.block).contains(&format!("Waiting for ({explicit_target})")));
-    assert!(live(&explicit.block).contains(&format!("Running ({explicit_target})")));
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
         app.transcript_cells = thread_items_to_transcript_cells(

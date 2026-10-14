@@ -1,5 +1,7 @@
 //! Human-only work below the transcript. Disclosures own their height; only terminal bounds clip.
 
+pub(crate) mod operations;
+
 use std::collections::HashSet;
 
 use codex_protocol::ThreadId;
@@ -46,9 +48,32 @@ impl Group {
 pub(crate) enum Key {
     Group(Group),
     ProcessStatus,
-    Operation { thread_id: ThreadId, id: String },
-    Process { thread_id: ThreadId, id: String },
-    Alarm { thread_id: ThreadId, id: String },
+    Operation {
+        thread_id: ThreadId,
+        id: String,
+    },
+    CodeMode {
+        thread_id: ThreadId,
+        exec_call_id: String,
+    },
+    CodeModeCall {
+        thread_id: ThreadId,
+        exec_call_id: String,
+        call_id: String,
+    },
+    CodeModeWait {
+        thread_id: ThreadId,
+        exec_call_id: String,
+        call_id: String,
+    },
+    Process {
+        thread_id: ThreadId,
+        id: String,
+    },
+    Alarm {
+        thread_id: ThreadId,
+        id: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

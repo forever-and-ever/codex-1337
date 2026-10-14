@@ -144,7 +144,7 @@ impl SlashCommand {
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
             SlashCommand::Pets => crate::chatwidget::pets_command::PETS_DESCRIPTION,
-            SlashCommand::Ps => "list background terminals",
+            SlashCommand::Ps => "show this agent tree’s running processes",
             SlashCommand::Stop => "stop all background terminals",
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",

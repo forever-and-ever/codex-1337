@@ -2291,7 +2291,9 @@ impl BottomPane {
             }
             // Avoid double-surfacing the same summary and avoid adding an extra
             // row while the status line is already visible.
-            if self.status_widget().is_none() && !self.unified_exec_footer.is_empty() {
+            let show_exec_footer =
+                options.composer_gap.is_none() && !self.unified_exec_footer.is_empty();
+            if self.status_widget().is_none() && show_exec_footer {
                 flex.push(
                     /*flex*/ 0,
                     RenderableItem::Borrowed(&self.unified_exec_footer),
@@ -2308,7 +2310,7 @@ impl BottomPane {
                 || !self.pending_input_preview.rejected_steers.is_empty();
             let has_status_or_footer = self.status_widget().is_some()
                 || self.hook_status_message.is_some()
-                || !self.unified_exec_footer.is_empty();
+                || show_exec_footer;
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
             if !has_inline_previews
                 && self.status_widget().is_some()

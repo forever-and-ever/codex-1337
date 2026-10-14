@@ -1280,37 +1280,6 @@ async fn approval_modal_patch_snapshot() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
-async fn interrupt_preserves_unified_exec_processes() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    begin_unified_exec_startup(&mut chat, "call-1", "process-1", "sleep 5");
-    begin_unified_exec_startup(&mut chat, "call-2", "process-2", "sleep 6");
-    assert_eq!(chat.unified_exec_processes.len(), 2);
-
-    handle_turn_interrupted(&mut chat, "turn-1");
-
-    assert_eq!(chat.unified_exec_processes.len(), 2);
-
-    chat.add_ps_output();
-    let cells = drain_insert_history(&mut rx);
-    let combined = cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        combined.contains("Background terminals"),
-        "expected /ps to remain available after interrupt; got {combined:?}"
-    );
-    assert!(
-        combined.contains("sleep 5") && combined.contains("sleep 6"),
-        "expected /ps to list running unified exec processes; got {combined:?}"
-    );
-
-    let _ = drain_insert_history(&mut rx);
-}
-
-#[tokio::test]
 async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -1330,37 +1299,6 @@ async fn interrupt_preserves_unified_exec_wait_streak_snapshot() {
         .join("\n");
     let snapshot = format!("cells={}\n{combined}", cells.len());
     assert_chatwidget_snapshot!("interrupt_preserves_unified_exec_wait_streak", snapshot);
-}
-
-#[tokio::test]
-async fn turn_complete_keeps_unified_exec_processes() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-
-    begin_unified_exec_startup(&mut chat, "call-1", "process-1", "sleep 5");
-    begin_unified_exec_startup(&mut chat, "call-2", "process-2", "sleep 6");
-    assert_eq!(chat.unified_exec_processes.len(), 2);
-
-    handle_turn_completed(&mut chat, "turn-1", /*duration_ms*/ None);
-
-    assert_eq!(chat.unified_exec_processes.len(), 2);
-
-    chat.add_ps_output();
-    let cells = drain_insert_history(&mut rx);
-    let combined = cells
-        .iter()
-        .map(|lines| lines_to_single_string(lines))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        combined.contains("Background terminals"),
-        "expected /ps to remain available after turn complete; got {combined:?}"
-    );
-    assert!(
-        combined.contains("sleep 5") && combined.contains("sleep 6"),
-        "expected /ps to list running unified exec processes; got {combined:?}"
-    );
-
-    let _ = drain_insert_history(&mut rx);
 }
 
 #[tokio::test]

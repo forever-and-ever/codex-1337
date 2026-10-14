@@ -283,38 +283,6 @@ fn interaction_end(
     collab_event(title, details)
 }
 
-fn waiting_begin(
-    receiver_thread_ids: &[String],
-    agent_metadata: &mut impl FnMut(ThreadId) -> AgentMetadata,
-) -> PlainHistoryCell {
-    let receiver_agents = receiver_thread_ids
-        .iter()
-        .filter_map(|thread_id| parse_thread_id(thread_id))
-        .map(|thread_id| (thread_id, agent_metadata(thread_id)))
-        .collect::<Vec<_>>();
-
-    let title = match receiver_agents.as_slice() {
-        [(thread_id, metadata)] => title_with_agent(
-            "Waiting for",
-            agent_label(*thread_id, metadata),
-            /*spawn_request*/ None,
-        ),
-        [] => title_text("Waiting for agents"),
-        _ => title_text(format!("Waiting for {} agents", receiver_agents.len())),
-    };
-
-    let details = if receiver_agents.len() > 1 {
-        receiver_agents
-            .iter()
-            .map(|(thread_id, metadata)| agent_label_line(agent_label(*thread_id, metadata)))
-            .collect()
-    } else {
-        Vec::new()
-    };
-
-    collab_event(title, details)
-}
-
 fn waiting_end(
     receiver_thread_ids: &[String],
     agents_states: &std::collections::HashMap<String, CollabAgentState>,

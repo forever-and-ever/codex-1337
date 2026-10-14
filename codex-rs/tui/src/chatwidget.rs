@@ -262,6 +262,7 @@ mod connectors;
 mod constructor;
 mod dynamic_activity;
 mod empty_state_policy;
+mod live_work;
 pub(crate) use self::connectors::ConnectorScopeGeneration;
 use self::connectors::ConnectorsState;
 mod exec_state;
@@ -1483,18 +1484,6 @@ impl ChatWidget {
             &self.config,
             self.session_network_proxy.as_ref(),
         ));
-    }
-
-    pub(crate) fn add_ps_output(&mut self) {
-        let processes = self
-            .unified_exec_processes
-            .iter()
-            .map(|process| history_cell::UnifiedExecProcessDetails {
-                command_display: process.command_display.clone(),
-                recent_chunks: process.recent_chunks.clone(),
-            })
-            .collect();
-        self.add_to_history(history_cell::new_unified_exec_processes_output(processes));
     }
 
     fn clean_background_terminals(&mut self) {

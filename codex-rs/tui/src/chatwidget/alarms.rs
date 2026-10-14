@@ -5,7 +5,7 @@ use codex_app_server_protocol::ThreadAlarmsUpdatedNotification;
 #[derive(Default)]
 pub(super) struct Alarms {
     pub(super) armed: Vec<AlarmSummary>,
-    disarming: Option<String>,
+    pub(super) disarming: Option<String>,
 }
 
 impl ChatWidget {

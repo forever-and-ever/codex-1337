@@ -268,6 +268,7 @@ mod alarms;
 mod comms;
 mod context_inventory;
 mod context_role;
+pub(crate) mod live_work;
 mod mouse_paste;
 mod realtime_delivery;
 mod realtime_settings;
@@ -585,6 +586,7 @@ pub(crate) struct App {
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
     code_mode_transcript: crate::code_mode_transcript::Reducers,
+    live_work: live_work::LiveWorkState,
     native_history: native_history::NativeHistory,
     turn_tips: turn_tips::TurnTips,
     pub(crate) transcript_view: crate::transcript_view::TranscriptView,

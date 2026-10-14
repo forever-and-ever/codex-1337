@@ -303,52 +303,6 @@ impl CodeModeCell {
             .map_or_else(|| label(self.exec_call_id()), owner_label)
     }
 
-    pub(crate) fn live_lines(&self) -> Vec<Line<'static>> {
-        if !self.is_active() {
-            return Vec::new();
-        }
-        let waits = self.waits();
-        let marker = activity_indicator(
-            Some(self.start_time()),
-            MotionMode::from_animations_enabled(self.animations_enabled()),
-            ReducedMotionIndicator::StaticBullet,
-        )
-        .unwrap_or_else(|| "•".dim());
-        let mut lines = Vec::new();
-        if !waits.iter().any(|(_, target)| target.is_some()) || self.has_pending_children() {
-            lines.push(Line::from(vec![
-                marker.clone(),
-                " ".into(),
-                "Running".bold(),
-                format!(" ({})", self.tetrad()).dim(),
-            ]));
-        }
-        for member in self.members() {
-            if let Some(exec) = member.as_any().downcast_ref::<ExecCell>() {
-                for call in exec.iter_calls().filter(|call| call.duration.is_none()) {
-                    let command = crate::exec_command::strip_bash_lc_and_escape(&call.command);
-                    let first = command.lines().next().unwrap_or_default().to_string();
-                    lines.push(Line::from(vec!["  ".into(), first.into()]));
-                }
-            } else if member.transcript_animation_tick().is_some()
-                && let Some(line) = member.display_lines(u16::MAX).into_iter().next()
-            {
-                let mut spans = vec!["  ".into()];
-                spans.extend(line.spans);
-                lines.push(Line::from(spans));
-            }
-        }
-        for (_, target) in waits {
-            lines.push(Line::from(vec![
-                marker.clone(),
-                " ".into(),
-                "Waiting for".bold(),
-                format!(" ({})", target.map_or_else(|| self.tetrad(), owner_label)).dim(),
-            ]));
-        }
-        lines
-    }
-
     fn waits(&self) -> Vec<(&str, Option<&CodeModeOwner>)> {
         // A wait invocation is one-shot; completion wins even when older pages arrive last.
         let completed = self
