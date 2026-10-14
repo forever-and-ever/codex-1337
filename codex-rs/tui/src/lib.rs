@@ -170,6 +170,7 @@ mod keymap;
 mod keymap_setup;
 mod landing_page;
 mod line_truncation;
+pub(crate) mod live_work;
 pub(crate) mod live_wrap;
 mod local_settings;
 mod local_shell;
