@@ -4042,6 +4042,7 @@ async fn turn_start_emits_spawn_agent_item_with_model_metadata_v2() -> Result<()
         model,
         reasoning_effort,
         agents_states,
+        ..
     } = spawn_completed
     else {
         unreachable!("loop ensures we break on collab agent tool call items");
@@ -4858,6 +4859,7 @@ config_file = "./custom-role.toml"
         model,
         reasoning_effort,
         agents_states,
+        ..
     } = spawn_completed
     else {
         unreachable!("loop ensures we break on collab agent tool call items");
