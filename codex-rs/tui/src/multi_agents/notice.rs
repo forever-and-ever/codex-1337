@@ -17,7 +17,6 @@ use super::wait::AgentPresentation;
 use super::wait::AgentToolHistoryCell;
 use super::wait::WaitPresentation;
 use super::wait::WaitState;
-use super::waiting_begin;
 use super::waiting_end;
 use crate::history_cell::HistoryCell;
 use codex_app_server_protocol::CollabAgentTool;
@@ -51,11 +50,11 @@ pub(super) fn tool_call_history_cell(
     let (presentation, captured) = match tool {
         CollabAgentTool::Wait => {
             let state = WaitState::from_lifecycle(status, wait_completion.as_ref());
-            let captured = if state.is_running() {
-                waiting_begin(receiver_thread_ids, &mut agent_metadata)
-            } else {
-                waiting_end(receiver_thread_ids, agents_states, &mut agent_metadata)
-            };
+            // Running waits are client decoration; exact tool captures remain independent.
+            if state.is_running() {
+                return None;
+            }
+            let captured = waiting_end(receiver_thread_ids, agents_states, &mut agent_metadata);
             (
                 AgentPresentation::Wait(WaitPresentation {
                     id: id.clone(),

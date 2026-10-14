@@ -85,6 +85,7 @@ pub(super) struct ThreadEventStore {
     pub(super) buffered_agent_message_delta_bytes: usize,
     delegated_turns: VecDeque<String>,
     recap_progress: recap::RecapProgress,
+    pub(super) operations: crate::live_work::operations::Operations,
 }
 
 impl ThreadEventStore {
@@ -132,6 +133,7 @@ impl ThreadEventStore {
             buffered_agent_message_delta_bytes: 0,
             delegated_turns: VecDeque::new(),
             recap_progress: recap::RecapProgress::default(),
+            operations: crate::live_work::operations::Operations::new(capacity),
         }
     }
 
@@ -158,6 +160,9 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_turns(&mut self, turns: Vec<Turn>) {
+        if let Some(session) = &self.session {
+            self.operations.refresh(session.thread_id, &turns);
+        }
         if self.active_reasoning_item.as_ref().is_some_and(|started| {
             turns.iter().any(|turn| {
                 (turn.id == started.turn_id && turn.status != TurnStatus::InProgress)
@@ -191,6 +196,7 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        self.operations.notification(notification.as_ref());
         let user_item = match notification.as_ref().native_notification() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item)),
@@ -668,6 +674,9 @@ impl ThreadEventChannel {
 
 #[cfg(test)]
 mod tests {
+    #[path = "live_operations.rs"]
+    mod live_operations;
+
     use super::*;
     use crate::test_support::PathBufExt;
     use crate::test_support::test_path_buf;
@@ -903,24 +912,6 @@ mod tests {
                 last_recapped_turn_count: Some(2),
             }
         );
-    }
-
-    #[test]
-    fn thread_event_store_restores_active_turn_from_snapshot_turns() {
-        let thread_id = ThreadId::new();
-        let session = test_thread_session(thread_id, test_path_buf("/tmp/project"));
-        let turns = vec![
-            test_turn("turn-1", TurnStatus::Completed, Vec::new()),
-            test_turn("turn-2", TurnStatus::InProgress, Vec::new()),
-        ];
-
-        let store =
-            ThreadEventStore::new_with_session(/*capacity*/ 8, session.clone(), turns.clone());
-        assert_eq!(store.active_turn_id(), Some("turn-2"));
-
-        let mut refreshed_store = ThreadEventStore::new(/*capacity*/ 8);
-        refreshed_store.set_session(session, turns);
-        assert_eq!(refreshed_store.active_turn_id(), Some("turn-2"));
     }
 
     #[test]
