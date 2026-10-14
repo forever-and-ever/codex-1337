@@ -168,6 +168,8 @@ enum Kind {
     },
     Arrival,
     Preamble,
+    /// A Code Mode invocation no step claims.
+    CodeMode,
     /// A finished reply no step claims.
     Reply,
 }
@@ -443,10 +445,19 @@ impl FeedIndex {
         };
         if !matches!(item.kind, Kind::Steps { .. }) {
             return Seat {
-                header: Some(header(vec![index], Vec::new(), Title::Response)),
+                header: Some(header(
+                    vec![index],
+                    Vec::new(),
+                    if item.kind == Kind::CodeMode {
+                        Title::Owned(index)
+                    } else {
+                        Title::Response
+                    },
+                )),
                 content: match (&item.kind, unfolded) {
                     (_, false) => Content::Hidden,
                     (Kind::User { .. } | Kind::Reply, true) => Content::Own,
+                    (Kind::CodeMode, true) => Content::Beheaded,
                     (_, true) => Content::Body,
                 },
             };
@@ -883,10 +894,12 @@ impl FeedIndex {
                 .and_then(|index| feed_entry(cell(*index)?))
                 .map(FeedEntry::feed_title)
                 .unwrap_or_default(),
-            (Kind::Steps { .. }, Title::Owned(index) | Title::Borrowed(index)) => cell(index)
-                .and_then(|cell| title_row(cell, expanded, width))
-                .unwrap_or_else(response),
-            (Kind::Steps { .. }, Title::Response) | (Kind::Reply, _) => response(),
+            (Kind::Steps { .. } | Kind::CodeMode, Title::Owned(index) | Title::Borrowed(index)) => {
+                cell(index)
+                    .and_then(|cell| title_row(cell, expanded, width))
+                    .unwrap_or_else(response)
+            }
+            (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         }
     }
 
@@ -924,7 +937,7 @@ impl FeedIndex {
                 total: Total::Exact(cell?.activity_header_tokens()?),
                 ..Figures::default()
             },
-            Kind::Reply => return None,
+            Kind::Reply | Kind::CodeMode => return None,
         };
         (figures.total != Total::Unknown).then_some(figures)
     }
@@ -981,6 +994,11 @@ fn entry_kind(
     if any.is::<PreambleCell>() {
         let id = cell.activity_ids().into_iter().next()?;
         return Some((Kind::Preamble, id));
+    }
+    if steps.is_empty()
+        && let Some(block) = any.downcast_ref::<CodeModeCell>()
+    {
+        return Some((Kind::CodeMode, block.identity()));
     }
     if steps.is_empty()
         && let Some(reply) = any.downcast_ref::<AgentMarkdownCell>()
@@ -1324,6 +1342,29 @@ impl TranscriptView {
             .verify(cells, index, frame, self.step_bills.revision())
         {
             self.feed.rebuild(cells, &self.step_bills, frame);
+            for (index, cell) in cells.iter().enumerate() {
+                let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() else {
+                    continue;
+                };
+                let Some(Role::Member(member)) = self.feed.roles.get(index) else {
+                    continue;
+                };
+                let item = &self.feed.items[member.item];
+                if !matches!(item.kind, Kind::Steps { .. }) {
+                    continue;
+                }
+                // Both forms default open; late admission moves the same closed mark and focus.
+                let prior = Item::new(Kind::CodeMode, block.identity());
+                if self.disclosure.expanded.remove(&prior.fold_mark) {
+                    self.disclosure.expanded.insert(item.fold_mark.clone());
+                }
+                if let Some(focused) = &mut self.disclosure.focused
+                    && let FoldTarget::Part(fold) = &mut focused.target
+                    && *fold == prior.fold
+                {
+                    *fold = item.fold.clone();
+                }
+            }
         }
     }
 
