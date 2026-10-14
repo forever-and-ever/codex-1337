@@ -4,4 +4,3 @@ expression: lines_to_single_string(&approved_lines)
 ---
 • Patch application pending
     foo.txt (+1, -0) — requested
-    1 +hello

@@ -255,6 +255,8 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
         let source = line.source.get_or_insert_with(|| {
             crate::terminal_hyperlinks::LogicalLineSource::from_line(&line.line)
         });
+        let clear_client_background = source.output_provenance == OutputProvenance::Client
+            && provenance != OutputProvenance::Client;
         source.output_provenance = provenance;
         source.line_style = source.line_style.patch(style);
         if provenance == OutputProvenance::Client {
@@ -266,6 +268,16 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
                 *span_style = span_style.patch(style);
             }
             source.span_style = source.span_style.patch(style);
+        } else if clear_client_background {
+            // The new line provenance owns its fill; an earlier client projection's
+            // explicit Reset must not override it in the source spans.
+            for span in &mut line.line.spans {
+                span.style.bg = None;
+            }
+            for (_, span_style) in std::sync::Arc::make_mut(&mut source.styles) {
+                span_style.bg = None;
+            }
+            source.span_style.bg = None;
         }
     }
 }

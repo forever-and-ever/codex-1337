@@ -4,5 +4,3 @@ expression: "lines_to_single_string(&replayed[0].display_lines(80))"
 ---
 • Edited
     sample.txt (+1, -1)
-    1 -old sample
-    1 +new sample

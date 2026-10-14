@@ -18,6 +18,7 @@ mod sanitized_git_url;
 mod session_id;
 pub mod step_admission;
 mod thread_id;
+pub mod tool_input;
 mod tool_name;
 pub use agent_path::AgentPath;
 pub use permission_profile_intersection::PermissionIntersectionError;

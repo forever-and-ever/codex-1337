@@ -293,6 +293,7 @@ fn turn_item_type(item: &TurnItem) -> &'static str {
         TurnItem::UserMessage(_) => "user_message",
         TurnItem::FunctionCallOutput(_) => "function_call_output",
         TurnItem::ToolOutputTokens(_) => "tool_output_tokens",
+        TurnItem::ToolInput(_) => "tool_input",
         TurnItem::Preamble(_) => "preamble",
         TurnItem::StepAdmission(_) => "step_admission",
         TurnItem::Arrival(_) => "arrival",

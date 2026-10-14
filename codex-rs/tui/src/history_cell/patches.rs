@@ -51,6 +51,14 @@ impl PatchHistoryCell {
         self.state == PatchState::InProgress
     }
 
+    pub(super) fn failure_label(&self) -> Option<&'static str> {
+        match self.state {
+            PatchState::Failed => Some("failed"),
+            PatchState::Declined => Some("declined"),
+            _ => None,
+        }
+    }
+
     pub(super) fn revise(&self, newer: &Self) -> Option<Self> {
         (self.call_id == newer.call_id
             && (self.file.is_none()

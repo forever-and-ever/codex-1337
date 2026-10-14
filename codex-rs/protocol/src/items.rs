@@ -47,6 +47,7 @@ pub enum TurnItem {
     CodeMode(crate::code_mode::CodeModeItem),
     UserMessage(UserMessageItem),
     FunctionCallOutput(FunctionCallOutputItem),
+    ToolInput(crate::tool_input::ToolInput),
     ToolOutputTokens(ToolOutputTokensItem),
     /// Human-only census of the standing context one request carried; never model input.
     Preamble(crate::PreambleItem),
@@ -776,6 +777,7 @@ impl TurnItem {
     pub fn id(&self) -> String {
         match self {
             TurnItem::CodeMode(item) => item.id.clone(),
+            TurnItem::ToolInput(item) => item.id.clone(),
             TurnItem::UserMessage(item) => item.id.clone(),
             TurnItem::FunctionCallOutput(item) => item.id.clone(),
             TurnItem::ToolOutputTokens(item) => item.id.clone(),

@@ -145,6 +145,7 @@ fn activity_summary(item: &ThreadItem) -> Option<String> {
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::ToolInput(_)
         | ThreadItem::Arrival(_) => {
             return None;
         }

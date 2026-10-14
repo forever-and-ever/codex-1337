@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 #[path = "text_logical.rs"]
-mod logical;
+pub(in crate::transcript_view) mod logical;
 
 #[path = "text_tabs.rs"]
 mod tabs;
@@ -73,7 +73,7 @@ pub(super) struct HeaderRows {
     pub(super) controls: Vec<HeaderControl>,
 }
 
-/// A control drawn in a header row's own text, such as a Code Mode title's `[js]`.
+/// A control drawn in a header row's own text.
 #[derive(Clone)]
 pub(super) struct HeaderControl {
     pub(super) row: usize,
@@ -99,6 +99,11 @@ struct DisclosureControl {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DisclosurePlacement {
     Row,
+    Invocation {
+        line: usize,
+        start: u16,
+        end: u16,
+    },
     Leading {
         line: usize,
     },
@@ -199,6 +204,12 @@ impl TextLayout {
         }
         for control in &self.disclosure_controls {
             layout = match control.placement {
+                DisclosurePlacement::Invocation { line, start, end } => layout
+                    .with_invocation_control(HeaderControl {
+                        row: line,
+                        columns: start..end,
+                        target: control.target.clone(),
+                    }),
                 DisclosurePlacement::Row => {
                     layout.with_disclosure_control_at(control.label.clone(), control.source_offset)
                 }
@@ -373,11 +384,6 @@ impl TextLayout {
     }
 
     #[cfg(test)]
-    pub(super) fn disclosure_row(&self) -> Option<usize> {
-        self.disclosure_controls.first().map(|control| control.row)
-    }
-
-    #[cfg(test)]
     pub(super) fn disclosure_columns(&self) -> Range<u16> {
         let Some(control) = self.disclosure_controls.first() else {
             return 0..0;
@@ -403,7 +409,8 @@ impl TextLayout {
                 (anchor + start).min(usize::from(self.width)) as u16
                     ..(anchor + end).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Inline { start, end } => {
+            DisclosurePlacement::Inline { start, end }
+            | DisclosurePlacement::Invocation { start, end, .. } => {
                 start.min(self.width)..end.min(self.width)
             }
         }

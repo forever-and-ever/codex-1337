@@ -2793,6 +2793,7 @@ async fn try_run_sampling_request(
                 let completion = items.completed(&item);
                 thought.observe(&item);
                 members.observe(&item);
+                sess.capture_tool_input(&turn_context, &item).await;
                 sess.reserve_assistant_message_order(&turn_context, &item)
                     .await;
                 if analytics_tool_call_ids.len() < MAX_ANALYTICS_TOOL_CALL_IDS_PER_RESPONSE {

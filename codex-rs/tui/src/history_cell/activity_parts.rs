@@ -9,6 +9,10 @@ pub(crate) enum FoldTarget {
     Activity,
     Part(String),
     OutputMode(super::output_provenance::OutputMode),
+    Invocation {
+        call_id: String,
+        action: super::invocation::Action,
+    },
 }
 
 impl FoldTarget {
@@ -16,6 +20,24 @@ impl FoldTarget {
         match self {
             Self::Activity | Self::OutputMode(_) => activity.to_vec(),
             Self::Part(id) => vec![id.clone()],
+            Self::Invocation { call_id, .. } => vec![call_id.clone()],
+        }
+    }
+
+    pub(crate) fn same_control(&self, other: &Self) -> bool {
+        use super::invocation::Action;
+        match (self, other) {
+            (
+                Self::Invocation {
+                    call_id: left,
+                    action: Action::Toggle(a, _),
+                },
+                Self::Invocation {
+                    call_id: right,
+                    action: Action::Toggle(b, _),
+                },
+            ) => left == right && a == b,
+            _ => self == other,
         }
     }
 }

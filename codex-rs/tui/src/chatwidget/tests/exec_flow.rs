@@ -1341,22 +1341,6 @@ async fn apply_patch_events_emit_history_cells() {
     insta::assert_snapshot!(blob, @"
     • Patch application pending
         foo.txt (+16, -0) — requested
-         1 +line 1
-         2 +line 2
-         3 +line 3
-         4 +line 4
-         5 +line 5
-         6 +line 6
-         7 +line 7
-         8 +line 8
-         9 +line 9
-        10 +line 10
-        11 +line 11
-        12 +line 12
-        13 +line 13
-        14 +line 14
-        15 +line 15
-        16 +line 16
     ");
 
     // 3) End apply success -> success cell

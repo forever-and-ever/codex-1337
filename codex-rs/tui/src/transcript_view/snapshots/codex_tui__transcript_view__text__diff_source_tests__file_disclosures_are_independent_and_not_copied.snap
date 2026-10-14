@@ -2,121 +2,98 @@
 source: tui/src/transcript_view/diff_source_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
-collapsed
-Buffer {
-    area: Rect { x: 0, y: 0, width: 70, height: 10 },
-    content: [
-        "              • Edited                                                ",
-        "        [+]       alpha.rs (+2, -0)                                   ",
-        "        [+]       beta.rs (+2, -0)                                    ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-    ],
-    styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 22, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 11, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 28, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 30, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 32, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 34, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 11, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 27, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 29, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 31, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 33, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-    ]
-}
+source and file groups
+            Command (apply_patch)                                [in [raw] [fmt]] [out]              123
+            *** Begin Patch
+            *** Add File: alpha.rs
+            +alpha body
+            *** Add File: beta.rs
+            +beta body
+            *** End Patch
 
-second file expanded
-Buffer {
-    area: Rect { x: 0, y: 0, width: 70, height: 10 },
-    content: [
-        "              • Edited                                                ",
-        "        [+]       alpha.rs (+2, -0)                                   ",
-        "        [-]       beta.rs (+2, -0)                                    ",
-        "                  1 +beta body                                        ",
-        "                  2 +second beta line                                 ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-        "                                                                      ",
-    ],
-    styles: [
-        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 22, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 11, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 28, y: 1, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 30, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 32, y: 1, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 34, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 27, y: 2, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 29, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 31, y: 2, fg: Red, bg: Reset, underline: Reset, modifier: NONE,
-        x: 33, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 18, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 20, y: 3, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 21, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 18, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
-        x: 20, y: 4, fg: Green, bg: Reset, underline: Reset, modifier: NONE,
-        x: 21, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-    ]
-}
+            • Edited
+        [+]     alpha.rs (+2, -0)
+        [+]     beta.rs (+2, -0)
 
-both files expanded with batch bill
-              • Edited  123
-        [-]       alpha.rs (+2, -0)
-                  1 +alpha body
-                  2 +second alpha line
-        [+]     Result
-        [-]       beta.rs (+2, -0)
-                  1 +beta body
-                  2 +second beta line
+file groups without ports
+            Command (apply_patch)                                [in]             [out]              123
+            • Edited
+        [+]     alpha.rs (+2, -0)
+        [+]     beta.rs (+2, -0)
 
-first file collapsed
-              • Edited  123
-        [+]       alpha.rs (+2, -0)
-        [-]       beta.rs (+2, -0)
-                  1 +beta body
-                  2 +second beta line
+second file
+            Command (apply_patch)                                [in]             [out]              123
+            • Edited
+        [+]     alpha.rs (+2, -0)
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
-adjacent calls
-              • Edited  123
-        [+]       alpha.rs (+2, -0)
-        [+]       beta.rs (+2, -0)
-        [+]       gamma.rs (+1, -0)  55
+input visibility preserves file folds
+            Command (apply_patch)        [in [raw] [fmt]] [out]              123
+            *** Begin Patch
+            *** Add File: alpha.rs
+            +alpha body
+            *** Add File: beta.rs
+            +beta body
+            *** End Patch
 
-next file expanded
-              • Edited  123
-        [+]       alpha.rs (+2, -0)
-        [+]       beta.rs (+2, -0)
-        [-]       gamma.rs (+1, -0)  55
-                  1 +gamma body
-        [+]     Result
+            • Edited
+        [+]     alpha.rs (+2, -0)
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
-message boundary
-              • Edited  123
-        [+]       alpha.rs (+2, -0)
-        [+]       beta.rs (+2, -0)
+input visibility preserves file folds
+            Command (apply_patch)        [in]             [out]              123
+            • Edited
+        [+]     alpha.rs (+2, -0)
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
-              A separate message
+both files
+            Command (apply_patch)                                [in]             [out]              123
+            • Edited
+        [-]     alpha.rs (+2, -0)
+                1 +alpha body
+                2 +second alpha line
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
 
-              • Edited  55
-        [-]       gamma.rs (+1, -0)
-                  1 +gamma body
-        [+]     Result
+output and edits
+            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            patched
+
+            • Edited
+        [-]     alpha.rs (+2, -0)
+                1 +alpha body
+                2 +second alpha line
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
+
+output format preserves file folds
+            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            patched
+
+            • Edited
+        [-]     alpha.rs (+2, -0)
+                1 +alpha body
+                2 +second alpha line
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line
+
+output format preserves file folds
+            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            patched
+
+            • Edited
+        [-]     alpha.rs (+2, -0)
+                1 +alpha body
+                2 +second alpha line
+        [-]     beta.rs (+2, -0)
+                1 +beta body
+                2 +second beta line

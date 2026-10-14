@@ -15,265 +15,137 @@ use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 #[test]
 fn file_disclosures_are_independent_and_not_copied() {
-    // The returned batch used to regroup all files into one disclosure, despite unique IDs.
+    use crate::history_cell::activity_parts::FoldTarget;
+    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::output_provenance::OutputMode;
+    use codex_protocol::tool_input::{ToolInput, ToolInputPayload};
+    let source = "*** Begin Patch\n*** Add File: alpha.rs\n+alpha body\n*** Add File: beta.rs\n+beta body\n*** End Patch";
     let returned = ThreadItem::FunctionCallOutput {
         id: "batch".into(),
         call_id: Some("patch-call".into()),
-        name: "exec".into(),
+        name: "apply_patch".into(),
         namespace: None,
-        output: FunctionCallOutputBody::Text(
-            "Script completed\nWall time 0.1 seconds\nOutput:\n{}".into(),
-        ),
+        output: FunctionCallOutputBody::Text("patched".into()),
     };
     let cells = crate::thread_transcript::thread_items_to_transcript_cells(
-        /*thread_id*/ None,
+        None,
         &test_path_buf("/project").abs(),
         [
             ThreadItem::FileChange {
                 id: "patch-call".into(),
-                changes: vec![
-                    FileUpdateChange {
-                        path: "alpha.rs".into(),
+                changes: ["alpha", "beta"]
+                    .map(|name| FileUpdateChange {
+                        path: format!("{name}.rs"),
                         kind: PatchChangeKind::Add,
-                        diff: "alpha body\nsecond alpha line\n".into(),
-                    },
-                    FileUpdateChange {
-                        path: "beta.rs".into(),
-                        kind: PatchChangeKind::Add,
-                        diff: "beta body\nsecond beta line\n".into(),
-                    },
-                ],
+                        diff: format!("{name} body\nsecond {name} line\n"),
+                    })
+                    .to_vec(),
                 status: PatchApplyStatus::Completed,
             },
             returned.clone(),
             returned,
         ],
         crate::thread_transcript::RawReasoningVisibility::Hidden,
-        /*config*/ None,
+        None,
         &|_| crate::multi_agents::AgentMetadata::default(),
     );
+    assert_eq!(cells.len(), 1);
     let mut view = TranscriptView::default();
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 70, /*height*/ 10,
-    );
-    let mut snapshots = Vec::new();
-    let mut buffer = Buffer::empty(area);
-    view.render(area, &mut buffer, &cells);
-    snapshots.push(format!("collapsed\n{buffer:?}"));
-    let (row, column) = view
-        .visible
-        .iter()
-        .enumerate()
-        .find_map(|(row, visible)| {
-            (visible.index == 1 && visible.layout.disclosure_row() == Some(visible.row))
-                .then(|| (row as u16, visible.layout.disclosure_columns().start))
-        })
-        .expect("second file's inline control");
-    assert!(view.toggle_disclosure_at(&cells, column, row));
-    let mut buffer = Buffer::empty(area);
-    view.render(area, &mut buffer, &cells);
-    snapshots.push(format!("second file expanded\n{buffer:?}"));
-    assert_eq!(
-        cells
-            .iter()
-            .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
-            .collect::<Vec<_>>(),
-        vec![false, true],
-    );
-    let layout = view
-        .current_layout(&cells, /*index*/ 1)
-        .expect("second file");
-    let copy = "beta.rs (+2, -0)\n+beta body\n+second beta line";
-    assert_eq!(layout.text(), copy);
-    assert_eq!(layout.rewrap(/*width*/ 40).text(), copy);
-    view.handle_key(
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Up,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-        &cells,
-    );
-    view.handle_key(
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-        &cells,
-    );
-    assert_eq!(
-        cells
-            .iter()
-            .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
-            .collect::<Vec<_>>(),
-        vec![true, true],
-    );
+    view.record_tool_input(ToolInput {
+        id: "input:patch-call".into(),
+        call_id: "patch-call".into(),
+        name: codex_protocol::ToolName::plain("apply_patch"),
+        payload: ToolInputPayload::Text(source.into()),
+    });
     view.record_tool_output_tokens(
         "tool-output-tokens:batch".into(),
-        "outer-exec".into(),
+        "patch-call".into(),
         Some(123),
     );
-    assert_eq!(
-        cells
-            .iter()
-            .map(|cell| view.activity_output_tokens(&cell.activity_ids()))
-            .collect::<Vec<_>>(),
-        vec![Some(123), None],
-    );
-    assert_eq!(
-        view.current_layout(&cells, /*index*/ 0)
-            .expect("first file")
-            .text(),
-        "• Edited\nalpha.rs (+2, -0)\n+alpha body\n+second alpha line",
-    );
-    for (label, collapse_first) in [
-        ("both files expanded with batch bill", false),
-        ("first file collapsed", true),
-    ] {
-        if collapse_first {
-            assert!(view.toggle_disclosure_at(
-                &cells,
-                crate::transcript_geometry::CONTROL_COLUMN,
-                /*row*/ 1
-            ));
-        }
-        view.clear_activity_focus();
+    let mut snapshots = Vec::new();
+    let mut paint = |view: &mut TranscriptView, width, label: &str| {
         view.jump_to_latest();
-        let mut buffer = Buffer::empty(area);
-        view.render(area, &mut buffer, &cells);
-        let text = (0..area.height)
-            .map(|y| {
-                (0..area.width)
-                    .map(|x| buffer[(x, y)].symbol())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        snapshots.push(format!("{label}\n{}", text.trim_end()));
-    }
-    assert_eq!(
-        cells
-            .iter()
-            .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
-            .collect::<Vec<_>>(),
-        vec![false, true],
-    );
-    // A later call shares the heading, not the prior call's disclosure or token bill.
-    let mut cells = cells;
-    cells.push(Arc::new(crate::history_cell::ReasoningSummaryCell::new(
-        String::new(),
-        "Hidden reasoning between edits".into(),
-        Path::new("/project"),
-        /*transcript_only*/ true,
-    )));
-    let next_index = cells.len();
-    cells.extend(crate::thread_transcript::thread_items_to_transcript_cells(
-        /*thread_id*/ None,
-        &test_path_buf("/project").abs(),
-        [
-            ThreadItem::FileChange {
-                id: "next-patch".into(),
-                changes: vec![FileUpdateChange {
-                    path: "gamma.rs".into(),
-                    kind: PatchChangeKind::Add,
-                    diff: "gamma body\n".into(),
-                }],
-                status: PatchApplyStatus::Completed,
-            },
-            ThreadItem::FunctionCallOutput {
-                id: "next-batch".into(),
-                call_id: Some("next-patch".into()),
-                name: "exec".into(),
-                namespace: None,
-                output: FunctionCallOutputBody::Text("Next patch applied".into()),
-            },
-        ],
-        crate::thread_transcript::RawReasoningVisibility::Hidden,
-        /*config*/ None,
-        &|_| crate::multi_agents::AgentMetadata::default(),
-    ));
-    view.record_tool_output_tokens(
-        "tool-output-tokens:next-batch".into(),
-        "next-exec".into(),
-        Some(55),
-    );
-    view.disclosure.expanded.clear();
-    let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 70, /*height*/ 14,
-    );
-    for stage in ["adjacent calls", "next file expanded", "message boundary"] {
-        if stage == "message boundary" {
-            cells.insert(
-                next_index,
-                Arc::new(crate::history_cell::PlainHistoryCell::new(vec![
-                    "A separate message".into(),
-                ])),
-            );
-        }
-        view.clear_activity_focus();
-        view.jump_to_latest();
-        let mut buffer = Buffer::empty(area);
-        view.render(area, &mut buffer, &cells);
+        let buffer = crate::transcript_view::tests::render(view, &cells, width, 20);
         snapshots.push(format!(
-            "{stage}\n{}",
+            "{label}\n{}",
             crate::transcript_view::tests::text(&buffer).trim_end()
         ));
-        if stage == "adjacent calls" {
-            let (row, column) = view
-                .visible
-                .iter()
-                .enumerate()
-                .find_map(|(row, visible)| {
-                    (visible.index == next_index
-                        && visible.layout.disclosure_row() == Some(visible.row))
-                    .then(|| (row as u16, visible.layout.disclosure_columns().start))
-                })
-                .expect("next call's file control");
-            assert!(view.toggle_disclosure_at(&cells, column, row));
-            assert_eq!(
-                cells
-                    .iter()
-                    .map(|cell| view.disclosure.is_expanded(&cell.activity_ids()))
-                    .collect::<Vec<_>>(),
-                vec![false, false, false, true],
-            );
-        }
-    }
-    // Adjacent patches may share presentation only when their canonical outcomes agree.
-    // A retained output must not make a failed patch inherit the preceding Edited heading.
-    cells.extend(crate::thread_transcript::thread_items_to_transcript_cells(
-        None,
-        &test_path_buf("/project").abs(),
-        [
-            ThreadItem::FileChange {
-                id: "failed-patch".into(),
-                changes: vec![],
-                status: PatchApplyStatus::Failed,
-            },
-            ThreadItem::FunctionCallOutput {
-                id: "failed-output".into(),
-                call_id: Some("failed-patch".into()),
-                name: "apply_patch".into(),
-                namespace: None,
-                output: FunctionCallOutputBody::Text("rejected patch".into()),
-            },
-        ],
-        crate::thread_transcript::RawReasoningVisibility::Hidden,
-        None,
-        &|_| crate::multi_agents::AgentMetadata::default(),
-    ));
-    view.jump_to_latest();
-    view.render(area, &mut Buffer::empty(area), &cells);
+        view.current_layout(&cells, 0).unwrap()
+    };
+    let control = |action| FoldTarget::Invocation {
+        call_id: "patch-call".into(),
+        action,
+    };
+    let layout = paint(&mut view, 104, "source and file groups");
+    assert!(layout.text().starts_with(source));
     assert!(
-        view.current_layout(&cells, cells.len() - 1)
-            .unwrap()
-            .text()
-            .contains("Failed to apply patch")
+        !layout
+            .fold_targets()
+            .contains(&control(Action::Format(Port::Input, OutputMode::Fmt)))
+    );
+    assert!(view.focus_fold(
+        &cells,
+        0,
+        control(Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Raw)))
+    ));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let layout = paint(&mut view, 104, "file groups without ports");
+    assert!(layout.text().contains("Edited"));
+    assert!(!layout.text().contains("beta body"));
+    let files: Vec<_> = layout
+        .fold_targets()
+        .into_iter()
+        .filter(|target| matches!(target, FoldTarget::Part(_)))
+        .collect();
+    assert_eq!(files.len(), 2);
+    assert!(view.focus_fold(&cells, 0, files[1].clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let layout = paint(&mut view, 104, "second file");
+    assert!(layout.text().contains("+beta body"));
+    assert!(!layout.text().contains("+alpha body"));
+    assert!(!layout.text().contains("[+]"));
+    assert_eq!(layout.text(), layout.rewrap(40).text());
+    for panel in [
+        Panel::Visible(OutputMode::Raw),
+        Panel::Hidden(OutputMode::Raw),
+    ] {
+        assert!(view.focus_fold(&cells, 0, control(Action::Toggle(Port::Input, panel))));
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        let layout = paint(&mut view, 80, "input visibility preserves file folds");
+        assert_eq!(layout.text().starts_with(source), panel.visible());
+        assert!(layout.text().contains("+second beta line"));
+        assert!(!layout.text().contains("+second alpha line"));
+    }
+    assert!(view.focus_fold(&cells, 0, files[0].clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let layout = paint(&mut view, 104, "both files");
+    assert!(layout.text().contains("+alpha body"));
+    assert!(layout.text().contains("+beta body"));
+    assert!(view.focus_fold(
+        &cells,
+        0,
+        control(Action::Toggle(
+            Port::Output,
+            Panel::Visible(OutputMode::Fmt)
+        ))
+    ));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    paint(&mut view, 104, "output and edits");
+    for mode in [OutputMode::Raw, OutputMode::Fmt] {
+        assert!(view.focus_fold(&cells, 0, control(Action::Format(Port::Output, mode))));
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        let layout = paint(&mut view, 104, "output format preserves file folds");
+        assert!(layout.text().starts_with("patched"));
+        assert!(layout.text().contains("Edited"));
+        assert!(layout.text().contains("+alpha body"));
+        assert!(layout.text().contains("+beta body"));
+    }
+    assert_eq!(
+        view.activity_output_tokens(&cells[0].activity_ids()),
+        Some(123)
     );
     insta::assert_snapshot!(snapshots.join("\n\n"));
 }

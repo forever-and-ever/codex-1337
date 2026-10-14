@@ -61,13 +61,34 @@ impl App {
         let tool_output_tokens = view.activity_output_tokens(&active_ids);
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
-        let search_changed = view.sync_search_live_tail(transcript_width, active_key, |width| {
-            chat_widget.active_cell_transcript_hyperlink_lines(width)
-        });
+        let search_changed = chat_widget
+            .active_invocation_cell()
+            .and_then(|cell| {
+                view.sync_search_invocation_tail(
+                    transcript_width,
+                    active_key,
+                    cell,
+                    chat_widget.active_auxiliary_transcript_lines(transcript_width),
+                )
+            })
+            .unwrap_or_else(|| {
+                view.sync_search_live_tail(transcript_width, active_key, |width| {
+                    chat_widget.active_cell_transcript_hyperlink_lines(width)
+                })
+            });
         let changed = if detailed {
             view.sync_live_tail(transcript_width, active_key, |width| {
                 chat_widget.active_cell_transcript_hyperlink_lines(width)
             })
+        } else if let Some(changed) = chat_widget.active_invocation_cell().and_then(|cell| {
+            view.sync_live_invocation_tail(
+                transcript_width,
+                active_key,
+                cell,
+                chat_widget.active_auxiliary_transcript_lines(transcript_width),
+            )
+        }) {
+            changed
         } else {
             view.sync_live_activity_tail(
                 transcript_width,

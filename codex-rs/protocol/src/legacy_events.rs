@@ -554,6 +554,7 @@ impl TurnItem {
             TurnItem::CodeMode(_)
             | TurnItem::FunctionCallOutput(_)
             | TurnItem::ToolOutputTokens(_)
+            | TurnItem::ToolInput(_)
             | TurnItem::Preamble(_)
             | TurnItem::StepAdmission(_)
             | TurnItem::Arrival(_)

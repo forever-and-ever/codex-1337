@@ -97,6 +97,27 @@ struct NodeReplExecOutput {
 }
 
 impl McpToolCallCell {
+    pub(super) fn receipt_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+        full: bool,
+    ) -> super::activity_parts::ActivityParts {
+        let parts = self.nested_receipt_parts(width, expanded, Vec::new());
+        if !full || parts.controls.is_empty() {
+            return parts;
+        }
+        let expanded = expanded
+            .iter()
+            .cloned()
+            .chain(parts.controls.iter().map(|control| control.id.clone()))
+            .collect();
+        self.nested_receipt_parts(width, &expanded, Vec::new())
+    }
+
+    pub(super) fn stored_output_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_detail_lines(width, McpToolCallRenderMode::Expanded)
+    }
     fn nested_receipt_parts(
         &self,
         width: u16,
@@ -189,7 +210,7 @@ impl McpToolCallCell {
         self.result = Some(result);
     }
 
-    fn success(&self) -> Option<bool> {
+    pub(crate) fn success(&self) -> Option<bool> {
         match self.result.as_ref() {
             Some(Ok(result)) => Some(!result.is_error),
             Some(Err(_)) => Some(false),

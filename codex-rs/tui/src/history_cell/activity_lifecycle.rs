@@ -64,16 +64,25 @@ pub(crate) struct ToolCallReconciliation {
 impl Revision<'_> {
     fn replace(&self, cell: &Arc<dyn HistoryCell>) -> Option<Arc<dyn HistoryCell>> {
         if let Some(group) = cell.as_any().downcast_ref::<ToolOutputGroup>() {
-            let (index, updated) = group
+            let replacements: Vec<_> = group
                 .members
                 .iter()
                 .enumerate()
-                .find_map(|(index, member)| self.replace(member).map(|updated| (index, updated)))?;
-            if Arc::ptr_eq(&group.members[index], &updated) {
+                .filter_map(|(index, member)| self.replace(member).map(|updated| (index, updated)))
+                .collect();
+            if replacements.is_empty() {
+                return None;
+            }
+            if replacements
+                .iter()
+                .all(|(index, updated)| Arc::ptr_eq(&group.members[*index], updated))
+            {
                 return Some(Arc::clone(cell));
             }
             let mut members = group.members.clone();
-            members[index] = updated;
+            for (index, updated) in replacements {
+                members[index] = updated;
+            }
             return Some(ToolOutputGroup::from_cells(members));
         }
         match self {
@@ -168,6 +177,30 @@ pub(crate) fn reconcile_tool_calls(
     cells: &[Arc<dyn HistoryCell>],
     incoming: &Arc<dyn HistoryCell>,
 ) -> ToolCallReconciliation {
+    if let Some(group) = incoming.as_any().downcast_ref::<ToolOutputGroup>() {
+        let mut current = cells.to_vec();
+        let mut replacements = BTreeMap::new();
+        let mut remainder = Vec::new();
+        for member in &group.members {
+            let revised = reconcile_tool_calls(&current, member);
+            for (index, cell) in revised.replacements {
+                current[index] = Arc::clone(&cell);
+                replacements.insert(index, cell);
+            }
+            remainder.extend(revised.remainder);
+        }
+        let remainder = if replacements.is_empty() {
+            vec![Arc::clone(incoming)]
+        } else if remainder.is_empty() {
+            Vec::new()
+        } else {
+            vec![ToolOutputGroup::from_cells(remainder)]
+        };
+        return ToolCallReconciliation {
+            replacements,
+            remainder,
+        };
+    }
     let revisions = if let Some(cell) = incoming.as_any().downcast_ref::<McpToolCallCell>() {
         vec![Revision::Mcp(cell)]
     } else if let Some(cell) = incoming.as_any().downcast_ref::<ComputerActivityCell>() {

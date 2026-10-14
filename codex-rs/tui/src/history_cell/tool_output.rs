@@ -103,6 +103,13 @@ impl ToolOutputCell {
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
+    pub(crate) fn name(&self) -> &codex_protocol::ToolName {
+        &self.name
+    }
+
+    pub(crate) fn captured_output(&self) -> &FunctionCallOutputBody {
+        &self.output
+    }
     pub(crate) fn append_result_parts(
         &self,
         parts: &mut super::activity_parts::ActivityParts,

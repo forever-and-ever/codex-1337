@@ -39,6 +39,43 @@ pub(crate) struct CommandRows {
     rows: Vec<CommandRow>,
 }
 
+impl CommandRows {
+    fn parse(script: String) -> Self {
+        let rows = shell_segments(&script)
+            .into_iter()
+            .map(|segment| {
+                let source = script[segment.source.clone()].trim();
+                let summary = match summarize_shell_segment(source) {
+                    ParsedCommand::Read { name, .. } => Some(
+                        vec![
+                            "Read ".cyan(),
+                            ReadIntent::parse(source)
+                                .map_or(name.clone(), |read| read.label(&name))
+                                .into(),
+                        ]
+                        .into(),
+                    ),
+                    ParsedCommand::ListFiles { path, .. } => {
+                        Some(vec!["List ".cyan(), path.unwrap_or_else(|| ".".into()).into()].into())
+                    }
+                    ParsedCommand::Search { query, path, .. } => Some(
+                        vec![
+                            "Search ".cyan(),
+                            query.unwrap_or_default().into(),
+                            path.map_or_else(String::new, |path| format!(" in {path}"))
+                                .into(),
+                        ]
+                        .into(),
+                    ),
+                    ParsedCommand::Unknown { .. } => None,
+                };
+                CommandRow { segment, summary }
+            })
+            .collect();
+        Self { script, rows }
+    }
+}
+
 #[derive(Debug)]
 struct CommandRow {
     segment: ShellSegment,
@@ -47,42 +84,32 @@ struct CommandRow {
 
 impl ExecCall {
     fn command_rows(&self) -> &CommandRows {
-        self.rows.get_or_init(|| {
-            let script = strip_bash_lc_and_escape(&self.command);
-            let rows = shell_segments(&script)
-                .into_iter()
-                .map(|segment| {
-                    let source = script[segment.source.clone()].trim();
-                    let summary = match summarize_shell_segment(source) {
-                        ParsedCommand::Read { name, .. } => Some(
-                            vec![
-                                "Read ".cyan(),
-                                ReadIntent::parse(source)
-                                    .map_or(name.clone(), |read| read.label(&name))
-                                    .into(),
-                            ]
-                            .into(),
-                        ),
-                        ParsedCommand::ListFiles { path, .. } => Some(
-                            vec!["List ".cyan(), path.unwrap_or_else(|| ".".into()).into()].into(),
-                        ),
-                        ParsedCommand::Search { query, path, .. } => Some(
-                            vec![
-                                "Search ".cyan(),
-                                query.unwrap_or_default().into(),
-                                path.map_or_else(String::new, |path| format!(" in {path}"))
-                                    .into(),
-                            ]
-                            .into(),
-                        ),
-                        ParsedCommand::Unknown { .. } => None,
-                    };
-                    CommandRow { segment, summary }
-                })
-                .collect();
-            Arc::new(CommandRows { script, rows })
-        })
+        self.rows
+            .get_or_init(|| Arc::new(CommandRows::parse(strip_bash_lc_and_escape(&self.command))))
     }
+}
+
+pub(crate) fn formatted_input(script: &str) -> Option<Vec<HyperlinkLine>> {
+    let rows = CommandRows::parse(script.to_owned());
+    if rows.rows.iter().all(|row| row.summary.is_none()) {
+        return None;
+    }
+    Some(
+        rows.rows
+            .iter()
+            .flat_map(|row| {
+                let source = &rows.script[row.segment.source.clone()];
+                let mut lines = row
+                    .summary
+                    .clone()
+                    .map_or_else(|| highlight_bash_to_lines(source), |summary| vec![summary]);
+                if let Some(last) = lines.last_mut() {
+                    last.push_span(row.segment.connector.map_or("", Connector::suffix).dim());
+                }
+                plain_hyperlink_lines(lines)
+            })
+            .collect(),
+    )
 }
 
 /// One heading for a command group, retaining failures and declined execution separately.

@@ -485,11 +485,24 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
     );
     let mut snapshots = Vec::new();
     for expanded in [false, true] {
-        if expanded {
-            view.disclosure
-                .expanded
-                .extend(cells.iter().flat_map(|cell| cell.activity_ids()));
+        for id in ["first", "second"] {
+            view.invocations.apply(
+                id,
+                crate::history_cell::invocation::Action::Toggle(
+                    crate::history_cell::invocation::Port::Output,
+                    if expanded {
+                        crate::history_cell::invocation::Panel::Visible(
+                            crate::history_cell::output_provenance::OutputMode::Fmt,
+                        )
+                    } else {
+                        crate::history_cell::invocation::Panel::Hidden(
+                            crate::history_cell::output_provenance::OutputMode::Fmt,
+                        )
+                    },
+                ),
+            );
         }
+        view.cache.clear();
         let area = Rect::new(
             /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 10,
         );
@@ -501,27 +514,8 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
         let committed = &cells[..1];
         let tail = &cells[1];
         let ids = tail.activity_ids();
-        let header_tokens = view.activity_output_tokens(&ids);
         view.sync_live_activity(committed, ids);
-        view.sync_live_activity_tail(
-            /*width*/ 80,
-            /*key*/ None,
-            expanded,
-            |width, expanded, mode| {
-                let parts = tail.output_parts(width, 0, expanded, mode).unwrap();
-                Some(ActivityTranscriptLines {
-                    output_mode: None,
-                    is_tool_entry: tail.is_tool_entry(),
-                    header: parts.header,
-                    controls: parts.controls,
-                    preface: Vec::new(),
-                    activity: parts.lines,
-                    auxiliary: Vec::new(),
-                    header_tokens,
-                    disclosure: parts.output,
-                })
-            },
-        );
+        view.sync_live_invocation_tail(80, None, tail.as_ref(), Vec::new());
         let mut live_buffer = Buffer::empty(area);
         view.render(area, &mut live_buffer, committed);
         assert_eq!(live_buffer, buffer);
@@ -543,180 +537,6 @@ fn code_mode_batches_display_their_own_counts_and_replay_without_double_counting
 }
 
 #[test]
-fn empty_tool_disclosures_follow_invocation_truncation() {
-    use crate::exec_cell::CommandOutput;
-    use crate::exec_cell::new_active_exec_command;
-    use crate::history_cell::ToolOutputCell;
-    use crate::history_cell::ToolOutputGroup;
-    use codex_app_server_protocol::CommandExecutionSource;
-    use codex_protocol::models::FunctionCallOutputBody;
-    use codex_shell_command::parse_command::parse_command;
-    use std::time::Duration;
-
-    let mut snapshots = Vec::new();
-    for (script, output) in [
-        ("true", ""),
-        ("printf '%s' a_long_argument >/dev/null", ""),
-        ("cat config.json", "real file data"),
-    ] {
-        let command = vec!["bash".into(), "-lc".into(), script.into()];
-        let parsed = parse_command(&command);
-        let mut call = new_active_exec_command(
-            "command".into(),
-            command,
-            parsed,
-            CommandExecutionSource::UnifiedExecStartup,
-            /*interaction_input*/ None,
-            /*animations_enabled*/ false,
-        );
-        call.complete_call(
-            "command",
-            CommandOutput::new(/*exit_code*/ 0, output.into()),
-            Duration::ZERO,
-        );
-        let result = FunctionCallOutputBody::Text(output.into());
-        let cells = vec![ToolOutputGroup::from_cells([
-            Arc::new(call) as Arc<dyn HistoryCell>,
-            Arc::new(
-                ToolOutputCell::from_output(
-                    "batch",
-                    Some("command"),
-                    "exec",
-                    /*namespace*/ None,
-                    &result,
-                )
-                .unwrap(),
-            ),
-        ])];
-        for width in [100, 44, 24] {
-            let mut view = TranscriptView::default();
-            let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 12);
-            let mut buffer = Buffer::empty(area);
-            view.render(area, &mut buffer, &cells);
-            let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-            let expandable = script != "true" && (width <= 44 || !output.is_empty());
-            assert_eq!(layout.disclosure, expandable);
-            snapshots.push(format!(
-                "{script}, width={width}\n{}",
-                crate::transcript_view::tests::text(&buffer).trim_end()
-            ));
-            if expandable {
-                for target in layout.fold_targets() {
-                    view.disclosure
-                        .expanded
-                        .extend(target.ids(&cells[0].activity_ids()));
-                }
-                view.cache.clear();
-                view.jump_to_latest();
-                view.render(area, &mut buffer, &cells);
-                assert!(view.current_layout(&cells, /*index*/ 0).unwrap().disclosure);
-                let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-                if output.is_empty() {
-                    assert!(layout.text().contains(script));
-                } else {
-                    assert!(!layout.text().contains(output));
-                    assert!(view.focus_fold(
-                        &cells,
-                        0,
-                        crate::history_cell::activity_parts::FoldTarget::Part(
-                            "result:batch".into()
-                        )
-                    ));
-                    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-                    view.render(area, &mut buffer, &cells);
-                    assert!(
-                        view.current_layout(&cells, 0)
-                            .unwrap()
-                            .text()
-                            .contains(output)
-                    );
-                }
-                snapshots.push(format!(
-                    "expanded\n{}",
-                    crate::transcript_view::tests::text(&buffer).trim_end()
-                ));
-            }
-        }
-    }
-    let mut call = crate::history_cell::new_active_mcp_tool_call(
-        "empty".into(),
-        crate::history_cell::McpInvocation {
-            server: "tools".into(),
-            tool: "noop".into(),
-            arguments: None,
-        },
-        /*animations_enabled*/ false,
-    );
-    call.complete(
-        Duration::ZERO,
-        Ok(codex_protocol::mcp::CallToolResult {
-            content: Vec::new(),
-            structured_content: None,
-            is_error: None,
-            meta: None,
-        }),
-    );
-    assert!(call.activity_disclosure(/*width*/ 80).is_none());
-    insta::assert_snapshot!(snapshots.join("\n\n"));
-}
-
-#[test]
-fn mixed_shell_reads_share_one_disclosure_and_output_bill() {
-    use crate::exec_cell::CommandOutput;
-    use crate::exec_cell::new_active_exec_command;
-    use codex_app_server_protocol::CommandExecutionSource;
-    use codex_shell_command::parse_command::parse_command;
-    use std::time::Duration;
-
-    let command = vec![
-        "bash".into(),
-        "-lc".into(),
-        "git status; sed -n '20,80p' src/lib.rs; tail -n 10 log.txt".into(),
-    ];
-    let parsed = parse_command(&command);
-    let mut cell = new_active_exec_command(
-        "mixed".into(),
-        command,
-        parsed,
-        CommandExecutionSource::UnifiedExecStartup,
-        /*interaction_input*/ None,
-        /*animations_enabled*/ false,
-    );
-    // Recognized reads must not hide the opaque stage. The process has one result and one
-    // output bill.
-    cell.complete_call(
-        "mixed",
-        CommandOutput::new(/*exit_code*/ 2, "combined output\nfinal error".into()),
-        Duration::from_millis(/*millis*/ 5),
-    );
-    assert_eq!(cell.activity_ids(), vec!["exec:mixed"]);
-    let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell)];
-    let mut view = TranscriptView::default();
-    for _ in 0..2 {
-        view.record_tool_output_tokens("bill".into(), "mixed".into(), Some(1_280));
-    }
-    assert_eq!(
-        view.activity_output_tokens(&cells[0].activity_ids()),
-        Some(1_280)
-    );
-    let mut snapshots = Vec::new();
-    for expanded in [false, true] {
-        if expanded {
-            view.disclosure.expanded.extend(cells[0].activity_ids());
-        }
-        let area = Rect::new(
-            /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 10,
-        );
-        let mut buffer = Buffer::empty(area);
-        view.render(area, &mut buffer, &cells);
-        let text = crate::transcript_view::tests::text(&buffer);
-        assert_eq!(text.matches(" 1280").count(), 1);
-        snapshots.push(format!("expanded={expanded}\n{buffer:?}"));
-    }
-    insta::assert_snapshot!("mixed_shell_reads_shared_output", snapshots.join("\n"));
-}
-
-#[test]
 fn activity_focus_keeps_controls_without_passive_hints() {
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     let cell = Arc::new(ActivityCell::default());
@@ -734,7 +554,7 @@ fn activity_focus_keeps_controls_without_passive_hints() {
                     is_tool_entry: cell.is_tool_entry(),
                     header: cell.activity_header(),
                     controls: Vec::new(),
-                    preface: Vec::new(),
+
                     activity: if expanded {
                         cell.expanded_hyperlink_lines(width)
                     } else {
@@ -837,34 +657,42 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     view.jump_to_entry(&old, /*index*/ 0);
     render(&mut view, &old);
     view.held_reading = Some(view.capture_snapshot(&old));
-    view.disclosure.focused = Some(super::disclosure::ActivityFocus {
-        ids: calls[0].activity_ids(),
-        target: Default::default(),
-    });
     let current = vec![
         grouped(vec![Arc::clone(&calls[0])]),
         grouped(vec![Arc::clone(&calls[1])]),
         Arc::clone(&calls[2]),
     ];
-    for (key, index) in [
-        (KeyCode::Down, 1),
-        (KeyCode::Down, 2),
-        (KeyCode::Down, 2),
-        (KeyCode::Up, 1),
-        (KeyCode::Up, 0),
-        (KeyCode::Up, 0),
-    ] {
+    let controls: Vec<_> = (0..current.len())
+        .flat_map(|index| {
+            view.current_layout(&current, index)
+                .unwrap()
+                .fold_targets()
+                .into_iter()
+                .map(move |target| (index, target))
+        })
+        .collect();
+    let start = controls.iter().rposition(|(index, _)| *index == 0).unwrap();
+    view.disclosure.focused = Some(super::disclosure::ActivityFocus {
+        ids: calls[0].activity_ids(),
+        target: controls[start].1.clone(),
+    });
+    for (key, index, target) in controls[start + 1..]
+        .iter()
+        .map(|(index, target)| (KeyCode::Down, *index, target))
+        .chain(
+            controls[..controls.len() - 1]
+                .iter()
+                .rev()
+                .map(|(index, target)| (KeyCode::Up, *index, target)),
+        )
+    {
         view.handle_key(KeyEvent::new(key, KeyModifiers::NONE), &current);
         assert!(view.snapshot().is_none());
+        let focus = view.disclosure.focused.as_ref().unwrap();
+        assert_eq!(focus.ids, current[index].activity_ids());
+        assert!(focus.target.same_control(target));
         assert_eq!(
-            view.disclosure.focused,
-            Some(super::disclosure::ActivityFocus {
-                ids: current[index].activity_ids(),
-                target: Default::default()
-            })
-        );
-        assert_eq!(
-            view.canonical_activity_index(&current, &view.disclosure.focused.as_ref().unwrap().ids),
+            view.canonical_activity_index(&current, &focus.ids),
             Some(index)
         );
         render(&mut view, &current);

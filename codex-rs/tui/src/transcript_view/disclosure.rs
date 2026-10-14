@@ -239,6 +239,46 @@ impl TranscriptView {
             ListAction::Accept => self.toggle_activity(cells, focused, focus.target),
             ListAction::MoveLeft | ListAction::MoveRight => {
                 let target = focus.target;
+                if let FoldTarget::Invocation {
+                    call_id,
+                    action: invocation_action,
+                } = &target
+                {
+                    use crate::history_cell::invocation::{Action, Panel};
+                    let action = match *invocation_action {
+                        Action::Toggle(port, next) => {
+                            let shown = action == ListAction::MoveRight;
+                            Action::Toggle(
+                                port,
+                                if shown {
+                                    Panel::Visible(next.mode())
+                                } else {
+                                    Panel::Hidden(next.mode())
+                                },
+                            )
+                        }
+                        Action::Format(port, _) => Action::Format(
+                            port,
+                            if action == ListAction::MoveLeft {
+                                OutputMode::Raw
+                            } else {
+                                OutputMode::Fmt
+                            },
+                        ),
+                    };
+                    let target = FoldTarget::Invocation {
+                        call_id: call_id.clone(),
+                        action,
+                    };
+                    if !matches!(action, Action::Format(_, _))
+                        || self
+                            .current_layout(cells, focused)
+                            .is_some_and(|layout| layout.fold_position(&target).is_some())
+                    {
+                        self.toggle_activity(cells, focused, target);
+                    }
+                    return Some(ViewAction::Changed);
+                }
                 if matches!(target, FoldTarget::OutputMode(_)) {
                     let mode = if action == ListAction::MoveLeft {
                         OutputMode::Raw
@@ -432,7 +472,9 @@ impl TranscriptView {
                 offset: 0,
                 row_bias: 0,
             });
-        if let FoldTarget::OutputMode(mode) = target {
+        if let FoldTarget::Invocation { call_id, action } = &target {
+            self.invocations.apply(call_id, *action);
+        } else if let FoldTarget::OutputMode(mode) = target {
             self.disclosure.output_revision = self
                 .disclosure
                 .output_revision
@@ -450,6 +492,16 @@ impl TranscriptView {
         } else {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
+        let target = match target {
+            FoldTarget::Invocation {
+                call_id,
+                action: crate::history_cell::invocation::Action::Toggle(port, panel),
+            } => FoldTarget::Invocation {
+                call_id,
+                action: crate::history_cell::invocation::Action::Toggle(port, panel.toggled()),
+            },
+            target => target,
+        };
         self.disclosure.focused = Some(ActivityFocus {
             ids: activity_ids,
             target,

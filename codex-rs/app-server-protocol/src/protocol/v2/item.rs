@@ -241,6 +241,7 @@ impl CommandAction {
 pub enum ThreadItem {
     CodeModeOwned(codex_protocol::code_mode::CodeModeOwned<Box<ThreadItem>>),
     CodeMode(CodeModeItem),
+    ToolInput(codex_protocol::tool_input::ToolInput),
     /// Human-only bill of one model request and what its step admitted, not model input.
     StepAdmission(StepAdmissionItem),
     /// Human-only announcement of context a step admitted after its results.
@@ -523,6 +524,7 @@ impl ThreadItem {
         match self {
             ThreadItem::CodeModeOwned(owned) => owned.payload().id(),
             ThreadItem::CodeMode(item) => &item.id,
+            ThreadItem::ToolInput(item) => &item.id,
             ThreadItem::StepAdmission(item) => &item.id,
             ThreadItem::Arrival(item) => &item.id,
             ThreadItem::UserMessage { id, .. }
@@ -981,6 +983,7 @@ impl From<CoreTurnItem> for ThreadItem {
                     questions: agent.questions,
                 }
             }
+            CoreTurnItem::ToolInput(item) => Self::ToolInput(item),
             CoreTurnItem::FunctionCallOutput(output) => ThreadItem::FunctionCallOutput {
                 id: output.id,
                 call_id: output.call_id,

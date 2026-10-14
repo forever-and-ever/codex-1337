@@ -686,6 +686,12 @@ impl App {
                     tui.frame_requester().schedule_frame();
                 }
             }
+            AppEvent::RecordToolInput { thread_id, input } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.transcript_view.record_tool_input(input);
+                    tui.frame_requester().schedule_frame();
+                }
+            }
             AppEvent::RecordStepAdmission { thread_id, item } => {
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     let response_id = item.response_id.clone();

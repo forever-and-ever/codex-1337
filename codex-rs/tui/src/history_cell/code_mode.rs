@@ -6,15 +6,12 @@ use super::HistoryTimestamp;
 use super::ToolOutputCell;
 use super::activity_parts::ActivityHeader;
 use super::output_provenance::OutputMode;
-use super::output_provenance::OutputProvenance;
 use super::output_provenance::client_notice;
-use super::output_provenance::mark_lines;
 use crate::code_mode_transcript::ScopedCodeMode;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 use crate::terminal_hyperlinks::visible_lines;
 use codex_app_server_protocol::CodeModeEvent;
@@ -311,27 +308,7 @@ impl CodeModeCell {
         })
     }
 
-    /// The fold that shows the script above the block's calls.
-    pub(crate) fn script_fold(&self) -> String {
-        format!("{}:js", self.identity())
-    }
-
-    /// Model-authored source, syntax-highlighted without claiming it is returned tool output.
-    pub(crate) fn script_lines(&self) -> Option<Vec<HyperlinkLine>> {
-        let script = self.script()?.trim_end_matches(['\r', '\n']);
-        let mut lines = plain_hyperlink_lines(crate::render::highlight::highlight_code_to_lines(
-            script,
-            "javascript",
-        ));
-        mark_lines(&mut lines, OutputProvenance::Formatted);
-        Some(prefix_hyperlink_lines(
-            lines,
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-            crate::transcript_geometry::CHILD_PREFIX.into(),
-        ))
-    }
-
-    fn status(&self) -> Option<(CodeModeStatus, i64)> {
+    pub(crate) fn status(&self) -> Option<(CodeModeStatus, i64)> {
         self.facts().iter().find_map(|fact| match fact.event {
             CodeModeEvent::Finished { status } => Some((status, fact.created_at)),
             _ => None,

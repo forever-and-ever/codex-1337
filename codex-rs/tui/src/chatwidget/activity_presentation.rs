@@ -12,6 +12,30 @@ impl ChatWidget {
             .map_or_else(Vec::new, |cell| cell.activity_ids())
     }
 
+    pub(crate) fn active_invocation_cell(&self) -> Option<&dyn HistoryCell> {
+        self.transcript.active_cell.as_deref()
+    }
+
+    pub(crate) fn active_auxiliary_transcript_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let active = self.transcript.active_cell.as_deref();
+        let mode = self.history_render_mode();
+        self.active_cell_hyperlink_lines_with(width, |cell, width| {
+            if active.is_some_and(|active| std::ptr::eq(active, cell)) {
+                Vec::new()
+            } else {
+                let lines = if cell.as_any().is::<history_cell::SessionInfoCell>() {
+                    history_cell::fullscreen_session_lines(cell, width, false, mode)
+                } else if mode == HistoryRenderMode::Raw {
+                    cell.display_hyperlink_lines_for_mode(width, mode)
+                } else {
+                    cell.compact_hyperlink_lines(width)
+                };
+                crate::transcript_geometry::clock_lines(lines, cell.transcript_timestamp())
+            }
+        })
+        .unwrap_or_default()
+    }
+
     /// Render only the chosen activity presentation, before any auxiliary live text.
     pub(crate) fn active_cell_owned_transcript_lines(
         &self,
@@ -75,15 +99,7 @@ impl ChatWidget {
                 Vec::new(),
             )
         };
-        let mut auxiliary = self
-            .active_cell_hyperlink_lines_with(width, |cell, width| {
-                if active.is_some_and(|active| std::ptr::eq(active, cell)) {
-                    Vec::new()
-                } else {
-                    render_compact(cell, width)
-                }
-            })
-            .unwrap_or_default();
+        let mut auxiliary = self.active_auxiliary_transcript_lines(width);
         if activity.is_empty() && auxiliary.is_empty() {
             return None;
         }
@@ -94,7 +110,7 @@ impl ChatWidget {
             output_mode: (expanded && active.is_some_and(HistoryCell::has_formatted_output))
                 .then_some(output_mode),
             is_tool_entry: active.is_some_and(HistoryCell::is_tool_entry),
-            preface: Vec::new(),
+
             activity,
             header,
             auxiliary,

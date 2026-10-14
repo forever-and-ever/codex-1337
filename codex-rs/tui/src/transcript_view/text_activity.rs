@@ -120,6 +120,27 @@ impl TextLayout {
         )
     }
 
+    pub(in crate::transcript_view) fn with_invocation_control(
+        mut self,
+        control: HeaderControl,
+    ) -> Self {
+        if let Some(row) = self.row_for_input_line(control.row) {
+            self.disclosure = true;
+            self.disclosure_controls.push(DisclosureControl {
+                target: control.target,
+                label: String::new(),
+                source_offset: self.rows[row].source.start,
+                row,
+                placement: DisclosurePlacement::Invocation {
+                    line: control.row,
+                    start: control.columns.start,
+                    end: control.columns.end,
+                },
+            });
+        }
+        self
+    }
+
     /// Head the layout with a Feed Item's header rows, its fold after the clock.
     pub(in crate::transcript_view) fn with_fold_header(self, rows: HeaderRows) -> Self {
         let mut layout = self;
@@ -179,7 +200,7 @@ impl TextLayout {
     ) -> Option<(usize, std::ops::Range<u16>, usize)> {
         self.disclosure_controls
             .iter()
-            .find(|control| &control.target == target)
+            .find(|control| control.target.same_control(target))
             .map(|control| {
                 (
                     control.row,

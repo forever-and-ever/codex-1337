@@ -189,6 +189,10 @@ impl ToolOutputGroup {
     pub(crate) fn from_cells(
         cells: impl IntoIterator<Item = Arc<dyn HistoryCell>>,
     ) -> Arc<dyn HistoryCell> {
+        Arc::new(Self::new(cells))
+    }
+
+    pub(crate) fn new(cells: impl IntoIterator<Item = Arc<dyn HistoryCell>>) -> Self {
         let mut group = Self {
             members: Vec::new(),
         };
@@ -227,7 +231,7 @@ impl ToolOutputGroup {
                 true
             }
         });
-        Arc::new(group)
+        group
     }
 
     /// Reunite every nested call from an older page, stopping at the previous outer return.

@@ -126,8 +126,14 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         .await?;
     let mut approvals = 0;
     let mut launches = 0;
+    let mut captured = std::collections::HashMap::new();
     loop {
         match wait_for_event(&test.codex, |_| true).await {
+            EventMsg::ItemCompleted(event) => {
+                if let codex_protocol::items::TurnItem::ToolInput(input) = event.item {
+                    captured.insert(input.call_id.clone(), input);
+                }
+            }
             EventMsg::ExecApprovalRequest(approval) => {
                 assert_eq!(approval.call_id, "script");
                 assert_eq!(approval.command, expected_command);
@@ -152,6 +158,12 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         }
     }
     assert_eq!((approvals, launches), (1, 1));
+    assert_eq!(captured["script"].payload.text(), source);
+    assert_eq!(captured["script"].name.name, language);
+    assert_eq!(captured.len(), invalid.len() + 1);
+    for (index, directive) in invalid.iter().enumerate() {
+        assert_eq!(captured[&format!("invalid-{index}")].payload.text(), format!("{directive}\n{body}"));
+    }
     let requests = log.requests();
     let tools = requests[0].body_json()["tools"]
         .as_array()

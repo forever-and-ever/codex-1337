@@ -1414,6 +1414,24 @@ async fn find_refreshes_live_details_before_searching_the_first_query() -> Resul
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
     app.render_owned_transcript(&mut tui, Size::new(/*width*/ 80, /*height*/ 24))?;
+    let initial = buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
+        &tui.terminal,
+    ));
+    let (row, line) = initial
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("[in"))
+        .unwrap();
+    app.transcript_view.handle_mouse(
+        crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: u16::try_from(line.find("[in").unwrap()).unwrap(),
+            row: u16::try_from(row).unwrap(),
+            modifiers: KeyModifiers::NONE,
+        },
+        &app.transcript_cells,
+    );
+    app.render_owned_transcript(&mut tui, Size::new(80, 24))?;
     assert!(
         !buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(
             &tui.terminal

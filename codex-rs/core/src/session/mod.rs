@@ -287,6 +287,7 @@ mod terminal_watch;
 pub(crate) mod thread_settings;
 pub(crate) mod time_reminder;
 mod token_budget;
+mod tool_input;
 mod tool_output_tokens;
 pub(crate) mod turn;
 pub(crate) mod turn_context;

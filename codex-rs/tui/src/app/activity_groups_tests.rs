@@ -333,7 +333,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
     );
     app.transcript_view.jump_to_latest();
     let current = render(&mut app.transcript_view, &app.transcript_cells);
-    assert!(current.contains("Called"));
+    assert!(current.contains("Code Mode"));
     assert_eq!(
         app.transcript_cells
             .iter()
@@ -868,7 +868,6 @@ fn project(app: &App, items: &[ThreadItem]) -> Vec<Arc<dyn HistoryCell>> {
 async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token_bill() {
     use codex_app_server_protocol::CodeModeEvent;
     use codex_app_server_protocol::CodeModeStatus;
-    use std::collections::HashSet;
 
     let (mut app, mut rx, _) = crate::app::tests::make_test_app_with_channels().await;
     let mut tui = crate::tui::test_support::make_test_tui().unwrap();
@@ -940,83 +939,18 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     }
     let expected = project(&app, &current.items);
     assert_eq!(expected.len(), 1);
-    let closed = expected[0]
-        .activity_parts(90, /*header_reserve*/ 0, &HashSet::new())
-        .unwrap();
-    let opened = expected[0]
-        .activity_parts(
-            90,
-            /*header_reserve*/ 0,
-            &HashSet::from(["code-mode:receipt-exec".into()]),
-        )
-        .unwrap();
-    let diff = expected[0]
-        .activity_parts(
-            90,
-            /*header_reserve*/ 0,
-            &HashSet::from([
-                "code-mode:receipt-exec".into(),
-                "mcp-file:receipt-edit:0".into(),
-            ]),
-        )
-        .unwrap();
-    assert_eq!(
-        (
-            closed.output.is_some(),
-            closed.controls.len(),
-            opened.controls.len()
-        ),
-        (true, 3, 3)
-    );
     assert_eq!(
         app.transcript_view
             .activity_output_tokens(&expected[0].activity_ids()),
         None
     );
-    let text = |lines: &[crate::terminal_hyperlinks::HyperlinkLine]| {
-        lines
+    let describe = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
             .iter()
-            .map(|line| line.line.to_string())
+            .map(|cell| cell.expanded_hyperlink_lines(90))
             .collect::<Vec<_>>()
-            .join("\n")
     };
-    assert!(text(&diff.lines).contains("new"));
-    assert!(!text(&closed.lines).contains("new"));
-    // Human-only diffs remain independently reachable even with the outer output closed.
-    let file_ids: Vec<_> = closed
-        .controls
-        .iter()
-        .map(|control| control.id.clone())
-        .collect();
-    let mut file_snapshots = Vec::new();
-    for (index, id) in file_ids.iter().enumerate() {
-        let file = expected[0]
-            .activity_parts(90, /*header_reserve*/ 0, &HashSet::from([id.clone()]))
-            .unwrap();
-        assert_eq!(
-            file.controls
-                .iter()
-                .map(|control| control.expanded)
-                .collect::<Vec<_>>(),
-            (0..3).map(|file| file == index).collect::<Vec<_>>()
-        );
-        let selected = &file.controls[index];
-        assert!(
-            text(&file.lines[selected.line..])
-                .contains(["new", "created body", "deleted body"][index])
-        );
-        for body in ["created body", "deleted body"] {
-            assert_eq!(
-                text(&file.lines).contains(body),
-                matches!((index, body), (1, "created body") | (2, "deleted body"))
-            );
-        }
-        file_snapshots.push(format!("Independent file {index}\n{}", text(&file.lines)));
-    }
-    assert_eq!(
-        app.transcript_cells[0].expanded_hyperlink_lines(/*width*/ 90),
-        expected[0].expanded_hyperlink_lines(/*width*/ 90)
-    );
+    assert_eq!(describe(&app.transcript_cells), describe(&expected));
     for split in 1..current.items.len() {
         let older = project(&app, &current.items[..split]);
         let boundary = older.len();
@@ -1026,22 +960,12 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             .collect();
         app.join_older_activity_group(&mut tui, boundary, std::slice::from_ref(&current));
         assert_eq!(
-            app.transcript_cells[0].expanded_hyperlink_lines(/*width*/ 90),
-            expected[0].expanded_hyperlink_lines(/*width*/ 90),
-            "split={split}"
-        );
-        assert_eq!(
-            app.transcript_cells[0]
-                .activity_parts(90, /*header_reserve*/ 0, &HashSet::new())
-                .unwrap()
-                .controls
-                .into_iter()
-                .map(|control| control.id)
-                .collect::<Vec<_>>(),
-            file_ids,
+            describe(&app.transcript_cells),
+            describe(&expected),
             "split={split}"
         );
     }
+    let mut file_snapshots = Vec::new();
     let mut view = crate::transcript_view::TranscriptView::default();
     let render = |view: &mut crate::transcript_view::TranscriptView| {
         let area = ratatui::layout::Rect::new(
@@ -1065,7 +989,9 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             .to_owned()
     };
     let painted = render(&mut view);
-    assert_eq!(painted.matches("[+]").count(), 4);
+    assert_eq!(painted.matches("[+]").count(), 3);
+    assert!(painted.contains("Edited"));
+    assert!(painted.contains("receipt.rs"));
     let row = painted
         .lines()
         .position(|line| line.contains("alpha.rs"))
@@ -1090,17 +1016,65 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     file_snapshots.push(format!(
         "Painted collapsed\n{painted}\nClicked native file\n{clicked}"
     ));
-    insta::assert_snapshot!(
-        "metadata_only_code_mode_receipt",
-        format!(
-            "Collapsed\n{}\nBlock expanded\n{}\nFile expanded\n{}\nTranscript\n{}\n{}",
-            text(&closed.lines),
-            text(&opened.lines),
-            text(&diff.lines),
-            text(&expected[0].transcript_hyperlink_lines(/*width*/ 90)),
-            file_snapshots.join("\n")
-        )
-    );
+    let click = |view: &mut crate::transcript_view::TranscriptView,
+                 shown: &str,
+                 needle: &str,
+                 child: Option<&str>| {
+        let (row, line) = shown
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(needle))
+            .unwrap();
+        let mut column = line.find(needle).unwrap();
+        if let Some(child) = child {
+            column += line[column..].find(child).unwrap();
+        }
+        assert!(
+            view.handle_mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left
+                    ),
+                    column: u16::try_from(unicode_width::UnicodeWidthStr::width(&line[..column]))
+                        .unwrap(),
+                    row: u16::try_from(row).unwrap(),
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+                &expected
+            )
+            .is_some()
+        );
+    };
+    let shown = clicked;
+    let receipt_line = shown
+        .lines()
+        .find(|line| line.contains("receipt.rs"))
+        .unwrap();
+    let receipt_fold = receipt_line[receipt_line.find("[+]").unwrap()..].to_owned();
+    click(&mut view, &shown, &receipt_fold, None);
+    let shown = render(&mut view);
+    assert!(shown.contains("+new"));
+    file_snapshots.push(format!("Receipt expanded\n{shown}"));
+    click(&mut view, &shown, "[in", None);
+    let hidden = render(&mut view);
+    assert!(hidden.contains("+new"));
+    assert!(hidden.contains("created body"));
+    assert!(!hidden.contains("semedit.edit"));
+    assert!(hidden.contains("[in]"));
+    assert!(!hidden.contains("Exact input is unavailable"));
+    file_snapshots.push(format!("Both ports hidden\n{hidden}"));
+    click(&mut view, &hidden, "[out]", None);
+    let shown = render(&mut view);
+    click(&mut view, &shown, "[out", Some("[raw]"));
+    let raw = render(&mut view);
+    assert!(raw.contains("+new"));
+    assert!(raw.contains("created body"));
+    click(&mut view, &raw, "[out", Some("[fmt]"));
+    let formatted = render(&mut view);
+    assert!(formatted.contains("+new"));
+    assert!(!formatted.contains("deleted body"));
+    file_snapshots.push(format!("Raw output\n{raw}\nFormatted output\n{formatted}"));
+    insta::assert_snapshot!("metadata_only_code_mode_receipt", file_snapshots.join("\n"));
     // A later model-visible return contributes one bill; receipt bytes and replay never do.
     app.chat_widget.replay_thread_item(
         ThreadItem::FunctionCallOutput {
@@ -1161,7 +1135,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             "exec-a",
             CodeModeEvent::Started {
                 call_id: "exec-a".into(),
-                script: None,
+                script: Some("text('owned source');".into()),
             },
         ),
         code_mode(
@@ -1263,6 +1237,16 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.transcript_view
                 .render(area, &mut buffer, &app.transcript_cells);
+            let source_row = buffer
+                .content()
+                .chunks(usize::from(area.width))
+                .position(|row| {
+                    row.iter()
+                        .map(ratatui::buffer::Cell::symbol)
+                        .collect::<String>()
+                        .contains("owned source")
+                })
+                .unwrap();
             for (kind, column) in [
                 (
                     crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
@@ -1281,7 +1265,7 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
                     crossterm::event::MouseEvent {
                         kind,
                         column,
-                        row: 0,
+                        row: u16::try_from(source_row).unwrap(),
                         modifiers: KeyModifiers::NONE,
                     },
                     &app.transcript_cells,
@@ -1705,21 +1689,42 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
             vec![Some(1280), None, Some(20)]
         );
         for expanded in [false, true] {
-            if expanded {
-                // Navigate to the first activity, not through a fixed number of now-independent
-                // Result folds. Opening the activity must still leave those captures closed.
-                for code in [KeyCode::F(4), KeyCode::Home, KeyCode::Right] {
-                    app.transcript_view
-                        .handle_key(KeyEvent::new(code, KeyModifiers::NONE), &expected);
-                }
-                app.transcript_view.clear_activity_focus();
-            }
             app.transcript_view.jump_to_latest();
             let area = Rect::new(
                 /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 32,
             );
             let mut buffer = ratatui::buffer::Buffer::empty(area);
             app.transcript_view.render(area, &mut buffer, &expected);
+            if expanded {
+                let (row, column) = buffer
+                    .content()
+                    .chunks(usize::from(area.width))
+                    .enumerate()
+                    .find_map(|(row, cells)| {
+                        let line = cells
+                            .iter()
+                            .map(ratatui::buffer::Cell::symbol)
+                            .collect::<String>();
+                        line.find("[out]").map(|column| {
+                            (row, unicode_width::UnicodeWidthStr::width(&line[..column]))
+                        })
+                    })
+                    .unwrap();
+                app.transcript_view.handle_mouse(
+                    crossterm::event::MouseEvent {
+                        kind: crossterm::event::MouseEventKind::Down(
+                            crossterm::event::MouseButton::Left,
+                        ),
+                        column: u16::try_from(column).unwrap(),
+                        row: u16::try_from(row).unwrap(),
+                        modifiers: KeyModifiers::NONE,
+                    },
+                    &expected,
+                );
+                app.transcript_view.jump_to_latest();
+                buffer = ratatui::buffer::Buffer::empty(area);
+                app.transcript_view.render(area, &mut buffer, &expected);
+            }
             let lines = (0..area.height)
                 .map(|y| {
                     (0..area.width)
@@ -1730,6 +1735,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
+            assert_eq!(lines.contains("chosen porcelain"), expanded);
             snapshots.push(format!(
                 "{kind:?} ordinary={ordinary} expanded={expanded}\n{}",
                 lines.trim()
@@ -2092,13 +2098,13 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                     }
                 }
             }
-            assert_eq!(app.transcript_cells.len(), 4);
+            assert_eq!(app.transcript_cells.len(), 2);
             let ids = app
                 .transcript_cells
                 .iter()
                 .map(|cell| cell.activity_ids())
                 .collect::<Vec<_>>();
-            let unrelated_cells = app.transcript_cells[2..].to_vec();
+            let unrelated_cells = app.transcript_cells[1..].to_vec();
             let mut terminal = pending.clone();
             if let ThreadItem::FileChange {
                 status: outcome,
@@ -2123,7 +2129,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                     }
                 }
             }
-            assert_eq!(app.transcript_cells.len(), 4);
+            assert_eq!(app.transcript_cells.len(), 2);
             assert_eq!(
                 app.transcript_cells
                     .iter()
@@ -2132,22 +2138,22 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                 ids,
             );
             assert!(
-                app.transcript_cells[..2]
+                app.transcript_cells[..1]
                     .iter()
                     .all(|cell| !history_cell::has_running_tool_calls(cell.as_ref()))
             );
             assert!(
-                app.transcript_cells[2..]
+                app.transcript_cells[1..]
                     .iter()
                     .all(|cell| history_cell::has_running_tool_calls(cell.as_ref()))
             );
             assert!(
-                app.transcript_cells[2..]
+                app.transcript_cells[1..]
                     .iter()
                     .zip(&unrelated_cells)
                     .all(|(cell, old)| Arc::ptr_eq(cell, old))
             );
-            let summary = app.transcript_cells[..2]
+            let summary = app.transcript_cells[..1]
                 .iter()
                 .flat_map(|cell| cell.compact_hyperlink_lines(/*width*/ 80))
                 .map(|line| line.line.to_string())
@@ -2218,7 +2224,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
         let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(/*owned*/ true).unwrap();
         let expected = project(&app, &current.items);
-        assert_eq!(expected.len(), file_count + usize::from(with_command) + 3);
+        assert_eq!(expected.len(), 1 + usize::from(with_command) + 3);
         for item in &current.items {
             app.chat_widget.replay_thread_item(
                 item.clone(),
@@ -2262,7 +2268,7 @@ async fn legacy_patch_files_keep_independent_outputs_across_live_replay_and_page
                 .collect::<Vec<_>>(),
             (0..expected.len())
                 .map(|index| {
-                    if index == file_count + usize::from(with_command) {
+                    if index == 1 + usize::from(with_command) {
                         Some(100)
                     } else if index == expected.len() - 1 {
                         Some(23)

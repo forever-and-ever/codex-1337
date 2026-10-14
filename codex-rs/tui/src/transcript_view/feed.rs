@@ -17,7 +17,7 @@
 //! the segment's first activity, which yields that row to it: folded, the header clips it to
 //! one row; unfolded, it wraps it whole, and the activity draws the rest. An activity left
 //! without a row draws the first row of its details, which holds the control that shows them.
-//! An unfolded Code Mode title carries `[js]`, which shows the block's script above the rest.
+//! Invocation headers carry independent source and return ports; file edits keep their folds.
 //! A segment without an activity borrows the item's title, and an item without any is a
 //! Response. Folded, a segment shows only its header, and the messages of an item that made
 //! calls. Unfolded, it shows every member, and an item of several steps heads each step's first
@@ -252,6 +252,7 @@ enum Title {
     Borrowed(usize),
     /// Nothing the item did besides respond.
     Response,
+    Command,
 }
 
 /// Where one header draws, what it covers and what titles it.
@@ -450,7 +451,13 @@ impl FeedIndex {
                 },
             };
         }
-        let plans = self.plans(item, &item.segments[member.segment], unfolded, elided);
+        let plans = self.plans(
+            item,
+            cells,
+            &item.segments[member.segment],
+            unfolded,
+            elided,
+        );
         let content = if !item.shows(member, unfolded) {
             Content::Hidden
         } else if plans.iter().any(|plan| plan.title == Title::Owned(index)) {
@@ -476,6 +483,19 @@ impl FeedIndex {
         if !matches!(item.kind, Kind::Steps { calls: true }) || item.steps.len() > 1 {
             return true;
         }
+        let calls: HashSet<_> = item
+            .segments
+            .iter()
+            .flatten()
+            .flat_map(|index| {
+                crate::history_cell::invocation::collect(cells[*index].as_ref())
+                    .into_iter()
+                    .map(|call| call.id)
+            })
+            .collect();
+        if calls.len() == 1 {
+            return false;
+        }
         let content_width =
             crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
         let (title_width, _) = header_columns(width);
@@ -483,8 +503,8 @@ impl FeedIndex {
         // force materialization of their potentially large captures during seat lookup.
         let compact = HashSet::new();
         for segment in &item.segments {
-            let plans = self.plans(item, segment, true, elided);
-            if plans.len() != self.plans(item, segment, false, elided).len() {
+            let plans = self.plans(item, cells, segment, true, elided);
+            if plans.len() != self.plans(item, cells, segment, false, elided).len() {
                 return true;
             }
             for &index in segment {
@@ -525,6 +545,7 @@ impl FeedIndex {
     fn plans(
         &self,
         item: &Item,
+        cells: &[Arc<dyn HistoryCell>],
         segment: &[usize],
         unfolded: bool,
         elided: &dyn Fn(usize) -> bool,
@@ -545,7 +566,7 @@ impl FeedIndex {
                 .iter()
                 .copied()
                 .find(|index| !elided(*index))
-                .map(|site| self.plan(item, site, segment.to_vec(), opened, elided))
+                .map(|site| self.plan(item, cells, site, segment.to_vec(), opened, elided))
                 .into_iter()
                 .collect();
         }
@@ -574,7 +595,7 @@ impl FeedIndex {
                     })
                 })
                 .collect();
-            plans.push(self.plan(item, candidate, scope, steps, elided));
+            plans.push(self.plan(item, cells, candidate, scope, steps, elided));
         }
         plans
     }
@@ -583,6 +604,7 @@ impl FeedIndex {
     fn plan(
         &self,
         item: &Item,
+        cells: &[Arc<dyn HistoryCell>],
         site: usize,
         scope: Vec<usize>,
         steps: Vec<usize>,
@@ -607,6 +629,19 @@ impl FeedIndex {
                     .map(Title::Borrowed)
             })
             .unwrap_or(Title::Response);
+        let calls: HashSet<_> = scope
+            .iter()
+            .flat_map(|index| {
+                crate::history_cell::invocation::collect(cells[*index].as_ref())
+                    .into_iter()
+                    .map(|call| call.id)
+            })
+            .collect();
+        let title = if calls.len() > 1 {
+            Title::Command
+        } else {
+            title
+        };
         Plan {
             site,
             scope,
@@ -624,6 +659,17 @@ impl FeedIndex {
             })
             .flatten()
             .collect()
+    }
+
+    pub(super) fn input_open(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
+        let Some(Role::Member(member)) = self.roles.get(index) else {
+            return true;
+        };
+        let item = &self.items[member.item];
+        let calls: HashSet<_> = item.segments.iter().flatten().filter(|index| {
+            matches!(self.roles.get(**index), Some(Role::Member(other)) if other.steps.iter().any(|step| member.steps.contains(step)))
+        }).flat_map(|index| crate::history_cell::invocation::collect(cells[*index].as_ref()).into_iter().map(|call| call.id)).collect();
+        calls.len() <= 1
     }
 
     /// Whether the cell belongs to an item drawn as a compact list.
@@ -664,6 +710,7 @@ impl FeedIndex {
     pub(super) fn header_site(
         &self,
         item: usize,
+        cells: &[Arc<dyn HistoryCell>],
         near: usize,
         expanded: &HashSet<String>,
         elided: &dyn Fn(usize) -> bool,
@@ -674,7 +721,7 @@ impl FeedIndex {
         }
         let unfolded = entry.unfolded(expanded);
         let sites = |segment: &[usize]| -> Vec<usize> {
-            self.plans(entry, segment, unfolded, elided)
+            self.plans(entry, cells, segment, unfolded, elided)
                 .into_iter()
                 .map(|plan| plan.site)
                 .collect()
@@ -698,9 +745,6 @@ impl FeedIndex {
             .find_map(|segment| sites(segment).first().copied())
     }
 
-    /// A header's rows: clock, fold, title and figures, then the rest of a title it owns,
-    /// wrapped under itself while unfolded. Source and Raw/Fmt controls remain independent
-    /// of whether the header has a meaningful parent fold.
     pub(super) fn header_rows(
         &self,
         cells: &[Arc<dyn HistoryCell>],
@@ -708,12 +752,13 @@ impl FeedIndex {
         bills: &StepBills,
         expanded: &HashSet<String>,
         mode: OutputMode,
+        invocations: &super::invocation::Invocations,
+        full: bool,
         width: u16,
     ) -> HeaderRows {
         use crate::transcript_geometry::CLOCK_COLUMNS;
         use crate::transcript_geometry::TITLE_COLUMN;
         let item = &self.items[header.item];
-        // A replayed member may carry no clock; its step's completion still dates it.
         let clock = header
             .scope
             .iter()
@@ -724,67 +769,47 @@ impl FeedIndex {
                 })
             });
         let (title_width, reach) = header_columns(width);
-        let mut title = self.title(cells, header, expanded, width);
-        let owner = match header.title {
-            Title::Owned(index) if header.disclosure.unfolded() => cells.get(index),
+        let invocation = match header.title {
+            Title::Owned(index) => cells.get(index).and_then(|cell| {
+                let mut calls = crate::history_cell::invocation::collect(cell.as_ref());
+                (calls.len() == 1).then(|| calls.remove(0))
+            }),
             _ => None,
         };
-        let mut handles = Vec::new();
-        if let Some(block) = owner
-            .and_then(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
-            .filter(|block| block.script().is_some())
-        {
-            let fold = block.script_fold();
-            let selected = expanded.contains(&fold);
-            handles.push((FoldTarget::Part(fold), "[js]", selected));
-        }
-        if owner.is_some_and(|cell| cell.has_formatted_output()) {
-            for (choice, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
-                handles.push((FoldTarget::OutputMode(choice), label, mode == choice));
-            }
-        }
-        for (_, label, selected) in &handles {
-            title.push_span(" ");
-            title.push_span(if *selected {
-                Span::styled(*label, crate::style::accent_style().underlined())
-            } else {
-                (*label).dim()
-            });
-        }
-        let titles = match header.title {
-            // Wrapped as the activity wraps its own rows: a command never splits at a hyphen.
-            Title::Owned(_) if header.disclosure.unfolded() => {
-                crate::wrapping::adaptive_wrap_lines(
-                    [title],
-                    crate::wrapping::RtOptions::new(title_width)
-                        .word_splitter(textwrap::WordSplitter::NoHyphenation),
-                )
-            }
-            _ => vec![truncate_line_with_ellipsis_if_overflow(title, title_width)],
-        };
-        // Controls are a known suffix, not text searched for in a possibly identical title.
-        // Walk that suffix backwards across wrapped rows without creating selectable bytes.
-        let mut row = titles.len().saturating_sub(1);
-        let mut end = titles.last().map_or(0, line_width);
-        let mut controls: Vec<_> = handles
-            .into_iter()
-            .rev()
-            .filter_map(|(target, label, _)| {
-                while end < label.len() && row > 0 {
-                    row -= 1;
-                    end = line_width(&titles[row]);
+        let (titles, mut controls) = if let Some(call) = &invocation {
+            let rows = invocations.header(call, true, title_width as u16, None, full);
+            (rows.lines, rows.controls)
+        } else {
+            let mut title = self.title(cells, header, expanded, width);
+            let mut controls = Vec::new();
+            if let Title::Owned(index) = header.title
+                && header.disclosure.unfolded()
+                && cells[index].has_formatted_output()
+            {
+                for (choice, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
+                    title.push_span(" ");
+                    let start = title.width() as u16;
+                    title.push_span(if mode == choice {
+                        Span::styled(label, crate::style::accent_style().underlined())
+                    } else {
+                        label.dim()
+                    });
+                    controls.push(HeaderControl {
+                        row: 0,
+                        columns: start..title.width() as u16,
+                        target: FoldTarget::OutputMode(choice),
+                    });
                 }
-                let start = end.checked_sub(label.len())?;
-                let control = HeaderControl {
-                    row,
-                    columns: TITLE_COLUMN + start as u16..TITLE_COLUMN + end as u16,
-                    target,
-                };
-                end = start.saturating_sub(1);
-                Some(control)
-            })
-            .collect();
-        controls.reverse();
+            }
+            (
+                vec![truncate_line_with_ellipsis_if_overflow(title, title_width)],
+                controls,
+            )
+        };
+        for control in &mut controls {
+            control.columns.start += TITLE_COLUMN;
+            control.columns.end += TITLE_COLUMN;
+        }
         let mut titles = titles.into_iter();
         let first = titles.next().unwrap_or_default();
         let used = line_width(&first);
@@ -819,7 +844,7 @@ impl FeedIndex {
         }));
         HeaderRows {
             lines,
-            fold: (header.disclosure != HeaderDisclosure::FixedOpen)
+            fold: (invocation.is_none() && header.disclosure != HeaderDisclosure::FixedOpen)
                 .then(|| (self.fold_target(header), header.disclosure.unfolded())),
             controls,
         }
@@ -836,6 +861,7 @@ impl FeedIndex {
         let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
         let response = || Line::from("Response".bold());
         match (&item.kind, header.title) {
+            (_, Title::Command) => Line::from("Command".bold()),
             (Kind::User { .. }, _) => Line::from("User".bold()),
             (Kind::Arrival | Kind::Preamble, _) => header
                 .scope
@@ -1090,8 +1116,8 @@ const SPLIT: [usize; 3] = [5, 5, 7];
 const SPLIT_WIDTH: usize = 2 * SPLIT.len() + SPLIT[0] + SPLIT[1] + SPLIT[2];
 /// What the split's columns hold, said after them.
 const LEGEND: &str = "(thought, output, self)";
-const MIN_TITLE: usize = 16;
-const MAX_TITLE: usize = 48;
+const MIN_TITLE: usize = 16 + super::invocation::CONTROL_COLUMNS;
+const MAX_TITLE: usize = 48 + super::invocation::CONTROL_COLUMNS;
 
 /// How far a header's figures reach along its row.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1120,11 +1146,7 @@ fn header_columns(width: u16) -> (usize, Reach) {
         .into_iter()
         .find(|reach| room >= MIN_TITLE + reach.width())
         .unwrap_or(Reach::Total);
-    (
-        room.saturating_sub(reach.width())
-            .clamp(MIN_TITLE, MAX_TITLE),
-        reach,
-    )
+    (room.saturating_sub(reach.width()).min(MAX_TITLE), reach)
 }
 
 /// The split in its fixed columns, each part colored by its size like the total; a part with
@@ -1311,7 +1333,7 @@ impl TranscriptView {
         self.live_separated = None;
         let site = self
             .feed
-            .header_site(item, index, &self.disclosure.expanded, &|index| {
+            .header_site(item, cells, index, &self.disclosure.expanded, &|index| {
                 self.elides_cell(cells, index)
             })
             .unwrap_or(index);

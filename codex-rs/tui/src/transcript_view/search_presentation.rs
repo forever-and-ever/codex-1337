@@ -51,12 +51,22 @@ impl TranscriptView {
         self.search.scanning_layout = None;
     }
 
-    /// Cache the full live source only while finding, independently of the compact live display.
     pub(crate) fn sync_search_live_tail(
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
         lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
+    ) -> bool {
+        self.sync_search_live_layout(width, key, |width, _| {
+            lines(width).map(|lines| TextLayout::new(lines, width))
+        })
+    }
+
+    pub(in crate::transcript_view) fn sync_search_live_layout(
+        &mut self,
+        width: u16,
+        key: Option<ActiveCellTranscriptKey>,
+        render: impl FnOnce(u16, &Self) -> Option<TextLayout>,
     ) -> bool {
         if !self.search.is_active() || self.detailed {
             return false;
@@ -65,13 +75,13 @@ impl TranscriptView {
         if key.is_some_and(|key| key.cacheable) && self.search.live_key == next {
             return false;
         }
-        self.search.live_key = next;
-        let live = lines(width).map(|lines| Arc::new(TextLayout::new(lines, width)));
+        let live = render(width, self).map(Arc::new);
         let changed = self.search.live.as_ref().map(|layout| layout.text())
             != live.as_ref().map(|layout| layout.text());
         if changed {
             self.invalidate_live_search();
         }
+        self.search.live_key = next;
         self.search.live = live;
         changed
     }

@@ -47,7 +47,7 @@ pub(super) fn cells(
             id,
             changes,
             status,
-        } => cells.extend(
+        } => cells.push(history_cell::ToolOutputGroup::from_cells(
             history_cell::patch_apply_cells(
                 id,
                 file_update_changes_to_display(changes),
@@ -56,7 +56,7 @@ pub(super) fn cells(
             )
             .into_iter()
             .map(|cell| Arc::new(cell) as Arc<dyn history_cell::HistoryCell>),
-        ),
+        )),
         ThreadItem::WebSearch(item) => cells.push(Arc::new(history_cell::new_web_search_call(
             item.id,
             item.query,
@@ -132,25 +132,33 @@ pub(super) fn cells(
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::ToolInput(_)
         | ThreadItem::Arrival(_)
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::McpToolCall { .. }
         | ThreadItem::Sleep(_) => {}
     }
     match call_id {
-        Some(call_id) => cells
-            .into_iter()
-            .map(|inner| {
-                if inner.tool_call_ids().is_empty() {
-                    Arc::new(history_cell::ToolItemCell {
-                        call_id: call_id.clone(),
-                        inner,
-                    }) as Arc<dyn history_cell::HistoryCell>
-                } else {
-                    inner
-                }
-            })
-            .collect(),
+        Some(call_id) => {
+            let cells: TranscriptCells = cells
+                .into_iter()
+                .map(|inner| {
+                    if inner.tool_call_ids().is_empty() {
+                        Arc::new(history_cell::ToolItemCell {
+                            call_id: call_id.clone(),
+                            inner,
+                        }) as Arc<dyn history_cell::HistoryCell>
+                    } else {
+                        inner
+                    }
+                })
+                .collect();
+            if cells.len() > 1 {
+                vec![history_cell::ToolOutputGroup::from_cells(cells)]
+            } else {
+                cells
+            }
+        }
         None => cells,
     }
 }

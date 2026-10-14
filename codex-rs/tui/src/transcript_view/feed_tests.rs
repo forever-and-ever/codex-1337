@@ -255,25 +255,56 @@ fn steps_fold_under_one_header_with_their_figures() {
         snapshots.push(format!("{label}\n{text}"));
         text
     };
-    let click = |view: &mut TranscriptView, text: &str, needle: &str, column: Option<u16>| {
-        let (row, line) = text
-            .lines()
-            .enumerate()
-            .find(|(_, line)| line.contains(needle))
-            .unwrap_or_else(|| panic!("{needle} is drawn:\n{text}"));
-        let column = column.unwrap_or_else(|| {
-            let start = line.find(needle).unwrap_or_default();
-            unicode_width::UnicodeWidthStr::width(&line[..start]) as u16 + 1
-        });
-        assert!(view.toggle_disclosure_at(&cells, column, row as u16));
+    screen(&mut view, "unfolded");
+    let code = cells
+        .iter()
+        .position(|cell| cell.as_any().is::<crate::history_cell::CodeModeCell>())
+        .unwrap();
+    let control = |call_id: &str, action| FoldTarget::Invocation {
+        call_id: call_id.into(),
+        action,
     };
-    let fold = Some(crate::transcript_geometry::CONTROL_COLUMN + 1);
-    let unfolded = screen(&mut view, "unfolded");
-    click(&mut view, &unfolded, "[js]", /*column*/ None);
-    let script = screen(&mut view, "script");
-    // The lower header first, so folding it leaves the upper one's row where it was.
-    click(&mut view, &script, "Code Mode", fold);
-    click(&mut view, &script, "cargo test", fold);
+    assert!(view.focus_fold(
+        &cells,
+        code,
+        control("exec-1", Action::Format(Port::Input, OutputMode::Raw))
+    ));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    screen(&mut view, "script");
+    assert!(view.focus_fold(
+        &cells,
+        code,
+        control(
+            "exec-1",
+            Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Raw))
+        )
+    ));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let command = (0..cells.len())
+        .find(|index| {
+            view.current_layout(&cells, *index).is_some_and(|layout| {
+                layout
+                    .fold_position(&control(
+                        "call-1",
+                        Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Fmt)),
+                    ))
+                    .is_some()
+            })
+        })
+        .unwrap();
+    assert!(
+        view.focus_fold(
+            &cells,
+            command,
+            control(
+                "call-1",
+                Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Fmt))
+            )
+        ),
+        "command controls: {:?}",
+        view.current_layout(&cells, command).unwrap().fold_targets()
+    );
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     screen(&mut view, "folded");
     insta::assert_snapshot!(snapshots.join("\n\n"));
 
@@ -394,9 +425,9 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert_eq!(view.disclosure.expanded, manual);
     assert!(!screen(&mut view, &cells, "search cancelled", 80).contains("<instructions>"));
     insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
-    // An output-only Code Mode execution has no nested command to carry its Result row.
-    // A genuinely empty revision stays open without an inert parent fold, including after a
-    // previously meaningful parent fold was closed. Its script control remains independent.
+    // No formatted input must fall back to source, not to an inert disclosure.
+    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::output_provenance::OutputMode;
     let exec = "source-only";
     let mut cells = vec![script_block(
         exec,
@@ -405,71 +436,68 @@ fn steps_fold_under_one_header_with_their_figures() {
     )];
     let mut view = TranscriptView::default();
     view.record_step_admission(step("source-step", &[exec], &[], Admission::Pending));
-    let script = FoldTarget::Part(
-        cells[0]
-            .as_any()
-            .downcast_ref::<crate::history_cell::CodeModeCell>()
-            .unwrap()
-            .script_fold(),
-    );
-    let result = FoldTarget::Part(format!("result:{exec}-output"));
+    // A separately cached legacy live-search projection once omitted visible Code Mode source.
+    let mut live_view = TranscriptView::default();
+    live_view.sync_live_activity(&[], cells[0].activity_ids());
+    live_view.sync_live_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
+    crate::transcript_view::tests::render(&mut live_view, &[], 80, 20);
+    live_view.begin_search();
+    live_view.paste_search("text(");
+    live_view.sync_search_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
+    assert!((0..512).any(|_| !live_view.advance_search(&[])));
+    assert!(live_view.is_search_expanded(super::super::EntryKey::Live));
+    live_view.cancel_search();
+    let target = |action| FoldTarget::Invocation {
+        call_id: exec.into(),
+        action,
+    };
     let buffer = crate::transcript_view::tests::render(&mut view, &cells, 104, 20);
     let shown = crate::transcript_view::tests::text(&buffer);
-    assert!(shown.contains("Result"));
-    assert!(!shown.contains("only emitted text"));
-    assert!(view.focus_fold(&cells, 0, result));
-    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-    let buffer = crate::transcript_view::tests::render(&mut view, &cells, 104, 20);
-    assert!(crate::transcript_view::tests::text(&buffer).contains("only emitted text"));
-    let formatted = FoldTarget::OutputMode(crate::history_cell::output_provenance::OutputMode::Fmt);
-    assert!(view.focus_fold(&cells, 0, formatted.clone()));
+    assert!(shown.contains("text("));
+    let layout = view.current_layout(&cells, 0).unwrap();
+    assert!(
+        layout
+            .fold_targets()
+            .iter()
+            .all(|target| matches!(target, FoldTarget::Invocation { .. }))
+    );
+    assert!(
+        !layout
+            .fold_targets()
+            .contains(&target(Action::Format(Port::Input, OutputMode::Fmt)))
+    );
+    assert!(view.focus_fold(
+        &cells,
+        0,
+        target(Action::Toggle(
+            Port::Output,
+            Panel::Visible(OutputMode::Fmt)
+        ))
+    ));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     for width in [104, 40, 80] {
-        crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+        crate::transcript_view::tests::render(&mut view, &cells, width, 24);
         let layout = view.current_layout(&cells, 0).unwrap();
-        assert!(layout.fold_targets().contains(&formatted));
-        assert!(layout.text().contains("only emitted text"));
-        for (label, capture) in [
-            ("[Raw]", "{\"message\":\"only emitted text\"}"),
-            ("[Fmt]", "{\n  \"message\": \"only emitted text\"\n}"),
-        ] {
-            let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 20);
-            let shown = crate::transcript_view::tests::text(&buffer);
-            let (row, line) = shown
-                .lines()
-                .enumerate()
-                .find(|(_, line)| line.contains(label))
-                .unwrap_or_else(|| panic!("{label} at width {width}:\n{shown}"));
-            let offset = line.find(label).unwrap();
-            let column = unicode_width::UnicodeWidthStr::width(&line[..offset]) as u16 + 1;
-            assert!(view.toggle_disclosure_at(&cells, column, row as u16));
+        assert!(layout.text().contains("text(\"only emitted text\");"));
+        assert!(
+            layout
+                .text()
+                .contains("{\n  \"message\": \"only emitted text\"\n}")
+        );
+        for mode in [OutputMode::Raw, OutputMode::Fmt] {
+            let control = target(Action::Format(Port::Output, mode));
+            assert!(view.focus_fold(&cells, 0, control.clone()));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            crate::transcript_view::tests::render(&mut view, &cells, width, 24);
             assert!(
                 view.current_layout(&cells, 0)
                     .unwrap()
-                    .text()
-                    .contains(capture)
+                    .fold_position(&control)
+                    .is_some()
             );
         }
     }
-    let parent = view
-        .current_layout(&cells, 0)
-        .unwrap()
-        .fold_targets()
-        .into_iter()
-        .find(|target| matches!(target, FoldTarget::Part(id) if id.starts_with("feed:")))
-        .unwrap();
-    assert!(view.focus_fold(&cells, 0, parent.clone()));
-    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-
     cells[0] = script_block(exec, None, Some(""));
-    for width in [104, 80] {
-        crate::transcript_view::tests::render(&mut view, &cells, width, 20);
-        let layout = view.current_layout(&cells, 0).unwrap();
-        assert!(!layout.fold_targets().contains(&parent));
-        assert!(layout.fold_targets().contains(&script));
-    }
-    assert!(view.focus_fold(&cells, 0, script.clone()));
-    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     crate::terminal_palette::with_test_default_colors(
         crate::terminal_probe::DefaultColors {
             fg: (220, 220, 220),
@@ -477,23 +505,17 @@ fn steps_fold_under_one_header_with_their_figures() {
         },
         || {
             for width in [104, 40, 80] {
-                let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 20);
+                let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
                 let shown = crate::transcript_view::tests::text(&buffer);
                 let (row, line) = shown
                     .lines()
                     .enumerate()
                     .find(|(_, line)| line.contains("text("))
-                    .unwrap_or_else(|| panic!("script at width {width}:\n{shown}"));
+                    .unwrap();
                 let column = line.find("text(").unwrap();
                 assert_eq!(
                     buffer[(column as u16, row as u16)].bg,
-                    crate::style::context_message_style().bg.unwrap(),
-                );
-                assert!(
-                    view.current_layout(&cells, 0)
-                        .unwrap()
-                        .fold_targets()
-                        .contains(&script)
+                    crate::style::context_message_style().bg.unwrap()
                 );
                 assert!(
                     view.current_layout(&cells, 0)

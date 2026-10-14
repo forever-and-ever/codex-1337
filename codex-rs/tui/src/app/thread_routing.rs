@@ -418,10 +418,14 @@ impl App {
         if request.thread_label.is_none() || request.changes.is_empty() {
             return;
         }
-        for cell in history_cell::new_patch_events(request.changes.clone(), &request.cwd) {
-            self.chat_widget
-                .add_to_history(cell.with_activity_id(request.id.clone()));
-        }
+        self.chat_widget
+            .add_to_history(history_cell::ToolOutputGroup::new(
+                history_cell::new_patch_events(request.changes.clone(), &request.cwd)
+                    .into_iter()
+                    .map(|cell| {
+                        Arc::new(cell.with_activity_id(request.id.clone())) as Arc<dyn HistoryCell>
+                    }),
+            ));
     }
 
     pub(super) async fn pending_inactive_thread_requests(&self) -> Vec<(ThreadId, ServerRequest)> {

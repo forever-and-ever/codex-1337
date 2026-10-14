@@ -80,6 +80,34 @@ fn owned_capture_survives_live_history_and_independent_page_projection() {
     let mut nested = serde_json::to_value(&event).unwrap();
     nested["payload"] = nested.clone();
     assert!(serde_json::from_value::<EventMsg>(nested).is_err());
+    // Inputs are captured before tool-specific parsing; neither JSON lexemes nor script
+    // metadata may be reconstructed from normalized execution records on replay.
+    for response in [
+        serde_json::json!({"type":"custom_tool_call","call_id":"raw-script","name":"python","namespace":"functions","input":"# @exec: {\"max_output_tokens\":7}\nprint('λ')\n"}),
+        serde_json::json!({"type":"function_call","call_id":"json-call","name":"tool","namespace":"mcp.test","arguments":"{\"n\":1e+02,\"n\":2}"}),
+    ] {
+        let response: codex_protocol::models::ResponseItem =
+            serde_json::from_value(response).unwrap();
+        let input = codex_protocol::tool_input::ToolInput::capture(&response).unwrap();
+        let canonical = item_completed(thread_id, "turn-1", TurnItem::ToolInput(input.clone()));
+        let projected = project(canonical.clone());
+        let mut builder = ThreadHistoryBuilder::new();
+        builder.handle_event(&EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-1".into(),
+            turn_attribution: None,
+            root_turn_id: None,
+            trace_id: None,
+            started_at: Some(1),
+            model_context_window: None,
+            collaboration_mode_kind: Default::default(),
+        }));
+        builder.handle_rollout_item(&RolloutItem::ResponseItem(response.into()));
+        builder.handle_rollout_item(&canonical);
+        builder.handle_rollout_item(&canonical);
+        let turns = builder.finish();
+        assert_eq!(turns[0].items, vec![ThreadItem::ToolInput(input)]);
+        assert_eq!(turns[0].items[0], projected.changed_items[0].item);
+    }
 }
 
 #[test]

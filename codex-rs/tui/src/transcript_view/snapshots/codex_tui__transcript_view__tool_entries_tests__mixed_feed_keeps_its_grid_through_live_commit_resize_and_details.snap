@@ -10,12 +10,17 @@ width=64
 
                 More text
 
-  14:17 [+]   • Command  128
-                  Read foo.rs (whole file)
-              • Called tools.inspect()
-              • Edited
-        [+]       foo.rs (+1, -0)
-        [+]       bar.rs (+1, -0)
+  14:17     Command           [in]             [out]
+            Command           [in]             [out]
+            Command           [in]             [out]
+            Command (exec)                                   128
+            [in]             [out]
+            Command           [in]             [out]
+            • Edited
+        [+]     foo.rs (+1, -0)
+            Command           [in]             [out]
+            • Edited
+        [+]     bar.rs (+1, -0)
 
   14:17 [-] Response
               • The layout keeps prose, code, and tools aligned.
@@ -30,15 +35,19 @@ expanded width=64
 
                 More text
 
-  14:17 [-]       $ poll foo  128
-              • Command
-                  $ cat foo.rs
-              • Called
-                └ tools.inspect()
-        [+]     Result
-              • Edited
-        [+]       foo.rs (+1, -0)
-        [+]       bar.rs (+1, -0)
+  14:17     Command           [in [raw] [fmt]] [out]
+            Stored execution · exact input unavailable
+            poll foo
+            Command           [in]             [out]
+            Command           [in]             [out]
+            Command (exec)                                   128
+            [in]             [out]
+            Command           [in]             [out]
+            • Edited
+        [+]     foo.rs (+1, -0)
+            Command           [in]             [out]
+            • Edited
+        [+]     bar.rs (+1, -0)
 
   14:17 [-] Response
               • The layout keeps prose, code, and tools aligned.
@@ -81,12 +90,28 @@ width=32
 
                 More text
 
-  14:17 [+]   • Command  128
-                  Read foo.rs...
-              • Called tools....
-              • Edited
-        [+]       foo.… (+1, -0)
-        [+]       bar.… (+1, -0)
+  14:17     Command
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+            Command (exec)   128
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+            • Edited
+        [+]     foo.rs (+1, -0)
+            Command
+            [in]
+            [out]
+            • Edited
+        [+]     bar.rs (+1, -0)
 
   14:17 [-] Response
               • The layout keeps

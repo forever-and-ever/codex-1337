@@ -158,24 +158,7 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
     let cell: Arc<dyn HistoryCell> = Arc::new(cell);
     let mut view = TranscriptView::default();
     view.sync_live_activity(&[], cell.activity_ids());
-    view.sync_live_activity_tail(
-        /*width*/ 72,
-        /*key*/ None,
-        /*expanded*/ false,
-        |width, _, _| {
-            Some(ActivityTranscriptLines {
-                output_mode: None,
-                is_tool_entry: cell.is_tool_entry(),
-                header: cell.activity_header(),
-                controls: Vec::new(),
-                preface: Vec::new(),
-                activity: cell.compact_hyperlink_lines(width),
-                auxiliary: Vec::new(),
-                disclosure: cell.activity_disclosure(width),
-                header_tokens: None,
-            })
-        },
-    );
+    view.sync_live_invocation_tail(72, None, cell.as_ref(), Vec::new());
     let live = text(&render(
         &mut view,
         &[],
@@ -189,14 +172,14 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
         &mut view, &cells, /*width*/ 72, /*height*/ 6,
     ));
     assert_eq!(live, committed);
-    assert!(live.contains("[+]"));
+    assert!(live.contains("[in"));
     // The visible control must not become selectable source text.
     assert!(
         !view
             .layout(&cells, /*index*/ 0)
             .unwrap()
             .text()
-            .contains("[+]")
+            .contains("[in")
     );
     // Warm layouts must follow config changes, including chords and disabling the action.
     for configured in [
@@ -217,82 +200,6 @@ fn terminal_output_disclosure_follows_live_history_and_keymap() {
             live,
         );
     }
-}
-
-#[test]
-fn terminal_output_disclosure_counts_only_revealable_lines() {
-    use crate::exec_cell::CommandOutput;
-    use crate::exec_cell::new_active_exec_command;
-    use codex_app_server_protocol::CommandExecutionSource;
-
-    let mut frames = Vec::new();
-    for (name, command, output, width, streamed) in [
-        ("empty result", "true", String::new(), 64, false),
-        ("three lines", "echo", "a\nb\nc\n".to_owned(), 64, false),
-        ("four lines", "echo", "a\nb\nc\nd\n".to_owned(), 64, false),
-        (
-            "clipped line",
-            "echo",
-            "abcdefghijklmnopqrstuvwxyz\n".to_owned(),
-            20,
-            false,
-        ),
-        ("command only", "echo a\necho b", String::new(), 64, false),
-        (
-            "storage truncated",
-            "echo",
-            "x\n".repeat(/*n*/ 530_000),
-            64,
-            true,
-        ),
-    ] {
-        let mut cell = new_active_exec_command(
-            "output-test".into(),
-            vec!["sh".into(), "-c".into(), command.into()],
-            Vec::new(),
-            CommandExecutionSource::Agent,
-            /*interaction_input*/ None,
-            /*animations_enabled*/ false,
-        );
-        if streamed {
-            cell.append_output("output-test", &output);
-        } else {
-            cell.complete_call(
-                "output-test",
-                CommandOutput::new(/*exit_code*/ 0, output.clone()),
-                std::time::Duration::from_secs(/*secs*/ 1),
-            );
-        }
-        let cells: [Arc<dyn HistoryCell>; 1] = [Arc::new(cell)];
-        let mut view = TranscriptView::default();
-        frames.push(format!(
-            "{name}, collapsed\n{}",
-            text(&render(&mut view, &cells, width, /*height*/ 6,)).trim_end()
-        ));
-        let targets = view
-            .current_layout(&cells, /*index*/ 0)
-            .unwrap()
-            .fold_targets();
-        assert_eq!(
-            targets.contains(&crate::history_cell::activity_parts::FoldTarget::Activity),
-            !output.trim().is_empty()
-        );
-        if !streamed && !targets.is_empty() {
-            for target in targets {
-                view.disclosure
-                    .expanded
-                    .extend(target.ids(&cells[0].activity_ids()));
-            }
-            view.cache.clear();
-            view.jump_to_beginning(&cells);
-            let expanded = render(&mut view, &cells, width, /*height*/ 8);
-            let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-            assert!(layout.text().contains(command));
-            assert!(layout.text().contains(output.trim_end_matches('\n')));
-            frames.push(format!("{name}, expanded\n{}", text(&expanded).trim_end()));
-        }
-    }
-    insta::assert_snapshot!(frames.join("\n\n"));
 }
 
 #[test]

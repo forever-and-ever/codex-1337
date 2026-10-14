@@ -23,6 +23,10 @@ impl ActivityDetails {
             .find_map(|(_, cell)| cell.outer_call_id())
     }
 
+    pub(crate) fn members(&self) -> impl Iterator<Item = &dyn HistoryCell> {
+        self.entries.iter().map(|(_, cell)| cell.as_ref())
+    }
+
     pub(crate) fn push(&mut self, after_calls: usize, cell: Arc<dyn HistoryCell>) {
         if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>()
             && self.entries.iter().any(|(_, retained)| {

@@ -347,6 +347,7 @@ fn searchable_text(item: &ThreadItem) -> Option<Cow<'_, str>> {
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::ToolInput(_)
         | ThreadItem::Arrival(_)
         | ThreadItem::CommandExecution { .. }
         | ThreadItem::FileChange { .. }

@@ -301,6 +301,7 @@ impl TranscriptView {
     /// Drop an in-progress scan of a live revision when the visible source changes. A match
     /// already being read has its own snapshot and remains valid until navigation leaves it.
     pub(super) fn invalidate_live_search(&mut self) {
+        self.search.live_key = None;
         if self.held_reading.is_none()
             && matches!(
                 self.search.progress,

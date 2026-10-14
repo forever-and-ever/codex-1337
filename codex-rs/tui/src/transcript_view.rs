@@ -15,6 +15,7 @@ mod feed;
 mod follow_control;
 mod footer;
 mod input;
+mod invocation;
 mod layout;
 mod mutations;
 mod presentation;
@@ -126,6 +127,7 @@ pub(crate) struct TranscriptView {
     disclosure: disclosure::Disclosure,
     tool_output_tokens: tool_output_tokens::ToolOutputTokens,
     step_bills: step_bills::StepBills,
+    invocations: invocation::Invocations,
     feed: feed::FeedIndex,
 }
 
@@ -166,6 +168,7 @@ impl Default for TranscriptView {
             disclosure: disclosure::Disclosure::default(),
             tool_output_tokens: Default::default(),
             step_bills: Default::default(),
+            invocations: Default::default(),
             feed: Default::default(),
         }
     }
@@ -341,10 +344,10 @@ impl TranscriptView {
     ) -> bool {
         let mode = self.mode;
         let output_mode = self.disclosure.output_mode(&self.disclosure.live_ids);
-        self.sync_live_layout(width, key, |width, expanded_parts| {
+        self.sync_live_layout(width, key, |width, view| {
             lines(
                 crate::transcript_geometry::content_width(width, mode),
-                expanded_parts,
+                &view.disclosure.expanded,
                 output_mode,
             )
             .map(|mut lines| {
@@ -369,7 +372,7 @@ impl TranscriptView {
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
-        layout: impl FnOnce(u16, &std::collections::HashSet<String>) -> Option<(TextLayout, bool)>,
+        layout: impl FnOnce(u16, &Self) -> Option<(TextLayout, bool)>,
     ) -> bool {
         let next = key.map(|key| (width, key));
         if key.is_some_and(|key| key.cacheable) && self.live_key == next {
@@ -380,7 +383,7 @@ impl TranscriptView {
         self.live_key = next;
         self.live_separated = None;
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
-        let live = layout(width, &self.disclosure.expanded).map(|(layout, tool_entry)| {
+        let live = layout(width, self).map(|(layout, tool_entry)| {
             self.live_tool_entry = tool_entry;
             Arc::new(layout)
         });

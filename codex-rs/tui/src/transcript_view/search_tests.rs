@@ -978,9 +978,20 @@ fn find_expands_only_the_match_and_preserves_manual_disclosures() {
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 24,
     );
     let mut view = TranscriptView::default();
+    use crate::history_cell::activity_parts::FoldTarget;
+    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::output_provenance::OutputMode;
+    let input = |id: &str| FoldTarget::Invocation {
+        call_id: id.into(),
+        action: Action::Toggle(Port::Input, Panel::Visible(OutputMode::Fmt)),
+    };
+    for id in ["unrelated", "older needle", "newer needle"] {
+        view.invocations.apply(
+            id,
+            Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Fmt)),
+        );
+    }
     view.render(area, &mut Buffer::empty(area), &cells);
-    view.handle_key(KeyCode::F(4).into(), &cells);
-    view.handle_key(KeyCode::Enter.into(), &cells);
     view.begin_search();
     view.paste_search("needle");
     finish_scan(&mut view, &cells);
@@ -1019,8 +1030,7 @@ fn find_expands_only_the_match_and_preserves_manual_disclosures() {
     );
     view.handle_key(KeyCode::Enter.into(), &cells);
     // Reading keeps the result and lets the normal activity controls open another block.
-    view.handle_key(KeyCode::F(4).into(), &cells);
-    view.handle_key(KeyCode::Home.into(), &cells);
+    assert!(view.focus_fold(&cells, 0, input("unrelated")));
     let mut hints = Vec::new();
     for history in [
         TranscriptHistoryState::LoadingOlder,
@@ -1049,9 +1059,7 @@ fn find_expands_only_the_match_and_preserves_manual_disclosures() {
             .contains("hidden unrelated")
     );
     assert_eq!(view.search.current.as_ref().unwrap().anchor.index, 2);
-    view.handle_key(KeyCode::F(4).into(), &cells);
-    view.handle_key(KeyCode::End.into(), &cells);
-    view.handle_key(KeyCode::Up.into(), &cells);
+    assert!(view.focus_fold(&cells, 2, input("newer needle")));
     for (key, expanded) in [
         (KeyCode::Right, true),
         (KeyCode::Left, false),

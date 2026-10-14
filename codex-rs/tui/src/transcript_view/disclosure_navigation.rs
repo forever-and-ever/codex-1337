@@ -36,7 +36,9 @@ impl TranscriptView {
                 .current_layout(cells, index)
                 .map(|layout| layout.fold_targets())
                 .unwrap_or_default();
-            let current = controls.iter().position(|candidate| *candidate == target);
+            let current = controls
+                .iter()
+                .position(|candidate| candidate.same_control(&target));
             let next = if edge && step == 0 {
                 if backwards {
                     controls.last()

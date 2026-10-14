@@ -7027,6 +7027,37 @@ class ToolExposureSurface(Enum):
     direct = "direct"
 
 
+class ToolInputPayload1(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format: Literal["json"]
+    text: str
+
+
+class ToolInputPayload2(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    format: Literal["text"]
+    text: str
+
+
+class ToolInputPayload(RootModel[ToolInputPayload1 | ToolInputPayload2]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ToolInputPayload1 | ToolInputPayload2
+
+
+class ToolName(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    namespace: str | None = None
+
+
 class ToolPolicyCeiling(RootModel[Literal["noTools"]]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11231,6 +11262,17 @@ class ThreadGoalUpdatedNotification(BaseModel):
     turn_id: Annotated[str | None, Field(alias="turnId")] = None
 
 
+class ToolInputThreadItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    call_id: Annotated[str, Field(alias="callId")]
+    id: str
+    name: ToolName
+    payload: ToolInputPayload
+    type: Annotated[Literal["toolInput"], Field(title="ToolInputThreadItemType")]
+
+
 class ArrivalThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -14715,6 +14757,7 @@ class ThreadItem(
     RootModel[
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
+        | ToolInputThreadItem
         | StepAdmissionThreadItem
         | ArrivalThreadItem
         | UserMessageThreadItem
@@ -14747,6 +14790,7 @@ class ThreadItem(
     root: (
         CodeModeOwnedThreadItem
         | CodeModeThreadItem
+        | ToolInputThreadItem
         | StepAdmissionThreadItem
         | ArrivalThreadItem
         | UserMessageThreadItem

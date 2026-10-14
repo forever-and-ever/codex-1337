@@ -1,0 +1,540 @@
+//! Invocation projections. Visibility belongs to the reader, never to a retained cell.
+
+use super::CodeModeCell;
+use super::HistoryCell;
+use super::ToolItemCell;
+use super::ToolOutputCell;
+use super::ToolOutputGroup;
+use super::output_provenance::ContextAuthor;
+use super::output_provenance::OutputMode;
+use super::output_provenance::OutputProvenance;
+use super::output_provenance::captured_lines;
+use super::output_provenance::client_notice;
+use super::output_provenance::mark_lines;
+use crate::exec_cell::ExecCall;
+use crate::exec_cell::ExecCell;
+use crate::terminal_hyperlinks::HyperlinkLine;
+use codex_protocol::models::FunctionCallOutputBody;
+use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::tool_input::ToolInput;
+use ratatui::style::Stylize;
+use ratatui::text::Line;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Port {
+    Input,
+    Output,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Action {
+    Toggle(Port, Panel),
+    Format(Port, OutputMode),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Panel {
+    Hidden(OutputMode),
+    Visible(OutputMode),
+}
+
+impl Panel {
+    pub(crate) fn mode(self) -> OutputMode {
+        match self {
+            Self::Hidden(mode) | Self::Visible(mode) => mode,
+        }
+    }
+    pub(crate) fn visible(self) -> bool {
+        matches!(self, Self::Visible(_))
+    }
+    pub(crate) fn toggled(self) -> Self {
+        match self {
+            Self::Hidden(mode) => Self::Visible(mode),
+            Self::Visible(mode) => Self::Hidden(mode),
+        }
+    }
+}
+
+pub(crate) enum Source<'a> {
+    Code(&'a CodeModeCell),
+    Command(&'a ExecCall),
+    Cells(Vec<&'a dyn HistoryCell>),
+    Output,
+}
+
+pub(crate) struct Invocation<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) source: Source<'a>,
+    pub(crate) outputs: Vec<&'a ToolOutputCell>,
+}
+
+fn json_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
+    let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input?.payload else {
+        return None;
+    };
+    Some(super::activity_parts::ActivityParts {
+        lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
+        ..Default::default()
+    })
+}
+
+fn combine_parts(
+    parts: impl IntoIterator<Item = super::activity_parts::ActivityParts>,
+) -> super::activity_parts::ActivityParts {
+    let mut combined = super::activity_parts::ActivityParts::default();
+    for mut part in parts {
+        for control in &mut part.controls {
+            control.line += combined.lines.len();
+        }
+        combined.controls.extend(part.controls);
+        combined.lines.extend(part.lines);
+    }
+    combined
+}
+
+fn edit_projection(
+    cell: &dyn HistoryCell,
+    width: u16,
+    expanded: &std::collections::HashSet<String>,
+    full: bool,
+) -> super::activity_parts::ActivityParts {
+    let any = cell.as_any();
+    if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
+        return edit_projection(wrapper.inner.as_ref(), width, expanded, full);
+    }
+    if let Some(mcp) = any.downcast_ref::<super::McpToolCallCell>() {
+        return mcp.receipt_parts(width, expanded, full);
+    }
+    if let Some(patch) = any.downcast_ref::<super::PatchHistoryCell>() {
+        let all;
+        let expanded = if full {
+            all = expanded
+                .iter()
+                .cloned()
+                .chain(patch.activity_ids())
+                .collect();
+            &all
+        } else {
+            expanded
+        };
+        return patch.nested_summary_parts(width, expanded);
+    }
+    let members: Vec<&dyn HistoryCell> = if let Some(group) = any.downcast_ref::<ToolOutputGroup>()
+    {
+        group.members.iter().map(AsRef::as_ref).collect()
+    } else if let Some(block) = any.downcast_ref::<CodeModeCell>() {
+        block.members().iter().map(AsRef::as_ref).collect()
+    } else if let Some(computer) = any.downcast_ref::<super::ComputerActivityCell>() {
+        computer
+            .group
+            .calls
+            .iter()
+            .map(|call| call as &dyn HistoryCell)
+            .chain(computer.group.details.members())
+            .collect()
+    } else if let Some(exec) = any.downcast_ref::<ExecCell>() {
+        exec.group.details.members().collect()
+    } else {
+        Vec::new()
+    };
+    combine_parts(
+        members
+            .into_iter()
+            .map(|member| edit_projection(member, width, expanded, full)),
+    )
+}
+
+fn input_projection(
+    cell: &dyn HistoryCell,
+    width: u16,
+) -> Option<super::activity_parts::ActivityParts> {
+    let any = cell.as_any();
+    if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
+        return input_projection(wrapper.inner.as_ref(), width);
+    }
+    if let Some(group) = any.downcast_ref::<ToolOutputGroup>() {
+        return Some(combine_parts(
+            group
+                .members
+                .iter()
+                .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
+                .map(|cell| input_projection(cell.as_ref(), width))
+                .collect::<Option<Vec<_>>>()?,
+        ));
+    }
+    // Edits have their own structural projection, independent of the source ports.
+    if any.is::<super::PatchHistoryCell>() {
+        return Some(Default::default());
+    }
+    let lines = if let Some(exec) = any.downcast_ref::<ExecCell>() {
+        exec.iter_calls()
+            .flat_map(|call| {
+                let source = crate::exec_command::strip_bash_lc_and_escape(&call.command);
+                crate::exec_cell::rows::formatted_input(&source).unwrap_or_else(|| {
+                    captured_lines(&source, ContextAuthor::Environment, OutputMode::Fmt)
+                })
+            })
+            .collect()
+    } else if any.is::<super::McpToolCallCell>() {
+        cell.activity_argument_lines(width)
+            .into_iter()
+            .skip(1)
+            .collect()
+    } else if let Some(dynamic) = any.downcast_ref::<super::DynamicToolCallCell>() {
+        dynamic.invocation_input(width)
+    } else if any.is::<super::WebSearchCell>() {
+        cell.nested_detail_lines(width)
+    } else {
+        return None;
+    };
+    Some(super::activity_parts::ActivityParts {
+        lines,
+        ..Default::default()
+    })
+}
+
+pub(crate) fn collect(cell: &dyn HistoryCell) -> Vec<Invocation<'_>> {
+    fn visit<'a>(
+        cell: &'a dyn HistoryCell,
+        calls: &mut Vec<Invocation<'a>>,
+        outputs: &mut Vec<&'a ToolOutputCell>,
+    ) {
+        let any = cell.as_any();
+        if let Some(block) = any.downcast_ref::<CodeModeCell>() {
+            calls.push(Invocation {
+                id: block.exec_call_id(),
+                source: Source::Code(block),
+                outputs: block
+                    .members()
+                    .iter()
+                    .filter_map(|cell| cell.as_any().downcast_ref::<ToolOutputCell>())
+                    .collect(),
+            });
+        } else if let Some(group) = any.downcast_ref::<ToolOutputGroup>() {
+            for member in &group.members {
+                visit(member.as_ref(), calls, outputs);
+            }
+        } else if let Some(output) = any.downcast_ref::<ToolOutputCell>() {
+            outputs.push(output);
+        } else if let Some(exec) = any.downcast_ref::<ExecCell>() {
+            calls.extend(exec.iter_calls().map(|call| Invocation {
+                id: &call.call_id,
+                source: Source::Command(call),
+                outputs: Vec::new(),
+            }));
+            for member in exec.group.details.members() {
+                visit(member, calls, outputs);
+            }
+        } else if let Some(computer) = any.downcast_ref::<super::ComputerActivityCell>() {
+            for call in &computer.group.calls {
+                visit(call, calls, outputs);
+            }
+            for member in computer.group.details.members() {
+                visit(member, calls, outputs);
+            }
+        } else if let Some(&id) = cell.tool_call_ids().first() {
+            let source = any
+                .downcast_ref::<ToolItemCell>()
+                .map_or(cell, |wrapper| wrapper.inner.as_ref());
+            if let Some(Invocation {
+                source: Source::Cells(members),
+                ..
+            }) = calls.iter_mut().find(|call| call.id == id)
+            {
+                members.push(source);
+            } else {
+                calls.push(Invocation {
+                    id,
+                    source: Source::Cells(vec![source]),
+                    outputs: Vec::new(),
+                });
+            }
+        }
+    }
+    let mut calls = Vec::new();
+    let mut outputs = Vec::new();
+    visit(cell, &mut calls, &mut outputs);
+    for output in outputs {
+        let id = output.outer_call_id().unwrap_or_else(|| output.id());
+        if let Some(call) = calls.iter_mut().find(|call| call.id == id) {
+            if !call.outputs.iter().any(|old| old.id() == output.id()) {
+                call.outputs.push(output);
+            }
+        } else {
+            calls.push(Invocation {
+                id,
+                source: Source::Output,
+                outputs: vec![output],
+            });
+        }
+    }
+    calls
+}
+
+impl Invocation<'_> {
+    fn name<'a>(&'a self, input: Option<&'a ToolInput>) -> Option<&'a codex_protocol::ToolName> {
+        input
+            .map(|input| &input.name)
+            .or_else(|| self.outputs.first().map(|output| output.name()))
+    }
+
+    pub(crate) fn title(&self, input: Option<&ToolInput>) -> Line<'static> {
+        let title = if let Source::Code(block) = self.source {
+            format!("Code Mode ({})", block.tetrad())
+        } else {
+            match self
+                .name(input)
+                .filter(|name| name.is_default_namespace())
+                .map(|name| name.name.as_str())
+            {
+                Some("bash") => "Script (bash)".into(),
+                Some("python") => "Script (python)".into(),
+                Some("fence") => "Fence".into(),
+                _ => self
+                    .name(input)
+                    .map_or_else(|| "Command".into(), |name| format!("Command ({name})")),
+            }
+        };
+        let mut title = Line::from(title.bold());
+        match &self.source {
+            Source::Code(block) => match block.status().map(|(status, _)| status) {
+                Some(codex_protocol::code_mode::CodeModeStatus::Failed) => {
+                    title.push_span(" · failed".red())
+                }
+                Some(codex_protocol::code_mode::CodeModeStatus::Interrupted) => {
+                    title.push_span(" · interrupted".red())
+                }
+                None if block.is_active() => title.push_span(" · running".dim()),
+                _ => {}
+            },
+            Source::Command(call) => match &call.output {
+                None if call.start_time.is_some() => title.push_span(" · running".dim()),
+                Some(output) => match output.outcome {
+                    crate::exec_cell::CommandOutcome::Exited(0) => {}
+                    crate::exec_cell::CommandOutcome::Exited(code) => {
+                        title.push_span(format!(" · failed ({code})").red())
+                    }
+                    crate::exec_cell::CommandOutcome::Declined => {
+                        title.push_span(" · declined".red())
+                    }
+                },
+                _ => {}
+            },
+            Source::Cells(cells) => {
+                let failed = cells.iter().any(|cell| {
+                    cell.as_any()
+                        .downcast_ref::<super::McpToolCallCell>()
+                        .is_some_and(|cell| cell.success() == Some(false))
+                        || cell
+                            .as_any()
+                            .downcast_ref::<super::DynamicToolCallCell>()
+                            .is_some_and(super::DynamicToolCallCell::failed)
+                });
+                let patch = cells.iter().find_map(|cell| {
+                    cell.as_any()
+                        .downcast_ref::<super::PatchHistoryCell>()
+                        .and_then(super::PatchHistoryCell::failure_label)
+                });
+                if let Some(status) = cells.iter().find_map(|cell| {
+                    cell.as_any()
+                        .downcast_ref::<crate::multi_agents::AgentToolHistoryCell>()
+                        .and_then(crate::multi_agents::AgentToolHistoryCell::invocation_status)
+                }) {
+                    title.push_span(format!(" · {status}").dim());
+                } else if failed {
+                    title.push_span(" · failed".red());
+                } else if let Some(label) = patch {
+                    title.push_span(format!(" · {label}").red());
+                } else if cells
+                    .iter()
+                    .any(|cell| super::has_running_tool_calls(*cell))
+                {
+                    title.push_span(" · running".dim());
+                }
+            }
+            _ => {}
+        }
+        if !self.outputs.is_empty()
+            && self
+                .outputs
+                .iter()
+                .all(|output| output.is_empty_completed_return())
+        {
+            title.push_span(" · no output".dim());
+        }
+        title
+    }
+
+    pub(crate) fn raw_source<'a>(&'a self, input: Option<&'a ToolInput>) -> Option<&'a str> {
+        input
+            .map(|input| input.payload.text())
+            .or_else(|| match self.source {
+                Source::Code(block) => block.script(),
+                _ => None,
+            })
+    }
+
+    pub(crate) fn raw_input(&self, input: Option<&ToolInput>) -> Option<Vec<HyperlinkLine>> {
+        Some(captured_lines(
+            self.raw_source(input)?,
+            ContextAuthor::Environment,
+            OutputMode::Raw,
+        ))
+    }
+
+    pub(crate) fn formatted_input(
+        &self,
+        input: Option<&ToolInput>,
+        width: u16,
+    ) -> Option<super::activity_parts::ActivityParts> {
+        let mut parts = match &self.source {
+            Source::Code(block) => combine_parts(
+                block
+                    .members()
+                    .iter()
+                    .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
+                    .map(|cell| input_projection(cell.as_ref(), width))
+                    .collect::<Option<Vec<_>>>()?,
+            ),
+            Source::Command(call) => {
+                let script = input
+                    .filter(|input| input.name.is_default_namespace() && input.name.name == "bash")
+                    .map(|input| input.payload.text().to_owned())
+                    .unwrap_or_else(|| {
+                        crate::exec_command::strip_bash_lc_and_escape(&call.command)
+                    });
+                let lines = match crate::exec_cell::rows::formatted_input(&script) {
+                    Some(lines) => lines,
+                    None if input.is_none() => {
+                        let mut lines =
+                            vec![client_notice("Stored execution · exact input unavailable")];
+                        lines.extend(super::output_provenance::client_lines(
+                            &script,
+                            OutputMode::Fmt,
+                        ));
+                        return Some(super::activity_parts::ActivityParts {
+                            lines,
+                            ..Default::default()
+                        });
+                    }
+                    None => return None,
+                };
+                super::activity_parts::ActivityParts {
+                    lines,
+                    ..Default::default()
+                }
+            }
+            Source::Cells(cells) => match cells
+                .iter()
+                .map(|cell| input_projection(*cell, width))
+                .collect::<Option<Vec<_>>>()
+            {
+                Some(parts) => combine_parts(parts),
+                None => return json_input(input),
+            },
+            Source::Output => return json_input(input),
+        };
+        if parts.lines.is_empty() {
+            return None;
+        }
+        mark_lines(&mut parts.lines, OutputProvenance::Formatted);
+        Some(parts)
+    }
+
+    pub(crate) fn output_ids(&self) -> Vec<String> {
+        if self.outputs.is_empty() {
+            vec![format!("call:{}", self.id)]
+        } else {
+            self.outputs
+                .iter()
+                .flat_map(|output| output.activity_ids())
+                .collect()
+        }
+    }
+
+    pub(crate) fn edit_parts(
+        &self,
+        width: u16,
+        expanded: &std::collections::HashSet<String>,
+        full: bool,
+    ) -> super::activity_parts::ActivityParts {
+        let mut parts = match &self.source {
+            Source::Code(block) => edit_projection(*block, width, expanded, full),
+            Source::Cells(cells) => combine_parts(
+                cells
+                    .iter()
+                    .map(|cell| edit_projection(*cell, width, expanded, full)),
+            ),
+            Source::Command(_) | Source::Output => Default::default(),
+        };
+        mark_lines(&mut parts.lines, OutputProvenance::Client);
+        parts
+    }
+
+    pub(crate) fn output(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        if self.outputs.is_empty() {
+            let mut lines = vec![client_notice("Exact output is unavailable in this record")];
+            if mode == OutputMode::Fmt {
+                let mut stored = match &self.source {
+                    Source::Command(call) => call.output.as_ref().map_or_else(Vec::new, |output| {
+                        super::output_provenance::client_lines(
+                            &output.transcript_lines().collect::<Vec<_>>().join("\n"),
+                            mode,
+                        )
+                    }),
+                    Source::Cells(cells) => cells
+                        .iter()
+                        .flat_map(|cell| {
+                            cell.as_any()
+                                .downcast_ref::<super::McpToolCallCell>()
+                                .map_or_else(
+                                    || {
+                                        if cell.as_any().is::<super::PatchHistoryCell>() {
+                                            Vec::new()
+                                        } else {
+                                            cell.expanded_output_lines(width, mode)
+                                        }
+                                    },
+                                    |mcp| mcp.stored_output_lines(width),
+                                )
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                mark_lines(&mut stored, OutputProvenance::Client);
+                lines.extend(stored);
+            }
+            return lines;
+        }
+        let mut lines = Vec::new();
+        for output in &self.outputs {
+            match output.captured_output() {
+                FunctionCallOutputBody::Text(text) => {
+                    lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                }
+                FunctionCallOutputBody::ContentItems(items) => {
+                    for item in items {
+                        match item {
+                            FunctionCallOutputContentItem::InputText { text } => {
+                                lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                            }
+                            FunctionCallOutputContentItem::InputImage { .. } => {
+                                lines.push(client_notice("Image attachment"))
+                            }
+                            FunctionCallOutputContentItem::InputAudio { .. } => {
+                                lines.push(client_notice("Audio attachment"))
+                            }
+                            FunctionCallOutputContentItem::EncryptedContent { .. } => {
+                                lines.push(client_notice("Encrypted content"))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if lines.is_empty() {
+            lines.push(client_notice("No output"));
+        }
+        lines
+    }
+}

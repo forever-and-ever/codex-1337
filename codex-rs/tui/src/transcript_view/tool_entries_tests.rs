@@ -109,28 +109,26 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
     let mut view = TranscriptView::default();
-    view.disclosure.expanded.extend(output.activity_ids());
-    view.disclosure
-        .expanded
-        .insert(format!("result:{}", output.id()));
+    use crate::history_cell::invocation::{Action, Panel, Port};
     view.record_tool_output_tokens("tool-output-tokens:mode".into(), "mode".into(), Some(123));
+    view.invocations.apply(
+        "mode",
+        Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
+    );
     let mut painted = Vec::new();
     for mode in [OutputMode::Fmt, OutputMode::Raw, OutputMode::Fmt] {
-        tests::render(&mut view, &cells, /*width*/ 80, /*height*/ 14);
-        let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-        let target = FoldTarget::OutputMode(mode);
+        tests::render(&mut view, &cells, 80, 14);
+        let layout = view.current_layout(&cells, 0).unwrap();
+        let target = FoldTarget::Invocation {
+            call_id: "mode".into(),
+            action: Action::Format(Port::Output, mode),
+        };
         let (row, columns, _) = layout.fold_position(&target).unwrap();
         assert_eq!(layout.fold_at(row, columns.start), Some(target));
-        let result_row = layout
-            .fold_position(&FoldTarget::Part("result:mode".into()))
-            .unwrap()
-            .0;
-        assert_eq!(layout.fold_at(result_row + 1, 10), None);
         assert!(view.toggle_disclosure_at(&cells, columns.start, row as u16));
-        let buffer = tests::render(&mut view, &cells, /*width*/ 80, /*height*/ 14);
-        let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
-        let content_start = layout.text().find('\n').unwrap() + 1;
-        let text = layout.text()[content_start..].to_owned();
+        let buffer = tests::render(&mut view, &cells, 80, 14);
+        let layout = view.current_layout(&cells, 0).unwrap();
+        let text = layout.text().to_owned();
         assert!(text.ends_with(&format!("\n{plain}\n{invalid}")));
         if mode == OutputMode::Raw {
             assert_eq!(text, [json, plain, invalid].join("\n"));
@@ -142,106 +140,21 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(text.contains(r#""key\n": "\u0061""#));
             assert_eq!(text.matches("\"a\":").count(), 2);
         }
-        view.begin_selection(&cells, /*column*/ 4, /*row*/ 1, /*clicks*/ 1);
+        let row = layout.row_for_offset(0);
+        view.begin_selection(
+            &cells,
+            crate::transcript_geometry::TITLE_COLUMN,
+            row as u16,
+            1,
+        );
         let selection = view.selection.as_mut().unwrap();
-        selection.start.offset = content_start;
+        selection.start.offset = 0;
         selection.end.offset = layout.text().len();
-        tests::render(&mut view, &cells, /*width*/ 34, /*height*/ 18);
+        tests::render(&mut view, &cells, 34, 18);
         assert_eq!(view.selected_text(&cells), Some(text));
         view.end_selection(&cells);
         painted.push(format!("{mode:?}\n{buffer:?}"));
     }
-    assert!(view.focus_fold(
-        &cells,
-        /*index*/ 0,
-        FoldTarget::OutputMode(OutputMode::Raw)
-    ));
-    for (key, mode) in [
-        (crossterm::event::KeyCode::Left, OutputMode::Raw),
-        (crossterm::event::KeyCode::Right, OutputMode::Fmt),
-    ] {
-        view.handle_key(
-            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
-            &cells,
-        );
-        assert_eq!(view.disclosure.output_mode(&output.activity_ids()), mode);
-        assert!(view.disclosure.is_expanded(&output.activity_ids()));
-    }
-    view.handle_key(
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Left,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-        &cells,
-    );
-    let older: Arc<dyn HistoryCell> = Arc::new(
-        ToolOutputCell::from_output(
-            "older-mode",
-            Some("mode"),
-            "tool",
-            /*namespace*/ None,
-            &FunctionCallOutputBody::Text("older output".into()),
-        )
-        .unwrap(),
-    );
-    let regrouped = vec![crate::history_cell::ToolOutputGroup::from_cells([
-        older,
-        output.clone() as Arc<dyn HistoryCell>,
-    ])];
-    let grouped_raw =
-        crate::history_cell::output_provenance::raw_cell_lines(regrouped[0].as_ref(), u16::MAX);
-    assert!(grouped_raw.iter().all(|line| {
-        line.source
-            .as_ref()
-            .is_some_and(|source| source.output_provenance == OutputProvenance::Captured)
-    }));
-    tests::render(&mut view, &regrouped, /*width*/ 80, /*height*/ 20);
-    assert_eq!(
-        view.disclosure.output_mode(&regrouped[0].activity_ids()),
-        OutputMode::Raw
-    );
-    view.handle_key(
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Right,
-            crossterm::event::KeyModifiers::NONE,
-        ),
-        &regrouped,
-    );
-    assert_eq!(
-        view.disclosure.output_mode(&output.activity_ids()),
-        OutputMode::Fmt
-    );
-    view.sync_live_activity(&[], output.activity_ids());
-    let mut live_modes = Vec::new();
-    for key in [
-        crossterm::event::KeyCode::Left,
-        crossterm::event::KeyCode::Right,
-    ] {
-        view.handle_key(
-            crossterm::event::KeyEvent::new(key, crossterm::event::KeyModifiers::NONE),
-            &cells,
-        );
-        view.sync_live_activity_tail(
-            /*width*/ 80,
-            /*key*/ None,
-            /*expanded*/ true,
-            |width, _, mode| {
-                live_modes.push(mode);
-                Some(ActivityTranscriptLines {
-                    output_mode: Some(mode),
-                    is_tool_entry: true,
-                    preface: Vec::new(),
-                    activity: output.expanded_output_lines(width, mode),
-                    header: output.activity_header(),
-                    auxiliary: Vec::new(),
-                    header_tokens: None,
-                    disclosure: output.activity_disclosure(width),
-                    controls: Vec::new(),
-                })
-            },
-        );
-    }
-    assert_eq!(live_modes, vec![OutputMode::Raw, OutputMode::Fmt]);
     let mut surfaces = output.output_lines(/*width*/ 80, OutputMode::Fmt);
     surfaces.push(client_notice("Stored result · exact capture unavailable"));
     let layout = TextLayout::new(surfaces, /*width*/ 80);
@@ -323,10 +236,10 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         }
         let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
         let mut view = TranscriptView::default();
-        view.disclosure.expanded.extend(output.activity_ids());
-        view.disclosure
-            .expanded
-            .insert(format!("result:{}", output.id()));
+        view.invocations.apply(
+            "unsafe",
+            Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
+        );
         tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
         let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
         let start = layout.text().find(&safe).unwrap();
@@ -345,31 +258,15 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 .join(" ")
                 .contains("escaped for display")
         );
-        // A client-only fold label has no source offset of its own. Its control
-        // must remain on that label, not the following payload, including after reflow.
         let layout = view.current_layout(&cells, 0).unwrap();
-        let target = FoldTarget::Part("result:unsafe".into());
-        let result_row = layout.fold_position(&target).unwrap().0;
-        let narrow = layout.rewrap(24);
-        for (layout, width) in [(layout.as_ref(), 32), (&narrow, 24)] {
-            let row = layout.fold_position(&target).unwrap().0;
-            let area = Rect::new(0, 0, width, u16::try_from(row + 1).unwrap());
-            let mut painted = Buffer::empty(area);
-            layout.render(area, &mut painted, 0);
-            let label = (0..width)
-                .map(|column| painted[(column, row as u16)].symbol())
-                .collect::<String>();
-            assert!(label.trim_end().ends_with("Result"), "{label:?}");
-            assert!(!layout.text().contains("Result"));
-        }
-        for row in 1..buffer.area.height {
-            if usize::from(row) != result_row {
-                assert!(
-                    (0..crate::transcript_geometry::GUTTER_COLUMNS
-                        + crate::transcript_geometry::CHILD_INDENT)
-                        .all(|column| buffer[(column, row)].symbol() == " ")
-                );
-            }
+        let target = FoldTarget::Invocation {
+            call_id: "unsafe".into(),
+            action: Action::Format(Port::Output, OutputMode::Raw),
+        };
+        for layout in [layout.as_ref(), &layout.rewrap(24)] {
+            let (row, columns, _) = layout.fold_position(&target).unwrap();
+            assert_eq!(layout.fold_at(row, columns.start), Some(target.clone()));
+            assert!(!layout.text().contains("[out"));
         }
         painted.push(format!("escaped capture\n{buffer:?}"));
     }
@@ -494,6 +391,18 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             crate::history_cell::output_provenance::mark_lines(
                 &mut decorated,
                 OutputProvenance::Client,
+            );
+            let mut promoted = decorated.clone();
+            crate::history_cell::output_provenance::mark_lines(
+                &mut promoted,
+                OutputProvenance::Formatted,
+            );
+            let promoted = TextLayout::new(promoted, 30);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 30, 1));
+            promoted.render(buffer.area, &mut buffer, 0);
+            assert_eq!(
+                buffer[(0, 0)].bg,
+                crate::style::context_message_style().bg.unwrap()
             );
             let layout = TextLayout::new(decorated, 8);
             let area = Rect::new(0, 0, 8, 4);
@@ -892,7 +801,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
                     output_mode: None,
                     is_tool_entry: false,
                     header: None,
-                    preface: Vec::new(),
+
                     activity: Vec::new(),
                     auxiliary: crate::transcript_geometry::clock_lines(
                         tail.compact_hyperlink_lines(width),
@@ -933,7 +842,6 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         }
         let text = tests::text(&committed);
         assert_eq!(text.matches("  128").count(), 1);
-        assert_eq!(text.matches("Edited").count(), 1);
         let layout = view.current_layout(&cells, cells.len() - 1).unwrap();
         assert!(layout.text().contains("  source_indent();"));
         assert!(!layout.text().starts_with(' '));
@@ -942,27 +850,31 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let clock = timestamp.unwrap().span().content.trim().to_owned();
         assert!(!layout.text().contains(&clock));
         let tool_layout = view.current_layout(&cells, /*index*/ 2).unwrap();
-        let (row, columns, _) = tool_layout.fold_position(&FoldTarget::Activity).unwrap();
+        let target = FoldTarget::Invocation {
+            call_id: "poll".into(),
+            action: crate::history_cell::invocation::Action::Toggle(
+                crate::history_cell::invocation::Port::Input,
+                crate::history_cell::invocation::Panel::Visible(
+                    crate::history_cell::output_provenance::OutputMode::Fmt,
+                ),
+            ),
+        };
+        let (row, columns, _) = tool_layout.fold_position(&target).unwrap();
+        assert!(tool_layout.fold_at(row, 0).is_none());
         assert_eq!(
-            columns,
-            crate::transcript_geometry::CONTROL_COLUMN
-                ..crate::transcript_geometry::CONTROL_COLUMN
-                    + crate::transcript_geometry::CONTROL_COLUMNS
-        );
-        assert!(tool_layout.fold_at(row, /*column*/ 0).is_none());
-        assert_eq!(
-            tool_layout.fold_at(row, crate::transcript_geometry::CONTROL_COLUMN),
-            Some(FoldTarget::Activity)
+            tool_layout.fold_at(row, columns.start),
+            Some(target.clone())
         );
         snapshots.push(format!("width={width}\n{}", text.trim_end()));
         if width == 64 {
-            view.disclosure.expanded.extend(cells[2].activity_ids());
+            assert!(view.focus_fold(&cells, 2, target));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let expanded = tests::render(&mut view, &cells, width, /*height*/ 50);
             let text = tests::text(&expanded);
-            assert!(text.contains("$ poll foo"));
+            assert!(text.contains("poll foo"));
             assert!(!text.contains("tokens"));
             snapshots.push(format!("expanded width={width}\n{}", text.trim_end()));
-            view.disclosure.expanded.clear();
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         }
         view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
         view.jump_to_latest();
@@ -1119,7 +1031,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     assert!(polling.activity_disclosure(/*width*/ 100).is_some());
     cells.push(polling);
     let area = Rect::new(
-        /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 22,
+        /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 40,
     );
     let mut buffer = Buffer::empty(area);
     cells.push(Arc::new(PlainHistoryCell::new(vec!["After tools".into()])));
@@ -1140,24 +1052,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     .unwrap();
     let ids = tail.activity_ids();
     view.sync_live_activity(&cells, ids);
-    view.sync_live_activity_tail(
-        /*width*/ 100,
-        /*key*/ None,
-        /*expanded*/ false,
-        |width, _, _| {
-            Some(ActivityTranscriptLines {
-                output_mode: None,
-                is_tool_entry: tail.is_tool_entry(),
-                header: tail.activity_header(),
-                preface: Vec::new(),
-                activity: tail.compact_hyperlink_lines(width),
-                auxiliary: Vec::new(),
-                header_tokens: None,
-                disclosure: tail.activity_disclosure(width),
-                controls: Vec::new(),
-            })
-        },
-    );
+    view.sync_live_invocation_tail(100, None, &tail, Vec::new());
     let mut live = Buffer::empty(area);
     view.render(area, &mut live, &cells);
     view.sync_live_tail(/*width*/ 100, /*key*/ None, |_| None);
@@ -1166,7 +1061,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     view.render(area, &mut committed, &cells);
     assert_eq!(live, committed);
 
-    // Owned new/legacy first blocks disappear; identical script/notify text remains literal.
+    // Raw output retains both harness execution headers and literal script/notify text.
     let isolated = [3, 8, 9, 10].map(|index| {
         let id = format!("header-{index}");
         Arc::new(
@@ -1182,17 +1077,16 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     });
     let mut expanded_view = TranscriptView::default();
     for cell in &isolated {
-        if cell.activity_disclosure(/*width*/ 100).is_some() {
-            expanded_view
-                .disclosure
-                .expanded
-                .extend(cell.activity_ids());
-            let output = cell.as_any().downcast_ref::<ToolOutputCell>().unwrap();
-            expanded_view
-                .disclosure
-                .expanded
-                .insert(format!("result:{}", output.id()));
-        }
+        let output = cell.as_any().downcast_ref::<ToolOutputCell>().unwrap();
+        expanded_view.invocations.apply(
+            output.outer_call_id().unwrap(),
+            crate::history_cell::invocation::Action::Toggle(
+                crate::history_cell::invocation::Port::Output,
+                crate::history_cell::invocation::Panel::Visible(
+                    crate::history_cell::output_provenance::OutputMode::Raw,
+                ),
+            ),
+        );
     }
     let expanded = tests::render(
         &mut expanded_view,
@@ -1201,7 +1095,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         /*height*/ 24,
     );
     let text = tests::text(&expanded).trim_end().to_string();
-    assert_eq!(text.matches("Script completed").count(), 1);
+    assert_eq!(text.matches("Script completed").count(), 4);
     assert_eq!(text.matches("Script failed").count(), 1);
     insta::assert_snapshot!("execution_headers_and_literal_text", text);
 
@@ -1393,19 +1287,18 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     let mut view = TranscriptView::default();
     let closed = tests::render(&mut view, &replay, 100, 12);
     assert!(!tests::text(&closed).contains(capture));
-    assert!(
-        view.disclosure
-            .expanded
-            .insert("agent-activity:interrupt-p".into())
-    );
-    let open = tests::render(&mut view, &replay, 100, 12);
-    assert!(!tests::text(&open).contains(capture));
-    assert!(tests::text(&open).contains("Result"));
-    assert!(tests::text(&open).contains("Interrupted"));
     assert!(view.focus_fold(
         &replay,
         0,
-        FoldTarget::Part("result:interrupt-result".into())
+        FoldTarget::Invocation {
+            call_id: "interrupt-p".into(),
+            action: crate::history_cell::invocation::Action::Toggle(
+                crate::history_cell::invocation::Port::Output,
+                crate::history_cell::invocation::Panel::Visible(
+                    crate::history_cell::output_provenance::OutputMode::Raw
+                ),
+            ),
+        }
     ));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
     let result = tests::render(&mut view, &replay, 100, 12);

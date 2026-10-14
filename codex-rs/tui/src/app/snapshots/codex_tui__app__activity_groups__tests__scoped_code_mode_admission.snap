@@ -3,22 +3,16 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "examples.join(\"\\n\\n\")"
 ---
 Held reading
-        [+]   • Calling (Code Mode ρξωζ)
-                  • Command
-                      Read child-a.rs (whole file)
-              • Calling (Code Mode βεθε)
-                  • Inspect child-b
+            Code Mode (ρξωζ) · running                  [in]             [out]
+            Code Mode (βεθε) · running                  [in [raw] [fmt]] [out]
+              └ cua_repl.js({"title":"Inspect child-b"})
 
 Return to live
               • Before script
 
-        [+]   • Called (Code Mode ρξωζ)  10
-                  • Command
-                      Read child-a.rs (whole file)
-        [+]         Result
-        [+]         Result
-              • Calling (Code Mode βεθε)
-                  • Inspect child-b
+            Code Mode (ρξωζ)                        [in]             [out]              10
+            Code Mode (βεθε) · running                  [in [raw] [fmt]] [out]
+              └ cua_repl.js({"title":"Inspect child-b"})
         [+]   • Command
                   Waited for ρξωζ
 

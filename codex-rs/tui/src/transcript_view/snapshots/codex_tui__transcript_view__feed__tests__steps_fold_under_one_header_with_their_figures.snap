@@ -6,24 +6,24 @@ unfolded
         [-] User
               › Fix the failing test
 
-  HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
-            codex-tui --lib transcript_view::feed
+  HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
               • I'll run the tests first.
-        [+]   test parse ... FAILED
-  HH:MM [-] Injection · environment_context          ≈84
+            Stored execution · exact input unavailable
+            cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM [-] Injection · environment_context                                   ≈84
                 Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
-  HH:MM [-] Response                                 154    120     34           (thought, output, self)
+  HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
               • Fixed the parser.
 
-        [-] User                                       3
+        [-] User                                                                3
               › Thanks
 
-  HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
-        [+]   • Command git status
+  HH:MM     Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+            git status
 
         [-] Response
               • No step billed this reply.
@@ -42,26 +42,26 @@ script
         [-] User
               › Fix the failing test
 
-  HH:MM [-] Command · failed cargo test -p          1342    120     34    ≈1188  (thought, output, self)
-            codex-tui --lib transcript_view::feed
+  HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
               • I'll run the tests first.
-        [+]   test parse ... FAILED
-  HH:MM [-] Injection · environment_context          ≈84
+            Stored execution · exact input unavailable
+            cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM [-] Injection · environment_context                                   ≈84
                 Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
-  HH:MM [-] Response                                 154    120     34           (thought, output, self)
+  HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
               • Fixed the parser.
 
-        [-] User                                       3
+        [-] User                                                                3
               › Thanks
 
-  HH:MM [-] Called (Code Mode ζσξζ) [js]             154    120     34        …  (thought, output, self)
-              const status = await tools.exec_command({ cmd: "git status" });
-              text(status.output);
-        [+]   • Command git status
+  HH:MM     Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+            const status = await tools.exec_command({ cmd: "git status" });
+            text(status.output);
+
 
         [-] Response
               • No step billed this reply.
@@ -78,20 +78,21 @@ folded
         [-] User
               › Fix the failing test
 
-  HH:MM [+] Command · failed cargo test -p codex…   1342    120     34    ≈1188  (thought, output, self)
+  HH:MM     Command · failed (1)        [in]             [out]               1342    120     34    ≈1188
+        [+]   • Thought · Summary
               • I'll run the tests first.
-  HH:MM [-] Injection · environment_context          ≈84
+  HH:MM [-] Injection · environment_context                                   ≈84
                 Context [Raw] [Fmt]
                 <environment_context>cwd</environment_context>
 
-  HH:MM [-] Response                                 154    120     34           (thought, output, self)
+  HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
               • Fixed the parser.
 
-        [-] User                                       3
+        [-] User                                                                3
               › Thanks
 
-  HH:MM [+] Called (Code Mode ζσξζ)                  154    120     34        …  (thought, output, self)
+  HH:MM     Code Mode (ζσξζ)            [in]             [out]                154    120     34        …
 
         [-] Response
               • No step billed this reply.

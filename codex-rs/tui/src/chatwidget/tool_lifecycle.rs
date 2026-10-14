@@ -13,14 +13,16 @@ impl ChatWidget {
         id: String,
         changes: HashMap<PathBuf, FileChange>,
     ) {
-        for cell in history_cell::patch_apply_cells(
-            id,
-            changes,
-            &self.config.cwd,
-            codex_app_server_protocol::PatchApplyStatus::InProgress,
-        ) {
-            self.add_to_history(cell);
-        }
+        self.add_to_history(history_cell::ToolOutputGroup::new(
+            history_cell::patch_apply_cells(
+                id,
+                changes,
+                &self.config.cwd,
+                codex_app_server_protocol::PatchApplyStatus::InProgress,
+            )
+            .into_iter()
+            .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>),
+        ));
     }
 
     pub(super) fn on_view_image_tool_call(
@@ -209,14 +211,16 @@ impl ChatWidget {
         else {
             return;
         };
-        for cell in history_cell::patch_apply_cells(
-            id,
-            file_update_changes_to_display(changes),
-            &self.config.cwd,
-            status,
-        ) {
-            self.add_to_history(cell);
-        }
+        self.add_to_history(history_cell::ToolOutputGroup::new(
+            history_cell::patch_apply_cells(
+                id,
+                file_update_changes_to_display(changes),
+                &self.config.cwd,
+                status,
+            )
+            .into_iter()
+            .map(|cell| Arc::new(cell) as Arc<dyn HistoryCell>),
+        ));
     }
 
     pub(crate) fn handle_mcp_tool_call_started_now(&mut self, item: ThreadItem) {

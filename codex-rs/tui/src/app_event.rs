@@ -1210,6 +1210,10 @@ pub(crate) enum AppEvent {
         call_id: String,
         tokens: Option<u64>,
     },
+    RecordToolInput {
+        thread_id: ThreadId,
+        input: codex_protocol::tool_input::ToolInput,
+    },
     RecordStepAdmission {
         thread_id: ThreadId,
         item: codex_app_server_protocol::StepAdmissionItem,

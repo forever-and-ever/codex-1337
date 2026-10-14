@@ -98,6 +98,7 @@ export type { ThreadMemoryMode } from "./ThreadMemoryMode";
 export type { Tool } from "./Tool";
 export type { ToolCallRejection } from "./ToolCallRejection";
 export type { ToolExposureSurface } from "./ToolExposureSurface";
+export type { ToolName } from "./ToolName";
 export type { Verbosity } from "./Verbosity";
 export type { WebSearchAction } from "./WebSearchAction";
 export type { WebSearchContextSize } from "./WebSearchContextSize";

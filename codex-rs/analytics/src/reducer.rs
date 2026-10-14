@@ -519,6 +519,7 @@ impl TurnToolCounts {
             | ThreadItem::Thought { .. }
             | ThreadItem::Preamble { .. }
             | ThreadItem::StepAdmission(_)
+            | ThreadItem::ToolInput(_)
             | ThreadItem::Arrival(_)
             | ThreadItem::ImageView { .. }
             | ThreadItem::Sleep(_)
@@ -2688,6 +2689,7 @@ pub(crate) fn tracked_tool_item_id(item: &ThreadItem) -> Option<&str> {
         | ThreadItem::Thought { .. }
         | ThreadItem::Preamble { .. }
         | ThreadItem::StepAdmission(_)
+        | ThreadItem::ToolInput(_)
         | ThreadItem::Arrival(_)
         | ThreadItem::SubAgentActivity { .. }
         | ThreadItem::ImageView { .. }

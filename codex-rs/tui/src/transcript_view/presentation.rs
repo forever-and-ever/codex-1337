@@ -27,6 +27,10 @@ impl TranscriptView {
         let Some(cell) = cells.get(index) else {
             return false;
         };
-        empty_return(cell.as_ref()) && self.activity_output_tokens(&cell.activity_ids()) == Some(0)
+        empty_return(cell.as_ref())
+            && !crate::history_cell::invocation::collect(cell.as_ref())
+                .iter()
+                .any(|call| self.invocations.input(call.id).is_some())
+            && self.activity_output_tokens(&cell.activity_ids()) == Some(0)
     }
 }

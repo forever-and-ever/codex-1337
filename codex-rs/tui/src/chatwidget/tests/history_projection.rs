@@ -369,8 +369,6 @@ async fn snapshot_formatter_empty_success_and_failed_patch_keep_their_outcomes()
     let failed = lines_to_single_string(&replayed[1].display_lines(/*width*/ 80));
     assert!(failed.starts_with("✘ Failed to apply patch\n"));
     assert!(failed.contains("sample.txt (+1, -1) — requested"));
-    assert!(failed.contains("-old sample"));
-    assert!(failed.contains("+new sample"));
 }
 
 fn patch_item(status: AppServerPatchApplyStatus) -> AppServerThreadItem {

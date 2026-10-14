@@ -90,6 +90,23 @@ impl AgentToolHistoryCell {
         }
     }
 
+    pub(crate) fn invocation_status(&self) -> Option<String> {
+        self.wait().map(|wait| match &wait.state {
+            WaitState::Running => "waiting".into(),
+            WaitState::Completed(None) => "outcome unavailable".into(),
+            WaitState::Completed(Some(completion)) => {
+                let outcome = match completion.outcome {
+                    AgentWaitOutcome::TimedOut => "timed out",
+                    AgentWaitOutcome::MailboxActivity => "updates available",
+                    AgentWaitOutcome::Steered => "new input arrived",
+                };
+                format!("{outcome} · {} ms", completion.elapsed_ms)
+            }
+            WaitState::Failed => "failed".into(),
+            WaitState::Interrupted => "interrupted".into(),
+        })
+    }
+
     pub(crate) fn resume_for(cell: &dyn HistoryCell) -> Option<&super::notice::NoticePresentation> {
         let cell = cell
             .as_any()

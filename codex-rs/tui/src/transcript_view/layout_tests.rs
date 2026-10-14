@@ -43,7 +43,7 @@ fn tool_output_disclosure_shows_fixed_token_column() {
                 &Line::from("Called"),
             )),
             controls: Vec::new(),
-            preface: Vec::new(),
+
             activity: vec![HyperlinkLine::from("Called tool")],
             auxiliary: Vec::new(),
             disclosure: Some(ActivityDisclosure::Generic),
@@ -103,7 +103,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
                 is_tool_entry: true,
                 header: mcp.activity_header(),
                 controls: Vec::new(),
-                preface: Vec::new(),
+
                 activity: if expanded {
                     mcp.expanded_hyperlink_lines(crate::transcript_geometry::content_width(
                         width,
@@ -156,7 +156,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
                 &Line::from(vec!["• ".into(), "Ran".into()]),
             )),
             controls: Vec::new(),
-            preface: Vec::new(),
+
             activity: vec![
                 Line::from(vec!["• ".into(), "Ran".bold(), " echo 界 👩‍💻".into()]).into(),
             ],

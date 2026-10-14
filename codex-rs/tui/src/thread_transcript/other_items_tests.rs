@@ -76,15 +76,15 @@ fn completed_patch_restores_rich_diff_and_styles() {
         &|_| crate::multi_agents::AgentMetadata::default(),
     );
 
-    assert_eq!(
-        actual
-            .iter()
-            .map(|cell| cell.transcript_hyperlink_lines(/*width*/ 80))
-            .collect::<Vec<_>>(),
+    assert_eq!(actual.len(), 1);
+    let expected = history_cell::ToolOutputGroup::from_cells(
         expected
-            .iter()
-            .map(|cell| cell.transcript_hyperlink_lines(/*width*/ 80))
-            .collect::<Vec<_>>(),
+            .into_iter()
+            .map(|cell| std::sync::Arc::new(cell) as std::sync::Arc<dyn HistoryCell>),
+    );
+    assert_eq!(
+        actual[0].transcript_hyperlink_lines(80),
+        expected.transcript_hyperlink_lines(80)
     );
 }
 

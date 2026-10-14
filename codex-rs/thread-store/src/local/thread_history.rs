@@ -536,6 +536,7 @@ WHERE thread_id = ?
             | ThreadItem::Thought { .. }
             | ThreadItem::Preamble { .. }
             | ThreadItem::StepAdmission(_)
+            | ThreadItem::ToolInput(_)
             | ThreadItem::Arrival(_)
             | ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }

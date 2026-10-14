@@ -1222,7 +1222,6 @@ async fn live_app_server_file_change_item_started_preserves_changes() {
     insta::assert_snapshot!(transcript, @"
     • Patch application pending
         foo.txt (+1, -0) — requested
-        1 +hello
     ");
 }
 

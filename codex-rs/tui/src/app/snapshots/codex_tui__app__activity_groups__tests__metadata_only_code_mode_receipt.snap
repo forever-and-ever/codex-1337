@@ -1,90 +1,69 @@
 ---
 source: tui/src/app/activity_groups_tests.rs
-expression: "format!(\"Collapsed\\n{}\\nBlock expanded\\n{}\\nFile expanded\\n{}\\nTranscript\\n{}\\n{}\",\ntext(&closed.lines), text(&opened.lines), text(&diff.lines),\ntext(&expected[0].transcript_hyperlink_lines(90)), file_snapshots.join(\"\\n\"))"
+expression: "file_snapshots.join(\"\\n\")"
 ---
-Collapsed
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-    • Edited
-        alpha.rs (+1, -0)
-        beta.rs (+0, -1)
-Block expanded
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-    • Edited
-        alpha.rs (+1, -0)
-        beta.rs (+0, -1)
-  Stored result · exact capture unavailable
-File expanded
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-            1 -old
-            1 +new
-    • Edited
-        alpha.rs (+1, -0)
-        beta.rs (+0, -1)
-  Stored result · exact capture unavailable
-Transcript
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-            1 -old
-            1 +new
-    • Edited
-        alpha.rs (+1, -0)
-        1 +created body
-        beta.rs (+0, -1)
-        1 -deleted body
-  Stored result · exact capture unavailable
-Independent file 0
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-            1 -old
-            1 +new
-    • Edited
-        alpha.rs (+1, -0)
-        beta.rs (+0, -1)
-Independent file 1
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-    • Edited
-        alpha.rs (+1, -0)
-        1 +created body
-        beta.rs (+0, -1)
-Independent file 2
-• Called (Code Mode ωρρλ)
-    • semedit.edit({})
-        Edited
-            /workspace/receipt.rs (+1, -1)
-    • Edited
-        alpha.rs (+1, -0)
-        beta.rs (+0, -1)
-        1 -deleted body
 Painted collapsed
-        [+]   • Called (Code Mode ωρρλ)
-                  • semedit.edit({})
-                      Edited
-        [+]               /workspace/receipt.rs (+1, -1)
-                  • Edited
-        [+]           alpha.rs (+1, -0)
-        [+]           beta.rs (+0, -1)
+            Code Mode (ωρρλ)                            [in [raw] [fmt]] [out]
+              └ semedit.edit({})
+
+                Edited
+        [+]         /workspace/receipt.rs (+1, -1)
+            • Edited
+        [+]     alpha.rs (+1, -0)
+        [+]     beta.rs (+0, -1)
 Clicked native file
-        [+]   • Called (Code Mode ωρρλ)
-                  • semedit.edit({})
-                      Edited
-        [+]               /workspace/receipt.rs (+1, -1)
-                  • Edited
-        [-]           alpha.rs (+1, -0)
-                      1 +created body
-        [+]           beta.rs (+0, -1)
+            Code Mode (ωρρλ)                            [in [raw] [fmt]] [out]
+              └ semedit.edit({})
+
+                Edited
+        [+]         /workspace/receipt.rs (+1, -1)
+            • Edited
+        [-]     alpha.rs (+1, -0)
+                1 +created body
+        [+]     beta.rs (+0, -1)
+Receipt expanded
+            Code Mode (ωρρλ)                            [in [raw] [fmt]] [out]
+              └ semedit.edit({})
+
+                Edited
+        [-]         /workspace/receipt.rs (+1, -1)
+                    1 -old
+                    1 +new
+            • Edited
+        [-]     alpha.rs (+1, -0)
+                1 +created body
+        [+]     beta.rs (+0, -1)
+Both ports hidden
+            Code Mode (ωρρλ)                            [in]             [out]
+                Edited
+        [-]         /workspace/receipt.rs (+1, -1)
+                    1 -old
+                    1 +new
+            • Edited
+        [-]     alpha.rs (+1, -0)
+                1 +created body
+        [+]     beta.rs (+0, -1)
+Raw output
+            Code Mode (ωρρλ)                            [in]             [out [raw] [fmt]]
+            Exact output is unavailable in this record
+
+                Edited
+        [-]         /workspace/receipt.rs (+1, -1)
+                    1 -old
+                    1 +new
+            • Edited
+        [-]     alpha.rs (+1, -0)
+                1 +created body
+        [+]     beta.rs (+0, -1)
+Formatted output
+            Code Mode (ωρρλ)                            [in]             [out [raw] [fmt]]
+            Exact output is unavailable in this record
+
+                Edited
+        [-]         /workspace/receipt.rs (+1, -1)
+                    1 -old
+                    1 +new
+            • Edited
+        [-]     alpha.rs (+1, -0)
+                1 +created body
+        [+]     beta.rs (+0, -1)

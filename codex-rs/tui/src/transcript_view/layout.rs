@@ -29,9 +29,6 @@ const LEGIBLE_ROW: usize = 16;
 pub(crate) struct ActivityTranscriptLines {
     pub(crate) output_mode: Option<OutputMode>,
     pub(crate) is_tool_entry: bool,
-    /// Rows above the activity's own, which neither clip nor hold its control: the script a
-    /// Code Mode member's header shows.
-    pub(crate) preface: Vec<HyperlinkLine>,
     pub(crate) activity: Vec<HyperlinkLine>,
     pub(crate) header: Option<crate::history_cell::activity_parts::ActivityHeader>,
     pub(crate) auxiliary: Vec<HyperlinkLine>,
@@ -112,9 +109,7 @@ pub(super) fn activity_layout(
         }
     }
     let has_details = !lines.activity.is_empty() && (expanded || lines.disclosure.is_some());
-    let lead = lines.preface.len();
-    let mut rows = lines.preface;
-    rows.extend(lines.activity);
+    let mut rows = lines.activity;
     rows.extend(lines.auxiliary);
     let mut layout = TextLayout::new(
         crate::transcript_geometry::gutter_lines(rows, columns),
@@ -124,15 +119,14 @@ pub(super) fn activity_layout(
     if has_details {
         layout = layout.with_leading_disclosure_control(
             if expanded { "[-]" } else { "[+]" }.into(),
-            lead + control_line,
+            control_line,
         );
     }
-    for mut part in lines.controls {
-        part.line += lead;
+    for part in lines.controls {
         layout = layout.with_part_control(part);
     }
     if let (Some(mode), Some(header)) = (lines.output_mode, lines.header) {
-        let offset = layout.line_offset(lead) + header.source_offset;
+        let offset = layout.line_offset(0) + header.source_offset;
         layout = layout.with_output_controls(offset, mode);
     }
     layout
@@ -328,7 +322,7 @@ impl TranscriptView {
             && previous.is_some_and(|previous| {
                 ToolOutputGroup::shares_patch_heading(cell.as_ref(), previous.as_ref())
             });
-        if manually_expanded {
+        if manually_expanded && crate::history_cell::invocation::collect(cell.as_ref()).is_empty() {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
         let separated = match &seat.header {
@@ -356,6 +350,9 @@ impl TranscriptView {
         let expanded_parts = &self.disclosure.expanded;
         let feed = &self.feed;
         let bills = &self.step_bills;
+        let invocations = &self.invocations;
+        let output_tokens = &self.tool_output_tokens;
+        let input_open = self.feed.input_open(cells, index);
         Some(self.cache.get(cell, width, presentation, || {
             let content_width = crate::transcript_geometry::content_width(width, mode);
             // A member's clock is its item's header's.
@@ -379,7 +376,7 @@ impl TranscriptView {
                             && cell.has_formatted_output())
                         .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
-                        preface: Vec::new(),
+
                         activity: crate::transcript_geometry::clock_lines(parts.lines, timestamp),
                         header: parts.header,
                         auxiliary: Vec::new(),
@@ -399,7 +396,7 @@ impl TranscriptView {
                             && cell.has_formatted_output())
                         .then_some(output_mode),
                         is_tool_entry: cell.is_tool_entry(),
-                        preface: Vec::new(),
+
                         activity: crate::transcript_geometry::clock_lines(activity, timestamp),
                         header: if expanded {
                             cell.expanded_activity_header()
@@ -417,113 +414,131 @@ impl TranscriptView {
                 }
                 lines
             };
-            let mut layout = match seat.content {
-                Content::Hidden => TextLayout::new(Vec::new(), width),
-                Content::Body => {
-                    let parts =
-                        feed::entry_body(cell.as_ref(), content_width, expanded_parts, output_mode)
-                            .expect("feed body requires a feed entry");
-                    let mut layout =
-                        TextLayout::new(crate::transcript_geometry::rich_lines(parts.lines), width);
-                    if cell.has_formatted_output()
-                        && parts.controls.last().is_none_or(|control| control.expanded)
-                    {
-                        let offset = parts
-                            .controls
-                            .last()
-                            .map_or(0, |control| layout.line_offset(control.line))
-                            + parts.header.map_or(0, |header| header.source_offset);
-                        layout = layout.with_output_controls(offset, output_mode);
-                    }
-                    for control in parts.controls {
-                        layout = layout.with_part_control(control);
-                    }
-                    layout
-                }
-                // Detailed content and markerless cards share the gutter without acquiring
-                // synthetic markers, disclosure identities, or expansion controls.
-                _ if !disclosure => {
-                    let columns = if seat.content == Content::Beheaded {
-                        crate::transcript_geometry::NESTED_COLUMNS
-                    } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
-                        crate::transcript_geometry::TITLE_COLUMN
-                            - crate::transcript_geometry::MARKER_COLUMNS
-                    } else {
-                        crate::transcript_geometry::GUTTER_COLUMNS
-                    };
-                    let content_width = if mode == HistoryRenderMode::Rich
-                        && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
-                    {
-                        width.saturating_sub(columns).max(/*other*/ 1)
-                    } else {
-                        content_width
-                    };
-                    let mut lines = crate::history_cell::fullscreen_session_lines(
-                        cell.as_ref(),
-                        content_width,
-                        detailed,
-                        mode,
-                    );
-                    if mode == HistoryRenderMode::Rich {
-                        if seat.content == Content::Beheaded {
-                            feed::behead(&mut lines);
-                        }
-                        TextLayout::new(
-                            crate::transcript_geometry::gutter_lines(
-                                crate::transcript_geometry::clock_lines(lines, timestamp),
-                                columns,
-                            ),
+            let invocation =
+                (mode == HistoryRenderMode::Rich && !detailed && seat.content != Content::Hidden)
+                    .then(|| {
+                        invocations.layout(
+                            cell.as_ref(),
                             width,
+                            input_open,
+                            seat.content,
+                            full_content,
+                            output_tokens,
+                            expanded_parts,
+                            Vec::new(),
                         )
-                        .with_header_tokens(
-                            header_tokens,
-                            if detailed {
-                                TokenSeat::Gutter
-                            } else {
-                                TokenSeat::Trailing
-                            },
+                    })
+                    .flatten();
+            let mut layout = if let Some(layout) = invocation {
+                layout
+            } else {
+                match seat.content {
+                    Content::Hidden => TextLayout::new(Vec::new(), width),
+                    Content::Body => {
+                        let parts = feed::entry_body(
+                            cell.as_ref(),
+                            content_width,
+                            expanded_parts,
+                            output_mode,
                         )
-                    } else {
-                        TextLayout::new(lines, width)
+                        .expect("feed body requires a feed entry");
+                        let mut layout = TextLayout::new(
+                            crate::transcript_geometry::rich_lines(parts.lines),
+                            width,
+                        );
+                        if cell.has_formatted_output()
+                            && parts.controls.last().is_none_or(|control| control.expanded)
+                        {
+                            let offset = parts
+                                .controls
+                                .last()
+                                .map_or(0, |control| layout.line_offset(control.line))
+                                + parts.header.map_or(0, |header| header.source_offset);
+                            layout = layout.with_output_controls(offset, output_mode);
+                        }
+                        for control in parts.controls {
+                            layout = layout.with_part_control(control);
+                        }
+                        layout
                     }
-                }
-                Content::Beheaded => {
-                    let mut lines = activity(expanded, expanded_parts);
-                    yield_head(&mut lines);
-                    // Its header was all it showed: the first row of its details that can hold
-                    // a control stands in, holding the one that shows the rest.
-                    if lines.activity.is_empty() && lines.disclosure.is_some() {
-                        let mut details = expanded_parts.clone();
-                        details.extend(ids.iter().cloned());
-                        let mut unfolded = activity(/*expanded*/ true, &details);
-                        yield_head(&mut unfolded);
-                        lines.activity = unfolded
-                            .activity
-                            .into_iter()
-                            .find(holds_control)
-                            .into_iter()
-                            .collect();
+                    // Detailed content and markerless cards share the gutter without acquiring
+                    // synthetic markers, disclosure identities, or expansion controls.
+                    _ if !disclosure => {
+                        let columns = if seat.content == Content::Beheaded {
+                            crate::transcript_geometry::NESTED_COLUMNS
+                        } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
+                            crate::transcript_geometry::TITLE_COLUMN
+                                - crate::transcript_geometry::MARKER_COLUMNS
+                        } else {
+                            crate::transcript_geometry::GUTTER_COLUMNS
+                        };
+                        let content_width = if mode == HistoryRenderMode::Rich
+                            && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
+                        {
+                            width.saturating_sub(columns).max(/*other*/ 1)
+                        } else {
+                            content_width
+                        };
+                        let mut lines = crate::history_cell::fullscreen_session_lines(
+                            cell.as_ref(),
+                            content_width,
+                            detailed,
+                            mode,
+                        );
+                        if mode == HistoryRenderMode::Rich {
+                            if seat.content == Content::Beheaded {
+                                feed::behead(&mut lines);
+                            }
+                            TextLayout::new(
+                                crate::transcript_geometry::gutter_lines(
+                                    crate::transcript_geometry::clock_lines(lines, timestamp),
+                                    columns,
+                                ),
+                                width,
+                            )
+                            .with_header_tokens(
+                                header_tokens,
+                                if detailed {
+                                    TokenSeat::Gutter
+                                } else {
+                                    TokenSeat::Trailing
+                                },
+                            )
+                        } else {
+                            TextLayout::new(lines, width)
+                        }
                     }
-                    // A Code Mode block's script leads its rows while its header shows it.
-                    lines.preface = cell
-                        .as_any()
-                        .downcast_ref::<crate::history_cell::CodeModeCell>()
-                        .filter(|block| expanded_parts.contains(&block.script_fold()))
-                        .and_then(crate::history_cell::CodeModeCell::script_lines)
-                        .unwrap_or_default();
-                    activity_layout(
-                        lines,
-                        crate::transcript_geometry::NESTED_COLUMNS,
+                    Content::Beheaded => {
+                        let mut lines = activity(expanded, expanded_parts);
+                        yield_head(&mut lines);
+                        // Its header was all it showed: the first row of its details that can hold
+                        // a control stands in, holding the one that shows the rest.
+                        if lines.activity.is_empty() && lines.disclosure.is_some() {
+                            let mut details = expanded_parts.clone();
+                            details.extend(ids.iter().cloned());
+                            let mut unfolded = activity(/*expanded*/ true, &details);
+                            yield_head(&mut unfolded);
+                            lines.activity = unfolded
+                                .activity
+                                .into_iter()
+                                .find(holds_control)
+                                .into_iter()
+                                .collect();
+                        }
+                        activity_layout(
+                            lines,
+                            crate::transcript_geometry::NESTED_COLUMNS,
+                            width,
+                            expanded,
+                        )
+                    }
+                    Content::Own | Content::Loose => activity_layout(
+                        activity(expanded, expanded_parts),
+                        crate::transcript_geometry::GUTTER_COLUMNS,
                         width,
                         expanded,
-                    )
+                    ),
                 }
-                Content::Own | Content::Loose => activity_layout(
-                    activity(expanded, expanded_parts),
-                    crate::transcript_geometry::GUTTER_COLUMNS,
-                    width,
-                    expanded,
-                ),
             };
             if let Some(header) = &seat.header {
                 layout = layout.with_fold_header(feed.header_rows(
@@ -532,6 +547,8 @@ impl TranscriptView {
                     bills,
                     expanded_parts,
                     output_mode,
+                    invocations,
+                    full_content,
                     width,
                 ));
             }

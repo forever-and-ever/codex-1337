@@ -22417,6 +22417,38 @@
           "type": "object"
         },
         {
+          "properties": {
+            "callId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "$ref": "#/definitions/ToolName"
+            },
+            "payload": {
+              "$ref": "#/definitions/ToolInputPayload"
+            },
+            "type": {
+              "enum": [
+                "toolInput"
+              ],
+              "title": "ToolInputThreadItemType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "callId",
+            "id",
+            "name",
+            "payload",
+            "type"
+          ],
+          "title": "ToolInputThreadItem",
+          "type": "object"
+        },
+        {
           "description": "Human-only bill of one model request and what its step admitted, not model input.",
           "properties": {
             "admission": {
@@ -26715,6 +26747,64 @@
           "type": "string"
         }
       ]
+    },
+    "ToolInputPayload": {
+      "oneOf": [
+        {
+          "properties": {
+            "format": {
+              "enum": [
+                "json"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "format": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "text"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolName": {
+      "description": "Identifies a callable tool, preserving the namespace split when the model provides one.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
     },
     "ToolPolicyCeiling": {
       "description": "A restriction captured at thread startup, independent of tool exposure.",

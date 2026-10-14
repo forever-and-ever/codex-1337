@@ -45,6 +45,7 @@ fn is_activity_metadata(item: &ThreadItem) -> bool {
         ThreadItem::Reasoning { .. }
             | ThreadItem::ToolOutputTokens { .. }
             | ThreadItem::StepAdmission(_)
+            | ThreadItem::ToolInput(_)
     ) || crate::history_cell::ToolOutputCell::is_item(item)
 }
 

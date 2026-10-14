@@ -498,6 +498,10 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_response_item(&mut self, item: &codex_protocol::models::ResponseItem) {
+        if let Some(input) = codex_protocol::tool_input::ToolInput::capture(item) {
+            self.upsert_item_in_current_turn(ThreadItem::ToolInput(input));
+            return;
+        }
         let codex_protocol::models::ResponseItem::Message {
             role, content, id, ..
         } = item
@@ -665,6 +669,7 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::ToolOutputTokens(_)
             | codex_protocol::items::TurnItem::Preamble(_)
             | codex_protocol::items::TurnItem::StepAdmission(_)
+            | codex_protocol::items::TurnItem::ToolInput(_)
             | codex_protocol::items::TurnItem::Arrival(_)
             | codex_protocol::items::TurnItem::CommandExecution(_)
             | codex_protocol::items::TurnItem::DynamicToolCall(_)

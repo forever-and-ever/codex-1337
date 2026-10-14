@@ -94,7 +94,10 @@ impl LogicalLine {
     }
 }
 
-pub(super) fn slice_line(line: &Line<'_>, range: Range<usize>) -> Line<'static> {
+pub(in crate::transcript_view) fn slice_line(
+    line: &Line<'_>,
+    range: Range<usize>,
+) -> Line<'static> {
     let mut offset = 0;
     let spans = line
         .spans

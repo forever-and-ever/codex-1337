@@ -677,6 +677,8 @@ export type { ThreadUsageBreakdownGroup } from "./ThreadUsageBreakdownGroup";
 export type { ThreadWarmingStoppedNotification } from "./ThreadWarmingStoppedNotification";
 export type { ThreadWorkStatusUpdatedNotification } from "./ThreadWorkStatusUpdatedNotification";
 export type { TokenUsageBreakdown } from "./TokenUsageBreakdown";
+export type { ToolInput } from "./ToolInput";
+export type { ToolInputPayload } from "./ToolInputPayload";
 export type { ToolPolicyCeiling } from "./ToolPolicyCeiling";
 export type { ToolRequestUserInputAnswer } from "./ToolRequestUserInputAnswer";
 export type { ToolRequestUserInputOption } from "./ToolRequestUserInputOption";

@@ -31,10 +31,16 @@ impl TranscriptView {
     }
 
     pub(crate) fn activity_output_tokens(&self, ids: &[String]) -> Option<u64> {
+        self.tool_output_tokens.for_ids(ids)
+    }
+}
+
+impl ToolOutputTokens {
+    pub(super) fn for_ids(&self, ids: &[String]) -> Option<u64> {
         if ids.is_empty() {
             return None;
         }
-        let counts = &self.tool_output_tokens;
+        let counts = self;
         let mut outputs = HashSet::new();
         // Returned batches own the bill. Nested execution IDs have no model-visible output of
         // their own; direct-call measurements, when present, still join the same deduplicated sum.

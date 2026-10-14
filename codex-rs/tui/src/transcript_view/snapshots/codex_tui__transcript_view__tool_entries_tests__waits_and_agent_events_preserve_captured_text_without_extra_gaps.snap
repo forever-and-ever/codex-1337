@@ -4,21 +4,21 @@ expression: rendered
 ---
               Before tools
 
-              • Started `/root/worker`
-        [+]   • Returned  47
-        [+]   • Returned  18
-              • Interacted with `/root/worker`
-        [+]   • Waited  18
-        [+]   • Waited  47
-        [+]   • Returned  47
-              • Interrupted `/root/worker`
-        [+]   • Waited  13
-        [+]   • Waited  13
-        [+]   • Returned  4
-              • Waited · finished  7
-        [+]   • Returned  14
-        [+]   • Returned  7
+            Command                                               [in]             [out]
+            Command (exec)                                    [in]             [out]              47
+            Command (exec)                                    [in]             [out]              18
+            Command                                               [in]             [out]
+            Command (wait)                                    [in]             [out]              18
+            Command (wait)                                    [in]             [out]              47
+            Command (exec)                                    [in]             [out]              47
+            Command                                               [in]             [out]
+            Command (wait)                                    [in]             [out]              13
+            Command (wait)                                    [in]             [out]              13
+            Command (exec)                                     [in]             [out]              4
+            Command (wait)                                     [in]             [out]              7
+            Command (exec)                                    [in]             [out]              14
+            Command (exec)                                     [in]             [out]              7
               • Completed `/root/worker`
-        [+]   • Waited
+            Command (exec)                                        [in]             [out]
 
               After tools

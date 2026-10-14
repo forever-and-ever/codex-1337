@@ -27,6 +27,7 @@ pub(crate) use code_mode::reunite_code_mode;
 pub(crate) use code_mode::split_code_mode_members;
 pub(crate) use tool_item::ToolItemCell;
 pub(crate) mod activity_parts;
+pub(crate) mod invocation;
 pub(crate) mod output_provenance;
 use output_provenance::OutputMode;
 mod delegation;
