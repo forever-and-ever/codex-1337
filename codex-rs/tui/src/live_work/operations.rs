@@ -6,7 +6,9 @@ use super::Key;
 use super::Row;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Source;
+use crate::history_cell::code_mode_owner_label;
 use crate::history_cell::insert_code_mode_fact;
+use crate::history_cell::sanitize_user_text;
 use codex_app_server_protocol::CodeModeEvent;
 use codex_app_server_protocol::CodeModeItem;
 use codex_app_server_protocol::CodeModeOwner;
@@ -433,6 +435,9 @@ impl Operations {
                         work: Pending::Call("Tool call".to_owned()),
                     });
             }
+            if let CodeModeEvent::WaitCompleted { call_id, .. } = &fact.event {
+                finish_call(&mut execution.children, call_id);
+            }
             if !matches!(fact.event, CodeModeEvent::ToolCall { .. }) {
                 insert_code_mode_fact(&mut execution.facts, fact.clone());
             }
@@ -471,13 +476,21 @@ impl Operations {
                 if !self.accepts_turn(turn) {
                     return None;
                 }
-                revision_row(thread_id, id, id, revision)
+                revision_row(
+                    thread_id,
+                    Key::Operation {
+                        thread_id,
+                        id: id.clone(),
+                    },
+                    id,
+                    revision,
+                )
             })
             .collect::<Vec<_>>();
         rows.extend(
             self.executions
                 .values()
-                .filter_map(|execution| execution.row()),
+                .flat_map(|execution| execution.rows()),
         );
         rows
     }
@@ -490,7 +503,7 @@ impl Execution {
             .any(|fact| matches!(fact.event, CodeModeEvent::Finished { .. }))
     }
 
-    fn row(&self) -> Option<Row> {
+    fn rows(&self) -> Vec<Row> {
         let owner = &self.owner;
         let finished = self.finished();
         let mut children = self
@@ -499,46 +512,75 @@ impl Execution {
             .filter_map(|(id, revision)| {
                 revision_row(
                     owner.thread_id,
-                    &format!("code:{}:{id}", owner.exec_call_id),
+                    Key::CodeModeCall {
+                        thread_id: owner.thread_id,
+                        exec_call_id: owner.exec_call_id.clone(),
+                        call_id: id.clone(),
+                    },
                     id,
                     revision,
                 )
             })
             .collect::<Vec<_>>();
-        if !finished {
-            for fact in &self.facts {
-                if let CodeModeEvent::WaitStarted { call_id, target } = &fact.event
-                    && !self.facts.iter().any(|fact| matches!(&fact.event,
-                        CodeModeEvent::WaitCompleted { call_id: completed, .. } if completed == call_id)) {
-                    let target = target.as_ref().unwrap_or(owner);
-                    children.push(row(owner.thread_id,
-                        format!("code:{}:wait:{call_id}", owner.exec_call_id), call_id,
-                        format!("Waiting for Code Mode · {}", target.cell_id.as_ref().unwrap_or(&target.exec_call_id)),
-                        vec![line(format!("Agent {} · call {}", target.thread_id, target.exec_call_id))]));
+        let waits = self
+            .facts
+            .iter()
+            .filter_map(|fact| match &fact.event {
+                CodeModeEvent::WaitStarted { call_id, target }
+                    if !finished
+                        && !self.facts.iter().any(|fact| {
+                            matches!(&fact.event,
+                    CodeModeEvent::WaitCompleted { call_id: completed, .. } if completed == call_id)
+                        }) =>
+                {
+                    Some((call_id, target))
                 }
-            }
-        }
-        if children.is_empty()
-            && (finished
-                || !self
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        children.retain(|child| {
+            !matches!(&child.key, Key::CodeModeCall { call_id, .. }
+            if waits.iter().any(|(waiting, _)| *waiting == call_id))
+        });
+        let running = !children.is_empty()
+            || (!finished
+                && self
                     .facts
                     .iter()
-                    .any(|fact| matches!(fact.event, CodeModeEvent::Started { .. })))
-        {
-            return None;
+                    .any(|fact| matches!(fact.event, CodeModeEvent::Started { .. }))
+                && !waits.iter().any(|(_, target)| target.is_some()));
+        for (call_id, target) in waits {
+            let target = target.as_ref().unwrap_or(owner);
+            children.push(row(
+                owner.thread_id,
+                Key::CodeModeWait {
+                    thread_id: owner.thread_id,
+                    exec_call_id: owner.exec_call_id.clone(),
+                    call_id: call_id.clone(),
+                },
+                call_id,
+                format!("Waiting for ({})", code_mode_owner_label(target)),
+                vec![line(format!(
+                    "Agent {} · call {}",
+                    target.thread_id, target.exec_call_id
+                ))],
+            ));
+        }
+        if !running {
+            return children;
         }
         let mut row = row(
             owner.thread_id,
-            format!("code:{}", owner.exec_call_id),
+            Key::CodeMode {
+                thread_id: owner.thread_id,
+                exec_call_id: owner.exec_call_id.clone(),
+            },
             &owner.exec_call_id,
-            format!(
-                "Code Mode · {}",
-                owner.cell_id.as_deref().unwrap_or("starting")
-            ),
+            format!("Running ({})", code_mode_owner_label(owner)),
             vec![line(format!("Call {}", owner.exec_call_id))],
         );
         row.children = children;
-        Some(row)
+        vec![row]
     }
 }
 
@@ -618,7 +660,7 @@ fn pending(item: &ThreadItem, started: Option<bool>) -> Option<bool> {
     })
 }
 
-fn revision_row(thread: ThreadId, key: &str, id: &str, revision: &Revision) -> Option<Row> {
+fn revision_row(thread: ThreadId, key: Key, id: &str, revision: &Revision) -> Option<Row> {
     let Revision::Pending { work, .. } = revision else {
         return None;
     };
@@ -669,18 +711,18 @@ fn revision_row(thread: ThreadId, key: &str, id: &str, revision: &Revision) -> O
             _ => return None,
         },
     };
-    Some(row(thread, key.to_owned(), id, summary, details))
+    Some(row(thread, key, id, summary, details))
 }
 
 fn row(
     thread_id: ThreadId,
-    id: String,
+    key: Key,
     item_id: &str,
     summary: String,
     details: Vec<Line<'static>>,
 ) -> Row {
     Row {
-        key: Key::Operation { thread_id, id },
+        key,
         summary: line(summary),
         details,
         children: Vec::new(),
@@ -692,15 +734,5 @@ fn row(
 }
 
 fn line(text: String) -> Line<'static> {
-    Line::from(
-        text.chars()
-            .flat_map(|ch| {
-                if ch.is_control() {
-                    ch.escape_default().collect::<Vec<_>>()
-                } else {
-                    vec![ch]
-                }
-            })
-            .collect::<String>(),
-    )
+    Line::from(sanitize_user_text(text.into()).into_owned())
 }

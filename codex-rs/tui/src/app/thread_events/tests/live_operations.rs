@@ -107,13 +107,30 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             target: Some(target.clone()),
         },
     );
+    store.push_notification(event(
+        thread_id,
+        "turn-2",
+        fact(
+            "wait-call",
+            CodeModeEvent::ToolCall {
+                call_id: "wait".to_owned(),
+            },
+        ),
+        false,
+    ));
     store.push_notification(event(thread_id, "turn-2", wait.clone(), false));
     let rows = store.operations.rows(thread_id);
     let execution = rows.iter().find(|row| row.children.len() == 2).unwrap();
     let wait_row = execution
         .children
         .iter()
-        .find(|row| row.summary.to_string().contains("target-cell"))
+        .find(|row| {
+            row.summary.to_string()
+                == format!(
+                    "Waiting for ({})",
+                    crate::history_cell::code_mode_owner_label(&target)
+                )
+        })
         .unwrap();
     assert!(
         wait_row.details[0]
@@ -121,6 +138,26 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             .contains(&target.thread_id.to_string())
     );
 
+    assert_eq!(
+        execution.summary.to_string(),
+        format!(
+            "Running ({})",
+            crate::history_cell::code_mode_owner_label(&owner)
+        )
+    );
+    store.push_notification(event(
+        thread_id,
+        "turn-2",
+        owned(command("completed")),
+        false,
+    ));
+    let waiting = store.operations.rows(thread_id);
+    assert!(
+        waiting
+            .iter()
+            .all(|row| !row.summary.to_string().starts_with("Running"))
+    );
+    assert!(waiting.iter().any(|row| row.summary == wait_row.summary));
     store.push_notification(event(
         thread_id,
         "turn-2",
@@ -134,12 +171,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         false,
     ));
     store.push_notification(event(thread_id, "turn-2", wait, false));
-    store.push_notification(event(
-        thread_id,
-        "turn-2",
-        owned(command("completed")),
-        false,
-    ));
+
     store.push_notification(event(
         thread_id,
         "turn-1",

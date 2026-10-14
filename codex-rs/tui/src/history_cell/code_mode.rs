@@ -97,7 +97,7 @@ fn label(identity: &str) -> String {
         .collect()
 }
 
-fn owner_label(owner: &CodeModeOwner) -> String {
+pub(crate) fn owner_label(owner: &CodeModeOwner) -> String {
     label(&format!("{}:{}", owner.thread_id, owner.exec_call_id))
 }
 
