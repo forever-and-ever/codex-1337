@@ -306,13 +306,15 @@ impl LiveWorkView {
                     .as_ref()
                     .map(Focus::key)
                     .filter(|key| self.find(key).is_some_and(Row::has_disclosure))
-                    .map_or("  ", |key| {
-                        if self.open.contains(key) {
-                            "▾ "
-                        } else {
-                            "▸ "
-                        }
-                    });
+                    .map_or_else(
+                        || " ".repeat(crate::render::disclosure::glyph(false).len() + 1),
+                        |key| {
+                            format!(
+                                "{} ",
+                                crate::render::disclosure::glyph(self.open.contains(key))
+                            )
+                        },
+                    );
                 line = Line::styled(
                     format!("{disclosure}No longer active"),
                     secondary_text_style(),
@@ -320,7 +322,10 @@ impl LiveWorkView {
             } else if !available {
                 line = Line::styled("  No longer available", secondary_text_style());
             } else if self.focused && work_line.focus.as_ref() == self.selected.as_ref() {
-                line = line.patch_style(accent_style().underlined());
+                line = line.patch_style(match &work_line.focus {
+                    Some(Focus::Row(_)) => crate::render::disclosure::style(true),
+                    _ => accent_style().underlined(),
+                });
             }
             line.render(line_area, buf);
             if available && let Some(focus) = &work_line.focus {
@@ -531,11 +536,7 @@ impl LiveWorkView {
             return;
         }
         let expanded = self.open.contains(&row.key);
-        let disclosure = match (row.has_disclosure(), expanded) {
-            (true, true) => "▾ ",
-            (true, false) => "▸ ",
-            (false, _) => "  ",
-        };
+        let disclosure = row.has_disclosure().then_some(expanded);
         let summary = match row.key {
             Key::Group(group) => {
                 let count = row
@@ -548,7 +549,7 @@ impl LiveWorkView {
                 } else {
                     format!("{} ({count})", group.title())
                 };
-                Line::styled(title, accent_style())
+                Line::styled(title, crate::render::header::style())
             }
             _ => row.summary.clone(),
         };
@@ -568,13 +569,13 @@ impl LiveWorkView {
             return;
         }
         for detail in &row.details {
-            append_lines(detail.clone(), (depth + 1) * 2, "  ", width, None, lines);
+            append_lines(detail.clone(), (depth + 1) * 2, None, width, None, lines);
         }
         for action in &row.actions {
             append_lines(
                 Line::styled(action.label(), accent_style().underlined()),
                 (depth + 1) * 2,
-                "  ",
+                None,
                 width,
                 Some(Focus::Action {
                     key: row.key.clone(),
@@ -592,7 +593,7 @@ impl LiveWorkView {
 fn append_lines(
     mut line: Line<'static>,
     indent: usize,
-    disclosure: &'static str,
+    disclosure: Option<bool>,
     width: u16,
     focus: Option<Focus>,
     lines: &mut Vec<WorkLine>,
@@ -602,14 +603,21 @@ fn append_lines(
     for span in &mut line.spans {
         span.style = span.style.bg(Color::Reset);
     }
-    let indent = indent.min(usize::from(width).saturating_sub(3));
-    let prefix = Line::from(vec![
-        Span::raw(" ".repeat(indent)),
-        Span::styled(disclosure, secondary_text_style()),
-    ]);
+    let control_width = crate::render::disclosure::glyph(false).len() + 1;
+    let indent = indent.min(usize::from(width).saturating_sub(control_width + 1));
+    let mut prefix = Line::from(" ".repeat(indent));
+    if let Some(expanded) = disclosure {
+        prefix.push_span(Span::styled(
+            crate::render::disclosure::glyph(expanded),
+            crate::render::disclosure::style(false),
+        ));
+        prefix.push_span(" ");
+    } else {
+        prefix.push_span(" ".repeat(control_width));
+    }
     let options = RtOptions::new(usize::from(width))
         .initial_indent(prefix)
-        .subsequent_indent(Line::from(" ".repeat(indent + 2)));
+        .subsequent_indent(Line::from(" ".repeat(indent + control_width)));
     for line in word_wrap_lines([line], options) {
         lines.push(WorkLine {
             line,
@@ -799,12 +807,34 @@ mod tests {
         let mut buf = Buffer::empty(area);
         view.render(area, &mut buf);
         for group in [Group::Work, Group::Processes, Group::Alarms] {
-            assert!(
-                view.hits
-                    .iter()
-                    .any(|(_, focus)| focus == &Focus::Row(Key::Group(group)))
-            );
+            let (hit, _) = view
+                .hits
+                .iter()
+                .find(|(_, focus)| focus == &Focus::Row(Key::Group(group)))
+                .unwrap();
+            let glyph: String = (hit.x..hit.x + 3)
+                .map(|x| buf[(x, hit.y)].symbol())
+                .collect();
+            assert_eq!(glyph, if group == Group::Work { "[-]" } else { "[+]" });
+            let title = &buf[(hit.x + 4, hit.y)];
+            assert_eq!(title.fg, crate::render::header::style().fg.unwrap());
+            assert!(title.modifier.contains(ratatui::style::Modifier::BOLD));
         }
+        let (hit, _) = view
+            .hits
+            .iter()
+            .find(|(_, focus)| Some(focus) == view.selected.as_ref())
+            .unwrap();
+        let selected = &buf[(hit.x + 2, hit.y)];
+        assert_eq!(
+            selected.fg,
+            crate::render::disclosure::style(true).fg.unwrap()
+        );
+        assert!(
+            selected
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD | ratatui::style::Modifier::UNDERLINED)
+        );
         let (hit, _) = view
             .hits
             .iter()

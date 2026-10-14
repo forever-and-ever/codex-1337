@@ -462,11 +462,17 @@ impl TextLayout {
                 ) && control.row == start_row + usize::from(screen_row)
             }) {
                 let columns = self.control_columns(control);
-                let mut label = Line::from(control.label.as_str()).dim();
+                let mut label = Line::from(control.label.as_str()).style(
+                    if matches!(control.target, FoldTarget::OutputMode(_)) {
+                        Style::default().dim()
+                    } else {
+                        crate::render::disclosure::style(false)
+                    },
+                );
                 if let FoldTarget::OutputMode(mode) = control.target
                     && self.output_mode == Some(mode)
                 {
-                    label = label.style(crate::style::accent_style().underlined());
+                    label = label.style(crate::render::disclosure::style(true));
                 }
                 buf.set_line(
                     area.x + columns.start,

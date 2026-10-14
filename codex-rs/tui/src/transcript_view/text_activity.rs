@@ -114,7 +114,7 @@ impl TextLayout {
         part: crate::history_cell::activity_parts::PartControl,
     ) -> Self {
         self.with_leading_disclosure_on_line(
-            if part.expanded { "[-]" } else { "[+]" }.into(),
+            crate::render::disclosure::glyph(part.expanded).into(),
             part.line,
             FoldTarget::Part(part.id),
         )
@@ -151,7 +151,7 @@ impl TextLayout {
             layout.disclosure = true;
             layout.disclosure_controls.push(DisclosureControl {
                 target: target.clone(),
-                label: if *unfolded { "[-]" } else { "[+]" }.into(),
+                label: crate::render::disclosure::glyph(*unfolded).into(),
                 source_offset: 0,
                 row: 0,
                 placement: DisclosurePlacement::Fold,

@@ -3,7 +3,6 @@
 
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::output_provenance::OutputMode;
-use crate::style::accent_color;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -12,8 +11,6 @@ use crate::key_hint::KeyBindingListExt;
 use crate::keymap::ListAction;
 use crate::keymap::RuntimeKeymap;
 use crossterm::event::KeyEvent;
-use ratatui::style::Modifier;
-use ratatui::style::Style;
 
 use super::*;
 
@@ -157,13 +154,10 @@ impl TranscriptView {
                     columns.end - columns.start,
                     /*height*/ 1,
                 ),
-                Style::default()
-                    .fg(accent_color())
-                    .bold()
-                    .remove_modifier(Modifier::DIM),
+                crate::render::disclosure::style(true),
             );
         } else if *target == FoldTarget::Activity && row == usize::from(layout.separated) {
-            buf.set_style(area, Style::default().underlined());
+            buf.set_style(area, crate::render::disclosure::style(true));
         }
     }
 

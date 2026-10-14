@@ -575,7 +575,7 @@ impl Execution {
                     call_id: call_id.clone(),
                 },
                 call_id,
-                format!("Waiting for ({})", code_mode_owner_label(target)),
+                line(format!("Waiting for ({})", code_mode_owner_label(target))),
                 vec![line(format!(
                     "Agent {} · call {}",
                     target.thread_id, target.exec_call_id
@@ -592,7 +592,10 @@ impl Execution {
                 exec_call_id: owner.exec_call_id.clone(),
             },
             &owner.exec_call_id,
-            format!("Running ({})", code_mode_owner_label(owner)),
+            crate::render::header::leading(
+                "Running",
+                line(format!(" ({})", code_mode_owner_label(owner))),
+            ),
             vec![line(format!("Call {}", owner.exec_call_id))],
         );
         row.children = children;
@@ -727,19 +730,19 @@ fn revision_row(thread: ThreadId, key: Key, id: &str, revision: &Revision) -> Op
             _ => return None,
         },
     };
-    Some(row(thread, key, id, summary, details))
+    Some(row(thread, key, id, line(summary), details))
 }
 
 fn row(
     thread_id: ThreadId,
     key: Key,
     item_id: &str,
-    summary: String,
+    summary: Line<'static>,
     details: Vec<Line<'static>>,
 ) -> Row {
     Row {
         key,
-        summary: line(summary),
+        summary,
         details,
         children: Vec::new(),
         actions: vec![Action::RevealCall {

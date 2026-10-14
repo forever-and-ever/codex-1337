@@ -798,7 +798,7 @@ impl FeedIndex {
             } else {
                 (
                     vec![truncate_line_with_ellipsis_if_overflow(
-                        call.title(invocations.input(call.id)),
+                        crate::render::header::paint(call.title(invocations.input(call.id))),
                         title_width,
                     )],
                     Vec::new(),
@@ -815,7 +815,7 @@ impl FeedIndex {
                     title.push_span(" ");
                     let start = title.width() as u16;
                     title.push_span(if mode == choice {
-                        Span::styled(label, crate::style::accent_style().underlined())
+                        Span::styled(label, crate::render::disclosure::style(true))
                     } else {
                         label.dim()
                     });
@@ -885,7 +885,7 @@ impl FeedIndex {
         let item = &self.items[header.item];
         let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
         let response = || Line::from("Response".bold());
-        match (&item.kind, header.title) {
+        let title = match (&item.kind, header.title) {
             (_, Title::Command) => Line::from("Command".bold()),
             (Kind::User { .. }, _) => Line::from("User".bold()),
             (Kind::Arrival | Kind::Preamble, _) => header
@@ -900,7 +900,8 @@ impl FeedIndex {
                     .unwrap_or_else(response)
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
-        }
+        };
+        crate::render::header::paint(title)
     }
 
     fn figures(

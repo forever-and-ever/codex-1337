@@ -124,7 +124,7 @@ impl Invocations {
         let width = width.saturating_sub(bill_width).max(1);
         let formatted = call.formatted_input(self.input(call.id), width).is_some();
         let ports = self.ports(call, open, formatted, full);
-        let mut title = call.title(self.input(call.id));
+        let mut title = crate::render::header::paint(call.title(self.input(call.id)));
         let mut controls = Vec::new();
         let mut strip = Line::default();
         for (port, label, available) in
@@ -137,7 +137,7 @@ impl Invocations {
             let start = strip.width() as u16;
             strip.push_span("[");
             strip.push_span(if panel.visible() {
-                Span::styled(label, crate::style::accent_style().underlined())
+                Span::styled(label, crate::render::disclosure::style(true))
             } else {
                 label.dim()
             });
@@ -157,10 +157,7 @@ impl Invocations {
                     strip.push_span(if !enabled {
                         Span::raw(" ".repeat(label.len() + 2))
                     } else if panel.mode() == mode {
-                        Span::styled(
-                            format!("[{label}]"),
-                            crate::style::accent_style().underlined(),
-                        )
+                        Span::styled(format!("[{label}]"), crate::render::disclosure::style(true))
                     } else {
                         format!("[{label}]").dim()
                     });

@@ -1,5 +1,7 @@
 use ratatui::layout::Rect;
 
+pub(crate) mod disclosure;
+pub(crate) mod header;
 pub(crate) mod highlight;
 pub(crate) mod line_utils;
 mod model_themes;

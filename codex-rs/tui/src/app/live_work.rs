@@ -73,10 +73,10 @@ fn text(value: impl Into<String>) -> Line<'static> {
         .into()
 }
 
-fn row(key: Key, summary: impl Into<String>) -> Row {
+fn row(key: Key, summary: Line<'static>) -> Row {
     Row {
         key,
-        summary: text(summary),
+        summary,
         details: Vec::new(),
         children: Vec::new(),
         actions: Vec::new(),
@@ -271,10 +271,12 @@ impl App {
                     thread_id: owner,
                     id: process.process_id.clone(),
                 },
-                format!(
-                    "{} · {owner_name} · {}",
+                crate::render::header::leading(
                     if stopping { "Stopping" } else { "Running" },
-                    process.command.lines().next().unwrap_or_default()
+                    text(format!(
+                        " · {owner_name} · {}",
+                        process.command.lines().next().unwrap_or_default()
+                    )),
                 ),
             );
             item.details = process.command.lines().map(text).collect();
@@ -300,15 +302,15 @@ impl App {
             Processes::Unloaded | Processes::Fetching { .. }
                 if processes.is_empty() && scope.show_empty_processes =>
             {
-                processes.push(row(Key::ProcessStatus, "Loading processes…"));
+                processes.push(row(Key::ProcessStatus, text("Loading processes…")));
             }
             Processes::Unavailable { error, .. } => {
-                let mut status = row(Key::ProcessStatus, "Process inventory unavailable");
+                let mut status = row(Key::ProcessStatus, text("Process inventory unavailable"));
                 status.details.push(text(error.clone()));
                 processes.push(status);
             }
             Processes::Ready { items, .. } if items.is_empty() && scope.show_empty_processes => {
-                processes.push(row(Key::ProcessStatus, "No running processes"));
+                processes.push(row(Key::ProcessStatus, text("No running processes")));
             }
             _ => {}
         }

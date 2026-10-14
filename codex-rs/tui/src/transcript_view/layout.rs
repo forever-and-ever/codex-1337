@@ -118,7 +118,7 @@ pub(super) fn activity_layout(
     .with_header_tokens(lines.header_tokens, TokenSeat::Trailing);
     if has_details {
         layout = layout.with_leading_disclosure_control(
-            if expanded { "[-]" } else { "[+]" }.into(),
+            crate::render::disclosure::glyph(expanded).into(),
             control_line,
         );
     }
