@@ -246,6 +246,7 @@ impl StatusIndicator<'_> {
             now.saturating_duration_since(row.header_started_at),
             shimmer,
         ));
+        crate::shimmers::dress_status(&mut spans, &row.header, elapsed_duration, progress, shimmer);
         if !spans.is_empty() {
             spans.push(" ".into());
         }
@@ -314,6 +315,7 @@ impl Renderable for StatusIndicator<'_> {
                 .schedule_frame_in(Duration::from_millis(interval_ms));
         }
         Paragraph::new(Text::from(self.lines(area.width))).render(area, buf);
+        crate::shimmers::shade_status(area, buf);
     }
 }
 
