@@ -45,14 +45,10 @@ impl Group {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Key {
     Group(Group),
-    Phase,
     ProcessStatus,
     Operation { thread_id: ThreadId, id: String },
     Process { thread_id: ThreadId, id: String },
     Alarm { thread_id: ThreadId, id: String },
-    Requests,
-    Queue,
-    Startup,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -65,9 +61,9 @@ pub(crate) enum Action {
         thread_id: ThreadId,
         id: String,
     },
-    OpenQuestions,
-    CleanProcesses {
+    TerminateProcess {
         thread_id: ThreadId,
+        process_id: String,
     },
 }
 
@@ -76,8 +72,7 @@ impl Action {
         match self {
             Self::RevealCall { .. } => "Show in history",
             Self::DisarmAlarm { .. } => "Disarm alarm",
-            Self::OpenQuestions => "Answer questions",
-            Self::CleanProcesses { .. } => "Stop all for this owner",
+            Self::TerminateProcess { .. } => "Stop process",
         }
     }
 }
@@ -155,6 +150,11 @@ struct WorkLine {
     group_header: bool,
 }
 
+struct Hover {
+    position: Position,
+    pending_rows: Option<Vec<Row>>,
+}
+
 #[derive(Default)]
 pub(crate) struct LiveWorkView {
     rows: Vec<Row>,
@@ -162,10 +162,15 @@ pub(crate) struct LiveWorkView {
     selected: Option<Focus>,
     focused: bool,
     hits: Vec<(Rect, Focus)>,
+    hover: Option<Hover>,
 }
 
 impl LiveWorkView {
     pub(crate) fn set_rows(&mut self, mut rows: Vec<Row>) {
+        if let Some(hover) = &mut self.hover {
+            hover.pending_rows = Some(rows);
+            return;
+        }
         rows.retain(Row::is_visible);
         let mut keys = HashSet::new();
         for row in &rows {
@@ -206,6 +211,7 @@ impl LiveWorkView {
     }
 
     pub(crate) fn focus_group(&mut self, group: Group) {
+        self.release_hover();
         let key = Key::Group(group);
         if self.find(&key).is_some_and(Row::is_visible) {
             self.open.insert(key.clone());
@@ -216,6 +222,7 @@ impl LiveWorkView {
     }
 
     pub(crate) fn blur(&mut self) {
+        self.release_hover();
         self.focused = false;
     }
 
@@ -252,11 +259,35 @@ impl LiveWorkView {
             }
             let line_area = Rect::new(area.x, y, area.width, 1);
             let mut line = work_line.line.clone();
-            if self.focused && work_line.focus.as_ref() == self.selected.as_ref() {
+            let available = match &work_line.focus {
+                Some(Focus::Action { key, action }) => self.action_available(key, action),
+                _ => true,
+            };
+            let completed = matches!(&work_line.focus, Some(Focus::Row(key)) if !self.current_rows().iter().any(|row| row.find(key).is_some()));
+            if completed {
+                let disclosure = work_line
+                    .focus
+                    .as_ref()
+                    .map(Focus::key)
+                    .filter(|key| self.find(key).is_some_and(Row::has_disclosure))
+                    .map_or("  ", |key| {
+                        if self.open.contains(key) {
+                            "▾ "
+                        } else {
+                            "▸ "
+                        }
+                    });
+                line = Line::styled(
+                    format!("{disclosure}No longer active"),
+                    secondary_text_style(),
+                );
+            } else if !available {
+                line = Line::styled("  No longer available", secondary_text_style());
+            } else if self.focused && work_line.focus.as_ref() == self.selected.as_ref() {
                 line = line.patch_style(accent_style().underlined());
             }
             line.render(line_area, buf);
-            if let Some(focus) = &work_line.focus {
+            if available && let Some(focus) = &work_line.focus {
                 self.hits.push((line_area, focus.clone()));
             }
             y = y.saturating_add(1);
@@ -273,22 +304,49 @@ impl LiveWorkView {
     }
 
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent) -> Interaction {
+        let position = Position::new(event.column, event.row);
+        if event.kind == MouseEventKind::Moved {
+            if self
+                .hover
+                .as_ref()
+                .is_some_and(|hover| hover.position == position)
+            {
+                return Interaction::Ignored;
+            }
+            let over_control = self.hits.iter().any(|(area, _)| area.contains(position));
+            let updated = self.release_hover();
+            if over_control {
+                self.hover = Some(Hover {
+                    position,
+                    pending_rows: None,
+                });
+            }
+            return if updated {
+                Interaction::Consumed
+            } else {
+                Interaction::Ignored
+            };
+        }
         if event.kind != MouseEventKind::Down(MouseButton::Left) {
             return Interaction::Ignored;
         }
-        let Some((_, focus)) = self
-            .hits
-            .iter()
-            .find(|(area, _)| area.contains(Position::new(event.column, event.row)))
-        else {
+        let Some((_, focus)) = self.hits.iter().find(|(area, _)| area.contains(position)) else {
+            self.blur();
             return Interaction::Ignored;
         };
         self.selected = Some(focus.clone());
         self.focused = true;
+        if self.hover.is_none() {
+            self.hover = Some(Hover {
+                position,
+                pending_rows: None,
+            });
+        }
         self.activate()
     }
 
     pub(crate) fn handle_key(&mut self, event: KeyEvent) -> Interaction {
+        self.release_hover();
         if !self.focused
             || event.kind == KeyEventKind::Release
             || event
@@ -329,9 +387,35 @@ impl LiveWorkView {
         self.rows.iter().find_map(|row| row.parent(key))
     }
 
+    fn release_hover(&mut self) -> bool {
+        let pending = self.hover.take().and_then(|hover| hover.pending_rows);
+        if let Some(rows) = pending {
+            self.set_rows(rows);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn current_rows(&self) -> &[Row] {
+        self.hover
+            .as_ref()
+            .and_then(|hover| hover.pending_rows.as_deref())
+            .unwrap_or(&self.rows)
+    }
+
+    fn action_available(&self, key: &Key, action: &Action) -> bool {
+        self.current_rows()
+            .iter()
+            .find_map(|row| row.find(key))
+            .is_some_and(|row| row.actions.contains(action))
+    }
+
     fn activate(&mut self) -> Interaction {
         match self.selected.clone() {
-            Some(Focus::Action { action, .. }) => return Interaction::Action(action),
+            Some(Focus::Action { key, action }) if self.action_available(&key, &action) => {
+                return Interaction::Action(action);
+            }
             Some(Focus::Row(key)) if self.find(&key).is_some_and(Row::has_disclosure) => {
                 if !self.open.remove(&key) {
                     self.open.insert(key);
@@ -527,7 +611,10 @@ mod tests {
                 "running",
                 Vec::new(),
             );
-            process.actions.push(Action::CleanProcesses { thread_id });
+            process.actions.push(Action::TerminateProcess {
+                thread_id,
+                process_id: "session".into(),
+            });
             process
         };
         let inventory = |children| vec![row(Key::Group(Group::Processes), "", children)];
@@ -540,7 +627,10 @@ mod tests {
         view.set_rows(inventory(vec![process(other), process(owner)]));
         assert_eq!(
             view.handle_key(KeyCode::Enter.into()),
-            Interaction::Action(Action::CleanProcesses { thread_id: owner }),
+            Interaction::Action(Action::TerminateProcess {
+                thread_id: owner,
+                process_id: "session".into()
+            }),
         );
         let height = view.desired_height(60);
         view.set_rows(inventory(vec![process(owner)]));
@@ -552,12 +642,76 @@ mod tests {
         );
         view.handle_key(KeyCode::Left.into());
         assert_eq!(view.desired_height(60), 1);
+
+        // Hover holds geometry, but never keeps a completed process actionable.
+        view.set_rows(inventory(vec![process(owner), process(other)]));
+        view.focus_group(Group::Processes);
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
+        let area = Rect::new(0, 0, 60, 10);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let (hit, target) = view
+            .hits
+            .iter()
+            .find(|(_, focus)| matches!(focus, Focus::Action { .. }))
+            .unwrap()
+            .clone();
+        let mouse = |kind, column, row| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        view.handle_mouse(mouse(MouseEventKind::Moved, hit.x, hit.y));
+        view.set_rows(inventory(vec![process(other), process(owner)]));
+        view.render(area, &mut buf);
+        assert!(
+            view.hits
+                .iter()
+                .any(|(area, focus)| *area == hit && *focus == target)
+        );
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y)),
+            Interaction::Action(Action::TerminateProcess {
+                thread_id: owner,
+                process_id: "session".into()
+            })
+        );
+        view.set_rows(inventory(vec![process(other)]));
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), hit.x, hit.y)),
+            Interaction::Consumed
+        );
+        view.render(area, &mut buf);
+        assert!(!view.hits.iter().any(|(_, focus)| *focus == target));
+        let display: String = buf.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(display.contains("No longer active"));
+        assert_eq!(
+            view.handle_mouse(mouse(MouseEventKind::Moved, area.right(), area.bottom())),
+            Interaction::Consumed
+        );
+        assert!(
+            view.find(&Key::Process {
+                thread_id: owner,
+                id: "session".into()
+            })
+            .is_none()
+        );
     }
 
     #[test]
     fn terminal_clipping_keeps_group_folds_and_rejects_stale_mouse_targets() {
         // Expanding Work must not strand the folds that reclaim terminal space.
-        let mut phase = row(Key::Phase, "Running", Vec::new());
+        let mut phase = row(
+            Key::Operation {
+                thread_id: ThreadId::new(),
+                id: "call".into(),
+            },
+            "Running",
+            Vec::new(),
+        );
         phase.details = (0..20).map(|n| Line::from(format!("detail {n}"))).collect();
         let mut view = LiveWorkView::default();
         view.set_rows(vec![
@@ -570,7 +724,14 @@ mod tests {
             row(
                 Key::Group(Group::Alarms),
                 "",
-                vec![row(Key::Startup, "Armed", Vec::new())],
+                vec![row(
+                    Key::Alarm {
+                        thread_id: ThreadId::new(),
+                        id: "alarm".into(),
+                    },
+                    "Armed",
+                    Vec::new(),
+                )],
             ),
         ]);
         view.focus_group(Group::Work);
