@@ -555,6 +555,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Statusline
                 | SlashCommand::Theme
                 | SlashCommand::Pets
+                | SlashCommand::Shimmer
                 | SlashCommand::Ps
                 | SlashCommand::Stop
                 | SlashCommand::MemoryDrop

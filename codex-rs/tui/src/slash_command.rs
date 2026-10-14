@@ -74,6 +74,7 @@ pub enum SlashCommand {
     Theme,
     #[strum(to_string = "pets", serialize = "pet")]
     Pets,
+    Shimmer,
     Mcp,
     Apps,
     Plugins,
@@ -144,6 +145,7 @@ impl SlashCommand {
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
             SlashCommand::Pets => crate::chatwidget::pets_command::PETS_DESCRIPTION,
+            SlashCommand::Shimmer => "choose the animation on the working rows",
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Stop => "stop all background terminals",
             SlashCommand::MemoryDrop => "DO NOT USE",
@@ -338,6 +340,7 @@ impl SlashCommand {
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,
+            SlashCommand::Shimmer => true,
             SlashCommand::Theme | SlashCommand::Pets => false,
         }
     }
