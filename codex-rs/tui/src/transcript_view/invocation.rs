@@ -154,7 +154,9 @@ impl Invocations {
                     strip.push_span(" ");
                     let start = strip.width() as u16;
                     let enabled = mode == OutputMode::Raw || available;
-                    strip.push_span(if enabled && panel.mode() == mode {
+                    strip.push_span(if !enabled {
+                        Span::raw(" ".repeat(label.len() + 2))
+                    } else if panel.mode() == mode {
                         Span::styled(
                             format!("[{label}]"),
                             crate::style::accent_style().underlined(),
@@ -334,7 +336,21 @@ impl Invocations {
                     notice
                 }));
             }
-            let mut body = self.body(call, open && calls.len() == 1, body_width, full, expanded);
+            let body_indent = if call.script_language(self.input(call.id)).is_some() {
+                2
+            } else {
+                0
+            };
+            let mut body = self.body(
+                call,
+                open && calls.len() == 1,
+                body_width.saturating_sub(body_indent).max(1),
+                full,
+                expanded,
+            );
+            if body_indent != 0 {
+                body.lines = crate::transcript_geometry::gutter_lines(body.lines, body_indent);
+            }
             for control in &mut body.controls {
                 control.line += lines.len();
             }

@@ -494,7 +494,11 @@ impl FeedIndex {
             })
             .collect();
         if calls.len() == 1 {
-            return false;
+            return item.segments.iter().flatten().any(|index| {
+                cells[*index]
+                    .as_any()
+                    .is::<crate::history_cell::CodeModeCell>()
+            });
         }
         let content_width =
             crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
@@ -777,8 +781,18 @@ impl FeedIndex {
             _ => None,
         };
         let (titles, mut controls) = if let Some(call) = &invocation {
-            let rows = invocations.header(call, true, title_width as u16, None, full);
-            (rows.lines, rows.controls)
+            if header.disclosure.unfolded() {
+                let rows = invocations.header(call, true, title_width as u16, None, full);
+                (rows.lines, rows.controls)
+            } else {
+                (
+                    vec![truncate_line_with_ellipsis_if_overflow(
+                        call.title(invocations.input(call.id)),
+                        title_width,
+                    )],
+                    Vec::new(),
+                )
+            }
         } else {
             let mut title = self.title(cells, header, expanded, width);
             let mut controls = Vec::new();
@@ -844,7 +858,7 @@ impl FeedIndex {
         }));
         HeaderRows {
             lines,
-            fold: (invocation.is_none() && header.disclosure != HeaderDisclosure::FixedOpen)
+            fold: (header.disclosure != HeaderDisclosure::FixedOpen)
                 .then(|| (self.fold_target(header), header.disclosure.unfolded())),
             controls,
         }

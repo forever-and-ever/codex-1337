@@ -425,7 +425,8 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert_eq!(view.disclosure.expanded, manual);
     assert!(!screen(&mut view, &cells, "search cancelled", 80).contains("<instructions>"));
     insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
-    // No formatted input must fall back to source, not to an inert disclosure.
+    // Source formatting cannot depend on nested tool members: a source-only call must
+    // paint its settled highlighted input immediately, live and after admission.
     use crate::history_cell::invocation::{Action, Panel, Port};
     use crate::history_cell::output_provenance::OutputMode;
     let exec = "source-only";
@@ -458,13 +459,13 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert!(
         layout
             .fold_targets()
-            .iter()
-            .all(|target| matches!(target, FoldTarget::Invocation { .. }))
+            .contains(&target(Action::Format(Port::Input, OutputMode::Fmt)))
     );
     assert!(
-        !layout
+        layout
             .fold_targets()
-            .contains(&target(Action::Format(Port::Input, OutputMode::Fmt)))
+            .iter()
+            .any(|target| matches!(target, FoldTarget::Part(_)))
     );
     assert!(view.focus_fold(
         &cells,

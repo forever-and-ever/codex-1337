@@ -250,4 +250,239 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .all(|target| matches!(target, FoldTarget::Invocation { .. }))
     );
     insta::assert_snapshot!(snapshots.join("\n\n"));
+    // Source readiness belongs to the invocation, not its changing nested tool set.
+    // Retained source-only records and a live call's first paint must agree.
+    let script = "const answer = 42;\ntext(\"emitted text\");";
+    let owner = codex_app_server_protocol::CodeModeOwner {
+        thread_id: codex_protocol::ThreadId::from_u128(7),
+        exec_call_id: "code".into(),
+        cell_id: None,
+        started_at_ms: 0,
+    };
+    let cwd = codex_utils_absolute_path::AbsolutePathBuf::current_dir().unwrap();
+    let mut reducers = crate::code_mode_transcript::Reducers::default();
+    let mut reduce = |item| {
+        reducers
+            .admit(
+                owner.thread_id,
+                crate::code_mode_transcript::Admission::item(
+                    codex_app_server_protocol::CodeModeOwned::new(owner.clone(), Box::new(item)),
+                    String::new(),
+                ),
+                &cwd,
+                false,
+                &|_| crate::multi_agents::AgentMetadata::default(),
+            )
+            .unwrap()
+            .block
+    };
+    let block = reduce(codex_app_server_protocol::ThreadItem::CodeMode(
+        codex_app_server_protocol::CodeModeItem {
+            id: "code-start".into(),
+            exec_call_id: "code".into(),
+            cell_id: None,
+            created_at: 0,
+            event: codex_app_server_protocol::CodeModeEvent::Started {
+                call_id: "code".into(),
+                script: Some(script.into()),
+            },
+        },
+    ));
+    let mut view = TranscriptView::default();
+    view.record_step_admission(codex_protocol::step_admission::StepAdmissionItem {
+        id: "step:code".into(),
+        response_id: "code-response".into(),
+        completed_at_ms: 0,
+        read_tokens: 0,
+        thinking_tokens: None,
+        output_tokens: 0,
+        call_ids: vec!["code".into()],
+        message_ids: Vec::new(),
+        admission: codex_protocol::step_admission::Admission::Pending,
+    });
+    let mut code = vec![block];
+    let buffer = tests::render(&mut view, &code, 104, 26);
+    let shown = tests::text(&buffer);
+    let header_column = shown
+        .lines()
+        .find(|line| line.contains("Code Mode"))
+        .unwrap()
+        .find("Code Mode")
+        .unwrap();
+    let (source_row, source_line) = shown
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("const answer"))
+        .unwrap();
+    let source_column = source_line.find("const answer").unwrap();
+    assert_eq!(source_column, header_column + 2);
+    assert_ne!(
+        buffer[(source_column as u16, source_row as u16)].fg,
+        buffer[((source_column + 15) as u16, source_row as u16)].fg,
+    );
+    let first = view.current_layout(&code, 0).unwrap();
+    assert_eq!(first.text(), script);
+    let format = FoldTarget::Invocation {
+        call_id: "code".into(),
+        action: Action::Format(Port::Input, OutputMode::Fmt),
+    };
+    assert!(first.fold_position(&format).is_some());
+    code[0] = reduce(codex_app_server_protocol::ThreadItem::CommandExecution {
+        sandbox_type: None,
+        model_context: None,
+        id: "child".into(),
+        plugin_id: None,
+        script_path: None,
+        command: "echo child".into(),
+        cwd: cwd.clone().into(),
+        process_id: None,
+        source: CommandExecutionSource::Agent,
+        status: codex_app_server_protocol::CommandExecutionStatus::Completed,
+        command_actions: Vec::new(),
+        aggregated_output: Some("child output".into()),
+        exit_code: Some(0),
+        duration_ms: Some(0),
+    });
+    tests::render(&mut view, &code, 104, 26);
+    let nested = view.current_layout(&code, 0).unwrap();
+    assert_eq!(nested.text(), first.text());
+    assert!(nested.fold_position(&format).is_some());
+    code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
+        id: "code-output".into(),
+        call_id: Some("code".into()),
+        name: "exec".into(),
+        namespace: None,
+        output: FunctionCallOutputBody::Text("plain result, not code".into()),
+    });
+    tests::render(&mut view, &code, 104, 26);
+    let output = FoldTarget::Invocation {
+        call_id: "code".into(),
+        action: Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
+    };
+    assert!(view.focus_fold(&code, 0, output));
+    view.handle_key(KeyCode::Enter.into(), &code);
+    let raw = FoldTarget::Invocation {
+        call_id: "code".into(),
+        action: Action::Format(Port::Input, OutputMode::Raw),
+    };
+    assert!(view.focus_fold(&code, 0, raw.clone()));
+    view.handle_key(KeyCode::Enter.into(), &code);
+    let outer = nested
+        .fold_targets()
+        .into_iter()
+        .find(|target| matches!(target, FoldTarget::Part(_)))
+        .unwrap();
+    for width in [104, 40, 80] {
+        assert!(view.focus_fold(&code, 0, outer.clone()));
+        view.handle_key(KeyCode::Enter.into(), &code);
+        tests::render(&mut view, &code, width, 26);
+        let collapsed = view.current_layout(&code, 0).unwrap();
+        assert!(collapsed.text().is_empty());
+        assert_eq!(collapsed.row_count(), 1);
+        let (row, columns, _) = collapsed.fold_position(&outer).unwrap();
+        assert_eq!(collapsed.fold_at(row, columns.start), Some(outer.clone()));
+        let screen_row = view
+            .visible
+            .iter()
+            .position(|visible| {
+                visible.row == row
+                    && visible.layout.fold_at(row, columns.start) == Some(outer.clone())
+            })
+            .unwrap();
+        assert!(view.toggle_disclosure_at(
+            &code,
+            columns.start + view.area.x,
+            screen_row as u16 + view.area.y
+        ));
+        tests::render(&mut view, &code, width, 26);
+        let opened = view.current_layout(&code, 0).unwrap();
+        assert!(opened.text().contains(script));
+        assert!(opened.text().contains("plain result, not code"));
+        assert!(opened.fold_position(&raw).is_some());
+        assert!(
+            opened
+                .fold_position(&FoldTarget::Invocation {
+                    call_id: "code".into(),
+                    action: Action::Toggle(Port::Output, Panel::Hidden(OutputMode::Fmt)),
+                })
+                .is_some()
+        );
+    }
+
+    // Known Python source is code; an arbitrary tool's text payload is not.
+    let input = |name| ToolInput {
+        id: "input:source".into(),
+        call_id: "source".into(),
+        name: ToolName::plain(name),
+        payload: ToolInputPayload::Text("print(42)".into()),
+    };
+    let output = ToolOutputCell::from_output(
+        "source-output",
+        Some("source"),
+        "python",
+        None,
+        &FunctionCallOutputBody::Text("plain result, not Python".into()),
+    )
+    .unwrap();
+    let call = crate::history_cell::invocation::collect(&output).remove(0);
+    view.record_tool_input(input("python"));
+    let python = view
+        .invocations
+        .body(&call, true, 80, false, &Default::default());
+    assert_eq!(
+        python
+            .lines
+            .iter()
+            .map(|line| line.line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        "print(42)"
+    );
+    let available = view.invocations.header(&call, true, 80, None, false);
+    let mut opaque = TranscriptView::default();
+    opaque.record_tool_input(input("opaque"));
+    opaque.invocations.apply(
+        "source",
+        Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
+    );
+    let reserved = opaque.invocations.header(&call, true, 80, None, false);
+    assert!(
+        reserved
+            .lines
+            .iter()
+            .any(|line| line.to_string().contains("[raw]      ]"))
+    );
+    assert!(!reserved.controls.iter().any(|control| matches!(
+        control.target,
+        FoldTarget::Invocation {
+            action: Action::Format(Port::Input, OutputMode::Fmt),
+            ..
+        }
+    )));
+    assert_eq!(
+        reserved
+            .controls
+            .iter()
+            .find(|control| matches!(
+                control.target,
+                FoldTarget::Invocation {
+                    action: Action::Toggle(Port::Output, _),
+                    ..
+                }
+            ))
+            .unwrap()
+            .columns,
+        available
+            .controls
+            .iter()
+            .find(|control| matches!(
+                control.target,
+                FoldTarget::Invocation {
+                    action: Action::Toggle(Port::Output, _),
+                    ..
+                }
+            ))
+            .unwrap()
+            .columns,
+    );
 }

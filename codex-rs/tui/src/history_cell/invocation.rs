@@ -281,14 +281,14 @@ impl Invocation<'_> {
     pub(crate) fn title(&self, input: Option<&ToolInput>) -> Line<'static> {
         let title = if let Source::Code(block) = self.source {
             format!("Code Mode ({})", block.tetrad())
+        } else if let Some(language) = self.script_language(input) {
+            format!("Script ({language})")
         } else {
             match self
                 .name(input)
                 .filter(|name| name.is_default_namespace())
                 .map(|name| name.name.as_str())
             {
-                Some("bash") => "Script (bash)".into(),
-                Some("python") => "Script (python)".into(),
                 Some("fence") => "Fence".into(),
                 _ => self
                     .name(input)
@@ -365,6 +365,21 @@ impl Invocation<'_> {
         title
     }
 
+    pub(crate) fn script_language(&self, input: Option<&ToolInput>) -> Option<&'static str> {
+        if matches!(self.source, Source::Code(_)) {
+            return Some("javascript");
+        }
+        match self
+            .name(input)
+            .filter(|name| name.is_default_namespace())
+            .map(|name| name.name.as_str())
+        {
+            Some("bash") => Some("bash"),
+            Some("python") => Some("python"),
+            _ => None,
+        }
+    }
+
     pub(crate) fn raw_source<'a>(&'a self, input: Option<&'a ToolInput>) -> Option<&'a str> {
         input
             .map(|input| input.payload.text())
@@ -387,6 +402,25 @@ impl Invocation<'_> {
         input: Option<&ToolInput>,
         width: u16,
     ) -> Option<super::activity_parts::ActivityParts> {
+        if let Some(language) = self.script_language(input)
+            && !matches!(self.source, Source::Command(_))
+            && let Some(source) = self.raw_source(input)
+        {
+            if source.chars().any(super::output_provenance::unsafe_control) {
+                return Some(super::activity_parts::ActivityParts {
+                    lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
+                    ..Default::default()
+                });
+            }
+            let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(
+                crate::render::highlight::highlight_code_to_lines(source, language),
+            );
+            mark_lines(&mut lines, OutputProvenance::Formatted);
+            return Some(super::activity_parts::ActivityParts {
+                lines,
+                ..Default::default()
+            });
+        }
         let mut parts = match &self.source {
             Source::Code(block) => combine_parts(
                 block
