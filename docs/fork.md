@@ -105,9 +105,13 @@ manifest when copying a release. The status line pairs the connected server vers
 with the running executable's revision, never the latest installation's revision.
 Uninstalled development binaries display `tui-dev`.
 
-The production and staging managed app servers start with
-`--linux-sandbox-pid-namespace inherit`: their local Linux tool sandboxes share
-the host PID namespace and `/proc`, including same-UID signaling authority.
+The production and staging managed app servers start with `--managed-daemon`
+for restart recovery and channel-owned alarms. Systemd supervision alone does
+not enable these facilities.
+
+They also start with `--linux-sandbox-pid-namespace inherit`: their local Linux
+tool sandboxes share the host PID namespace and `/proc`, including same-UID
+signaling authority.
 Filesystem, network, user-namespace and seccomp restrictions remain in force
 for directly executed tools; services launched through the host user manager
 are outside those tool sandboxes.

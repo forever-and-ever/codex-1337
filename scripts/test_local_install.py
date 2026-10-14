@@ -166,17 +166,40 @@ class LocalInstallTest(unittest.TestCase):
                     ],
                 )
                 self.assertFalse(binary.is_symlink())
+                production_unit = (units / local_integration.UNITS[0]).read_text()
                 self.assertIn(
                     str(prefix / "bin/codex"),
-                    (units / local_integration.UNITS[0]).read_text(),
+                    production_unit,
                 )
                 self.assertIn(
                     "--linux-sandbox-pid-namespace inherit",
-                    (units / local_integration.UNITS[0]).read_text(),
+                    production_unit,
                 )
+                # Systemd supervision does not enable the server's durable owners.
+                self.assertIn("--managed-daemon", production_unit)
                 systemctl.reset_mock()
                 local_integration.integrate("install", prefix)
                 self.assertEqual(systemctl.call_args_list[0].args, ("daemon-reload",))
+                systemctl.reset_mock()
+                local_integration.integrate_staging("install-staging", prefix)
+                self.assertEqual(
+                    [call.args for call in systemctl.call_args_list],
+                    [
+                        ("daemon-reload",),
+                        ("enable", local_integration.STAGING_UNIT),
+                        ("restart", local_integration.STAGING_UNIT),
+                    ],
+                )
+                staging_unit = (units / local_integration.STAGING_UNIT).read_text()
+                self.assertIn("--managed-daemon", staging_unit)
+                self.assertIn(
+                    str(data / "codex-1337/staging/distributions/current/bin/codex"),
+                    staging_unit,
+                )
+                self.assertEqual(
+                    (units / local_integration.UNITS[0]).read_text(), production_unit
+                )
+                local_integration.integrate_staging("uninstall-staging", prefix)
                 systemctl.reset_mock()
                 local_integration.integrate("uninstall", prefix)
                 self.assertEqual(
