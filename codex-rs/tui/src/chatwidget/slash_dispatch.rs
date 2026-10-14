@@ -638,7 +638,12 @@ impl ChatWidget {
                 self.open_pets_picker();
             }
             SlashCommand::Shimmer => {
-                let picker = crate::shimmers::picker(self.frame_requester.clone());
+                let picker = crate::shimmers::picker(
+                    self.frame_requester.clone(),
+                    crate::motion::MotionMode::from_animations_enabled(
+                        self.local_settings.tui.animations,
+                    ),
+                );
                 self.bottom_pane.show_selection_view(picker);
             }
             SlashCommand::Ps => {

@@ -24,6 +24,7 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::SideContentWidth;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::motion::MotionMode;
 use crate::render::renderable::Renderable;
 use crate::status_indicator_widget::fmt_elapsed_compact;
 use crate::tui::FrameRequester;
@@ -33,7 +34,7 @@ const PREVIEW_WIDTH: u16 = 44;
 /// Rows of the preview: a running tool and its output, a blank row, the status row.
 const PREVIEW_ROWS: u16 = 4;
 
-pub(crate) fn picker(frames: FrameRequester) -> SelectionViewParams {
+pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionViewParams {
     let current = live::engaged();
     let items = ROSTER
         .iter()
@@ -70,6 +71,7 @@ pub(crate) fn picker(frames: FrameRequester) -> SelectionViewParams {
     let pane = |preview: &Arc<Mutex<Preview>>| PreviewPane {
         preview: Arc::clone(preview),
         frames: frames.clone(),
+        motion,
     };
     let follow = Arc::clone(&preview);
     SelectionViewParams {
@@ -94,7 +96,7 @@ struct Preview {
     engine: Engine,
     palette: Palette,
     script: Script,
-    started: Instant,
+    stepped: Instant,
     ticks: u64,
 }
 
@@ -104,7 +106,7 @@ impl Preview {
             engine: Engine::new(recipe, palette),
             palette,
             script: Script::new(),
-            started: Instant::now(),
+            stepped: Instant::now(),
             ticks: 0,
         }
     }
@@ -117,22 +119,36 @@ impl Preview {
 struct PreviewPane {
     preview: Arc<Mutex<Preview>>,
     frames: FrameRequester,
+    motion: MotionMode,
 }
 
 impl Renderable for PreviewPane {
     fn render(&self, area: Rect, buf: &mut Buffer) {
+        if area.width == 0 || area.height <= PREVIEW_ROWS {
+            return;
+        }
+        let animated = self.motion == MotionMode::Animated
+            && self.frames.mode() == crate::tui::PresentationMode::Normal;
         let mut preview = self.preview.lock().unwrap_or_else(PoisonError::into_inner);
         let Preview {
             engine,
             palette,
             script,
-            started,
+            stepped,
             ticks,
         } = &mut *preview;
-        let due = (started.elapsed().as_secs_f64() / TICK) as u64;
-        while *ticks < due {
-            *ticks += 1;
-            feed(engine, script, *ticks);
+        if animated {
+            let now = Instant::now();
+            let tick = Duration::from_secs_f64(TICK);
+            // Hidden or suspended previews pause; never replay an unbounded wall-clock backlog.
+            if now.saturating_duration_since(*stepped) > Duration::from_secs(1) {
+                *stepped = now;
+            }
+            while now.saturating_duration_since(*stepped) >= tick {
+                *stepped += tick;
+                *ticks += 1;
+                feed(engine, script, *ticks);
+            }
         }
         let area = Rect {
             y: area.y.saturating_add(1),
@@ -140,7 +156,9 @@ impl Renderable for PreviewPane {
             ..area
         };
         stage_rows(engine, script, *ticks, *palette, area, buf);
-        self.frames.schedule_frame_in(Duration::from_secs_f64(TICK));
+        if animated {
+            self.frames.schedule_frame_in(Duration::from_secs_f64(TICK));
+        }
     }
 
     fn desired_height(&self, _width: u16) -> u16 {
