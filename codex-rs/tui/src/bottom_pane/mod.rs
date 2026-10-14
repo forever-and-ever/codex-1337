@@ -73,6 +73,7 @@ use std::time::Instant;
 
 mod action_required_title;
 mod actionable_banner;
+mod activity_inset;
 mod app_link_view;
 mod apply_patch_header;
 mod approval_overlay;
@@ -2273,7 +2274,7 @@ impl BottomPane {
             if let Some(status) = self.status_widget() {
                 flex.push(
                     /*flex*/ 0,
-                    RenderableItem::Owned(Box::new(status.with_timer(&self.status_timer))),
+                    activity_inset::inset(status.with_timer(&self.status_timer)),
                 );
             }
             if self.status.is_none()
@@ -2281,12 +2282,12 @@ impl BottomPane {
             {
                 flex.push(
                     /*flex*/ 0,
-                    RenderableItem::Owned(Box::new(hook_status::HookStatus {
+                    activity_inset::inset(hook_status::HookStatus {
                         message,
                         animations_enabled: self.animations_enabled
                             && self.effects.shimmer
                             && self.frame_requester.mode() == crate::tui::PresentationMode::Normal,
-                    })),
+                    }),
                 );
             }
             // Avoid double-surfacing the same summary and avoid adding an extra
@@ -2308,9 +2309,8 @@ impl BottomPane {
                 || !self.pending_input_preview.queued_messages.is_empty()
                 || self.pending_input_preview.pending_steer.is_some()
                 || !self.pending_input_preview.rejected_steers.is_empty();
-            let has_status_or_footer = self.status_widget().is_some()
-                || self.hook_status_message.is_some()
-                || show_exec_footer;
+            let has_activity = self.status_widget().is_some() || self.hook_status_message.is_some();
+            let has_status_or_footer = has_activity || show_exec_footer;
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
             if !has_inline_previews
                 && self.status_widget().is_some()
@@ -2318,7 +2318,7 @@ impl BottomPane {
             {
                 flex.push(/*flex*/ 1, RenderableItem::Borrowed(tip));
             }
-            if has_inline_previews && has_status_or_footer {
+            if has_inline_previews && has_status_or_footer && !has_activity {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
             flex.push(
@@ -2341,9 +2341,10 @@ impl BottomPane {
                 },
             );
             let question_editor = self.questions.as_ref().filter(|q| q.expanded);
-            // An empty shared gap already separates activity from the composer.
+            // Activity owns its trailing blank row; footer summaries and tips need one here.
             if !has_inline_previews
                 && has_status_or_footer
+                && (!has_activity || options.working_tip.is_some())
                 && options.composer_gap.is_none_or(|gap| gap.needs_separator)
                 && question_editor.is_none_or(|q| q.unanswered_count() > 1)
             {
