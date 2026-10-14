@@ -7,7 +7,8 @@
 //! patterns stock shimmers share. Nothing outside this module knows which shimmer runs or how.
 //!
 //! Each TUI engages a random stock shimmer at startup and `/shimmer` swaps it. Until one is engaged, as
-//! in tests, and wherever the terminal lacks 24-bit color or motion is reduced, the classic sweep runs.
+//! in tests, and wherever the terminal lacks 24-bit color, the classic sweep remains. Reduced or frozen
+//! windows do not run the shimmer clock; reduced motion keeps the existing static fallbacks.
 //! Every stock shimmer stays under the glare cap measured in `tests`. To add one, implement
 //! `stage::Shimmer` in a new file beside a `RECIPE` and list it in `ROSTER`; the cap then holds it too.
 
@@ -31,6 +32,7 @@ mod tetromino;
 
 pub(crate) use live::dress_status;
 pub(crate) use live::engage_random;
+pub(crate) use live::follow_presentation;
 pub(crate) use live::observe;
 pub(crate) use live::shade_status;
 pub(crate) use live::tool_mark;

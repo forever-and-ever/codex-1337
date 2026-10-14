@@ -13,6 +13,7 @@ use codex_app_server_protocol::ThreadItem;
 use rand::Rng as _;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui::style::Stylize;
 use ratatui::text::Span;
 
 use super::ROSTER;
@@ -27,6 +28,8 @@ use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::default_bg;
 use crate::terminal_palette::default_fg;
 use crate::terminal_palette::effective_stdout_color_level;
+use crate::tui::FrameRequester;
+use crate::tui::PresentationMode;
 
 /// A gap in drawing longer than this, as between turns, pauses the shimmer's clock.
 const STALE: Duration = Duration::from_secs(/*secs*/ 1);
@@ -36,6 +39,7 @@ static LIVE: LazyLock<Mutex<Live>> = LazyLock::new(Mutex::default);
 #[derive(Default)]
 struct Live {
     feed: Feed,
+    frames: Option<FrameRequester>,
     act: Act,
     /// The backdrop of the status row dressed last, which `shade_status` lays under the rendered row.
     backdrop: Vec<Rgb>,
@@ -56,8 +60,17 @@ enum Act {
 }
 
 impl Live {
+    fn draws_motion(&self) -> bool {
+        self.frames
+            .as_ref()
+            .is_some_and(|frames| frames.mode() == PresentationMode::Normal)
+    }
+
     /// The running engine, stepped up to now.
     fn current(&mut self, palette: Palette) -> Option<&mut Engine> {
+        if !self.draws_motion() {
+            return None;
+        }
         let now = Instant::now();
         let tick = Duration::from_secs_f64(TICK);
         let restart = now.checked_sub(tick).unwrap_or(now);
@@ -94,6 +107,11 @@ pub(super) fn palette() -> Option<Palette> {
         fg: default_fg()?.into(),
         bg: default_bg()?.into(),
     })
+}
+
+/// Read the terminal's canonical attention state instead of keeping another focus flag.
+pub(crate) fn follow_presentation(frames: FrameRequester) {
+    live().frames = Some(frames);
 }
 
 /// Engages a random stock shimmer. Until something does, as in tests, the classic sweep runs.
@@ -150,15 +168,22 @@ pub(crate) fn dress_status(
 
 /// Lays the dressed status row's backdrop under the row rendered at the top of `area`.
 pub(crate) fn shade_status(area: Rect, buf: &mut Buffer) {
-    for (x, bg) in (area.x..area.right()).zip(&live().backdrop) {
+    let live = live();
+    if !live.draws_motion() {
+        return;
+    }
+    for (x, bg) in (area.x..area.right()).zip(&live.backdrop) {
         buf[(x, area.y)].set_bg(color(*bg));
     }
 }
 
-/// A running tool's bullet from the engaged shimmer.
 pub(crate) fn tool_mark() -> Option<Span<'static>> {
+    let mut live = live();
+    if !live.draws_motion() {
+        return (!matches!(live.act, Act::Classic)).then(|| "•".dim());
+    }
     let palette = palette()?;
-    live().current(palette).map(|engine| engine.tool(palette))
+    live.current(palette).map(|engine| engine.tool(palette))
 }
 
 /// What the displayed thread streams and runs, distilled for the shimmer.
@@ -247,4 +272,45 @@ fn waits(item: &ThreadItem) -> bool {
             | ThreadItem::Sleep(_)
             | ThreadItem::ImageGeneration(_)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inactive_windows_do_not_start_or_catch_up_the_shimmer_clock() {
+        let (frames, _requests) = FrameRequester::test_channel();
+        let mut live = Live {
+            act: Act::Engaged(0),
+            frames: Some(frames.clone()),
+            ..Live::default()
+        };
+        let palette = Palette {
+            fg: (208, 208, 208).into(),
+            bg: (21, 21, 21).into(),
+        };
+        frames.set_mode(PresentationMode::Reduced);
+        assert!(live.current(palette).is_none());
+        assert!(matches!(live.act, Act::Engaged(_)));
+
+        frames.set_mode(PresentationMode::Normal);
+        assert!(live.current(palette).is_some());
+        let before = Instant::now() - Duration::from_secs(20);
+        let Act::Running { stepped, .. } = &mut live.act else {
+            panic!("the foreground started the shimmer");
+        };
+        *stepped = before;
+        // Content can still repaint an inactive window; painting must not run its clock.
+        for mode in [PresentationMode::Reduced, PresentationMode::Frozen] {
+            frames.set_mode(mode);
+            assert!(live.current(palette).is_none());
+            let Act::Running { stepped, .. } = &live.act else {
+                panic!("attention changes retain the selected shimmer");
+            };
+            assert_eq!(*stepped, before);
+        }
+        frames.set_mode(PresentationMode::Normal);
+        assert!(live.current(palette).is_some());
+    }
 }
