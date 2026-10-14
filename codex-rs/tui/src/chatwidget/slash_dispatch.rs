@@ -637,6 +637,15 @@ impl ChatWidget {
             SlashCommand::Pets => {
                 self.open_pets_picker();
             }
+            SlashCommand::Shimmer => {
+                let picker = crate::shimmers::picker(
+                    self.frame_requester.clone(),
+                    crate::motion::MotionMode::from_animations_enabled(
+                        self.local_settings.tui.animations,
+                    ),
+                );
+                self.bottom_pane.show_selection_view(picker);
+            }
             SlashCommand::Ps => {
                 self.open_processes();
             }
@@ -1295,7 +1304,8 @@ impl ChatWidget {
             | SlashCommand::Title
             | SlashCommand::Statusline
             | SlashCommand::Theme
-            | SlashCommand::Pets => QueueDrain::Stop,
+            | SlashCommand::Pets
+            | SlashCommand::Shimmer => QueueDrain::Stop,
         }
     }
 

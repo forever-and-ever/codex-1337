@@ -60,7 +60,7 @@ impl ChatWidget {
 
     pub(crate) fn show_context_role(&mut self, role: Option<&str>) {
         let message = match role {
-            Some(role) => format!("Context role: {role}."),
+            Some(role) => format!("Context role: {role}"),
             None => "No context role.".to_owned(),
         };
         self.add_info_message(message, /*hint*/ None);

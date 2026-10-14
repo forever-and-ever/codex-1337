@@ -4,9 +4,13 @@ expression: "output.join(\"\\n\")"
 ---
 • No context role.
 
-• Context role: Review agent boundaries.
+• Context role: Review agent boundaries
 
-• Context role: Review agent boundaries.
+• Context role: Review agent boundaries
+
+• Context role: Preserve my punctuation.
+
+• Context role: Preserve my punctuation.
 
 • Context role cleared.
 

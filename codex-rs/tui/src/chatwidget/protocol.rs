@@ -6,6 +6,9 @@ impl ChatWidget {
         notification: ServerNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if replay_kind.is_none() {
+            crate::shimmers::observe(&notification);
+        }
         if self.admit_code_mode_notification(&notification, replay_kind) {
             return;
         }

@@ -11,6 +11,8 @@ async fn context_role_command_output() {
         "",
         "set Review agent boundaries",
         "",
+        "set Preserve my punctuation.",
+        "",
         "clear",
         "set bad\nrole",
     ] {

@@ -214,6 +214,7 @@ mod session_queue_commands;
 mod session_resume;
 mod session_start;
 mod session_state;
+mod shimmers;
 mod shortcut_help;
 mod skills_helpers;
 mod slash_command;
@@ -1063,6 +1064,7 @@ pub async fn run_main(
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
     system_motion::initialize().await;
+    shimmers::engage_random();
     startup_recovery::scope(async move {
         // Startup retains a large future for the whole session. Keep it off callers' stacks,
         // which also need room to construct a replacement chat widget on `/new`.
