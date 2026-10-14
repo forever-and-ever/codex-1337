@@ -64,12 +64,6 @@ impl RequestUserInputHandler {
             }
         };
 
-        if turn.session_source.is_non_root_agent() {
-            return Err(FunctionCallError::RespondToModel(
-                "request_user_input can only be used by the root thread".to_string(),
-            ));
-        }
-
         let mode = turn.collaboration_mode().mode;
         if let Some(message) = request_user_input_unavailable_message(mode, &self.available_modes) {
             return Err(FunctionCallError::RespondToModel(message));

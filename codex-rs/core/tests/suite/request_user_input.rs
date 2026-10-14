@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
+use codex_core::StartThreadOptions;
 use codex_core::TurnInputRequest;
 use core_test_support::test_codex::local_requests;
 use std::collections::HashMap;
@@ -12,6 +13,8 @@ use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::request_user_input::RequestUserInputAnswer;
 use codex_protocol::request_user_input::RequestUserInputResponse;
@@ -68,12 +71,14 @@ fn call_output_content_and_success(
     (content, success)
 }
 
+#[test_case::test_case(false; "root")]
+#[test_case::test_case(true; "child")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_round_trip_resolves_pending() -> anyhow::Result<()> {
-    request_user_input_round_trip_for_mode(ModeKind::Plan).await
+async fn request_user_input_round_trip_resolves_pending(child: bool) -> anyhow::Result<()> {
+    request_user_input_round_trip_for_mode(ModeKind::Plan, child).await
 }
 
-async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Result<()> {
+async fn request_user_input_round_trip_for_mode(mode: ModeKind, child: bool) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -83,6 +88,8 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         codex,
         cwd,
         session_configured,
+        thread_manager,
+        config,
         ..
     } = builder
         .with_config(move |config| {
@@ -95,6 +102,24 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         })
         .build(&server)
         .await?;
+
+    let codex = if child {
+        thread_manager
+            .start_thread(StartThreadOptions {
+                session_source: Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                    parent_thread_id: session_configured.thread_id,
+                    depth: 1,
+                    agent_path: None,
+                    agent_nickname: None,
+                    agent_role: None,
+                })),
+                ..StartThreadOptions::new(config)
+            })
+            .await?
+            .thread
+    } else {
+        codex
+    };
 
     let call_id = "user-input-call";
     let expected_is_blocking = mode == ModeKind::Plan;
@@ -417,7 +442,11 @@ async fn request_user_input_rejected_in_default_mode_by_default() -> anyhow::Res
     .await
 }
 
+#[test_case::test_case(false; "root")]
+#[test_case::test_case(true; "child")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn request_user_input_round_trip_in_default_mode_with_feature() -> anyhow::Result<()> {
-    request_user_input_round_trip_for_mode(ModeKind::Default).await
+async fn request_user_input_round_trip_in_default_mode_with_feature(
+    child: bool,
+) -> anyhow::Result<()> {
+    request_user_input_round_trip_for_mode(ModeKind::Default, child).await
 }
