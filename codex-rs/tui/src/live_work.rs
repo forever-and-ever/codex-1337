@@ -307,7 +307,7 @@ impl LiveWorkView {
                     .map(Focus::key)
                     .filter(|key| self.find(key).is_some_and(Row::has_disclosure))
                     .map_or_else(
-                        || " ".repeat(crate::render::disclosure::glyph(false).len() + 1),
+                        || " ".repeat(crate::render::disclosure::columns() + 1),
                         |key| {
                             format!(
                                 "{} ",
@@ -320,7 +320,13 @@ impl LiveWorkView {
                     secondary_text_style(),
                 );
             } else if !available {
-                line = Line::styled("  No longer available", secondary_text_style());
+                line = Line::styled(
+                    format!(
+                        "{}No longer available",
+                        " ".repeat(crate::render::disclosure::columns() + 1)
+                    ),
+                    secondary_text_style(),
+                );
             } else if self.focused && work_line.focus.as_ref() == self.selected.as_ref() {
                 line = line.patch_style(match &work_line.focus {
                     Some(Focus::Row(_)) => crate::render::disclosure::style(true),
@@ -603,7 +609,7 @@ fn append_lines(
     for span in &mut line.spans {
         span.style = span.style.bg(Color::Reset);
     }
-    let control_width = crate::render::disclosure::glyph(false).len() + 1;
+    let control_width = crate::render::disclosure::columns() + 1;
     let indent = indent.min(usize::from(width).saturating_sub(control_width + 1));
     let mut prefix = Line::from(" ".repeat(indent));
     if let Some(expanded) = disclosure {
