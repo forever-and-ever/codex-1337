@@ -31,6 +31,7 @@ use std::collections::VecDeque;
 use std::collections::btree_map::Entry;
 use std::time::Instant;
 
+#[derive(Debug)]
 pub(crate) struct Operations {
     stage: Stage,
     active_turn: Option<String>,
@@ -40,7 +41,7 @@ pub(crate) struct Operations {
     executions: BTreeMap<String, Execution>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum Stage {
     #[default]
     Unbound,
@@ -48,11 +49,13 @@ enum Stage {
     Closed(ThreadId),
 }
 
+#[derive(Debug)]
 enum Pending {
     Item(Box<ThreadItem>),
     Call(String),
 }
 
+#[derive(Debug)]
 enum Revision {
     Pending { source: Source, work: Pending },
     Terminal(Instant),
@@ -85,6 +88,7 @@ impl Revision {
     }
 }
 
+#[derive(Debug)]
 struct Execution {
     owner: CodeModeOwner,
     facts: Vec<CodeModeItem>,
@@ -101,6 +105,18 @@ impl Operations {
             direct: BTreeMap::new(),
             executions: BTreeMap::new(),
         }
+    }
+
+    pub(crate) fn reconcile_turn(&mut self, turn: Option<String>) {
+        if self.active_turn == turn {
+            return;
+        }
+        if let Some(previous) = self.active_turn.take() {
+            self.close_turn(&previous);
+        }
+        self.active_turn = turn;
+        self.direct
+            .retain(|(turn, _), _| self.active_turn.as_ref() == Some(turn));
     }
 
     fn close_turn(&mut self, turn: &str) {

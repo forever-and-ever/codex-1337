@@ -1,4 +1,5 @@
 use super::*;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn thread_event_store_restores_active_turn_from_snapshot_turns() {

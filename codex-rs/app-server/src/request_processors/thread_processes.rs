@@ -23,7 +23,7 @@ impl ThreadRequestProcessor {
                     Ok(thread) => owners.push((descendant, thread)),
                     // Unloaded descendants have no managed execution sessions. Do not
                     // resume them merely to project the live process inventory.
-                    Err(CodexErr::ThreadNotFound(_)) => {}
+                    Err(err) if matches!(err.details(), CodexErrorDetails::ThreadNotFound(_)) => {}
                     Err(err) => return Err(internal_error(err.to_string())),
                 }
             }

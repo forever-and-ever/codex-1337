@@ -10,6 +10,7 @@ use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_server_session::ThreadParamsMode;
 use crate::bottom_pane::BottomPaneView;
 use codex_app_server_client::AppServerEvent;
+use codex_app_server_protocol::ThreadLoadedListParams;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 

@@ -7,6 +7,7 @@ use crate::app_server_session::session_preparation::{self as preparation, Reques
 use crate::live_work::{Action, Group, Interaction, Key, LiveWorkView, Row};
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
+use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::text::Line;
 use uuid::Uuid;
@@ -22,6 +23,7 @@ pub(super) struct LiveWorkState {
 struct Scope {
     thread: ThreadId,
     view: LiveWorkView,
+    work: Vec<Row>,
     processes: Processes,
     stopping: HashMap<(ThreadId, String), Uuid>,
     show_empty_processes: bool,
@@ -138,6 +140,11 @@ impl Processes {
 }
 
 impl LiveWorkState {
+    pub(super) fn is_focused(&self) -> bool {
+        self.scope
+            .as_ref()
+            .is_some_and(|scope| scope.view.is_focused())
+    }
     pub(super) fn desired_height(&self, width: u16) -> u16 {
         self.scope
             .as_ref()
@@ -202,6 +209,7 @@ impl LiveWorkState {
             self.scope = Some(Scope {
                 thread,
                 view: LiveWorkView::default(),
+                work: Vec::new(),
                 processes: Processes::Unloaded,
                 stopping: HashMap::new(),
                 show_empty_processes: false,
@@ -220,15 +228,13 @@ impl App {
         let work = self
             .thread_event_channels
             .get(&thread)
-            .map(|channel| {
+            .map_or(Some(Vec::new()), |channel| {
                 channel
                     .store
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .operations
-                    .rows(thread)
-            })
-            .unwrap_or_default();
+                    .try_lock()
+                    .ok()
+                    .map(|store| store.operations.rows(thread))
+            });
         if !self.chat_widget.no_modal_or_popup_active()
             || self.chat_widget.is_external_writer_view()
             || self.overlay.is_some()
@@ -238,6 +244,10 @@ impl App {
         let alarms = self.chat_widget.live_alarm_rows();
         let owners = self.chat_widget.live_process_owners();
         let scope = self.live_work.scope(thread);
+        // The event pump briefly holds this lock; paint the last observation instead of blocking.
+        if let Some(work) = work {
+            scope.work = work;
+        }
         if let Some(request) = scope.processes.refresh(Instant::now()) {
             self.app_event_tx
                 .send(AppEvent::LiveWork(Event::Refresh { thread, request }));
@@ -264,13 +274,14 @@ impl App {
                 format!(
                     "{} · {owner_name} · {}",
                     if stopping { "Stopping" } else { "Running" },
-                    process.command
+                    process.command.lines().next().unwrap_or_default()
                 ),
             );
-            item.details = vec![
+            item.details = process.command.lines().map(text).collect();
+            item.details.extend([
                 text(format!("Owner: {owner} · session: {}", process.process_id)),
                 text(format!("Directory: {}", process.cwd)),
-            ];
+            ]);
             if owner == thread {
                 item.actions.push(Action::RevealCall {
                     thread_id: owner,
@@ -302,7 +313,7 @@ impl App {
             _ => {}
         }
         scope.view.set_rows(vec![
-            group(Group::Work, work),
+            group(Group::Work, scope.work.clone()),
             group(Group::Processes, processes),
             group(Group::Alarms, alarms),
         ]);
@@ -566,7 +577,7 @@ mod tests {
             item_id: "call".into(),
             process_id: "42".into(),
             command: "owned worker".into(),
-            cwd: app.config.cwd.to_path_buf().into(),
+            cwd: app.config.cwd.clone().into(),
             os_pid: None,
             cpu_percent: None,
             rss_kb: None,
@@ -592,7 +603,7 @@ mod tests {
         assert!(app.transcript_cells.is_empty());
         let mut tui = crate::tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(true).unwrap();
-        let size = Size::new(80, 14);
+        let size = Size::new(80, 24);
         tui.terminal.resize(size).unwrap();
         app.render_owned_transcript(&mut tui, size).unwrap();
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);

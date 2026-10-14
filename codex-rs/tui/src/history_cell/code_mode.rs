@@ -10,7 +10,6 @@ use super::output_provenance::OutputProvenance;
 use super::output_provenance::client_notice;
 use super::output_provenance::mark_lines;
 use crate::code_mode_transcript::ScopedCodeMode;
-use crate::exec_cell::ExecCell;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
@@ -230,11 +229,6 @@ impl LegacyCodeMode {
 }
 
 impl CodeModeCell {
-    #[cfg(test)]
-    pub(crate) fn owned(owner: CodeModeOwner, animations_enabled: bool) -> Self {
-        Self::Scoped(ScopedCodeMode::new(owner, animations_enabled))
-    }
-
     pub(crate) fn owner(&self) -> Option<&CodeModeOwner> {
         self.scoped().map(ScopedCodeMode::owner)
     }
@@ -288,11 +282,6 @@ impl CodeModeCell {
         }
     }
 
-    fn has_pending_children(&self) -> bool {
-        self.scoped()
-            .is_some_and(ScopedCodeMode::has_pending_children)
-    }
-
     pub(crate) fn is_active(&self) -> bool {
         (self.live() && self.status().is_none())
             || self.scoped().is_some_and(ScopedCodeMode::has_live_command)
@@ -301,29 +290,6 @@ impl CodeModeCell {
     pub(crate) fn tetrad(&self) -> String {
         self.owner()
             .map_or_else(|| label(self.exec_call_id()), owner_label)
-    }
-
-    fn waits(&self) -> Vec<(&str, Option<&CodeModeOwner>)> {
-        // A wait invocation is one-shot; completion wins even when older pages arrive last.
-        let completed = self
-            .facts()
-            .iter()
-            .filter_map(|fact| match &fact.event {
-                CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
-        self.facts()
-            .iter()
-            .filter_map(|fact| match &fact.event {
-                CodeModeEvent::WaitStarted { call_id, target }
-                    if !completed.contains(call_id.as_str()) =>
-                {
-                    Some((call_id.as_str(), target.as_ref()))
-                }
-                _ => None,
-            })
-            .collect()
     }
 
     #[cfg(test)]

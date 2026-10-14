@@ -16,7 +16,6 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Clear;
@@ -227,6 +226,18 @@ impl LiveWorkView {
             focus => focus,
         });
         self.hits.clear();
+        let visible = self.controls();
+        while self
+            .selected
+            .as_ref()
+            .is_some_and(|selected| !visible.contains(selected))
+        {
+            self.selected = match self.selected.take() {
+                Some(Focus::Action { key, .. }) => Some(Focus::Row(key)),
+                Some(Focus::Row(key)) => self.parent(&key).cloned().map(Focus::Row),
+                None => None,
+            };
+        }
         if self.focused && self.selected.is_none() {
             self.selected = self.controls().into_iter().next();
         }
@@ -723,6 +734,27 @@ mod tests {
                 id: "session".into()
             })
             .is_none()
+        );
+        // A lifecycle change may move the same operation under a newly folded parent.
+        let mut view = LiveWorkView::default();
+        view.set_rows(inventory(vec![process(owner)]));
+        view.focus_group(Group::Processes);
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
+        let parent = Key::Operation {
+            thread_id: owner,
+            id: "container".into(),
+        };
+        view.set_rows(inventory(vec![row(
+            parent.clone(),
+            "Running",
+            vec![process(owner)],
+        )]));
+        assert_eq!(view.selected, Some(Focus::Row(parent)));
+        assert_eq!(
+            view.handle_key(KeyCode::Enter.into()),
+            Interaction::Consumed
         );
     }
 

@@ -16,6 +16,7 @@ use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::JSONRPCResponse;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadHistoryMode;
+use codex_app_server_protocol::ThreadLoadedListParams;
 
 use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::AgentPath;
@@ -2927,7 +2928,9 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
             .await;
         assert_eq!(
             recorded_params(&requests, "thread/backgroundTerminals/list"),
-            vec![json!({"threadId": original.to_string(), "cursor": null, "limit": 1})],
+            vec![
+                json!({"threadId": original.to_string(), "scope": "thread", "cursor": null, "limit": 1})
+            ],
         );
         let output = history().join("");
         insta::allow_duplicates! {

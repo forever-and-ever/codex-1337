@@ -442,10 +442,6 @@ impl ScopedCodeMode {
         self.live
     }
 
-    pub(crate) fn has_pending_children(&self) -> bool {
-        self.revisions.values().any(|revision| !revision.terminal())
-    }
-
     pub(crate) fn has_live_command(&self) -> bool {
         self.revisions.values().any(|revision| {
             matches!(

@@ -320,7 +320,11 @@ impl App {
             feedback_tick =
                 view.render_composer_gap(follow_area, composer_hint.as_ref(), frame.buffer, now);
             chat_widget.note_rendered_width(screen_size.width);
-            rendered_cursor = bottom.cursor_pos(bottom_area);
+            rendered_cursor = if live_work.is_focused() {
+                None
+            } else {
+                bottom.cursor_pos(bottom_area)
+            };
             let mut cursor_style = bottom.cursor_style(bottom_area);
             if let Some(header) = chat_widget
                 .screen_hint_renderable(prompt_footer.as_ref().or(footer.as_ref()), popup_placement)

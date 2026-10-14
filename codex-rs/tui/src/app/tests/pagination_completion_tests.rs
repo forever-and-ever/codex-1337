@@ -498,9 +498,16 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
         )
         .await?;
         assert!(app_server.is_older_history_page_pending(thread_id, &final_cursor));
-        let final_event = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), event_rx.recv())
-            .await?
-            .expect("final page completion");
+        let final_event = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, AppEvent::OlderThreadHistoryLoaded { .. }) {
+                    return Some(event);
+                }
+            }
+            None
+        })
+        .await?
+        .expect("final page completion");
         assert!(matches!(
             &final_event,
             AppEvent::OlderThreadHistoryLoaded { result: Ok(HistoryPage::Items(page)), .. }

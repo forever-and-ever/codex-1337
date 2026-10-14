@@ -76,9 +76,16 @@ async fn browsing_loads_before_the_oldest_prompt_after_a_partial_answer() -> Res
             app.transcript_view.history,
             TranscriptHistoryState::LoadingOlder
         );
-        let first_event = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), event_rx.recv())
-            .await?
-            .expect("older history completion");
+        let first_event = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, AppEvent::OlderThreadHistoryLoaded { .. }) {
+                    return Some(event);
+                }
+            }
+            None
+        })
+        .await?
+        .expect("older history completion");
         let AppEvent::OlderThreadHistoryLoaded { cursor, .. } = first_event else {
             panic!("expected an older history completion")
         };

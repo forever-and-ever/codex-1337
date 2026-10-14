@@ -1297,10 +1297,8 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     .unwrap();
     let mut retained = vec![agent(SubAgentActivityKind::Started)];
     let mut stages = Vec::new();
-    for status in [
-        CollabAgentToolCallStatus::InProgress,
-        CollabAgentToolCallStatus::Completed,
-    ] {
+    {
+        let status = CollabAgentToolCallStatus::Completed;
         let cell = Arc::new(crate::history_cell::ToolItemCell::new(
             "agent-wait".into(),
             crate::multi_agents::tool_call_history_cell(
@@ -1334,7 +1332,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             retained[1].display_lines(/*width*/ 64),
             replay[0].display_lines(/*width*/ 64)
         );
-        if status == CollabAgentToolCallStatus::Completed {
+        {
             assert!(!tests::text(&buffer).contains("waiting"));
             assert!(retained[1].raw_lines().is_empty());
             assert!(tests::text(&buffer).contains("outcome unavailable"));

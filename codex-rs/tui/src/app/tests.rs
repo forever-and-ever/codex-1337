@@ -6555,6 +6555,7 @@ async fn make_test_app() -> Box<App> {
         file_search,
         transcript_cells: Vec::new(),
         code_mode_transcript: Default::default(),
+        live_work: Default::default(),
         native_history: Default::default(),
         turn_tips: Default::default(),
         transcript_view: Default::default(),
@@ -6677,6 +6678,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             file_search,
             transcript_cells: Vec::new(),
             code_mode_transcript: Default::default(),
+            live_work: Default::default(),
             native_history: Default::default(),
             turn_tips: Default::default(),
             transcript_view: Default::default(),
@@ -9354,8 +9356,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
                         turn_id: "turn-1".to_string(),
                         started_at_ms: 0,
                         item: ThreadItem::CollabAgentToolCall {
-                            id: "wait-1".to_string(),
-                            tool: codex_app_server_protocol::CollabAgentTool::Wait,
+                            id: "resume-1".to_string(),
+                            tool: codex_app_server_protocol::CollabAgentTool::ResumeAgent,
                             status:
                                 codex_app_server_protocol::CollabAgentToolCallStatus::InProgress,
                             sender_thread_id: ThreadId::new().to_string(),
@@ -9375,10 +9377,10 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
         /*resume_restored_queue*/ false,
     );
 
-    let mut saw_named_wait = false;
+    let mut saw_named_agent = false;
     while let Ok(event) = app_event_rx.try_recv() {
         if let AppEvent::InsertHistoryCell(cell) = event {
-            saw_named_wait |= cell
+            saw_named_agent |= cell
                 .expanded_hyperlink_lines(/*width*/ 80)
                 .iter()
                 .any(|line| line.line.to_string().contains("Robie [explorer]"));
@@ -9386,8 +9388,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
     }
 
     assert!(
-        saw_named_wait,
-        "expected replayed wait item to keep agent name"
+        saw_named_agent,
+        "expected replayed agent item to keep agent name"
     );
 }
 

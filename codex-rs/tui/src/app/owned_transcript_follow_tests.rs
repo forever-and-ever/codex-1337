@@ -32,6 +32,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                 started_at_ms: 0,
             };
             let mut reducers = crate::code_mode_transcript::Reducers::default();
+            let live = crate::app::thread_events::ThreadEventChannel::new(32);
             let mut reduce = |item| {
                 let notification = codex_app_server_protocol::ServerNotification::ItemCompleted(
                     codex_app_server_protocol::ItemCompletedNotification {
@@ -46,6 +47,10 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                         completed_at_ms: 0,
                     },
                 );
+                live.store
+                    .try_lock()
+                    .unwrap()
+                    .push_notification(notification.clone());
                 reducers
                     .admit(
                         owner.thread_id,
@@ -91,6 +96,8 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                 duration_ms: None,
             });
             app.transcript_cells.push(block);
+            app.active_thread_id = Some(owner.thread_id);
+            app.thread_event_channels.insert(owner.thread_id, live);
             app.chat_widget.handle_server_notification(
                 codex_app_server_protocol::ServerNotification::TurnStarted(
                     codex_app_server_protocol::TurnStartedNotification {
@@ -111,7 +118,8 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                 /*replay_kind*/ None,
             );
         }
-        let size = Size::new(width, /*height*/ 12);
+        // Leave history visible for the return-control interaction; short resizes below may hide it.
+        let size = Size::new(width, if running { 14 } else { 12 });
         tui.screen_size_for_event(&TuiEvent::Resize(size))?;
         app.transcript_view.jump_to_latest();
         let bottom = app.render_owned_transcript(&mut tui, size)?;
@@ -130,7 +138,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
         tui.screen_size_for_event(&TuiEvent::Resize(size))?;
         app.render_owned_transcript(&mut tui, size)?;
         assert_eq!(tui.terminal.last_known_cursor_pos, cursor);
-        for height in [24, 9, 8, 12] {
+        for height in [24, 9, 8, size.height] {
             let resized = Size::new(width, height);
             tui.screen_size_for_event(&TuiEvent::Resize(resized))?;
             app.render_owned_transcript(&mut tui, resized)?;

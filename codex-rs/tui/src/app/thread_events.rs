@@ -183,6 +183,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_active_turn_id(&mut self, turn_id: String) {
+        self.operations.reconcile_turn(Some(turn_id.clone()));
         self.latest_turn_id = Some(turn_id.clone());
         self.active_turn_id = Some(turn_id);
     }
@@ -570,6 +571,7 @@ impl ThreadEventStore {
 
     pub(super) fn clear_active_turn_id(&mut self) {
         self.active_turn_id = None;
+        self.operations.reconcile_turn(None);
     }
 }
 

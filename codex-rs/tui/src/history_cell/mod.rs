@@ -112,7 +112,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
-use unicode_segmentation::UnicodeSegmentation;
 #[cfg(test)]
 use url::Url;
 

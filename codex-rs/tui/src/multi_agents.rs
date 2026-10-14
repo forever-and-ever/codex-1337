@@ -381,10 +381,6 @@ fn agent_label(thread_id: ThreadId, metadata: &AgentMetadata) -> AgentLabel<'_> 
     }
 }
 
-fn agent_label_line(agent: AgentLabel<'_>) -> Line<'static> {
-    agent_label_spans(agent).into()
-}
-
 fn agent_label_spans(agent: AgentLabel<'_>) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let nickname = agent
@@ -655,24 +651,6 @@ mod tests {
         )
         .expect("send-input item renders");
 
-        let waiting = tool_call_history_cell(
-            &ThreadItem::CollabAgentToolCall {
-                id: "call-wait".to_string(),
-                tool: CollabAgentTool::Wait,
-                status: CollabAgentToolCallStatus::InProgress,
-                sender_thread_id: sender_thread_id.to_string(),
-                receiver_thread_ids: vec![robie_id.to_string()],
-                prompt: None,
-                model: None,
-                reasoning_effort: None,
-                wait_completion: None,
-                agents_states: HashMap::new(),
-            },
-            /*cached_spawn_request*/ None,
-            |thread_id| metadata_for(thread_id, robie_id, bob_id),
-        )
-        .expect("wait begin item renders");
-
         let finished = tool_call_history_cell(
             &ThreadItem::CollabAgentToolCall {
                 id: "call-wait".to_string(),
@@ -721,7 +699,7 @@ mod tests {
         )
         .expect("close item renders");
 
-        let snapshot = [spawn, send, waiting, finished, close]
+        let snapshot = [spawn, send, finished, close]
             .iter()
             .map(|cell| cell_to_text(cell))
             .filter(|text| !text.is_empty())
