@@ -101,8 +101,14 @@ fn file_disclosures_are_independent_and_not_copied() {
         .filter(|target| matches!(target, FoldTarget::Part(_)))
         .collect();
     assert_eq!(files.len(), 2);
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
     assert!(view.focus_fold(&cells, 0, files[1].clone()));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    // The old paint helper jumped to latest and concealed disclosure-induced loss of follow.
+    assert!(view.is_following());
+    let expanded = crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
+    assert!(crate::transcript_view::tests::text(&expanded).contains("+second beta line"));
+    assert!(view.tail_visible);
     let layout = paint(&mut view, 104, "second file");
     assert!(layout.text().contains("+beta body"));
     assert!(!layout.text().contains("+alpha body"));
@@ -148,6 +154,34 @@ fn file_disclosures_are_independent_and_not_copied() {
         Some(123)
     );
     insta::assert_snapshot!(snapshots.join("\n\n"));
+
+    view.jump_to_latest();
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
+    assert!(view.focus_fold(&cells, 0, files[1].clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    assert!(view.is_following());
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
+    let (row, column, _) = view
+        .current_layout(&cells, 0)
+        .unwrap()
+        .fold_position(&files[1])
+        .unwrap();
+    let screen_row = view
+        .visible
+        .iter()
+        .position(|visible| visible.row == row)
+        .unwrap();
+    assert!(view.toggle_disclosure_at(&cells, column.start as u16, screen_row as u16));
+    assert!(view.is_following());
+    let expanded = crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
+    assert!(crate::transcript_view::tests::text(&expanded).contains("+second beta line"));
+    assert!(view.tail_visible);
+
+    view.scroll(&cells, -1);
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
+    assert!(view.focus_fold(&cells, 0, files[1].clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    assert!(!view.is_following());
 }
 
 #[test]
