@@ -68,10 +68,35 @@ pub(crate) struct Invocation<'a> {
     pub(crate) outputs: Vec<&'a ToolOutputCell>,
 }
 
-fn json_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
-    let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input?.payload else {
+fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+    let read = codex_shell_command::read_intent::ReadIntent::from_tool_input(input)?;
+    Some(super::activity_parts::ActivityParts {
+        lines: captured_lines(
+            &format!("Read {}", read.label(&read.path)),
+            ContextAuthor::Environment,
+            OutputMode::Fmt,
+        ),
+        ..Default::default()
+    })
+}
+
+fn argument_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
+    let input = input?;
+    if let Some(read) = read_input(input) {
+        return Some(read);
+    }
+    if input.name.is_default_namespace() && input.name.name == "bash" {
+        let mut lines = crate::exec_cell::rows::formatted_input(input.payload.text())?;
+        mark_lines(&mut lines, OutputProvenance::Formatted);
+        return Some(super::activity_parts::ActivityParts {
+            lines,
+            ..Default::default()
+        });
+    }
+    let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input.payload else {
         return None;
     };
+    super::output_provenance::format_json(source).ok()??;
     Some(super::activity_parts::ActivityParts {
         lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
         ..Default::default()
@@ -149,6 +174,34 @@ fn input_projection(
     width: u16,
 ) -> Option<super::activity_parts::ActivityParts> {
     let any = cell.as_any();
+    if let Some(input) = any.downcast_ref::<super::ToolInputCell>() {
+        if let Some(read) = read_input(&input.0) {
+            return Some(read);
+        }
+        if input.0.name.is_default_namespace()
+            && input.0.name.name == "bash"
+            && let Some(lines) = crate::exec_cell::rows::formatted_input(input.0.payload.text())
+        {
+            return Some(super::activity_parts::ActivityParts {
+                lines,
+                ..Default::default()
+            });
+        }
+        let mut lines = captured_lines(
+            &input.0.name.to_string(),
+            ContextAuthor::Environment,
+            OutputMode::Fmt,
+        );
+        lines.extend(captured_lines(
+            input.0.payload.text(),
+            ContextAuthor::Environment,
+            OutputMode::Fmt,
+        ));
+        return Some(super::activity_parts::ActivityParts {
+            lines,
+            ..Default::default()
+        });
+    }
     if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
         return input_projection(wrapper.inner.as_ref(), width);
     }
@@ -393,11 +446,34 @@ impl Invocation<'_> {
     }
 
     pub(crate) fn raw_input(&self, input: Option<&ToolInput>) -> Option<Vec<HyperlinkLine>> {
-        Some(captured_lines(
-            self.raw_source(input)?,
-            ContextAuthor::Environment,
-            OutputMode::Raw,
-        ))
+        let source = self.raw_source(input)?;
+        let Some(language) = self
+            .script_language(input)
+            .filter(|_| !source.chars().any(super::output_provenance::unsafe_control))
+        else {
+            return Some(captured_lines(
+                source,
+                ContextAuthor::Environment,
+                OutputMode::Raw,
+            ));
+        };
+        let highlighted = crate::render::highlight::highlight_code_to_lines(source, language);
+        // Highlighting changes paint, never the captured source or its final empty line.
+        let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(
+            source
+                .split('\n')
+                .enumerate()
+                .map(|(index, text)| {
+                    highlighted
+                        .get(index)
+                        .filter(|line| line.to_string() == text)
+                        .cloned()
+                        .unwrap_or_else(|| Line::from(text.to_owned()))
+                })
+                .collect(),
+        );
+        mark_lines(&mut lines, OutputProvenance::Captured);
+        Some(lines)
     }
 
     pub(crate) fn formatted_input(
@@ -405,33 +481,29 @@ impl Invocation<'_> {
         input: Option<&ToolInput>,
         width: u16,
     ) -> Option<super::activity_parts::ActivityParts> {
-        if let Some(language) = self.script_language(input)
-            && !matches!(self.source, Source::Command(_))
-            && let Some(source) = self.raw_source(input)
-        {
-            if source.chars().any(super::output_provenance::unsafe_control) {
-                return Some(super::activity_parts::ActivityParts {
-                    lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
-                    ..Default::default()
-                });
-            }
-            let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(
-                crate::render::highlight::highlight_code_to_lines(source, language),
-            );
-            mark_lines(&mut lines, OutputProvenance::Formatted);
-            return Some(super::activity_parts::ActivityParts {
-                lines,
-                ..Default::default()
-            });
-        }
         let mut parts = match &self.source {
             Source::Code(block) => combine_parts(
                 block
                     .members()
                     .iter()
                     .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
-                    .map(|cell| input_projection(cell.as_ref(), width))
-                    .collect::<Option<Vec<_>>>()?,
+                    .filter_map(|cell| {
+                        // Captured arguments own the input projection. Later native lifecycle
+                        // cells must not replace an already formatted call or duplicate it.
+                        if !cell.as_any().is::<super::ToolInputCell>()
+                            && cell.tool_call_ids().iter().any(|id| {
+                                block.members().iter().any(|member| {
+                                    member
+                                        .as_any()
+                                        .downcast_ref::<super::ToolInputCell>()
+                                        .is_some_and(|input| input.0.call_id == *id)
+                                })
+                            })
+                        {
+                            return None;
+                        }
+                        input_projection(cell.as_ref(), width)
+                    }),
             ),
             Source::Command(call) => {
                 let script = input
@@ -467,9 +539,9 @@ impl Invocation<'_> {
                 .collect::<Option<Vec<_>>>()
             {
                 Some(parts) => combine_parts(parts),
-                None => return json_input(input),
+                None => return argument_input(input),
             },
-            Source::Output => return json_input(input),
+            Source::Output => return argument_input(input),
         };
         if parts.lines.is_empty() {
             return None;
@@ -506,6 +578,31 @@ impl Invocation<'_> {
         };
         mark_lines(&mut parts.lines, OutputProvenance::Client);
         parts
+    }
+
+    pub(crate) fn has_formatted_output(&self, width: u16) -> bool {
+        if !self.outputs.is_empty() {
+            return self.outputs.iter().any(|output| {
+                let reformats = |source: &str| {
+                    super::output_provenance::format_json(source)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|formatted| formatted != source)
+                };
+                match output.captured_output() {
+                    FunctionCallOutputBody::Text(text) => reformats(text),
+                    FunctionCallOutputBody::ContentItems(items) => items.iter().any(|item| {
+                        matches!(item, FunctionCallOutputContentItem::InputText { text }
+                            if reformats(text))
+                    }),
+                }
+            });
+        }
+        let raw = self.output(width, OutputMode::Raw);
+        let formatted = self.output(width, OutputMode::Fmt);
+        !raw.iter()
+            .map(|line| line.line.to_string())
+            .eq(formatted.iter().map(|line| line.line.to_string()))
     }
 
     pub(crate) fn output(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {

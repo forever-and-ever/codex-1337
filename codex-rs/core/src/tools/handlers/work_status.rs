@@ -31,13 +31,17 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "update_work_status".into(),
-            description: format!("Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most {} characters. Replaces the previous activity and clears when the turn ends. Never changes the goal.", WorkStatus::MAX_ACTIVITY_CHARS),
+            description: format!(
+                "Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most {} characters. Replaces the previous activity and clears when the turn ends. Never changes the goal.",
+                WorkStatus::MAX_ACTIVITY_CHARS
+            ),
             strict: false,
             defer_loading: None,
             parameters: JsonSchema::object(
-                BTreeMap::from([
-                    ("activity".into(), JsonSchema::string(Some("What you are currently working on.".into()))),
-                ]),
+                BTreeMap::from([(
+                    "activity".into(),
+                    JsonSchema::string(Some("What you are currently working on.".into())),
+                )]),
                 Some(vec!["activity".into()]),
                 /*additional_properties*/ Some(false.into()),
             ),
@@ -81,9 +85,10 @@ impl CoreToolRuntime for WorkStatusHandler {
 
 fn summary(text: String) -> Result<String, FunctionCallError> {
     if text.chars().count() > WorkStatus::MAX_ACTIVITY_CHARS {
-        return Err(FunctionCallError::RespondToModel(
-            format!("Keep each summary within {} characters.", WorkStatus::MAX_ACTIVITY_CHARS),
-        ));
+        return Err(FunctionCallError::RespondToModel(format!(
+            "Keep each summary within {} characters.",
+            WorkStatus::MAX_ACTIVITY_CHARS
+        )));
     }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() || text.chars().any(char::is_control) {

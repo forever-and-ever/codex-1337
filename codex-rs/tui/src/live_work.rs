@@ -267,7 +267,11 @@ impl LiveWorkView {
     }
 
     pub(crate) fn desired_height(&self, width: u16) -> u16 {
-        u16::try_from(self.lines(crate::render::live_section::content_width(width)).len()).unwrap_or(u16::MAX)
+        u16::try_from(
+            self.lines(crate::render::live_section::content_width(width))
+                .len(),
+        )
+        .unwrap_or(u16::MAX)
     }
 
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer) {

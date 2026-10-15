@@ -2295,15 +2295,12 @@ impl BottomPane {
             {
                 flex.push(
                     /*flex*/ 0,
-                    activity_inset::inset(
-                        hook_status::HookStatus {
-                            message,
-                            animations_enabled: self.animations_enabled
-                                && self.effects.shimmer
-                                && self.frame_requester.mode()
-                                    == crate::tui::PresentationMode::Normal,
-                        },
-                    ),
+                    activity_inset::inset(hook_status::HookStatus {
+                        message,
+                        animations_enabled: self.animations_enabled
+                            && self.effects.shimmer
+                            && self.frame_requester.mode() == crate::tui::PresentationMode::Normal,
+                    }),
                 );
             }
             // Avoid double-surfacing the same summary and avoid adding an extra

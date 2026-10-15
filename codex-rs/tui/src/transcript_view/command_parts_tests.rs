@@ -39,6 +39,10 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     };
     let mut view = TranscriptView::default();
     view.record_tool_input(input);
+    view.invocations.apply(
+        "train",
+        Action::Toggle(Port::Input, Panel::Visible(OutputMode::Fmt)),
+    );
     view.sync_live_activity(&[], cell.activity_ids());
     assert!(
         view.sync_live_invocation_tail(80, None, &cell, vec!["live auxiliary".into()])
@@ -250,9 +254,9 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .all(|target| matches!(target, FoldTarget::Invocation { .. }))
     );
     insta::assert_snapshot!(snapshots.join("\n\n"));
-    // Source readiness belongs to the invocation, not its changing nested tool set.
-    // Retained source-only records and a live call's first paint must agree.
-    let script = "const answer = 42;\ntext(\"emitted text\");";
+    // A source-first highlight once bypassed every semantic child projection.
+    // Hold the initial input until real call arguments arrive; raw remains exact.
+    let script = "const answer = 42;\ntext(await fs.readFile(\"src/main.rs\", \"utf8\"));\nawait tools.update_work_status({activity: \"Reading source\"});\n";
     let owner = codex_app_server_protocol::CodeModeOwner {
         thread_id: codex_protocol::ThreadId::from_u128(7),
         exec_call_id: "code".into(),
@@ -316,24 +320,37 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .unwrap()
             .find("Code Mode")
             .unwrap();
-        let (source_row, source_line) = shown
-            .lines()
-            .enumerate()
-            .find(|(_, line)| line.contains("const answer"))
-            .unwrap();
-        let source_column = source_line.find("const answer").unwrap();
-        assert_eq!(source_column, header_column + 2);
-        assert_ne!(
-            buffer[(source_column as u16, source_row as u16)].fg,
-            buffer[((source_column + 15) as u16, source_row as u16)].fg,
-        );
+        let pending = view.current_layout(&code, 0).unwrap();
+        assert!(pending.text().is_empty());
+        assert!(!shown.contains("const answer"));
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+            ToolInput {
+                id: "input:read-child".into(),
+                call_id: "read-child".into(),
+                name: ToolName::plain("fs"),
+                payload: ToolInputPayload::Json(
+                    r#"{"operation":"read","path":"src/main.rs","encoding":"utf8"}"#.into(),
+                ),
+            },
+        ));
+        tests::render(&mut view, &code, 104, 26);
         let first = view.current_layout(&code, 0).unwrap();
-        assert_eq!(first.text(), script);
+        assert!(first.text().contains("Read src/main.rs"));
+        assert!(!first.text().contains("fs.readFile"));
         let format = FoldTarget::Invocation {
             call_id: "code".into(),
             action: Action::Format(Port::Input, OutputMode::Fmt),
         };
+        assert!(pending.fold_position(&format).is_none());
         assert!(first.fold_position(&format).is_some());
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+            ToolInput {
+                id: "input:status-child".into(),
+                call_id: "status-child".into(),
+                name: ToolName::plain("update_work_status"),
+                payload: ToolInputPayload::Json(r#"{"activity":"Reading source"}"#.into()),
+            },
+        ));
         code[0] = reduce(codex_app_server_protocol::ThreadItem::CommandExecution {
             sandbox_type: None,
             model_context: None,
@@ -352,7 +369,10 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         });
         tests::render(&mut view, &code, 104, 26);
         let nested = view.current_layout(&code, 0).unwrap();
-        assert_eq!(nested.text(), first.text());
+        assert!(nested.text().contains("Read src/main.rs"));
+        assert!(nested.text().contains("update_work_status"));
+        assert!(nested.text().contains("Reading source"));
+        assert!(!nested.text().contains("const answer"));
         assert!(nested.fold_position(&format).is_some());
         code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
             id: "code-output".into(),
@@ -364,7 +384,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         tests::render(&mut view, &code, 104, 26);
         let output = FoldTarget::Invocation {
             call_id: "code".into(),
-            action: Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
+            action: Action::Toggle(Port::Output, Panel::Visible(OutputMode::Raw)),
         };
         assert!(view.focus_fold(&code, 0, output));
         view.handle_key(KeyCode::Enter.into(), &code);
@@ -374,6 +394,25 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         };
         assert!(view.focus_fold(&code, 0, raw.clone()));
         view.handle_key(KeyCode::Enter.into(), &code);
+        let buffer = tests::render(&mut view, &code, 104, 26);
+        let shown = tests::text(&buffer);
+        let (source_row, source_line) = shown
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains("const answer"))
+            .unwrap();
+        let source_column = source_line.find("const answer").unwrap();
+        assert_eq!(source_column, header_column + 2);
+        assert_ne!(
+            buffer[(source_column as u16, source_row as u16)].fg,
+            buffer[((source_column + 15) as u16, source_row as u16)].fg
+        );
+        assert!(
+            view.current_layout(&code, 0)
+                .unwrap()
+                .text()
+                .contains(script)
+        );
         let outer = nested
             .fold_targets()
             .into_iter()
@@ -410,7 +449,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 opened
                     .fold_position(&FoldTarget::Invocation {
                         call_id: "code".into(),
-                        action: Action::Toggle(Port::Output, Panel::Hidden(OutputMode::Fmt)),
+                        action: Action::Toggle(Port::Output, Panel::Hidden(OutputMode::Raw)),
                     })
                     .is_some()
             );
@@ -454,6 +493,10 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     let call = crate::history_cell::invocation::collect(&output).remove(0);
     let mut view = TranscriptView::default();
     view.record_tool_input(input("python"));
+    view.invocations.apply(
+        "source",
+        Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
+    );
     let python = view
         .invocations
         .body(&call, true, 80, false, &Default::default());
@@ -467,6 +510,20 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         "print(42)"
     );
     let available = view.invocations.header(&call, true, 80, None, false);
+    assert!(available.controls.iter().all(|control| !matches!(
+        control.target,
+        FoldTarget::Invocation {
+            action: Action::Format(_, OutputMode::Fmt),
+            ..
+        }
+    )));
+    assert!(
+        python.lines[0]
+            .line
+            .spans
+            .iter()
+            .any(|span| span.style.fg != python.lines[0].line.spans[0].style.fg)
+    );
     // Folded defaults must not hide explicit choices or export content.
     let input_text = |view: &TranscriptView, width, full| {
         view.invocations
@@ -484,7 +541,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             "session_id",
         ),
         ("bash", ToolInputPayload::Text("echo 42".into()), "echo 42"),
-        ("python", ToolInputPayload::Text("print(42)".into()), "print(42)"),
+        (
+            "python",
+            ToolInputPayload::Text("print(42)".into()),
+            "print(42)",
+        ),
     ] {
         let mut folded = TranscriptView::default();
         folded.record_tool_input(ToolInput {

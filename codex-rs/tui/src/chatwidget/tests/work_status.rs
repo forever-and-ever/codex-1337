@@ -188,7 +188,10 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         "Reconnecting…",
     );
     chat.set_status_header("Working".into());
-    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        "Working"
+    );
     assert_eq!(chat.current_work_status, None);
     assert!(drain_insert_history(&mut rx).is_empty());
     // Activity text is a projection: neither legacy labels nor row recreation own the timer.
@@ -198,7 +201,10 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     legacy.activity = format!("{}👩‍🔬 extra", "x".repeat(48));
     chat.set_status_header("Reconnecting…".into());
     chat.on_work_status_updated(legacy);
-    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Reconnecting…");
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        "Reconnecting…"
+    );
     chat.set_status_header("Working".into());
     let expected = format!("{}…", "x".repeat(48));
     assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
@@ -208,7 +214,10 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
     assert!(chat.bottom_pane.status_elapsed().unwrap() >= elapsed);
     chat.clear_work_status();
-    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        "Working"
+    );
     let _ = drain_insert_history(&mut rx);
     for final_status in [
         TurnStatus::Completed,
@@ -231,14 +240,20 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         assert_eq!(chat.current_work_status, None);
         chat.bottom_pane.ensure_status_indicator();
         chat.restore_reasoning_status_header();
-        assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
+        assert_eq!(
+            chat.bottom_pane.status_widget().unwrap().header(),
+            "Working"
+        );
         assert!(chat.current_goal_status.is_some());
         // Late completion metadata must not resurrect the previous turn's activity.
         chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
         assert_eq!(chat.current_work_status, None);
         chat.bottom_pane.ensure_status_indicator();
         chat.restore_reasoning_status_header();
-        assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
+        assert_eq!(
+            chat.bottom_pane.status_widget().unwrap().header(),
+            "Working"
+        );
     }
     chat.current_goal_status = None;
     chat.bottom_pane

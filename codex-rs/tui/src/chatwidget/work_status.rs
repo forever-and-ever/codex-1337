@@ -82,7 +82,8 @@ fn activity_header(activity: &str) -> String {
     }
     // Legacy servers may exceed the current limit. Keep whole graphemes and count the ellipsis.
     let mut remaining = WorkStatus::MAX_ACTIVITY_CHARS - 1;
-    let mut header: String = activity.graphemes(true)
+    let mut header: String = activity
+        .graphemes(true)
         .take_while(|grapheme| {
             let len = grapheme.chars().count();
             if len > remaining {

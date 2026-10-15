@@ -196,7 +196,8 @@ text('authority and bounds preserved');
         let mut filesystem_inputs = Vec::new();
         core_test_support::wait_for_event(&test.codex, |event| {
             if let codex_protocol::protocol::EventMsg::CodeModeOwned(owned) = event
-                && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) = owned.payload()
+                && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) =
+                    owned.payload()
                 && let codex_protocol::items::TurnItem::ToolInput(input) = &completed.item
             {
                 assert_eq!(owned.owner.exec_call_id, "filesystem");
@@ -233,9 +234,9 @@ text('authority and bounds preserved');
         let request = log.last_request().expect("follow-up");
         assert!(request.input().iter().all(|item| {
             item["type"] != "tool_input"
-                && filesystem_inputs.iter().all(|input| {
-                    item["call_id"].as_str() != Some(input.call_id.as_str())
-                })
+                && filesystem_inputs
+                    .iter()
+                    .all(|input| item["call_id"].as_str() != Some(input.call_id.as_str()))
         }));
         let output = custom_tool_output_items(&request, "filesystem");
         assert_eq!(text_item(&output, 1), "authority and bounds preserved");

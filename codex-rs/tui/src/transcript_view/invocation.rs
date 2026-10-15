@@ -63,7 +63,14 @@ impl Invocations {
         self.inputs.get(id)
     }
 
-    fn ports(&self, call: &Invocation<'_>, open: bool, formatted: bool, full: bool) -> Ports {
+    fn ports(
+        &self,
+        call: &Invocation<'_>,
+        open: bool,
+        formatted: bool,
+        formatted_output: bool,
+        full: bool,
+    ) -> Ports {
         if full {
             return Ports {
                 input: Panel::Visible(
@@ -86,26 +93,34 @@ impl Invocations {
         } else {
             OutputMode::Raw
         };
+        // A live/page-prefix Code Mode source is not its settled semantic projection.
+        // Keep the default body unpainted until arguments or the terminal fact arrive.
         let preferred = choices.and_then(|choice| choice.input).unwrap_or(
             if open
                 && input_open_by_default(call.name(self.input(call.id)))
-                && (formatted || call.raw_source(self.input(call.id)).is_some())
+                && (formatted
+                    || (!matches!(call.source, crate::history_cell::invocation::Source::Code(block)
+                            if block.status().is_none())
+                        && call.raw_source(self.input(call.id)).is_some()))
             {
                 Panel::Visible(mode)
             } else {
                 Panel::Hidden(mode)
             },
         );
-        let input = match (formatted, preferred) {
+        let available = |panel, formatted| match (formatted, panel) {
             (false, Panel::Visible(_)) => Panel::Visible(OutputMode::Raw),
             (false, Panel::Hidden(_)) => Panel::Hidden(OutputMode::Raw),
             (_, panel) => panel,
         };
         Ports {
-            input,
-            output: choices
-                .and_then(|choice| choice.output)
-                .unwrap_or(Panel::Hidden(OutputMode::Fmt)),
+            input: available(preferred, formatted),
+            output: available(
+                choices
+                    .and_then(|choice| choice.output)
+                    .unwrap_or(Panel::Hidden(OutputMode::Fmt)),
+                formatted_output,
+            ),
         }
     }
 
@@ -135,13 +150,15 @@ impl Invocations {
         let bill_width = bill.as_ref().map_or(0, |(_, label)| label.len() as u16 + 2);
         let width = width.saturating_sub(bill_width).max(1);
         let formatted = call.formatted_input(self.input(call.id), width).is_some();
-        let ports = self.ports(call, open, formatted, full);
+        let formatted_output = call.has_formatted_output(width);
+        let ports = self.ports(call, open, formatted, formatted_output, full);
         let mut title = crate::render::header::paint(call.title(self.input(call.id)));
         let mut controls = Vec::new();
         let mut strip = Line::default();
-        for (port, label, available) in
-            [(Port::Input, "in", formatted), (Port::Output, "out", true)]
-        {
+        for (port, label, available) in [
+            (Port::Input, "in", formatted),
+            (Port::Output, "out", formatted_output),
+        ] {
             if !strip.spans.is_empty() {
                 strip.push_span(" ");
             }
@@ -262,7 +279,13 @@ impl Invocations {
         use crate::history_cell::activity_parts::ActivityParts;
         let input = self.input(call.id);
         let formatted = call.formatted_input(input, width);
-        let ports = self.ports(call, open, formatted.is_some(), full);
+        let ports = self.ports(
+            call,
+            open,
+            formatted.is_some(),
+            call.has_formatted_output(width),
+            full,
+        );
         let mut parts = ActivityParts::default();
         if ports.input.visible() {
             parts = if ports.input.mode() == OutputMode::Fmt {
