@@ -4,9 +4,11 @@
 
 use super::*;
 
+use crate::render::ruled_sections::HorizontalRule;
+
 impl ChatComposer {
     pub(super) fn status_surface_height(&self, options: ComposerRenderOptions<'_>) -> u16 {
-        u16::from(options.separate_status_line && self.footer.status_line_enabled)
+        2 * u16::from(options.separate_status_line && self.footer.status_line_enabled)
     }
 
     pub(super) fn hint_footer_props(&self, options: ComposerRenderOptions<'_>) -> FooterProps {
@@ -28,6 +30,16 @@ impl ChatComposer {
         if area.is_empty() {
             return;
         }
+        let area = if area.height > 1 {
+            HorizontalRule.render(area, buf);
+            Rect {
+                y: area.y + 1,
+                height: area.height - 1,
+                ..area
+            }
+        } else {
+            area
+        };
         let mut props = self.footer_props();
         let show_cycle_hint = !props.is_task_running
             && !self.blocks_direct_input

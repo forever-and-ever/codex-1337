@@ -35,7 +35,7 @@ impl Renderable for RuledSections<'_> {
         for height in heights {
             total = total.saturating_add(height + 1);
         }
-        total + u16::from(total > 0)
+        total
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -47,7 +47,7 @@ impl Renderable for RuledSections<'_> {
             .iter()
             .filter(|section| section.desired_height(area.width) > 0)
             .collect();
-        if area.height < 3 {
+        if area.height < 2 {
             if let Some(section) = sections.last() {
                 section.render(area, buf);
             }
@@ -58,7 +58,7 @@ impl Renderable for RuledSections<'_> {
             let height = section.desired_height(area.width);
             // Later sections contain navigation. Give each a row before spending the remaining
             // height on wrapped metadata; omit a section rather than draw adjacent empty rules.
-            let reserve = ((sections.len() - index - 1) * 2 + 1) as u16;
+            let reserve = ((sections.len() - index - 1) * 2) as u16;
             if area.bottom().saturating_sub(y) <= reserve + 1 {
                 continue;
             }
@@ -74,16 +74,6 @@ impl Renderable for RuledSections<'_> {
             let height = height.min(area.bottom().saturating_sub(y).saturating_sub(reserve));
             section.render(Rect { y, height, ..area }, buf);
             y += height;
-        }
-        if y < area.bottom() {
-            HorizontalRule.render(
-                Rect {
-                    y,
-                    height: 1,
-                    ..area
-                },
-                buf,
-            );
         }
     }
 }

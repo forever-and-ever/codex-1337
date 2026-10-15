@@ -187,7 +187,8 @@ fn shortcut_help_stays_above_the_prompt_and_bottom_status() {
                 Some((2, prompt_row as u16))
             ),
         );
-        assert_eq!(prompt_row + 3, rows.len() - 1);
+        assert_eq!(rows[rows.len() - 3], "─".repeat(usize::from(width)));
+        assert_eq!(prompt_row + 4, rows.len() - 1);
         if let Some(name) = snapshot {
             insta::assert_snapshot!(name, text);
         }
