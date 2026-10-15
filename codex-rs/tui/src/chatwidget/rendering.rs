@@ -269,7 +269,6 @@ impl ChatWidget {
                                 .current_goal_status
                                 .as_ref()
                                 .map(|status| status.goal.objective.as_str()),
-                            status: self.current_work_status.as_ref(),
                             reasoning: self.reasoning_header.as_deref(),
                         })),
                         RenderableItem::Owned(Box::new(crate::subagent_roster::RosterView {

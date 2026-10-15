@@ -77,7 +77,7 @@ impl ChatWidget {
 
     pub(super) fn on_task_started(&mut self) {
         self.bottom_pane.dismiss_composer_sparkle();
-        self.current_work_status = None;
+        self.clear_work_status();
         self.clear_context_compaction();
         self.input_queue.turn.started();
         self.reset_safety_buffering_for_turn_start();
@@ -128,7 +128,7 @@ impl ChatWidget {
         self.input_queue
             .pending_steer
             .set_interrupt(input_queue::SteerInterrupt::RestoreDraft);
-        self.current_work_status = None;
+        self.clear_work_status();
         let sanitized_last_agent_message = last_agent_message.as_deref().map(|message| {
             parse_assistant_markdown(message, self.config.cwd.as_path()).visible_markdown
         });
@@ -321,7 +321,7 @@ impl ChatWidget {
         self.flush_answer_and_plan_streams();
         self.flush_interrupt_activity();
         self.finish_dynamic_activity();
-        self.current_work_status = None;
+        self.clear_work_status();
         if self.status_state.reasoning_resume_turn_id.is_some() {
             self.on_agent_reasoning_final();
         }

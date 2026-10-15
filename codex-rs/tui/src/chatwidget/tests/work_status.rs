@@ -41,6 +41,10 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     );
     chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
     assert_eq!(chat.current_work_status, Some(status.clone()));
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        status.activity,
+    );
     let mut history: Vec<Arc<dyn HistoryCell>> = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => Some(Arc::from(cell)),
@@ -63,6 +67,10 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     }
     chat.handle_server_notification(misrouted, /*replay_kind*/ None);
     assert_eq!(chat.current_work_status, Some(status.clone()));
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        status.activity,
+    );
     assert!(drain_insert_history(&mut rx).is_empty());
     chat.on_agent_reasoning_delta("**Checking the lifecycle**".into());
     let mut panels = Vec::new();
@@ -97,7 +105,6 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
                 .expect("composer cursor");
             let status_height = super::super::work_status::WorkStatusView {
                 goal,
-                status: Some(&status),
                 reasoning: chat.reasoning_header.as_deref(),
             }
             .desired_height(width);
@@ -174,9 +181,35 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut cleared {
         update.status.activity.clear();
     }
+    chat.set_status_header("Reconnecting…".into());
     chat.handle_server_notification(cleared, /*replay_kind*/ None);
+    assert_eq!(
+        chat.bottom_pane.status_widget().unwrap().header(),
+        "Reconnecting…",
+    );
+    chat.set_status_header("Working".into());
+    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
     assert_eq!(chat.current_work_status, None);
     assert!(drain_insert_history(&mut rx).is_empty());
+    // Activity text is a projection: neither legacy labels nor row recreation own the timer.
+    chat.bottom_pane.reset_status_timer(Duration::from_secs(42));
+    let elapsed = chat.bottom_pane.status_elapsed().unwrap();
+    let mut legacy = status.clone();
+    legacy.activity = format!("{}👩‍🔬 extra", "x".repeat(48));
+    chat.set_status_header("Reconnecting…".into());
+    chat.on_work_status_updated(legacy);
+    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Reconnecting…");
+    chat.set_status_header("Working".into());
+    let expected = format!("{}…", "x".repeat(48));
+    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
+    chat.bottom_pane.hide_status_indicator();
+    chat.bottom_pane.ensure_status_indicator();
+    chat.set_status_header("Working".into());
+    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
+    assert!(chat.bottom_pane.status_elapsed().unwrap() >= elapsed);
+    chat.clear_work_status();
+    assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
+    let _ = drain_insert_history(&mut rx);
     for final_status in [
         TurnStatus::Completed,
         TurnStatus::Interrupted,
@@ -196,10 +229,16 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
             Some(ReplayKind::ThreadSnapshot),
         );
         assert_eq!(chat.current_work_status, None);
+        chat.bottom_pane.ensure_status_indicator();
+        chat.restore_reasoning_status_header();
+        assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
         assert!(chat.current_goal_status.is_some());
         // Late completion metadata must not resurrect the previous turn's activity.
         chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
         assert_eq!(chat.current_work_status, None);
+        chat.bottom_pane.ensure_status_indicator();
+        chat.restore_reasoning_status_header();
+        assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), "Working");
     }
     chat.current_goal_status = None;
     chat.bottom_pane
