@@ -77,14 +77,6 @@ pub(super) fn bump(distance: f64, width: f64) -> f64 {
     }
 }
 
-/// Smooth value noise in [0, 1) that wanders once per `period` seconds.
-pub(super) fn wobble(seed: i64, t: f64, period: f64) -> f64 {
-    let step = (t / period).floor();
-    let u = ease(t / period - step);
-    let at = |k: f64| hash(seed + 7919 * k as i64);
-    at(step) * (1.0 - u) + at(step + 1.0) * u
-}
-
 /// One tick of a first-order lag from `value` toward `target` with time constant `tau` seconds.
 pub(super) fn lag(value: f64, target: f64, tau: f64) -> f64 {
     value + (target - value) * (1.0 - (-TICK / tau).exp())

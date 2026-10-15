@@ -134,7 +134,7 @@ impl Shimmer for Rubik {
         };
         row.mark = [0, 4]
             .map(|first| match flash {
-                Some(flash) => Ink::of('█').fg(flash.blend(stage.bg, /*alpha*/ 0.8)),
+                Some(flash) => Ink::of('█').fg(flash),
                 None => {
                     let bits = (0..4)
                         .filter(|&q| !stickers[first + q])
@@ -144,15 +144,15 @@ impl Shimmer for Rubik {
                 }
             })
             .to_vec();
-        row.header = stage.letters(|i, _| {
-            let sticker = flash.unwrap_or(if stickers[i % 8] { b } else { a });
-            Ink::default().fg(dim(sticker.blend(stage.fg, /*alpha*/ 0.4)))
+        row.header = stage.letters(|i, _| match flash {
+            Some(flash) => Ink::default().fg(flash).bold(true),
+            None => Ink::default().fg(dim(if stickers[i % 8] { b } else { a })),
         });
     }
 
     fn tool(&self, stage: &Stage) -> Ink {
         match self.puzzle(stage).moving {
-            Some(twist) => Ink::of(TWIST_SIGNS[twist]).fg(stage.grey(/*alpha*/ 0.85)),
+            Some(twist) => Ink::of(TWIST_SIGNS[twist]).fg(WHITE),
             None => Ink::of('·').fg(stage.grey(/*alpha*/ 0.4)),
         }
     }

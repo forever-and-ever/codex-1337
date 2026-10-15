@@ -1,44 +1,50 @@
-//! A scripted turn, the design swatches' Cycle: output under three headers with a stall, then a wait on
-//! a background terminal. The picker previews shimmers with it and the glare tests measure them on it.
+//! A scripted turn, the design swatches' Cycle: the model works under three headers, then waits on a
+//! background terminal whose output enters the context as the wait ends. The picker previews
+//! shimmers with it, paced as the live feed paces a real thread.
 
 use super::kit::hash;
+use super::stage::DRAIN;
 use super::stage::Spell;
+use super::stage::pace;
 
 /// Seconds per slot of the token schedule.
 const SLOT: f64 = 0.05;
 
+/// What the agent does during a segment.
+#[derive(Clone, Copy)]
+enum Work {
+    /// The model works, its output entering the context at `rate` tokens a second.
+    Busy { rate: f64 },
+    /// A tool runs; its result's `tokens` enter the context as the wait ends.
+    Wait { tokens: f64 },
+}
+
 struct Segment {
-    spell: Spell,
     header: &'static str,
     length: f64,
-    /// Seconds into the segment during which no tokens arrive.
-    stall: Option<(f64, f64)>,
+    work: Work,
 }
 
 static CYCLE: [Segment; 4] = [
     Segment {
-        spell: Spell::Busy,
         header: "Working",
         length: 2.5,
-        stall: None,
+        work: Work::Busy { rate: 60.0 },
     },
     Segment {
-        spell: Spell::Busy,
         header: "Tracing shimmer cadence",
         length: 3.5,
-        stall: None,
+        work: Work::Busy { rate: 80.0 },
     },
     Segment {
-        spell: Spell::Busy,
         header: "Drafting the fix",
         length: 4.0,
-        stall: Some((1.0, 3.8)),
+        work: Work::Busy { rate: 50.0 },
     },
     Segment {
-        spell: Spell::Wait,
         header: "Waiting for background terminal",
         length: 7.0,
-        stall: None,
+        work: Work::Wait { tokens: 600.0 },
     },
 ];
 
@@ -46,20 +52,40 @@ fn length() -> f64 {
     CYCLE.iter().map(|segment| segment.length).sum()
 }
 
-/// The segment under way `t` seconds into a cycle, and the seconds into it.
-fn segment(t: f64) -> (&'static Segment, f64) {
-    let mut start = 0.0;
+/// The segment under way `t` seconds into a cycle.
+fn segment(t: f64) -> &'static Segment {
+    let mut end = 0.0;
     for segment in &CYCLE[..CYCLE.len() - 1] {
-        if t < start + segment.length {
-            return (segment, t - start);
+        end += segment.length;
+        if t < end {
+            return segment;
         }
-        start += segment.length;
     }
-    (&CYCLE[CYCLE.len() - 1], t - start)
+    &CYCLE[CYCLE.len() - 1]
+}
+
+/// Tokens a second entering the context `t` seconds into a cycle: the model's output while it
+/// works, and every wait's result draining.
+fn inflow(t: f64) -> f64 {
+    let length = length();
+    // A result drains on through later cycles, so each cycle meets every earlier one's remainder.
+    let echoes = 1.0 / -(-length / DRAIN).exp_m1();
+    let mut end = 0.0;
+    let mut drained = 0.0;
+    for segment in &CYCLE {
+        end += segment.length;
+        if let Work::Wait { tokens } = segment.work {
+            drained += tokens / DRAIN * (-(t - end).rem_euclid(length) / DRAIN).exp() * echoes;
+        }
+    }
+    match segment(t).work {
+        Work::Busy { rate } => rate + drained,
+        Work::Wait { .. } => drained,
+    }
 }
 
 pub(super) struct Script {
-    /// Tokens arrived before each slot of one cycle; the last entry is the cycle's total.
+    /// Paced tokens arrived before each slot of one cycle; the last entry is the cycle's total.
     before: Vec<u64>,
 }
 
@@ -68,30 +94,22 @@ impl Script {
         let slots = (length() / SLOT).round() as usize;
         let mut before = vec![0; slots + 1];
         for slot in 0..slots {
-            let k = slot as f64;
-            let (segment, into) = segment((k + 0.5) * SLOT);
-            let stalled = segment
-                .stall
-                .is_some_and(|(from, to)| (from..to).contains(&into));
-            let flowing =
-                segment.spell == Spell::Busy && !stalled && hash(7 * slot as i64 + 3) > 0.08;
-            let rate = 62.0 + 28.0 * (0.21 * k).sin() + 18.0 * (0.047 * k + 1.0).sin();
-            let arrived = if flowing {
-                (rate * SLOT + hash(slot as i64)).floor() as u64
-            } else {
-                0
-            };
-            before[slot + 1] = before[slot] + arrived;
+            let paced = pace(inflow((slot as f64 + 0.5) * SLOT)) * SLOT;
+            before[slot + 1] = before[slot] + (paced + hash(slot as i64)).floor() as u64;
         }
         Self { before }
     }
 
-    /// The spell, the header and the tokens arrived `t` seconds into the looping script.
+    /// The spell, the header and the paced tokens arrived `t` seconds into the looping script.
     pub(super) fn at(&self, t: f64) -> (Spell, &'static str, u64) {
-        let (segment, _) = segment(t % length());
+        let segment = segment(t % length());
         let slots = self.before.len() - 1;
         let slot = (t / SLOT + 1e-6).floor() as usize;
         let tokens = (slot / slots) as u64 * self.before[slots] + self.before[slot % slots];
-        (segment.spell, segment.header, tokens)
+        let spell = match segment.work {
+            Work::Busy { .. } => Spell::Busy,
+            Work::Wait { .. } => Spell::Wait,
+        };
+        (spell, segment.header, tokens)
     }
 }

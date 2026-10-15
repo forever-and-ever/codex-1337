@@ -2,8 +2,22 @@
 
 /// Seconds per tick; codex-tui schedules animation frames 32 ms apart.
 pub(super) const TICK: f64 = 0.032;
-/// Ticks of token history a stage keeps, a little over four seconds.
+/// Ticks of paced token history a stage keeps, a little over four seconds.
 const HISTORY: usize = 128;
+/// Seconds over which a lump of tokens entering the context drains into the stage.
+pub(super) const DRAIN: f64 = 4.0;
+/// Tokens a second above which the stage's pace grows only logarithmically.
+const KNEE: f64 = 100.0;
+
+/// The stage's pace, in tokens a second, for `rate` tokens a second entering the context: the rate
+/// itself up to [`KNEE`], and logarithmic beyond, so a large result surges without swamping the row.
+pub(super) fn pace(rate: f64) -> f64 {
+    if rate <= KNEE {
+        rate
+    } else {
+        KNEE * (1.0 + (rate / KNEE).ln())
+    }
+}
 
 /// A stock shimmer: its picker entry and how to start one.
 pub(super) struct Recipe {
@@ -37,9 +51,10 @@ pub(super) struct Stage {
     pub(super) spell: Spell,
     /// Seconds into the current spell; the first spell starts with the clock.
     pub(super) spell_t: f64,
-    /// Tokens since the shimmer was engaged, estimated from streamed text.
+    /// Paced tokens since the shimmer was engaged: the displayed thread's context inflow, at the
+    /// [`pace`] the engine feeds it.
     pub(super) tokens: u64,
-    /// Seconds since a token arrived.
+    /// Seconds since a paced token arrived.
     pub(super) quiet: f64,
     /// The status header, one entry per grapheme.
     pub(super) header: Vec<String>,
@@ -53,7 +68,7 @@ pub(super) struct Stage {
     pub(super) fg: Rgb,
     /// The terminal's default background.
     pub(super) bg: Rgb,
-    /// Tokens that arrived in each recent tick; `newest` indexes the last.
+    /// Paced tokens that arrived in each recent tick; `newest` indexes the last.
     history: [u32; HISTORY],
     newest: usize,
 }
@@ -81,12 +96,12 @@ impl Stage {
         self.spell == Spell::Busy
     }
 
-    /// Tokens that arrived during the last tick.
+    /// Paced tokens that arrived during the last tick.
     pub(super) fn fresh(&self) -> u32 {
         self.history[self.newest]
     }
 
-    /// Tokens that arrived in the last `window` seconds, at most the stage's history.
+    /// Paced tokens that arrived in the last `window` seconds, at most the stage's history.
     pub(super) fn tokens_in(&self, window: f64) -> f64 {
         let ticks = ((window / TICK).round() as usize).min(HISTORY);
         (0..ticks)
@@ -94,7 +109,7 @@ impl Stage {
             .sum()
     }
 
-    /// Tokens per second over the last `window` seconds.
+    /// Paced tokens per second over the last `window` seconds.
     pub(super) fn flow(&self, window: f64) -> f64 {
         self.tokens_in(window) / window
     }
@@ -113,7 +128,7 @@ impl Stage {
             .collect()
     }
 
-    /// Moves the clock one tick, in which `tokens` arrived during `spell`.
+    /// Moves the clock one tick, in which `tokens` paced tokens arrived during `spell`.
     pub(super) fn advance(&mut self, tokens: u32, spell: Spell) {
         self.spell_t = if spell != self.spell && self.t > 0.0 {
             0.0

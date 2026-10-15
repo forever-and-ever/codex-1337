@@ -1,16 +1,17 @@
 //! Shimmers: the animation that dresses codex-tui's live rows.
 //!
 //! A shimmer paints the status row (its mark, its header, the cells after the header, and a backdrop
-//! behind the row) and the one-cell bullet of each running tool. The engine owns time, token flow and
-//! whether the agent is busy or waiting on a tool, and hands them to the shimmer every 32 ms tick as a
-//! [`stage::Stage`], the way a shader receives its uniforms; `stage` is that interface and `kit` the
-//! patterns stock shimmers share. Nothing outside this module knows which shimmer runs or how.
+//! behind the row) and the one-cell bullet of each running tool. The engine owns time, the pace of
+//! tokens entering the displayed thread's context and whether the agent is busy or waiting on a tool,
+//! and hands them to the shimmer every 32 ms tick as a [`stage::Stage`], the way a shader receives
+//! its uniforms; `stage` is that interface and `kit` the patterns stock shimmers share. Nothing
+//! outside this module knows which shimmer runs or how.
 //!
 //! Each TUI engages a random stock shimmer at startup and `/shimmer` swaps it. Until one is engaged, as
 //! in tests, and wherever the terminal lacks 24-bit color, the classic sweep remains. Reduced or frozen
 //! windows do not run the shimmer clock; reduced motion keeps the existing static fallbacks.
-//! Every stock shimmer stays under the glare cap measured in `tests`. To add one, implement
-//! `stage::Shimmer` in a new file beside a `RECIPE` and list it in `ROSTER`; the cap then holds it too.
+//! To add a shimmer, implement `stage::Shimmer` in a new file beside a `RECIPE` and list it in
+//! `ROSTER`.
 
 mod critter;
 mod engine;
@@ -26,8 +27,6 @@ mod rubik;
 mod script;
 mod stage;
 mod supernova;
-#[cfg(test)]
-mod tests;
 mod tetromino;
 
 pub(crate) use live::dress_status;

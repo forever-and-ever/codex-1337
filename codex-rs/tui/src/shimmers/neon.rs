@@ -13,6 +13,7 @@ use super::stage::Recipe;
 use super::stage::Row;
 use super::stage::Shimmer;
 use super::stage::Stage;
+use super::stage::TICK;
 
 pub(super) const RECIPE: Recipe = Recipe {
     name: "Neon",
@@ -36,7 +37,7 @@ struct Neon;
 impl Shimmer for Neon {
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = stage.t;
-        let flicker = (t / 0.064).floor() as i64;
+        let flicker = (t / TICK).round() as i64;
         let fault = frac(t / FAULT);
         let faulty =
             (hash(13 * (t / FAULT).floor() as i64 + 1) * stage.header.len() as f64) as usize;
@@ -62,8 +63,8 @@ impl Shimmer for Neon {
             let index = i as i64;
             if warmth < 0.0 {
                 return Ink::default()
-                    .fg(WHITE.blend(tube, /*alpha*/ 0.5))
-                    .bg(tube.blend(stage.bg, /*alpha*/ 0.3))
+                    .fg(WHITE)
+                    .bg(WHITE.blend(stage.bg, /*alpha*/ 0.2))
                     .bold(true);
             }
             let ignites = 0.06 * i as f64 + 0.1 * hash(7 * stage.headers + index);
