@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests/questions_tests.rs
 expression: "render_bottom_popup(&chat, 100)"
 ---
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 • Message to be submitted after next tool call (press ⌥i to interrupt and send immediately)
   ↳ > Which terminal?
