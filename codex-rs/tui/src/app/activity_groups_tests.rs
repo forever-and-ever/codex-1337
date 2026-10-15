@@ -1010,7 +1010,11 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
         .is_some()
     );
     let clicked = render(&mut view);
-    assert_eq!(clicked.matches("[-]").count(), 1);
+    assert!(
+        clicked
+            .lines()
+            .any(|line| line.contains("alpha.rs") && line.contains("[-]"))
+    );
     assert!(clicked.contains("created body"));
     assert!(!clicked.contains("deleted body"));
     file_snapshots.push(format!(

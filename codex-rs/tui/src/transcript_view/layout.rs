@@ -545,6 +545,7 @@ impl TranscriptView {
                     cells,
                     header,
                     bills,
+                    output_tokens,
                     expanded_parts,
                     output_mode,
                     invocations,

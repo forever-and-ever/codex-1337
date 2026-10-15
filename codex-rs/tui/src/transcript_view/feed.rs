@@ -765,6 +765,7 @@ impl FeedIndex {
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
+        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
         expanded: &HashSet<String>,
         mode: OutputMode,
         invocations: &super::invocation::Invocations,
@@ -846,7 +847,7 @@ impl FeedIndex {
             " ".repeat(usize::from(TITLE_COLUMN - CLOCK_COLUMNS)).into(),
         ];
         spans.extend(first.spans);
-        if let Some(figures) = self.figures(cells, header, bills) {
+        if let Some(figures) = self.figures(cells, header, bills, output_tokens) {
             spans.push(" ".repeat(title_width - used.min(title_width) + 1).into());
             spans.push(total_span(figures.total));
             if reach >= Reach::Split
@@ -909,6 +910,7 @@ impl FeedIndex {
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
+        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
     ) -> Option<Figures> {
         let item = &self.items[header.item];
         let cell = header.scope.first().and_then(|index| cells.get(*index));
@@ -938,7 +940,12 @@ impl FeedIndex {
                 total: Total::Exact(cell?.activity_header_tokens()?),
                 ..Figures::default()
             },
-            Kind::Reply | Kind::CodeMode => return None,
+            Kind::CodeMode => Figures {
+                // Unadmitted entries can still own a measured model-visible return.
+                total: Total::Exact(output_tokens.for_ids(&cell?.activity_ids())?),
+                ..Figures::default()
+            },
+            Kind::Reply => return None,
         };
         (figures.total != Total::Unknown).then_some(figures)
     }
