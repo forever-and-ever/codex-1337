@@ -15,13 +15,13 @@ Buffer {
         "                        ",
     ],
     styles: [
-        x: 0, y: 0, fg: Magenta, bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 2, y: 0, fg: Rgb(137, 180, 250), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Rgb(205, 214, 244), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Rgb(166, 227, 161), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 20, y: 0, fg: Rgb(187, 206, 210), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 4, y: 1, fg: Rgb(166, 227, 161), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
-        x: 16, y: 1, fg: Rgb(187, 206, 210), bg: Rgb(67, 61, 73), underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Magenta, bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 2, y: 0, fg: Rgb(137, 180, 250), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Rgb(205, 214, 244), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Rgb(166, 227, 161), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 20, y: 0, fg: Rgb(187, 206, 210), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 4, y: 1, fg: Rgb(166, 227, 161), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 16, y: 1, fg: Rgb(187, 206, 210), bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

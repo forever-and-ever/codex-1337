@@ -4,10 +4,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 ---
 80 columns, 12 rows
 ────────────────────────────────────────────────────────────────────────────────
-▾ Work (1)
-  ▸ Running (ζσξζ)
+[-] Work (1)
+  [+] Running (ζσξζ)
                                               Copied 24 chars to host clipboard
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 › draft stays here
                                                                               󰜗
@@ -17,12 +17,12 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
   GPT-5.6-Sol default · /tmp/project
 
 18 columns, 14 rows
-            test
 ──────────────────
-▾ Work (1)
-  ▸ Running (ζσξζ)
+[-] Work (1)
+  [+] Running
+      (ζσξζ)
   Copied 24 chars
-• Working (0s • ⌃…
+  • Working (0s •…
 
 › draft stays
   here
@@ -34,11 +34,11 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 6 columns, 18 rows
 ──────
-▾ Work
-  (1)
-… 7 li
+[-] Wo
+    rk
+… 15 l
 
-• Wor…
+  • W…
 
 › ft ↑
   sta

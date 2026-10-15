@@ -4,10 +4,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 ---
               transcript row 31
 ────────────────────────────────────────────────────────────────────────────────
-▾ Work (1)
-  ▸ Running (ζσξζ)
+[-] Work (1)
+  [+] Running (ζσξζ)
                              ↓ Back to bottom · esc
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 
 › draft stays here
