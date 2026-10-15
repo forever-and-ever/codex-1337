@@ -53,16 +53,10 @@ Computer ordinary=false expanded=true
 
 Exploration ordinary=true expanded=false
 [-] Code Mode (εμογ)        [in [raw] [fmt]] [out]               1280
-              cargo check
-              cargo check
         [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
-              cargo check
 
 Exploration ordinary=true expanded=true
 [-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
-              cargo check
-              cargo check
-
               Script running with cell ID reused-runtime-cell
               Wall time 0.1 seconds
               Output:
@@ -77,4 +71,3 @@ Exploration ordinary=true expanded=true
               Output:
               Only model-visible text.
         [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
-              cargo check

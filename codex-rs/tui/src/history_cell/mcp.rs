@@ -103,16 +103,29 @@ impl McpToolCallCell {
         expanded: &std::collections::HashSet<String>,
         full: bool,
     ) -> super::activity_parts::ActivityParts {
-        let parts = self.nested_receipt_parts(width, expanded, Vec::new());
-        if !full || parts.controls.is_empty() {
-            return parts;
+        let Some(Ok(result)) = &self.result else {
+            return Default::default();
+        };
+        let Some(receipt) = &result.file_changes else {
+            return Default::default();
+        };
+        let width = width.saturating_sub(crate::transcript_geometry::MARKER_COLUMNS);
+        let (mut lines, mut controls) =
+            receipt.lines(width, FileChangeDetail::Disclosed, &self.call_id, expanded);
+        if full && !controls.is_empty() {
+            let expanded = expanded
+                .iter()
+                .cloned()
+                .chain(controls.iter().map(|control| control.id.clone()))
+                .collect();
+            (lines, controls) =
+                receipt.lines(width, FileChangeDetail::Disclosed, &self.call_id, &expanded);
         }
-        let expanded = expanded
-            .iter()
-            .cloned()
-            .chain(parts.controls.iter().map(|control| control.id.clone()))
-            .collect();
-        self.nested_receipt_parts(width, &expanded, Vec::new())
+        super::activity_parts::ActivityParts {
+            lines: prefix_hyperlink_lines(lines, "• ".dim(), "  ".into()),
+            controls,
+            ..Default::default()
+        }
     }
 
     pub(super) fn stored_output_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -127,34 +140,25 @@ impl McpToolCallCell {
         expanded: &std::collections::HashSet<String>,
         lines: Vec<HyperlinkLine>,
     ) -> super::activity_parts::ActivityParts {
+        let mut receipt = self.receipt_parts(
+            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
+            expanded,
+            false,
+        );
+        for control in &mut receipt.controls {
+            control.line += lines.len();
+        }
         let mut parts = super::activity_parts::ActivityParts {
             lines,
             header: self.activity_header(),
             output: None,
-            controls: Vec::new(),
+            controls: receipt.controls,
         };
-        let Some(Ok(result)) = &self.result else {
-            return parts;
-        };
-        let Some(receipt) = result.file_changes.as_ref() else {
-            return parts;
-        };
-        let offset = parts.lines.len();
-        let (file_lines, mut controls) = receipt.lines(
-            width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
-            FileChangeDetail::Disclosed,
-            &self.call_id,
-            expanded,
-        );
-        for control in &mut controls {
-            control.line += offset;
-        }
         parts.lines.extend(prefix_hyperlink_lines(
-            file_lines,
+            receipt.lines,
             crate::transcript_geometry::CHILD_PREFIX.into(),
             crate::transcript_geometry::CHILD_PREFIX.into(),
         ));
-        parts.controls = controls;
         parts
     }
     fn file_change_lines(&self, width: u16, detail: FileChangeDetail) -> Vec<HyperlinkLine> {

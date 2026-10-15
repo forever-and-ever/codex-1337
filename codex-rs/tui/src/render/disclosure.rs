@@ -11,10 +11,16 @@ pub(crate) fn columns() -> usize {
 }
 
 pub(crate) fn style(focused: bool) -> Style {
-    let style = super::header::style();
+    let style = Style::default()
+        .fg(ratatui::style::Color::Reset)
+        .remove_modifier(Modifier::BOLD | Modifier::DIM);
     if focused {
         style.add_modifier(Modifier::UNDERLINED)
     } else {
         style
     }
+}
+
+pub(crate) fn tab_style() -> Style {
+    super::header::style().add_modifier(Modifier::UNDERLINED)
 }

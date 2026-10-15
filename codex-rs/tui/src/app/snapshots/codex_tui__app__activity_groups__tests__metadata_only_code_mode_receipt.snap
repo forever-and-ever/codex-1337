@@ -5,18 +5,16 @@ expression: "file_snapshots.join(\"\\n\")"
 Painted collapsed
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
-
-                  Edited
-        [+]           /workspace/receipt.rs (+1, -1)
+              • Edited
+        [+]       /workspace/receipt.rs (+1, -1)
               • Edited
         [+]       alpha.rs (+1, -0)
         [+]       beta.rs (+0, -1)
 Clicked native file
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
-
-                  Edited
-        [+]           /workspace/receipt.rs (+1, -1)
+              • Edited
+        [+]       /workspace/receipt.rs (+1, -1)
               • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
@@ -24,21 +22,20 @@ Clicked native file
 Receipt expanded
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
-
-                  Edited
-        [-]           /workspace/receipt.rs (+1, -1)
-                      1 -old
-                      1 +new
+              • Edited
+        [-]       /workspace/receipt.rs (+1, -1)
+                  1 -old
+                  1 +new
               • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)
 Both ports hidden
         [-] Code Mode (ωρρλ)                     [in]             [out]
-                  Edited
-        [-]           /workspace/receipt.rs (+1, -1)
-                      1 -old
-                      1 +new
+              • Edited
+        [-]       /workspace/receipt.rs (+1, -1)
+                  1 -old
+                  1 +new
               • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
@@ -46,11 +43,10 @@ Both ports hidden
 Output open
         [-] Code Mode (ωρρλ)                     [in]             [out [raw]      ]
               Exact output is unavailable in this record
-
-                  Edited
-        [-]           /workspace/receipt.rs (+1, -1)
-                      1 -old
-                      1 +new
+              • Edited
+        [-]       /workspace/receipt.rs (+1, -1)
+                  1 -old
+                  1 +new
               • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body

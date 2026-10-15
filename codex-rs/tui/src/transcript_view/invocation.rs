@@ -172,7 +172,7 @@ impl Invocations {
             let start = strip.width() as u16;
             strip.push_span("[");
             strip.push_span(if panel.visible() {
-                Span::styled(label, crate::render::disclosure::style(true))
+                Span::styled(label, crate::render::disclosure::tab_style())
             } else {
                 label.dim()
             });
@@ -192,7 +192,7 @@ impl Invocations {
                     strip.push_span(if !enabled {
                         Span::raw(" ".repeat(label.len() + 2))
                     } else if panel.mode() == mode {
-                        Span::styled(format!("[{label}]"), crate::render::disclosure::style(true))
+                        Span::styled(format!("[{label}]"), crate::render::disclosure::tab_style())
                     } else {
                         format!("[{label}]").dim()
                     });
@@ -315,9 +315,6 @@ impl Invocations {
         }
         let mut edits = call.edit_parts(width, expanded, full);
         if !edits.lines.is_empty() {
-            if !parts.lines.is_empty() {
-                parts.lines.push(client_notice(""));
-            }
             for control in &mut edits.controls {
                 control.line += parts.lines.len();
             }
@@ -347,7 +344,7 @@ impl Invocations {
         let mut parts = Vec::new();
         let indent = crate::transcript_geometry::TITLE_COLUMN
             + if placement == super::feed::Content::Own {
-                crate::transcript_geometry::CHILD_INDENT
+                crate::transcript_geometry::ENTRY_INDENT
             } else {
                 0
             };
@@ -374,11 +371,7 @@ impl Invocations {
                     notice
                 }));
             }
-            let body_indent = if call.script_language(self.input(call.id)).is_some() {
-                2
-            } else {
-                0
-            };
+            let body_indent = crate::transcript_geometry::ENTRY_INDENT;
             let mut body = self.body(
                 call,
                 open && calls.len() == 1,
@@ -386,9 +379,7 @@ impl Invocations {
                 full,
                 expanded,
             );
-            if body_indent != 0 {
-                body.lines = crate::transcript_geometry::gutter_lines(body.lines, body_indent);
-            }
+            body.lines = crate::transcript_geometry::gutter_lines(body.lines, body_indent);
             for control in &mut body.controls {
                 control.line += lines.len();
             }

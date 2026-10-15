@@ -821,6 +821,7 @@ fn render_wrapped_diff_line(
             .collect::<Vec<_>>();
     let mut source = LogicalLineSource::from_line(&RtLine::from(source_spans).style(line_style));
     source.wrap_policy = LineWrapPolicy::Hard;
+    source.output_provenance = crate::history_cell::output_provenance::OutputProvenance::ClientDiff;
     let mut gutter_style = style_gutter_for(kind, theme, color_level);
     if line_style.bg.is_none() {
         gutter_style.bg = None;
@@ -1282,7 +1283,7 @@ mod tests {
                     del: Some(rgb_color((55, 25, 35))),
                 },
             };
-            let lines = [DiffLineType::Insert, DiffLineType::Delete]
+            let mut lines = [DiffLineType::Insert, DiffLineType::Delete]
                 .into_iter()
                 .flat_map(|kind| {
                     render_wrapped_diff_line(
@@ -1295,8 +1296,19 @@ mod tests {
                         style,
                     )
                 })
-                .map(|line| line.line)
                 .collect::<Vec<_>>();
+            crate::history_cell::output_provenance::mark_lines(
+                &mut lines,
+                crate::history_cell::output_provenance::OutputProvenance::Client,
+            );
+            for (line, background) in lines
+                .iter()
+                .zip([style.diff_backgrounds.add, style.diff_backgrounds.del])
+            {
+                assert_eq!(line.line.style.bg, background);
+                assert_eq!(line.source.as_ref().unwrap().line_style.bg, background);
+            }
+            let lines = lines.into_iter().map(|line| line.line).collect::<Vec<_>>();
             let area = Rect::new(
                 /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 2,
             );
@@ -2289,20 +2301,13 @@ mod tests {
                 ]
                 .into_iter()
                 .map(|extension| {
-                    let mut changes: HashMap<PathBuf, FileChange> = HashMap::new();
-                    changes.insert(
-                        PathBuf::from(format!("math.{extension}")),
-                        FileChange::Add {
-                            content:
-                                "export module math;\nexport int sum(int a, int b) { return a + b; }\n"
-                                    .to_string(),
-                        },
-                    );
-
-                    let lines = create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
+                    let change = FileChange::Add {
+                        content: "export module math;\nexport int sum(int a, int b) { return a + b; }\n".into(),
+                    };
+                    let lines = file_change_lines(&change, &PathBuf::from(format!("math.{extension}")), 80);
                     let rgb_tokens = lines
                         .iter()
-                        .flat_map(|line| &line.spans)
+                        .flat_map(|line| &line.line.spans)
                         .filter(|span| matches!(span.style.fg, Some(ratatui::style::Color::Rgb(..))))
                         .map(|span| span.content.to_string())
                         .collect::<Vec<_>>();

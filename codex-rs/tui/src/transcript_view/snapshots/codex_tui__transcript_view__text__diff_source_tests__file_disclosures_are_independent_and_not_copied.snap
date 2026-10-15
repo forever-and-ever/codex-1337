@@ -4,100 +4,95 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 source and file groups
             Command (apply_patch)                                [in [raw]      ] [out]              123
-            *** Begin Patch
-            *** Add File: alpha.rs
-            +alpha body
-            *** Add File: beta.rs
-            +beta body
-            *** End Patch
-
-            • Edited
-        [+]     alpha.rs (+2, -0)
-        [+]     beta.rs (+2, -0)
+              *** Begin Patch
+              *** Add File: alpha.rs
+              +alpha body
+              *** Add File: beta.rs
+              +beta body
+              *** End Patch
+              • Edited
+        [+]       alpha.rs (+2, -0)
+        [+]       beta.rs (+2, -0)
 
 file groups without ports
             Command (apply_patch)                                [in]             [out]              123
-            • Edited
-        [+]     alpha.rs (+2, -0)
-        [+]     beta.rs (+2, -0)
+              • Edited
+        [+]       alpha.rs (+2, -0)
+        [+]       beta.rs (+2, -0)
 
 second file
             Command (apply_patch)                                [in]             [out]              123
-            • Edited
-        [+]     alpha.rs (+2, -0)
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+              • Edited
+        [+]       alpha.rs (+2, -0)
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
 input visibility preserves file folds
             Command (apply_patch)        [in [raw]      ] [out]              123
-            *** Begin Patch
-            *** Add File: alpha.rs
-            +alpha body
-            *** Add File: beta.rs
-            +beta body
-            *** End Patch
-
-            • Edited
-        [+]     alpha.rs (+2, -0)
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+              *** Begin Patch
+              *** Add File: alpha.rs
+              +alpha body
+              *** Add File: beta.rs
+              +beta body
+              *** End Patch
+              • Edited
+        [+]       alpha.rs (+2, -0)
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
 input visibility preserves file folds
             Command (apply_patch)        [in]             [out]              123
-            • Edited
-        [+]     alpha.rs (+2, -0)
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+              • Edited
+        [+]       alpha.rs (+2, -0)
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
 both files
             Command (apply_patch)                                [in]             [out]              123
-            • Edited
-        [-]     alpha.rs (+2, -0)
-                1 +alpha body
-                2 +second alpha line
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+              • Edited
+        [-]       alpha.rs (+2, -0)
+                  1 +alpha body
+                  2 +second alpha line
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
 output and edits
             Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            {
-              "result": "patched"
-            }
-
-            • Edited
-        [-]     alpha.rs (+2, -0)
-                1 +alpha body
-                2 +second alpha line
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
-
-output format preserves file folds
-            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            {"result":"patched"}
-
-            • Edited
-        [-]     alpha.rs (+2, -0)
-                1 +alpha body
-                2 +second alpha line
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+              {
+                "result": "patched"
+              }
+              • Edited
+        [-]       alpha.rs (+2, -0)
+                  1 +alpha body
+                  2 +second alpha line
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
 output format preserves file folds
             Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            {
-              "result": "patched"
-            }
+              {"result":"patched"}
+              • Edited
+        [-]       alpha.rs (+2, -0)
+                  1 +alpha body
+                  2 +second alpha line
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line
 
-            • Edited
-        [-]     alpha.rs (+2, -0)
-                1 +alpha body
-                2 +second alpha line
-        [-]     beta.rs (+2, -0)
-                1 +beta body
-                2 +second beta line
+output format preserves file folds
+            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+              {
+                "result": "patched"
+              }
+              • Edited
+        [-]       alpha.rs (+2, -0)
+                  1 +alpha body
+                  2 +second alpha line
+        [-]       beta.rs (+2, -0)
+                  1 +beta body
+                  2 +second beta line

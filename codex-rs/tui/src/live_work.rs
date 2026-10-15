@@ -845,8 +845,9 @@ mod tests {
         assert!(
             selected
                 .modifier
-                .contains(ratatui::style::Modifier::BOLD | ratatui::style::Modifier::UNDERLINED)
+                .contains(ratatui::style::Modifier::UNDERLINED)
         );
+        assert!(!selected.modifier.contains(ratatui::style::Modifier::BOLD));
         let (hit, _) = view
             .hits
             .iter()

@@ -472,7 +472,7 @@ impl TextLayout {
                 if let FoldTarget::OutputMode(mode) = control.target
                     && self.output_mode == Some(mode)
                 {
-                    label = label.style(crate::render::disclosure::style(true));
+                    label = label.style(crate::render::disclosure::tab_style());
                 }
                 buf.set_line(
                     area.x + columns.start,

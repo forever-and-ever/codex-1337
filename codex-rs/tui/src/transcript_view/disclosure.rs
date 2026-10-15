@@ -144,6 +144,12 @@ impl TranscriptView {
             return;
         }
         let target = &focused.target;
+        let style = match target {
+            FoldTarget::OutputMode(_) | FoldTarget::Invocation { .. } => {
+                crate::render::disclosure::tab_style()
+            }
+            _ => crate::render::disclosure::style(true),
+        };
         if let Some((control_row, columns, _)) = layout.fold_position(target)
             && control_row == row
         {
@@ -154,7 +160,7 @@ impl TranscriptView {
                     columns.end - columns.start,
                     /*height*/ 1,
                 ),
-                crate::render::disclosure::style(true),
+                style,
             );
         } else if *target == FoldTarget::Activity && row == usize::from(layout.separated) {
             buf.set_style(area, crate::render::disclosure::style(true));
@@ -238,7 +244,8 @@ impl TranscriptView {
                     action: invocation_action,
                 } = &target
                 {
-                    use crate::history_cell::invocation::{Action, Panel};
+                    use crate::history_cell::invocation::Action;
+                    use crate::history_cell::invocation::Panel;
                     let action = match *invocation_action {
                         Action::Toggle(port, next) => {
                             let shown = action == ListAction::MoveRight;

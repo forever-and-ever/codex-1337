@@ -98,11 +98,7 @@ pub(crate) fn formatted_input(script: &str) -> Option<Vec<HyperlinkLine>> {
         rows.rows
             .iter()
             .flat_map(|row| {
-                let source = &rows.script[row.segment.source.clone()];
-                let mut lines = row
-                    .summary
-                    .clone()
-                    .map_or_else(|| highlight_bash_to_lines(source), |summary| vec![summary]);
+                let mut lines: Vec<_> = row.summary.clone().into_iter().collect();
                 if let Some(last) = lines.last_mut() {
                     last.push_span(row.segment.connector.map_or("", Connector::suffix).dim());
                 }

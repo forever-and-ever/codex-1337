@@ -14,7 +14,6 @@ use super::activity_parts::PartControl;
 use crate::diff_model::FileChange;
 use crate::file_change_view::FileChangeView;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::terminal_hyperlinks::prefix_hyperlink_lines;
 
 pub(super) enum FileChangeDetail {
     Summary,
@@ -120,14 +119,16 @@ impl ReceiptView {
             PublicationOutcome::Unknown => "Changes uncertain",
         };
         let options = crate::wrapping::RtOptions::new(usize::from(width).max(/*other*/ 1));
-        let mut lines =
-            crate::wrapping::word_wrap_lines([Line::from(outcome.bold())], options.clone())
-                .into_iter()
-                .map(HyperlinkLine::from)
-                .collect::<Vec<_>>();
+        let mut lines = crate::wrapping::word_wrap_lines(
+            [crate::render::header::leading(outcome, Line::default())],
+            options.clone(),
+        )
+        .into_iter()
+        .map(HyperlinkLine::from)
+        .collect::<Vec<_>>();
         let mut controls = Vec::new();
         let file_width = usize::from(width)
-            .saturating_sub(usize::from(crate::transcript_geometry::CHILD_INDENT));
+            .saturating_sub(usize::from(crate::transcript_geometry::ENTRY_INDENT));
         for (index, file) in self.files.iter().enumerate() {
             let view = FileChangeView {
                 label: file.label.as_str().into(),
@@ -155,10 +156,9 @@ impl ReceiptView {
                 );
                 file_lines.extend(detail);
             }
-            lines.extend(prefix_hyperlink_lines(
+            lines.extend(crate::transcript_geometry::gutter_lines(
                 file_lines,
-                crate::transcript_geometry::CHILD_PREFIX.into(),
-                crate::transcript_geometry::CHILD_PREFIX.into(),
+                crate::transcript_geometry::ENTRY_INDENT,
             ));
         }
         if self.omitted_files > 0 {

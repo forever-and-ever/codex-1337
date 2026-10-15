@@ -85,6 +85,13 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
             Text::from(cell.transcript_lines(/*width*/ 100))
         ));
         if label == "text and rename" {
+            let input = cell.invocation_input(100);
+            let edits = cell.receipt_parts(100, &HashSet::new(), false);
+            assert_eq!(
+                input[0].line.to_string().find("MCP"),
+                edits.lines[0].line.to_string().find("Edited"),
+            );
+            assert_eq!(edits.controls.len(), 2);
             assert_eq!(
                 opened
                     .controls

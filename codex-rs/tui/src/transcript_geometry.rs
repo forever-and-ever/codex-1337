@@ -21,8 +21,10 @@ pub(crate) const TOKEN_COLUMN: u16 = CONTROL_COLUMN;
 pub(crate) const TOKEN_COLUMNS: u16 = 5;
 /// A Feed Item header's title.
 pub(crate) const TITLE_COLUMN: u16 = CONTROL_COLUMN + CONTROL_COLUMNS + 1;
-/// Every row's content.
-pub(crate) const GUTTER_COLUMNS: u16 = TITLE_COLUMN + 2;
+/// Each entry's body hangs this far from its header.
+pub(crate) const ENTRY_INDENT: u16 = 2;
+/// Every top-level body starts here.
+pub(crate) const GUTTER_COLUMNS: u16 = TITLE_COLUMN + ENTRY_INDENT;
 pub(crate) const MARKER_COLUMNS: u16 = 2;
 pub(crate) const BODY_COLUMN: u16 = GUTTER_COLUMNS + MARKER_COLUMNS;
 pub(crate) const CHILD_INDENT: u16 = BODY_COLUMN - GUTTER_COLUMNS + 2;

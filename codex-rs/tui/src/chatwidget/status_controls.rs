@@ -25,7 +25,7 @@ impl ChatWidget {
         {
             (
                 compaction::COMPACTION_HEADER.to_string(),
-                Some(compaction::COMPACTION_DETAILS.to_string()),
+                None,
                 STATUS_DETAILS_DEFAULT_MAX_LINES,
             )
         } else {

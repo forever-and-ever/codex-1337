@@ -12,8 +12,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 collapsed
@@ -26,8 +24,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 20 columns: <composer hints>
@@ -43,7 +39,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -60,7 +56,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

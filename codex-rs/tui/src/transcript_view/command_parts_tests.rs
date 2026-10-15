@@ -68,6 +68,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         initial.text()
     );
     assert!(!initial.fold_targets().contains(&FoldTarget::Activity));
+    assert!(!initial.text().contains("not;a&&boundary"));
     let target = |action| FoldTarget::Invocation {
         call_id: "train".into(),
         action,
@@ -476,6 +477,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(!nested.text().contains("update_work_status"));
         assert!(!nested.text().contains("Reading source"));
         assert!(!nested.text().contains("const answer"));
+        assert!(!nested.text().contains("echo child"));
         assert!(nested.fold_position(&format).is_some());
         code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
             id: "code-output".into(),

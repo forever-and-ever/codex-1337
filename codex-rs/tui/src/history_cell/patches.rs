@@ -93,7 +93,7 @@ impl PatchHistoryCell {
         if self.state == PatchState::Failed {
             Line::from(vec!["✘ ".red(), self.heading().red().bold()])
         } else {
-            Line::from(vec!["• ".dim(), self.heading().bold()])
+            crate::render::header::paint(Line::from(vec!["• ".dim(), self.heading().bold()]))
         }
     }
 

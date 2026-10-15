@@ -17,6 +17,8 @@ pub(crate) enum OutputProvenance {
     Captured,
     Formatted,
     Client,
+    /// Human-only diff paint is semantic, not a captured-content background.
+    ClientDiff,
     /// Client serialization of model-bound definitions, never the provider's hidden prompt.
     Definitions(OutputMode),
 }
@@ -222,7 +224,7 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
 impl OutputProvenance {
     fn style(self) -> Style {
         match self {
-            Self::Unspecified => Style::default(),
+            Self::Unspecified | Self::ClientDiff => Style::default(),
             Self::Captured | Self::Definitions(OutputMode::Raw) => {
                 crate::style::context_message_style()
             }
@@ -250,6 +252,14 @@ pub(crate) fn client_notice(text: &str) -> HyperlinkLine {
 
 pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenance) {
     for line in lines {
+        // A container cannot repaint the diff's additions, deletions, or reflow source.
+        if line
+            .source
+            .as_ref()
+            .is_some_and(|source| source.output_provenance == OutputProvenance::ClientDiff)
+        {
+            continue;
+        }
         let style = provenance.style();
         line.line.style = line.line.style.patch(style);
         let source = line.source.get_or_insert_with(|| {

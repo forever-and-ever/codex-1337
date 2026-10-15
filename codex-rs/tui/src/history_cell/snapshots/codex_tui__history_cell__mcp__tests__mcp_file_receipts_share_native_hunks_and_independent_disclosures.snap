@@ -6,39 +6,39 @@ text and rename
 Compact
 • Called semedit.edit()
     Edited
-        /workspace/a.rs (+1, -1)
-        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+      /workspace/a.rs (+1, -1)
+      //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
 First file expanded
 • Called semedit.edit()
     Edited
-        /workspace/a.rs (+1, -1)
-        1 -old
-        1 +new
-        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+      /workspace/a.rs (+1, -1)
+      1 -old
+      1 +new
+      //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
 Transcript
 • Called MCP semedit.edit()
   └ ordinary result remains accessible
     Edited
-        /workspace/a.rs (+1, -1)
-        1 -old
-        1 +new
-        //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
-        1 -old
-        1 +new
+      /workspace/a.rs (+1, -1)
+      1 -old
+      1 +new
+      //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
+      1 -old
+      1 +new
 
 Direct captured result
 Collapsed
 • Called semedit.edit(target="long-direct-a...
     Edited
-        /workspace/a.rs (+1, -1)
-        //remote/workspace/old name.rs → //remote/… (+1, -1)
+      /workspace/a.rs (+1, -1)
+      //remote/workspace/old name.rs → //remote/wo… (+1, -1)
 Expanded with first diff
 • Called semedit.edit(target="long-direct-a...
     Edited
-        /workspace/a.rs (+1, -1)
-        1 -old
-        1 +new
-        //remote/workspace/old name.rs → //remote/… (+1, -1)
+      /workspace/a.rs (+1, -1)
+      1 -old
+      1 +new
+      //remote/workspace/old name.rs → //remote/wo… (+1, -1)
   Result
     chosen model text
 
@@ -46,77 +46,77 @@ partial failure
 Compact
 • Failed semedit.edit()
     Partially applied
-        /workspace/a.rs (+1, -1)
-        /workspace/refused.rs — not applied; content unavailable
+      /workspace/a.rs (+1, -1)
+      /workspace/refused.rs — not applied; content unavailable
 First file expanded
 • Failed semedit.edit()
     Partially applied
-        /workspace/a.rs (+1, -1)
-        1 -old
-        1 +new
-        /workspace/refused.rs — not applied; content unavailable
+      /workspace/a.rs (+1, -1)
+      1 -old
+      1 +new
+      /workspace/refused.rs — not applied; content unavailable
 Transcript
 • Failed MCP semedit.edit()
   └ Publication partially failed; do not retry.
     Partially applied
-        /workspace/a.rs (+1, -1)
-        1 -old
-        1 +new
-        /workspace/refused.rs — not applied; content unavailable
+      /workspace/a.rs (+1, -1)
+      1 -old
+      1 +new
+      /workspace/refused.rs — not applied; content unavailable
 
 metadata only
 Compact
 • Called semedit.edit()
     Edited
-        /workspace/a  \u{202e}.rs (+1, -1)
+      /workspace/a  \u{202e}.rs (+1, -1)
 First file expanded
 • Called semedit.edit()
     Edited
-        /workspace/a  \u{202e}.rs (+1, -1)
-        1 -old
-        1 +new
+      /workspace/a  \u{202e}.rs (+1, -1)
+      1 -old
+      1 +new
 Transcript
 • Called MCP semedit.edit()
     Edited
-        /workspace/a  \u{202e}.rs (+1, -1)
-        1 -old
-        1 +new
+      /workspace/a  \u{202e}.rs (+1, -1)
+      1 -old
+      1 +new
 
 preview
 Compact
 • Called semedit.edit()
     Preview — not applied
-        /workspace/a.rs (+1, -1) — preview
+      /workspace/a.rs (+1, -1) — preview
 First file expanded
 • Called semedit.edit()
     Preview — not applied
-        /workspace/a.rs (+1, -1) — preview
-        1 -old
-        1 +new
+      /workspace/a.rs (+1, -1) — preview
+      1 -old
+      1 +new
 Transcript
 • Called MCP semedit.edit()
   └ ordinary result remains accessible
     Preview — not applied
-        /workspace/a.rs (+1, -1) — preview
-        1 -old
-        1 +new
+      /workspace/a.rs (+1, -1) — preview
+      1 -old
+      1 +new
 
 summary and omissions
 Compact
 • Called semedit.edit()
     Edited
-        /workspace/blob.bin — binary; full diff unavailable
+      /workspace/blob.bin — binary; full diff unavailable
     2 additional files omitted; full diffs unavailable
 First file expanded
 • Called semedit.edit()
     Edited
-        /workspace/blob.bin — binary; full diff unavailable
+      /workspace/blob.bin — binary; full diff unavailable
     2 additional files omitted; full diffs unavailable
 Transcript
 • Called MCP semedit.edit()
   └ ordinary result remains accessible
     Edited
-        /workspace/blob.bin — binary; full diff unavailable
+      /workspace/blob.bin — binary; full diff unavailable
     2 additional files omitted; full diffs unavailable
 
 unknown

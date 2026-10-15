@@ -204,6 +204,18 @@ fn steps_fold_under_one_header_with_their_figures() {
         }),
         script_block("exec-1", Some("git status"), None),
         message("msg-4", "No step billed this reply."),
+        Arc::new(crate::history_cell::AlarmSoundingCell(
+            codex_app_server_protocol::alarm_sounding::AlarmSounding {
+                id: "check-layout".into(),
+                armed_at: CLOCK_MS - 1000,
+                sounded_at: CLOCK_MS,
+                note: "Check the header alignment".into(),
+                cause: codex_app_server_protocol::alarm_sounding::AlarmCause::Clock {
+                    late_by_seconds: None,
+                },
+                still_armed: Vec::new(),
+            },
+        )),
     ];
     let mut view = TranscriptView::default();
     view.record_step_admission(step(
@@ -252,10 +264,73 @@ fn steps_fold_under_one_header_with_their_figures() {
             view, &cells, /*width*/ 104, /*height*/ 34,
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
+        for (row, line) in text.lines().enumerate() {
+            for glyph in ["[+]", "[-]"] {
+                for (column, _) in line.match_indices(glyph) {
+                    let cell = &buffer[(column as u16, row as u16)];
+                    assert_eq!(cell.fg, ratatui::style::Color::Reset);
+                    assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
+                }
+            }
+            for label in [
+                "User",
+                "Response",
+                "Command",
+                "Injection",
+                "Code Mode",
+                "Alarm",
+            ] {
+                if let Some(column) = line.find(label) {
+                    assert_eq!(
+                        column,
+                        usize::from(crate::transcript_geometry::TITLE_COLUMN),
+                        "{line}"
+                    );
+                    let cell = &buffer[(column as u16, row as u16)];
+                    assert_eq!(cell.fg, crate::render::header::style().fg.unwrap());
+                    assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
+                    assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
+                }
+            }
+            for label in ["Stored execution", "Check the header alignment"] {
+                if let Some(column) = line.find(label) {
+                    assert_eq!(
+                        column,
+                        usize::from(crate::transcript_geometry::GUTTER_COLUMNS),
+                        "{line}"
+                    );
+                }
+            }
+        }
         snapshots.push(format!("{label}\n{text}"));
         text
     };
-    screen(&mut view, "unfolded");
+    let fresh = screen(&mut view, "unfolded");
+    assert!(fresh.contains("[+] Injection"));
+    assert!(!fresh.contains("<environment_context>"));
+    let injection = cells
+        .iter()
+        .position(|cell| cell.as_any().is::<ArrivalCell>())
+        .unwrap();
+    let fold = view
+        .current_layout(&cells, injection)
+        .unwrap()
+        .fold_targets()[0]
+        .clone();
+    assert!(view.focus_fold(&cells, injection, fold.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let opened = screen(&mut view, "injection opened");
+    assert!(opened.contains("<environment_context>"));
+    assert_eq!(
+        opened
+            .lines()
+            .find(|line| line.trim_start().starts_with("Context"))
+            .unwrap()
+            .find("Context"),
+        Some(usize::from(crate::transcript_geometry::GUTTER_COLUMNS))
+    );
+    assert!(view.focus_fold(&cells, injection, fold));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let code = cells
         .iter()
         .position(|cell| cell.as_any().is::<crate::history_cell::CodeModeCell>())
@@ -306,6 +381,18 @@ fn steps_fold_under_one_header_with_their_figures() {
     );
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     screen(&mut view, "folded");
+    let manual = view.disclosure.expanded.clone();
+    view.begin_search();
+    view.paste_search("<environment_context>");
+    assert!((0..512).any(|_| !view.advance_search(&cells)));
+    assert!(
+        view.layout(&cells, injection)
+            .unwrap()
+            .text()
+            .contains("<environment_context>")
+    );
+    view.cancel_search();
+    assert_eq!(view.disclosure.expanded, manual);
     insta::assert_snapshot!(snapshots.join("\n\n"));
 
     // A parent's fold must not stand in for consent to reveal retained instructions. The two

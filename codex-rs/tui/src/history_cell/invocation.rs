@@ -240,9 +240,7 @@ fn input_projection(
         exec.iter_calls()
             .flat_map(|call| {
                 let source = crate::exec_command::strip_bash_lc_and_escape(&call.command);
-                crate::exec_cell::rows::formatted_input(&source).unwrap_or_else(|| {
-                    captured_lines(&source, ContextAuthor::Environment, OutputMode::Fmt)
-                })
+                crate::exec_cell::rows::formatted_input(&source).unwrap_or_default()
             })
             .collect()
     } else if let Some(mcp) = any.downcast_ref::<super::McpToolCallCell>() {

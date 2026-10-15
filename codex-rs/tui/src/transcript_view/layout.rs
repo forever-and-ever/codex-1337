@@ -263,11 +263,11 @@ impl TranscriptView {
         if index > cells.len() {
             return None;
         }
-        // Search reads the full retained preamble independently of both manual folds.
+        // Search reads retained entry content independently of its manual folds.
         let seat = if full_content
             && cells
                 .get(index)
-                .is_some_and(|cell| cell.as_any().is::<crate::history_cell::PreambleCell>())
+                .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some())
         {
             super::feed::Seat::LOOSE
         } else {

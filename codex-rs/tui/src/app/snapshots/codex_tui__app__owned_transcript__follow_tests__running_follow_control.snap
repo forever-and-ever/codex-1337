@@ -3,8 +3,8 @@ source: tui/src/app/owned_transcript_follow_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::tests::buffer_text(buffer))"
 ---
   tab to queue message
+              transcript row 30
               transcript row 31
-              transcript row 32
 ────────────────────────────────────────────────────────────────────────────────
   [-] Work (1)
     [+] Running (ζσξζ)

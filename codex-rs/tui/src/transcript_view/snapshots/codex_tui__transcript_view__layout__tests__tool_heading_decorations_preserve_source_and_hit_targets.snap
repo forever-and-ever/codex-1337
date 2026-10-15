@@ -17,8 +17,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -55,8 +53,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -85,8 +81,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -137,8 +131,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
-        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,

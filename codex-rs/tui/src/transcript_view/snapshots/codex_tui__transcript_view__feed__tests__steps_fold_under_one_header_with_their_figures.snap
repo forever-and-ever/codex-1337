@@ -9,11 +9,9 @@ unfolded
   HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
               • I'll run the tests first.
-            Stored execution · exact input unavailable
-            cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [-] Injection · environment_context                                   ≈84
-                Context [Raw] [Fmt]
-                <environment_context>cwd</environment_context>
+              Stored execution · exact input unavailable
+              cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
@@ -23,12 +21,50 @@ unfolded
               › Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
-              git status
 
         [-] Response
               • No step billed this reply.
 
+  HH:MM [-] Alarm check-layout · time reached
+              Check the header alignment
 
+
+
+
+
+
+
+
+
+
+
+injection opened
+        [-] User
+              › Fix the failing test
+
+  HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
+        [+]   • Thought · Summary
+              • I'll run the tests first.
+              Stored execution · exact input unavailable
+              cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM [-] Injection · environment_context                                   ≈84
+              Context [Raw] [Fmt]
+              <environment_context>cwd</environment_context>
+
+  HH:MM [-] Response                                                          154    120     34
+        [+]   • Thought · Summary
+              • Fixed the parser.
+
+        [-] User                                                                3
+              › Thanks
+
+  HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+
+        [-] Response
+              • No step billed this reply.
+
+  HH:MM [-] Alarm check-layout · time reached
+              Check the header alignment
 
 
 
@@ -45,11 +81,9 @@ script
   HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
               • I'll run the tests first.
-            Stored execution · exact input unavailable
-            cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [-] Injection · environment_context                                   ≈84
-                Context [Raw] [Fmt]
-                <environment_context>cwd</environment_context>
+              Stored execution · exact input unavailable
+              cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
@@ -66,6 +100,8 @@ script
         [-] Response
               • No step billed this reply.
 
+  HH:MM [-] Alarm check-layout · time reached
+              Check the header alignment
 
 
 
@@ -81,9 +117,7 @@ folded
   HH:MM     Command · failed (1)        [in]             [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
               • I'll run the tests first.
-  HH:MM [-] Injection · environment_context                                   ≈84
-                Context [Raw] [Fmt]
-                <environment_context>cwd</environment_context>
+  HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
@@ -96,3 +130,6 @@ folded
 
         [-] Response
               • No step billed this reply.
+
+  HH:MM [-] Alarm check-layout · time reached
+              Check the header alignment

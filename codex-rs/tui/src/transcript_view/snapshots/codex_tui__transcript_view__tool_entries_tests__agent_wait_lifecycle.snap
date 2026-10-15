@@ -4,7 +4,7 @@ expression: "stages.join(\"\\n\\n\")"
 ---
 Completed
             Command           [in [raw] [fmt]] [out]
-            • Started `/root/worker`
+              • Started `/root/worker`
             Command · outcome unavailable
             [in [raw] [fmt]] [out]
-            • Waited for agent updates · outcome unavailable
+              • Waited for agent updates · outcome unavailable

@@ -53,9 +53,11 @@ impl ArrivalCell {
         &self,
         mode: super::output_provenance::OutputMode,
     ) -> Vec<HyperlinkLine> {
-        use super::output_provenance::{
-            ContextAuthor, captured_blocks, client_lines, client_notice, context_sources,
-        };
+        use super::output_provenance::ContextAuthor;
+        use super::output_provenance::captured_blocks;
+        use super::output_provenance::client_lines;
+        use super::output_provenance::client_notice;
+        use super::output_provenance::context_sources;
         use codex_protocol::step_admission::ArrivalSource;
         let author = match self.0.kind {
             ArrivalKind::InterAgent => ContextAuthor::Subagent,
@@ -100,6 +102,13 @@ impl ArrivalCell {
 }
 
 impl FeedEntry for ArrivalCell {
+    fn feed_id(&self) -> String {
+        self.0.id.clone()
+    }
+    fn feed_initially_collapsed(&self) -> bool {
+        self.0.kind == ArrivalKind::Injection
+    }
+
     fn feed_title(&self) -> Line<'static> {
         self.heading()
     }
@@ -111,7 +120,8 @@ impl FeedEntry for ArrivalCell {
         mode: super::output_provenance::OutputMode,
     ) -> ActivityParts {
         use super::activity_parts::PartControl;
-        use super::output_provenance::{OutputProvenance, mark_lines};
+        use super::output_provenance::OutputProvenance;
+        use super::output_provenance::mark_lines;
         let declarations = matches!(
             self.0.source,
             codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. }
@@ -139,11 +149,7 @@ impl FeedEntry for ArrivalCell {
             lines.extend(self.context_lines(width, mode));
         }
         ActivityParts {
-            lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
-                lines,
-                "  ".into(),
-                "  ".into(),
-            ),
+            lines,
             header: Some(ActivityHeader {
                 source_offset: heading.len(),
                 expand_on_truncation: false,

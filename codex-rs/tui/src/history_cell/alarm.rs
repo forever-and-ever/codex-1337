@@ -9,7 +9,7 @@ use codex_app_server_protocol::alarm_sounding::AlarmSounding;
 pub(crate) struct AlarmSoundingCell(pub(crate) AlarmSounding);
 
 impl AlarmSoundingCell {
-    fn lines(&self, tail: Vec<Line<'static>>) -> Vec<Line<'static>> {
+    fn heading(&self) -> Line<'static> {
         let alarm = &self.0;
         let cause = match &alarm.cause {
             AlarmCause::Clock { late_by_seconds } => late_by_seconds.map_or_else(
@@ -30,8 +30,13 @@ impl AlarmSoundingCell {
         };
         let heading =
             sanitize_user_text(format!("Alarm {} · {cause}", alarm.id).into()).into_owned();
+        Line::from(heading.bold())
+    }
+
+    fn body(&self, tail: Vec<Line<'static>>) -> Vec<Line<'static>> {
+        let alarm = &self.0;
         let note = sanitize_user_text(alarm.note.as_str().into());
-        let mut lines = vec![Line::from(heading.bold())];
+        let mut lines = Vec::new();
         lines.extend(note.lines().map(|line| Line::from(line.to_owned().dim())));
         match &alarm.cause {
             AlarmCause::Clock {
@@ -71,7 +76,7 @@ impl AlarmSoundingCell {
         lines
     }
 
-    fn full_lines(&self) -> Vec<Line<'static>> {
+    fn full_body(&self) -> Vec<Line<'static>> {
         let tail = match &self.0.cause {
             AlarmCause::Exited { tail, .. } => sanitize_user_text(tail.as_str().into())
                 .lines()
@@ -79,7 +84,7 @@ impl AlarmSoundingCell {
                 .collect(),
             _ => Vec::new(),
         };
-        self.lines(tail)
+        self.body(tail)
     }
 }
 
@@ -101,7 +106,9 @@ impl HistoryCell for AlarmSoundingCell {
         };
         prefix_lines(
             adaptive_wrap_lines(
-                self.lines(tail),
+                std::iter::once(self.heading())
+                    .chain(self.body(tail))
+                    .collect::<Vec<_>>(),
                 RtOptions::new(width.saturating_sub(2).max(1) as usize),
             ),
             "◷ ".into(),
@@ -110,18 +117,45 @@ impl HistoryCell for AlarmSoundingCell {
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.full_lines()
+        std::iter::once(self.heading())
+            .chain(self.full_body())
+            .collect()
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         prefix_lines(
             adaptive_wrap_lines(
-                self.full_lines(),
+                self.raw_lines(),
                 RtOptions::new(width.saturating_sub(2).max(1) as usize),
             ),
             "◷ ".into(),
             "  ".into(),
         )
+    }
+}
+
+impl crate::transcript_view::FeedEntry for AlarmSoundingCell {
+    fn feed_id(&self) -> String {
+        format!("alarm:{}", self.0.id)
+    }
+
+    fn feed_title(&self) -> Line<'static> {
+        self.heading()
+    }
+
+    fn feed_body(
+        &self,
+        width: u16,
+        _expanded: &std::collections::HashSet<String>,
+        _mode: super::output_provenance::OutputMode,
+    ) -> super::activity_parts::ActivityParts {
+        super::activity_parts::ActivityParts {
+            lines: adaptive_wrap_lines(self.full_body(), RtOptions::new(usize::from(width)))
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            ..Default::default()
+        }
     }
 }
 

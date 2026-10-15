@@ -112,7 +112,7 @@ impl ChatWidget {
             // Match newline-committed streaming behavior: once assistant output is ready to be
             // committed into history, hide the inline status row so transcript content replaces it.
             if cell.is_some() {
-                self.bottom_pane.hide_status_indicator();
+                self.hide_stream_status();
             }
             let deferred_history_cell =
                 if scrollback_reflow == crate::app_event::ConsolidationScrollbackReflow::Required {
@@ -170,6 +170,13 @@ impl ChatWidget {
                 .as_ref()
                 .map(|controller| controller.queued_lines() == 0)
                 .unwrap_or(true)
+    }
+
+    fn hide_stream_status(&mut self) {
+        // Buffered prose must not dismiss a live compaction's progress.
+        if self.status_state.compaction.is_none() {
+            self.bottom_pane.hide_status_indicator();
+        }
     }
 
     /// Restore the status indicator only after commentary completion is pending,
@@ -417,7 +424,7 @@ impl ChatWidget {
         if from_replay && self.stream_controller.is_none() && !parsed.visible_markdown.is_empty() {
             self.prepare_assistant_message();
             self.mark_safety_buffering_agent_message_started();
-            self.bottom_pane.hide_status_indicator();
+            self.hide_stream_status();
             let context = self.thread_id.and_then(|thread_id| {
                 crate::inline_visualization::InlineVisualizationContext::from_config(
                     &self.config,
@@ -516,7 +523,7 @@ impl ChatWidget {
             now,
         );
         for cell in outcome.cells {
-            self.bottom_pane.hide_status_indicator();
+            self.hide_stream_status();
             self.add_boxed_history(cell);
         }
         if scope == CommitTickScope::AnyMode || outcome.has_controller {
@@ -565,7 +572,7 @@ impl ChatWidget {
 
     pub(super) fn handle_stream_finished(&mut self) {
         if self.task_complete_pending {
-            self.bottom_pane.hide_status_indicator();
+            self.hide_stream_status();
             self.task_complete_pending = false;
         }
         // A completed stream indicates non-exec content was just inserted.
@@ -636,12 +643,12 @@ impl ChatWidget {
                 return self.clear_active_stream_tail();
             }
 
-            self.bottom_pane.hide_status_indicator();
             let mut cell = history_cell::StreamingAgentTailCell::new(
                 tail_lines,
                 controller.tail_starts_stream(),
             );
             cell.timestamp = controller.timestamp;
+            self.hide_stream_status();
             if self
                 .transcript
                 .active_cell
@@ -666,11 +673,11 @@ impl ChatWidget {
                 return self.clear_active_stream_tail();
             }
 
-            self.bottom_pane.hide_status_indicator();
             let cell = history_cell::StreamingPlanTailCell::new(
                 tail_lines,
                 !controller.tail_starts_stream(),
             );
+            self.hide_stream_status();
             if self
                 .transcript
                 .active_cell

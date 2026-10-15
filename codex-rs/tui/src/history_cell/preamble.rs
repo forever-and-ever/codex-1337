@@ -275,6 +275,13 @@ fn count(tokens: u64) -> String {
 }
 
 impl FeedEntry for PreambleCell {
+    fn feed_id(&self) -> String {
+        self.id.clone()
+    }
+    fn feed_initially_collapsed(&self) -> bool {
+        true
+    }
+
     fn feed_title(&self) -> Line<'static> {
         self.heading()
     }
@@ -285,7 +292,8 @@ impl FeedEntry for PreambleCell {
         expanded: &HashSet<String>,
         mode: super::output_provenance::OutputMode,
     ) -> ActivityParts {
-        use super::output_provenance::{OutputProvenance, mark_lines};
+        use super::output_provenance::OutputProvenance;
+        use super::output_provenance::mark_lines;
         let mut lines: Vec<HyperlinkLine> =
             self.summary_lines().into_iter().map(Into::into).collect();
         mark_lines(&mut lines, OutputProvenance::Client);
@@ -307,11 +315,7 @@ impl FeedEntry for PreambleCell {
             }
         }
         ActivityParts {
-            lines: crate::terminal_hyperlinks::prefix_hyperlink_lines(
-                lines,
-                "  ".into(),
-                "  ".into(),
-            ),
+            lines,
             header: Some(ActivityHeader {
                 source_offset: "Raw Context".len(),
                 expand_on_truncation: false,

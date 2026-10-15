@@ -4,10 +4,7 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 running input
             Script (bash) · running           [in [raw] [fmt]] [out]
-              # @exec: {"max_output_tokens": 3000}
-              sed -n '10,20p' src/main.rs;
               Search TODO in src;
-               echo 'not;a&&boundary'
 
 raw source
             Script (bash) · running           [in [raw] [fmt]] [out]
@@ -70,26 +67,26 @@ neither port
 
 compound batch
         [-] Command                                                            10      2      8        …
-                Script (bash)                                     [in]             [out]              31
-                Script (python)                                   [in]             [out]              79
-                Fence · no output                                  [in]             [out]              0
+              Script (bash)                                       [in]             [out]              31
+              Script (python)                                     [in]             [out]              79
+              Fence · no output                                    [in]             [out]              0
 
 one child input
         [-] Command                                                            10      2      8        …
-                Script (bash)                                     [in]             [out]              31
-                Script (python)                                   [in [raw]      ] [out]              79
-                  print('beta')
-                Fence · no output                                  [in]             [out]              0
+              Script (bash)                                       [in]             [out]              31
+              Script (python)                                     [in [raw]      ] [out]              79
+                print('beta')
+              Fence · no output                                    [in]             [out]              0
 
 outer fold
         [+] Command                                                            10      2      8        …
 
 outer fold
         [-] Command                                                            10      2      8        …
-                Script (bash)                                     [in]             [out]              31
-                Script (python)                                   [in [raw]      ] [out]              79
-                  print('beta')
-                Fence · no output                                  [in]             [out]              0
+              Script (bash)                                       [in]             [out]              31
+              Script (python)                                     [in [raw]      ] [out]              79
+                print('beta')
+              Fence · no output                                    [in]             [out]              0
 
 regrouped singleton
             Script (python)             [in [raw]      ] [out]                 10      2      8        …

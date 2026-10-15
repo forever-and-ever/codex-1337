@@ -67,9 +67,18 @@ async fn compaction_status_survives_follow_up_and_preserves_turn_time() {
     );
     assert_matches!(next_submit_op(&mut op_rx), Op::UserTurn { .. });
     assert!(chat.input_queue.pending_steer.is_some());
+    chat.on_work_status_updated(codex_protocol::protocol::WorkStatus {
+        turn_id: "turn-1".into(),
+        activity: "Resume the layout review".into(),
+        emitted_at: None,
+    });
+    // A late buffered stream must not dismiss the higher-priority compaction status.
+    chat.on_agent_message_delta("Buffered commentary\n".into());
+    chat.on_commit_tick();
+    assert!(chat.bottom_pane.status_indicator_visible());
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
-        "Compacting context"
+        "Compacting context..."
     );
     drain_insert_history(&mut rx);
 
@@ -83,7 +92,7 @@ async fn compaction_status_survives_follow_up_and_preserves_turn_time() {
     assert!(chat.status_state.compaction.is_none());
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
-        "Working"
+        "Resume the layout review"
     );
     assert!(chat.bottom_pane.status_elapsed().unwrap() >= Duration::from_secs(/*secs*/ 600));
 }
@@ -95,7 +104,7 @@ async fn manual_compaction_shows_status_before_backend_events() {
     assert!(chat.bottom_pane.status_indicator_visible());
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
-        "Compacting context"
+        "Compacting context..."
     );
     assert!(chat.handle_turn_start_rejection("Could not start compaction".to_string()));
     assert!(!chat.bottom_pane.status_indicator_visible());
@@ -171,7 +180,7 @@ async fn compaction_snapshot_restores_elapsed_time_and_clears_on_replayed_comple
     );
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
-        "Compacting context"
+        "Compacting context..."
     );
     assert!(
         chat.status_state
@@ -225,6 +234,6 @@ async fn compaction_retry_status_returns_to_compacting() {
     chat.handle_server_notification(compaction_started("compact-1"), /*replay_kind*/ None);
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
-        "Compacting context"
+        "Compacting context..."
     );
 }

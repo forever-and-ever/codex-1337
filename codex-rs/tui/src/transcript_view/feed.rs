@@ -61,18 +61,26 @@ use std::ops::Range;
 
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
 pub(crate) trait FeedEntry {
+    fn feed_id(&self) -> String;
+    fn feed_initially_collapsed(&self) -> bool {
+        false
+    }
     fn feed_title(&self) -> Line<'static>;
-    /// The body and its controls share one projection of the viewer's disclosure state.
+    /// Body rows start at their local origin; the viewport owns their inset.
+    /// Rows and controls share one projection of the viewer's disclosure state.
     fn feed_body(&self, width: u16, expanded: &HashSet<String>, mode: OutputMode) -> ActivityParts;
 }
 
-fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
+pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
     let any = cell.as_any();
     if let Some(arrival) = any.downcast_ref::<ArrivalCell>() {
         return Some(arrival);
     }
-    any.downcast_ref::<PreambleCell>()
-        .map(|preamble| preamble as &dyn FeedEntry)
+    if let Some(preamble) = any.downcast_ref::<PreambleCell>() {
+        return Some(preamble);
+    }
+    any.downcast_ref::<crate::history_cell::AlarmSoundingCell>()
+        .map(|alarm| alarm as &dyn FeedEntry)
 }
 
 pub(super) fn entry_body(
@@ -166,8 +174,9 @@ enum Kind {
     User {
         admitted: Option<(String, usize)>,
     },
-    Arrival,
-    Preamble,
+    Entry {
+        initially_collapsed: bool,
+    },
     /// A Code Mode invocation no step claims.
     CodeMode,
     /// A finished reply no step claims.
@@ -175,9 +184,15 @@ enum Kind {
 }
 
 impl Item {
-    /// Preambles start closed; other items start open. The saved mark toggles that default.
+    /// The saved mark toggles the entry's initial disclosure policy.
     fn unfolded(&self, expanded: &HashSet<String>) -> bool {
-        expanded.contains(&self.fold_mark) == matches!(self.kind, Kind::Preamble)
+        expanded.contains(&self.fold_mark)
+            == matches!(
+                self.kind,
+                Kind::Entry {
+                    initially_collapsed: true
+                }
+            )
     }
 
     /// User turns and replies stand apart.
@@ -816,7 +831,7 @@ impl FeedIndex {
                     title.push_span(" ");
                     let start = title.width() as u16;
                     title.push_span(if mode == choice {
-                        Span::styled(label, crate::render::disclosure::style(true))
+                        Span::styled(label, crate::render::disclosure::tab_style())
                     } else {
                         label.dim()
                     });
@@ -889,7 +904,7 @@ impl FeedIndex {
         let title = match (&item.kind, header.title) {
             (_, Title::Command) => Line::from("Command".bold()),
             (Kind::User { .. }, _) => Line::from("User".bold()),
-            (Kind::Arrival | Kind::Preamble, _) => header
+            (Kind::Entry { .. }, _) => header
                 .scope
                 .first()
                 .and_then(|index| feed_entry(cell(*index)?))
@@ -932,14 +947,17 @@ impl FeedIndex {
                 let (step, ordinal) = admitted.as_ref()?;
                 user_figures(bills.step(step), *ordinal)
             }
-            Kind::Arrival => {
-                let arrival = cell?.as_any().downcast_ref::<ArrivalCell>()?;
-                arrival_figures(bills.step(arrival.response_id()), arrival.id())
+            Kind::Entry { .. } => {
+                let cell = cell?;
+                if let Some(arrival) = cell.as_any().downcast_ref::<ArrivalCell>() {
+                    arrival_figures(bills.step(arrival.response_id()), arrival.id())
+                } else {
+                    Figures {
+                        total: Total::Exact(cell.activity_header_tokens()?),
+                        ..Figures::default()
+                    }
+                }
             }
-            Kind::Preamble => Figures {
-                total: Total::Exact(cell?.activity_header_tokens()?),
-                ..Figures::default()
-            },
             Kind::CodeMode => Figures {
                 // Unadmitted entries can still own a measured model-visible return.
                 total: Total::Exact(output_tokens.for_ids(&cell?.activity_ids())?),
@@ -996,12 +1014,13 @@ fn entry_kind(
             format!("user:{:x}", cell_key(cell)),
         ));
     }
-    if let Some(arrival) = any.downcast_ref::<ArrivalCell>() {
-        return Some((Kind::Arrival, arrival.id().to_string()));
-    }
-    if any.is::<PreambleCell>() {
-        let id = cell.activity_ids().into_iter().next()?;
-        return Some((Kind::Preamble, id));
+    if let Some(entry) = feed_entry(cell.as_ref()) {
+        return Some((
+            Kind::Entry {
+                initially_collapsed: entry.feed_initially_collapsed(),
+            },
+            entry.feed_id(),
+        ));
     }
     if steps.is_empty()
         && let Some(block) = any.downcast_ref::<CodeModeCell>()

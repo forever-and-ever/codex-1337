@@ -548,6 +548,11 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             // AdditionalTools arrivals must not dump their definitions into an otherwise open feed.
             let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(arrival)];
             let mut view = TranscriptView::default();
+            let closed = tests::render(&mut view, &cells, 64, 6);
+            assert!(!tests::text(&closed).contains("Raw Context"));
+            let parent = view.current_layout(&cells, 0).unwrap().fold_targets()[0].clone();
+            assert!(view.focus_fold(&cells, 0, parent));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 64, 6);
             assert!(tests::text(&folded).contains("Raw Context"));
             assert!(

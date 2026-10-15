@@ -3,7 +3,6 @@ use super::HistoryTimestamp;
 use super::PrefixedWrappedHistoryCell;
 use super::agent_prefix;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 
 #[derive(Debug)]
@@ -12,7 +11,7 @@ pub(crate) struct WorkStatusCell(PrefixedWrappedHistoryCell);
 impl WorkStatusCell {
     pub(crate) fn new(activity: String, timestamp: Option<HistoryTimestamp>) -> Self {
         let mut cell = PrefixedWrappedHistoryCell::new(
-            Line::from(vec!["Activity ".bold(), activity.into()]),
+            crate::render::header::leading("Activity ", Line::from(activity)),
             Line::from(agent_prefix(/*first*/ true)),
             Line::from(agent_prefix(/*first*/ false)),
         );

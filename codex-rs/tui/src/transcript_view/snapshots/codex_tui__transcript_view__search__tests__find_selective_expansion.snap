@@ -5,13 +5,13 @@ expression: "crate::transcript_view::tests::text(&buffer)"
             Command                           [in]             [out]
             Command                           [in]             [out]
             Command                           [in [raw] [fmt]] [out [raw] [fmt]]
-            Stored execution · exact input unavailable
-            'echo visible
-            echo hidden newer needle'
+              Stored execution · exact input unavailable
+              'echo visible
+              echo hidden newer needle'
 
-            Exact output is unavailable in this record
+              Exact output is unavailable in this record
 
             Command                           [in [raw] [fmt]] [out]
-            Stored execution · exact input unavailable
-            'echo visible
-            echo hidden manual'
+              Stored execution · exact input unavailable
+              'echo visible
+              echo hidden manual'
