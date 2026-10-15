@@ -5,7 +5,6 @@ expression: "snapshots.join(\"\\n\\n\")"
 Latest
 
 ────────────────────────────────────────────────────────────────────────────────
-              Transcript row 37
               Transcript row 38
               Transcript row 39
               Transcript row 40
@@ -14,27 +13,27 @@ Latest
 
 › draft
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Reading
   esc latest
 ────────────────────────────────────────────────────────────────────────────────
-              Transcript row 34
-              Transcript row 35
               Transcript row 36
               Transcript row 37
+              Transcript row 38
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 
 › draft
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Resized multiline composer
   esc latest
-────────────────────────────────────────
-              Transcript row 34
-              Transcript row 35
+              Transcript row 36
+              Transcript row 37
 ────────────────────────────────────────
          ↓ Back to bottom · esc
 
@@ -42,13 +41,14 @@ Resized multiline composer
   second line
   third line
                                       󰜗
+────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Tiny terminal
 
-
 › draft
                                       󰜗
+────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Detailed
@@ -57,10 +57,10 @@ Detailed
               • Viewed image assets/detail-image.png
 
 
-
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › preserved draft
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project

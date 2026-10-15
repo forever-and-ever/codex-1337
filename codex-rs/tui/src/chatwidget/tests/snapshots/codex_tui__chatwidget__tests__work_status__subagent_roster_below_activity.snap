@@ -14,7 +14,6 @@ expression: "panels.join(\"\\n\\n\")"
 "  ■ claude-sonnet-4-6 worker-7  —                                        12.3K  "
 "› ● gpt-6.1-sol xhigh worker-8  Checking the parser and its integration … 1.5M  "
 "  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "
-"────────────────────────────────────────────────────────────────────────────────"
 "  GPT-5.6-Sol default · /tmp/project                                            "
 
 
@@ -30,7 +29,6 @@ expression: "panels.join(\"\\n\\n\")"
 "  ■ claude-sonnet-4-6… 12.3K  "
 "› ● gpt-6.1-sol xhigh … 1.5M  "
 "  Ctrl+X retire · ↑↓ select   "
-"──────────────────────────────"
 "  GPT-5.6-Sol default · /tmp/…"
 
 
@@ -40,7 +38,7 @@ expression: "panels.join(\"\\n\\n\")"
 "                            󰜗 "
 "──────────────────────────────"
 "›↑● gpt-6.1-sol xhigh … 1.5M  "
-"──────────────────────────────"
+"  Ctrl+X retire · ↑↓ select   "
 "  GPT-5.6-Sol default · /tmp/…"
 
 
@@ -54,7 +52,6 @@ expression: "panels.join(\"\\n\\n\")"
 "  ■ gpt-6.1-sol xhigh worker-3  —                                        12.3K  "
 " ↓■ gpt-6.1-sol xhigh worker-4  —                                        12.3K  "
 "  Ctrl+X retire · ↑↓ select · Enter open · Esc back                             "
-"────────────────────────────────────────────────────────────────────────────────"
 "  GPT-5.6-Sol default · /tmp/project                                            "
 
 
@@ -70,7 +67,6 @@ expression: "panels.join(\"\\n\\n\")"
 "  ■ gpt-6.1-sol xhigh… 12.3K  "
 " ↓■ gpt-6.1-sol xhigh… 12.3K  "
 "  Ctrl+X retire · ↑↓ select   "
-"──────────────────────────────"
 "  GPT-5.6-Sol default · /tmp/…"
 
 
@@ -80,5 +76,5 @@ expression: "panels.join(\"\\n\\n\")"
 "  · Ctrl+C interrupt          "
 "──────────────────────────────"
 " ↓● gpt-6.1-sol xhigh … 1.5M  "
-"──────────────────────────────"
+"  Ctrl+X retire · ↑↓ select   "
 "  GPT-5.6-Sol default · /tmp/…"

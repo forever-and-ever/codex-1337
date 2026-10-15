@@ -223,7 +223,7 @@ definitions folded
 Buffer {
     area: Rect { x: 0, y: 0, width: 64, height: 6 },
     content: [
-        "        [-] Injection · Additional tools                       …",
+        "        [-] Injection · Additional tools                     ≈44",
         "        [+]   Raw Context                                       ",
         "                                                                ",
         "                                                                ",
@@ -237,7 +237,7 @@ Buffer {
         x: 12, y: 0, fg: Rgb(255, 255, 255), bg: Reset, underline: Reset, modifier: BOLD,
         x: 21, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 58, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 58, y: 0, fg: Rgb(62, 62, 62), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

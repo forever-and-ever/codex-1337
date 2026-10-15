@@ -4,7 +4,6 @@ expression: open_text
 ---
   model high · fast
 ────────────────────────────────────────────────────────────────────────────────
-              Transcript row 32: content behind the menu
               Transcript row 33: content behind the menu
               Transcript row 34: content behind the menu
               Transcript row 35: content behind the menu
@@ -15,4 +14,5 @@ expression: open_text
 
 › /m
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project

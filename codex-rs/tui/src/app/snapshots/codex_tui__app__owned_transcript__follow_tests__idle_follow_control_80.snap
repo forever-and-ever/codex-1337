@@ -4,7 +4,6 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 ---
   esc latest
 ────────────────────────────────────────────────────────────────────────────────
-              transcript row 26
               transcript row 27
               transcript row 28
               transcript row 29
@@ -13,4 +12,5 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 
 › draft stays here
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project

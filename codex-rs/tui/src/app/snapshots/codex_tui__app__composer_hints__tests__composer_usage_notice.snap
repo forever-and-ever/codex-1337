@@ -4,7 +4,6 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 ---
 80 columns, 10 rows, running=false, queued=false
   ? for shortcuts                                      ⚠ 1 warning · f2 to view
-────────────────────────────────────────────────────────────────────────────────
               ⚠ Heads up, you have less than 10% of your 5h limit left. Run /
                 status for a breakdown.
 ────────────────────────────────────────────────────────────────────────────────
@@ -12,10 +11,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 80 columns, 12 rows, running=true, queued=false
-  tab to queue message
               ⚠ Heads up, you have less than 5% of your 5h limit left. Run /
                 status for a breakdown.
 ────────────────────────────────────────────────────────────────────────────────
@@ -26,10 +25,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › draft stays
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 32 columns, 10 rows, running=true, queued=false
-                a breakdown.
 ────────────────────────────────
                   ⚠ 5h <1% left
   • Working (0s • ⌃c to interru…
@@ -38,10 +37,10 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › draft stays
                               󰜗
+────────────────────────────────
   GPT-5.6-Sol default · /tmp/pr…
 
 18 columns, 10 rows, running=true, queued=false
-                n.
 ──────────────────
      ⚠ 5h 5% left
   • Working (0s •…
@@ -50,12 +49,12 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 › draft stays
                 󰜗
+──────────────────
   GPT-5.6-Sol def…
 
 80 columns, 18 rows, running=true, queued=true
   tab to queue message
 ────────────────────────────────────────────────────────────────────────────────
-
               ⚠ Heads up, you have less than 5% of your 5h limit left. Run /
                 status for a breakdown.
 ────────────────────────────────────────────────────────────────────────────────
@@ -70,6 +69,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 › draft stays
   second line
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 80 columns, 11 rows, running=true, queued=true
@@ -78,17 +78,17 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 ────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ queued follow-up
-    ⇧← edit last · ⌥x cancel
 
 › draft stays
   second line
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 80 columns, 6 rows, running=true, queued=false
   • Working (0s • ⌃c to interrupt)
 
-
 › draft stays
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project

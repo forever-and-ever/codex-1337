@@ -3445,8 +3445,8 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
     ────                                                                        ────
       ? › 1. Yes, enable  Save on the server for new threads without changing    —
       Ct                  this thread
-    ────  2. Not now      Keep subagents disabled                               ────
-      gp
+      gp  2. Not now      Keep subagents disabled
+
           enter select · esc back
     ");
     Ok(())

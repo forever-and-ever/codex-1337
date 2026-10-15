@@ -3,7 +3,6 @@ source: tui/src/app/turn_tips_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screens.join(\"\\n\\n\"))"
 ---
 working=true, response rows=1, 80x12
-
               Response row 0
 ────────────────────────────────────────────────────────────────────────────────
 
@@ -14,20 +13,20 @@ working=true, response rows=1, 80x12
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=true, response rows=1, 80x6
   • Working (0s • ⌃c to interrupt)
-    └ Tip: Try /help.
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-› Show a response.
               • Done.
 
                 Worked for [duration] • [completion time]
@@ -36,12 +35,12 @@ working=false, response rows=1, 80x12
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=30, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-› Show a response.
               • Done.
 
                 Worked for [duration] • [completion time]
@@ -50,10 +49,10 @@ working=false, response rows=30, 80x12
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 80x9
-  ? for shortcuts
 
                 Worked for [duration] • [completion time]
 ────────────────────────────────────────────────────────────────────────────────
@@ -61,11 +60,11 @@ working=false, response rows=1, 80x9
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 80x10
   ? for shortcuts
-────────────────────────────────────────────────────────────────────────────────
 
                 Worked for [duration] • [completion time]
 ────────────────────────────────────────────────────────────────────────────────
@@ -73,12 +72,12 @@ working=false, response rows=1, 80x10
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 80x11
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-              • Done.
 
                 Worked for [duration] • [completion time]
 ────────────────────────────────────────────────────────────────────────────────
@@ -86,12 +85,12 @@ working=false, response rows=1, 80x11
 
 › Ask Codex to do anything
                                                                               󰜗
+────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 working=false, response rows=1, 12x12
   ? for shor
 ────────────
-2
 :
 0
 0
@@ -100,6 +99,7 @@ working=false, response rows=1, 12x12
 
 › Ask Codex
           󰜗
+────────────
   gpt-test …
 
 working=false, response rows=1, 80x4
