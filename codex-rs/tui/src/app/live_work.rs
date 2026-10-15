@@ -400,13 +400,10 @@ impl App {
                 if self.active_thread_id != Some(thread_id) {
                     return;
                 }
-                if let Some(index) = self
-                    .transcript_cells
-                    .iter()
-                    .position(|cell| cell.tool_call_ids().contains(&item_id.as_str()))
+                if self
+                    .transcript_view
+                    .reveal_call(&self.transcript_cells, &item_id)
                 {
-                    self.transcript_view
-                        .jump_to_entry(&self.transcript_cells, index);
                     if let Some(scope) = &mut self.live_work.scope {
                         scope.view.blur();
                     }
