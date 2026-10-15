@@ -58,6 +58,29 @@ impl ReadIntent {
         })
     }
 
+    pub fn from_tool_input(input: &codex_protocol::tool_input::ToolInput) -> Option<Self> {
+        use codex_protocol::tool_input::ToolInputPayload;
+
+        if !input.name.is_default_namespace() || input.name.name != "fs" {
+            return None;
+        }
+        let ToolInputPayload::Json(arguments) = &input.payload else {
+            return None;
+        };
+        let arguments: serde_json::Value = serde_json::from_str(arguments).ok()?;
+        if arguments.get("operation")?.as_str()? != "read" {
+            return None;
+        }
+        let path = arguments.get("path")?.as_str()?;
+        if path.is_empty() {
+            return None;
+        }
+        Some(Self {
+            path: path.to_owned(),
+            range: ReadRange::Whole,
+        })
+    }
+
     pub fn label(&self, name: &str) -> String {
         match self.range {
             ReadRange::Whole => format!("{name} (whole file)"),
