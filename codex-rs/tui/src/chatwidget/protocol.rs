@@ -461,13 +461,14 @@ impl ChatWidget {
         }
         // Tool and hook activity can recreate a hidden row with its default
         // heading. Restore the selected status before that row is rendered.
+        let header = self.work_status_header(&self.status_state.current_status.header);
         if self
             .bottom_pane
             .status_widget()
-            .is_some_and(|status| status.header() != self.status_state.current_status.header)
+            .is_some_and(|status| status.header() != header)
         {
             self.bottom_pane.update_status(
-                self.status_state.current_status.header.clone(),
+                header,
                 self.status_state.current_status.details.clone(),
                 StatusDetailsCapitalization::Preserve,
                 self.status_state.current_status.details_max_lines,
