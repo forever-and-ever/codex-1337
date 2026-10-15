@@ -5,6 +5,7 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
   • Working (0s • ⌃c to interrupt)
 
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ Hello, world! 0
   ↳ Hello, world! 1
@@ -19,10 +20,9 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
   ↳ Hello, world! 10
   ↳ Hello, world! 11
   ↳ Hello, world! 12
+  ↳ Hello, world! 13
+  ↳ Hello, world! 14
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project

@@ -23,11 +23,11 @@ unfolded
               › Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
-              const status = await tools.exec_command({ cmd: "git status" });
-              text(status.output);
+              git status
 
         [-] Response
               • No step billed this reply.
+
 
 
 

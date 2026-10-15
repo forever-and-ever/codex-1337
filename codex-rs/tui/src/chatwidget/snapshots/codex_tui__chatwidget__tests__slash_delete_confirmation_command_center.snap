@@ -5,10 +5,10 @@ expression: popup
       Delete this session?
 › As  Cannot be undone. Subagent threads will also be deleted.
                                                                               󰜗
-────                                                                        ────
-  Ac› 1. No, keep this session                     Return to the current
-────                                               session                  ────
-  GP  2. Yes, delete and return to command center  Permanently delete this
+  GP
+    › 1. No, keep this session                     Return to the current
+                                                   session
+      2. Yes, delete and return to command center  Permanently delete this
                                                    session now
 
       enter select · esc back

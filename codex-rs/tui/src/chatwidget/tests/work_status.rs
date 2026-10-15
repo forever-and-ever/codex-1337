@@ -255,6 +255,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
             "Working"
         );
     }
+    chat.bottom_pane.hide_status_indicator();
     chat.current_goal_status = None;
     chat.bottom_pane
         .set_composer_text(String::new(), Vec::new(), Vec::new());

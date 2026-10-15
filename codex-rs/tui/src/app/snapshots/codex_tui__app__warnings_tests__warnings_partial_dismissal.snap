@@ -4,6 +4,9 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
 ---
   esc latest                                           ⚠ 1 warning · f2 to view
 ────────────────────────────────────────────────────────────────────────────────
+              Earlier transcript row 14
+              Earlier transcript row 15
+              Earlier transcript row 16
               Earlier transcript row 17
               Earlier transcript row 18
               Earlier transcript row 19
@@ -22,7 +25,4 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screen)
 
 › draft
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project

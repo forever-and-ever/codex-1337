@@ -197,7 +197,7 @@ text('authority and bounds preserved');
         core_test_support::wait_for_event(&test.codex, |event| {
             if let codex_protocol::protocol::EventMsg::CodeModeOwned(owned) = event
                 && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) =
-                    owned.payload()
+                    owned.payload().as_ref()
                 && let codex_protocol::items::TurnItem::ToolInput(input) = &completed.item
             {
                 assert_eq!(owned.owner.exec_call_id, "filesystem");

@@ -5,6 +5,7 @@ expression: "format!(\"OPEN\\n{open}\\n\\nONLY QUESTIONS\\n{completed}\")"
 OPEN
   • Working (0s • ⌃c to interrupt)
 
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ queued follow-up
 

@@ -8,7 +8,4 @@ expression: "normalize_snapshot_paths(format!(\"{}\\n{}\",\nlines_to_single_stri
   Learn more: https://help.openai.com/en/articles/20001326
 
   Viewing sub-agent — direct input is disabled · Esc main · Ctrl+C interrupt
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   GPT-6.1-Sol default · /tmp/project

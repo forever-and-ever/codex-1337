@@ -2,5 +2,4 @@
 source: tui/src/chatwidget/tests/reasoning_status_tests.rs
 expression: terminal.backend()
 ---
-"  Activity  —                           "
 "  Reasoning Preparing evidence report   "

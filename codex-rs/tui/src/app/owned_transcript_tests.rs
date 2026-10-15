@@ -1274,7 +1274,7 @@ async fn slash_picker_overlays_history_without_moving_the_transcript_or_composer
             let menu_y = open_text
                 .lines()
                 .position(|line| line.contains("› /model"))
-                .expect("available rows show command matches");
+                .unwrap_or_else(|| panic!("missing command matches at {width}×{height}, composer_y={composer_y}:\n{open_text}"));
             let prefix_len = menu_y * usize::from(width);
             assert_eq!(
                 &open.content()[..prefix_len],

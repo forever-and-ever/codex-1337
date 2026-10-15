@@ -5,9 +5,9 @@ expression: "render_bottom_popup(&chat, 80)"
       Enable subagents?
 › As  Subagents are disabled in this TUI session.
                                                                               󰜗
-────                                                                        ────
-  Ac› 1. Yes, enable  Save on the server for new threads without changing
-────                  this thread                                           ────
-  GP  2. Not now      Keep subagents disabled
+  GP
+    › 1. Yes, enable  Save on the server for new threads without changing
+                      this thread
+      2. Not now      Keep subagents disabled
 
       enter select · esc back

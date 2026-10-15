@@ -6,7 +6,4 @@ expression: terminal.backend()
 "                                                                                "
 "› Ask a follow-up question                                                      "
 "                                                                              󰜗 "
-"────────────────────────────────────────────────────────────────────────────────"
-"  Activity  —                                                                   "
-"────────────────────────────────────────────────────────────────────────────────"
 " Side from main thread · main needs input · ctrl+/ to switch · ctrl+c to close  "

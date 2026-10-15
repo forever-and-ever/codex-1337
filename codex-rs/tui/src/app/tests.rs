@@ -3443,12 +3443,11 @@ async fn open_agent_picker_prompts_when_subagents_disabled() -> Result<()> {
     › As  Subagents are disabled in this TUI session.
                                                                                   󰜗
     ────                                                                        ────
-      Ac› 1. Yes, enable  Save on the server for new threads without changing
-    ────                  this thread                                           ────
-      ?   2. Not now      Keep subagents disabled                                —
-      Ct
-    ────  enter select · esc back                                               ────
-      gpt-test default · /tmp/project · Main [default]
+      ? › 1. Yes, enable  Save on the server for new threads without changing    —
+      Ct                  this thread
+    ────  2. Not now      Keep subagents disabled                               ────
+      gp
+          enter select · esc back
     ");
     Ok(())
 }

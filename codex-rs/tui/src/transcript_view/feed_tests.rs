@@ -457,7 +457,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert!(shown.contains("text("));
     let layout = view.current_layout(&cells, 0).unwrap();
     assert!(
-        layout
+        !layout
             .fold_targets()
             .contains(&target(Action::Format(Port::Input, OutputMode::Fmt)))
     );

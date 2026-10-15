@@ -41,7 +41,7 @@ Buffer {
         "            Output:                                                             ",
         "            {"content":[{"type":"text","text":"first returned batch\nOnly       ",
         "            emitted text, after truncation."}],"isError":false}                 ",
-        "            Command (exec)               [in]             [out [raw] [fmt]]  280",
+        "            Command (exec)               [in]             [out [raw]      ]  280",
         "            Script completed                                                    ",
         "            Wall time 0.1 seconds                                               ",
         "            Output:                                                             ",
@@ -49,19 +49,15 @@ Buffer {
         "            emitted text, after truncation."}],"isError":false}                 ",
     ],
     styles: [
-        x: 0, y: 0, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 42, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 44, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
         x: 62, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 63, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 63, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
         x: 68, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 69, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
-        x: 74, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 5, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 message boundaries
@@ -70,7 +66,7 @@ Buffer {
     content: [
         "            {"content":[{"type":"text","text":"first returned batch\nOnly       ",
         "            emitted text, after truncation."}],"isError":false}                 ",
-        "            Command (exec)               [in]             [out [raw] [fmt]]  280",
+        "            Command (exec)               [in]             [out [raw]      ]  280",
         "            Script completed                                                    ",
         "            Wall time 0.1 seconds                                               ",
         "            Output:                                                             ",
@@ -80,19 +76,14 @@ Buffer {
         "              After tools                                                       ",
     ],
     styles: [
-        x: 0, y: 0, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 42, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 44, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 59, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
         x: 62, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 63, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 63, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
         x: 68, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 69, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
-        x: 74, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 3, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 8, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

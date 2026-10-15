@@ -1,10 +1,10 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 8782
 expression: transcript
 ---
 
 ────────────────────────────────────────────────────────────────────────────────
+
         [-] User
               › retained prompt
 

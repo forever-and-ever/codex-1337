@@ -305,9 +305,6 @@ async fn replacement_uses_server_defaults_and_preserves_explicit_launch_settings
             insta::assert_snapshot!(rendered, @"
             › Ask Codex to do anything
                                                                                           󰜗
-            ────────────────────────────────────────────────────────────────────────────────
-              Activity  —
-            ────────────────────────────────────────────────────────────────────────────────
               server-model high · <PROJECT>
             ");
         }

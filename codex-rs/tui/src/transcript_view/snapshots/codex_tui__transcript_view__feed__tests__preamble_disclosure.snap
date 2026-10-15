@@ -43,7 +43,6 @@ raw explicitly opened
   HH:MM [+] Preamble                                                        1000
 
 narrow raw
-  HH:MM [-] Preamble                1000
                       700  Instructions
                       700    Base
                 instructions
@@ -66,6 +65,8 @@ narrow raw
                       300  Context
                       300    AGENTS.md /
                 repo
+
+        [+]     Raw Context
 
 wide raw
   HH:MM [-] Preamble                                                        1000

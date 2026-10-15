@@ -4,6 +4,9 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 Latest
 
+────────────────────────────────────────────────────────────────────────────────
+              Transcript row 37
+              Transcript row 38
               Transcript row 39
               Transcript row 40
 ────────────────────────────────────────────────────────────────────────────────
@@ -11,56 +14,53 @@ Latest
 
 › draft
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Reading
   esc latest
-              Transcript row 38
-              Transcript row 39
+────────────────────────────────────────────────────────────────────────────────
+              Transcript row 34
+              Transcript row 35
+              Transcript row 36
+              Transcript row 37
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 
 › draft
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Resized multiline composer
-              Transcript row 38
-              Transcript row 39
+  esc latest
+────────────────────────────────────────
+              Transcript row 34
+              Transcript row 35
 ────────────────────────────────────────
          ↓ Back to bottom · esc
 
-› second line                          ↑
+› draft
+  second line
   third line
                                       󰜗
-────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────
   gpt-test default · /tmp/project
 
 Tiny terminal
 
+
 › draft
                                       󰜗
-  Activity  —
   gpt-test default · /tmp/project
 
 Detailed
 
+────────────────────────────────────────────────────────────────────────────────
               • Viewed image assets/detail-image.png
+
+
 
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › preserved draft
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project

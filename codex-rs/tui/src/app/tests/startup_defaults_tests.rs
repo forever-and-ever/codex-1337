@@ -611,9 +611,6 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             insta::assert_snapshot!(rendered, @"
             › Ask Codex to do anything
                                                                                           󰜗
-            ────────────────────────────────────────────────────────────────────────────────
-              Activity  —
-            ────────────────────────────────────────────────────────────────────────────────
               GPT-6.1-Sol high · <PROJECT>
             ");
         }

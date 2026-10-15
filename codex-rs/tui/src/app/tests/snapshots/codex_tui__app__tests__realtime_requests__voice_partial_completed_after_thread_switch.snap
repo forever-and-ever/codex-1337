@@ -5,9 +5,6 @@ expression: "normalize_voice_snapshot_directory(&format!(\"Other task:\\n{other_
 Other task:
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 Restored owner:
  voice ● listening                                      ⌃x mute     /voice stop
@@ -15,9 +12,6 @@ Restored owner:
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
   >_ OpenAI Codex (v0.162.1-1337)

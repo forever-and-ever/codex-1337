@@ -4,10 +4,9 @@ expression: popup
 ---
   •   Archive this session?
       This will stop the current turn and archive the session.
+────                                                                        ────
 
-› As
-    › 1. No, don't archive  Return to the current session                     󰜗
-────  2. Yes, archive       Archive this session now                        ────
-  Ac
-────  enter select · esc back                                               ────
-  GPT-5.6-Sol default · /tmp/project
+› As› 1. No, don't archive  Return to the current session
+      2. Yes, archive       Archive this session now                          󰜗
+  GP
+      enter select · esc back

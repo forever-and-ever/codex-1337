@@ -4595,18 +4595,20 @@ impl ChatComposer {
             && options.command_popup_placement != CommandPopupPlacement::Hidden
         {
             let popup_rect = if options.command_popup_placement == CommandPopupPlacement::Overlay {
+                let available = composer_rect.y.saturating_sub(buf.area.y);
+                let reserved_hints =
+                    if options.hint_placement == ComposerHintPlacement::ScreenHeader {
+                        self.hint_content_height(composer_rect.width, options)
+                            .saturating_add(1)
+                    } else {
+                        0
+                    };
+                // Keep one suggestion row when a short terminal clips the screen header.
                 let height = self
                     .popups
                     .active
                     .required_height(composer_rect.width, /*footer_total_height*/ 0)
-                    .min(composer_rect.y.saturating_sub(buf.area.y).saturating_sub(
-                        if options.hint_placement == ComposerHintPlacement::ScreenHeader {
-                            self.hint_content_height(composer_rect.width, options)
-                                .saturating_add(1)
-                        } else {
-                            0
-                        },
-                    ));
+                    .min(available.saturating_sub(reserved_hints.min(available.saturating_sub(1))));
                 // Command and unified mention menus can render in a single row.
                 let height = if matches!(
                     self.popups.active,

@@ -14,14 +14,14 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
 
 
 
+
+
+
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 32 columns
@@ -36,12 +36,12 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
 
 
 
+
+
+
 ────────────────────────────────
 
 
 › Ask Codex to do anything
                               󰜗
-────────────────────────────────
-  Activity  —
-────────────────────────────────
   GPT-5.6-Sol default · /tmp/pr…

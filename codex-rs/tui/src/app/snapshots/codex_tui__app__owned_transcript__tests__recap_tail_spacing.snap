@@ -3,43 +3,46 @@ source: tui/src/app/owned_transcript_tests.rs
 expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ---
 80x10, Recap at tail
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
                 ↳ Recap: The draft is ready.
+
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x10, Message after recap
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+
               • Follow-up response.
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x10, Live message after recap
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+
               • Streaming response.
 ────────────────────────────────────────────────────────────────────────────────
 
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x12, Recap at tail
   ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+
+                ↳ Recap: The draft is ready.
                          Next: Review the changes.
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -47,13 +50,13 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x12, Message after recap
   ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+                ↳ Recap: The draft is ready.
+                         Next: Review the changes.
 
               • Follow-up response.
 ────────────────────────────────────────────────────────────────────────────────
@@ -61,13 +64,13 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x12, Live message after recap
   ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+                ↳ Recap: The draft is ready.
+                         Next: Review the changes.
 
               • Streaming response.
 ────────────────────────────────────────────────────────────────────────────────
@@ -75,13 +78,13 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 32x12, Recap at tail
   ? for shortcuts
+────────────────────────────────
+                         w the
+                         chang
                          es.
 
 ────────────────────────────────
@@ -89,13 +92,13 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                               󰜗
-────────────────────────────────
-  Activity  —
-────────────────────────────────
   gpt-test default · /tmp/proje…
 
 32x12, Message after recap
   ? for shortcuts
+────────────────────────────────
+                         es.
+
               • Follow-up
                 response.
 ────────────────────────────────
@@ -103,13 +106,13 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                               󰜗
-────────────────────────────────
-  Activity  —
-────────────────────────────────
   gpt-test default · /tmp/proje…
 
 32x12, Live message after recap
   ? for shortcuts
+────────────────────────────────
+                         es.
+
               • Streaming
                 response.
 ────────────────────────────────
@@ -117,58 +120,55 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 
 › Ask Codex to do anything
                               󰜗
-────────────────────────────────
-  Activity  —
-────────────────────────────────
   gpt-test default · /tmp/proje…
 
 80x7, Recap at tail
+                         Next: Review the changes.
+────────────────────────────────────────────────────────────────────────────────
+
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x7, Message after recap
+              • Follow-up response.
+────────────────────────────────────────────────────────────────────────────────
+
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 80x7, Live message after recap
+              • Streaming response.
+────────────────────────────────────────────────────────────────────────────────
+
 
 › Ask Codex to do anything
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
 32x6, Recap at tail
+────────────────────────────────
+
 
 › Ask Codex to do anything
                               󰜗
-  Activity  —
-
   gpt-test default · /tmp/proje…
 
 32x6, Message after recap
+────────────────────────────────
+
 
 › Ask Codex to do anything
                               󰜗
-  Activity  —
-
   gpt-test default · /tmp/proje…
 
 32x6, Live message after recap
+────────────────────────────────
+
 
 › Ask Codex to do anything
                               󰜗
-  Activity  —
-
   gpt-test default · /tmp/proje…

@@ -5,10 +5,10 @@ expression: popup
       Upload logs?
 › As
       The following files will be sent:                                       󰜗
-────    • codex-logs.log                                                    ────
-  Ac    • client-logs.txt (if available)
-────    • codex-doctor-report.json                                          ────
-  GP    • codex-apps-tools-cache.json (if available)
+  GP    • codex-logs.log
+        • client-logs.txt (if available)
+        • codex-doctor-report.json
+        • codex-apps-tools-cache.json (if available)
         • codex-app-directory-cache.json (if available)
         • windows-sandbox.log
         • auto-review-rollout-thread-1.jsonl

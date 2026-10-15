@@ -10,7 +10,7 @@ Exploration ordinary=false expanded=false
               Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw] [fmt]]   1280
+[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
               Read first.rs (whole file)
               Read nested.rs (whole file)
 
@@ -35,7 +35,7 @@ Computer ordinary=false expanded=false
         [-] Code Mode (τνμβ)        [in]             [out]                 20
 
 Computer ordinary=false expanded=true
-[-] Code Mode (εμογ)        [in]             [out [raw] [fmt]]   1280
+[-] Code Mode (εμογ)        [in]             [out [raw]      ]   1280
               Script running with cell ID reused-runtime-cell
               Wall time 0.1 seconds
               Output:
@@ -59,7 +59,7 @@ Exploration ordinary=true expanded=false
               cargo check
 
 Exploration ordinary=true expanded=true
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw] [fmt]]   1280
+[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
               cargo check
               cargo check
 

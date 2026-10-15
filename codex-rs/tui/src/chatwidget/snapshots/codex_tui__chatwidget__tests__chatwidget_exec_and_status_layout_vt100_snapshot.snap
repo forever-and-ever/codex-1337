@@ -34,11 +34,11 @@ expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 
   • Working (0s • ⌃c to interrupt)
 
+────────────────────────────────────────────────────────────────────────────────
 
 › Summarize recent commits
                                                                               󰜗
 ────────────────────────────────────────────────────────────────────────────────
-  Activity  —
   Reasoning Investigating rendering code
 ────────────────────────────────────────────────────────────────────────────────
   tab to queue message                                       100% context left

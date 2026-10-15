@@ -6,10 +6,10 @@ expression: "render_bottom_popup(&chat, 80)"
                                                                             etry
       This will stop the current attempt and retry in a new thread. Any     ts.
       file changes or other actions already taken will remain.
-
-› As  Your message will be sent again using Faster Model, which may be
-      less capable on complex tasks.                                          󰜗
 ────                                                                        ────
-  Ac
-────› 1. Keep waiting                                                       ────
-  gp  2. Stop and retry
+      Your message will be sent again using Faster Model, which may be
+› As  less capable on complex tasks.
+                                                                              󰜗
+  gp
+    › 1. Keep waiting
+      2. Stop and retry

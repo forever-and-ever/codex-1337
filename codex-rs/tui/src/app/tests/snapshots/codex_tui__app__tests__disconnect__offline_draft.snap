@@ -5,6 +5,7 @@ expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.
 › only once
   • Reconnecting to server… (0s)
 
+────────────────────────────────────────────────────────────────────────────────
 • Queued follow-up inputs
   ↳ only once
   ↳ queued before disconnect
@@ -12,7 +13,4 @@ expression: "format!(\"{}\\n{}\",\nlines_to_single_string(&app.transcript_cells.
 
 › keep this draft!
                                                                               󰜗
-────────────────────────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────────────────────────
   ⌃c quit

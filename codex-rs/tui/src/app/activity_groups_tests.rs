@@ -1327,7 +1327,38 @@ async fn interleaved_scripts_keep_exact_ownership_after_terminal_wait_and_replay
             let area = Rect::new(
                 /*x*/ 0, /*y*/ 0, /*width*/ 90, /*height*/ 40,
             );
+            assert!(
+                app.transcript_view
+                    .reveal_call(&app.transcript_cells, "exec-a")
+            );
             let mut buffer = ratatui::buffer::Buffer::empty(area);
+            app.transcript_view
+                .render(area, &mut buffer, &app.transcript_cells);
+            // Selecting script source is an explicit Raw choice, not the semantic default.
+            let (row, column) = buffer
+                .content()
+                .chunks(usize::from(area.width))
+                .enumerate()
+                .find_map(|(row, cells)| {
+                    cells
+                        .iter()
+                        .map(ratatui::buffer::Cell::symbol)
+                        .collect::<String>()
+                        .find("[raw]")
+                        .map(|column| (row, column + 1))
+                })
+                .unwrap();
+            app.transcript_view.handle_mouse(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::Down(
+                        crossterm::event::MouseButton::Left,
+                    ),
+                    column: u16::try_from(column).unwrap(),
+                    row: u16::try_from(row).unwrap(),
+                    modifiers: KeyModifiers::NONE,
+                },
+                &app.transcript_cells,
+            );
             app.transcript_view
                 .render(area, &mut buffer, &app.transcript_cells);
             let source_row = buffer

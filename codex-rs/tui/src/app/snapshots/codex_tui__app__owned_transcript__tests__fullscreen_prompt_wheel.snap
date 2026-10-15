@@ -12,7 +12,10 @@ Following caret
 ────────────────────────────────────────────────────────────
 
 
-› Prompt 26 界                                              ↑
+› Prompt 23 界                                              ↑
+  Prompt 24 界
+  Prompt 25 界
+  Prompt 26 界
   Prompt 27 界
   Prompt 28 界
   Prompt 29 界
@@ -23,9 +26,6 @@ Following caret
   Prompt 34 界
   Prompt 35 界
                                                           󰜗
-────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 Wheel up
@@ -38,7 +38,10 @@ Wheel up
 ────────────────────────────────────────────────────────────
 
 
-› Prompt 17 界                                              ↑
+› Prompt 14 界                                              ↑
+  Prompt 15 界
+  Prompt 16 界
+  Prompt 17 界
   Prompt 18 界
   Prompt 19 界
   Prompt 20 界
@@ -49,9 +52,6 @@ Wheel up
   Prompt 25 界
   Prompt 26 界                                              ↓
                                                           󰜗
-────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 Edit at caret
@@ -64,7 +64,10 @@ Edit at caret
 ────────────────────────────────────────────────────────────
 
 
-› Prompt 26 界                                              ↑
+› Prompt 23 界                                              ↑
+  Prompt 24 界
+  Prompt 25 界
+  Prompt 26 界
   Prompt 27 界
   Prompt 28 界
   Prompt 29 界
@@ -75,9 +78,6 @@ Edit at caret
   Prompt 34 界
   Prompt 35 界
                                                           󰜗
-────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 Paste at caret
@@ -90,7 +90,10 @@ Paste at caret
 ────────────────────────────────────────────────────────────
 
 
-› Edited 26 界                                              ↑
+› Edited 23 界                                              ↑
+  Edited 24 界
+  Edited 25 界
+  Edited 26 界
   Edited 27 界
   Edited 28 界
   Edited 29 界
@@ -101,19 +104,16 @@ Paste at caret
   Edited 34 界
   Edited 35 界  pasted here
                                                           󰜗
-────────────────────────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
 
 Short screen
 ────────────────────────────────────────
 
 
-› Edited 34 界                          ↑
+› Edited 31 界                          ↑
+  Edited 32 界
+  Edited 33 界
+  Edited 34 界
   Edited 35 界  pasted here
                                       󰜗
-────────────────────────────────────────
-  Activity  —
-────────────────────────────────────────
   GPT-5.6-Sol default · /tmp/project
