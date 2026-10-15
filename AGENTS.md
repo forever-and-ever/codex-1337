@@ -35,3 +35,6 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - Snapshot changes → `docs/fork.md` Snapshots
 - Installing or numbering TUI builds → `docs/fork.md` Local TUI releases
 - Deciding which providers may receive conversation data → `docs/fork.md` Provider data
+
+## grants
+- Deploy validated merged changes automatically with `scripts/install-local --staging`; production still requires explicit approval
