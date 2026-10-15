@@ -593,6 +593,8 @@ impl ToolRegistry {
             return Err(err);
         }
 
+        crate::tools::code_mode::transcript::capture_input(&invocation).await;
+
         if let Some(pre_tool_use_payload) = tool.pre_tool_use_payload(&invocation) {
             match run_pre_tool_use_hooks(
                 &invocation.session,

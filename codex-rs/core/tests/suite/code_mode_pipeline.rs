@@ -193,11 +193,50 @@ text('authority and bounds preserved');
                 ),
             )
             .await?;
+        let mut filesystem_inputs = Vec::new();
         core_test_support::wait_for_event(&test.codex, |event| {
+            if let codex_protocol::protocol::EventMsg::CodeModeOwned(owned) = event
+                && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) = owned.payload()
+                && let codex_protocol::items::TurnItem::ToolInput(input) = &completed.item
+            {
+                assert_eq!(owned.owner.exec_call_id, "filesystem");
+                assert!(owned.owner.cell_id.is_some());
+                assert_eq!(
+                    event.code_mode_call_id().as_deref(),
+                    Some(input.call_id.as_str())
+                );
+                // Capturing arguments must not end the real invocation's ownership lease.
+                assert!(event.code_mode_completed_child().is_none());
+                assert_eq!(completed.started_at_ms, None);
+                filesystem_inputs.push(input.clone());
+            }
             matches!(event, codex_protocol::protocol::EventMsg::TurnComplete(_))
         })
         .await;
+        assert_eq!(filesystem_inputs.len(), 3);
+        for (input, (operation, path)) in filesystem_inputs.iter().zip([
+            ("read", "seed"),
+            ("write", "seed"),
+            ("read", "oversize"),
+        ]) {
+            assert!(input.name.is_default_namespace());
+            assert_eq!(input.name.name, "fs");
+            assert_eq!(input.id, format!("input:{}", input.call_id));
+            assert!(matches!(
+                input.payload,
+                codex_protocol::tool_input::ToolInputPayload::Json(_)
+            ));
+            let arguments: serde_json::Value = serde_json::from_str(input.payload.text())?;
+            assert_eq!(arguments["operation"], operation);
+            assert_eq!(arguments["path"], path);
+        }
         let request = log.last_request().expect("follow-up");
+        assert!(request.input().iter().all(|item| {
+            item["type"] != "tool_input"
+                && filesystem_inputs.iter().all(|input| {
+                    item["call_id"].as_str() != Some(input.call_id.as_str())
+                })
+        }));
         let output = custom_tool_output_items(&request, "filesystem");
         assert_eq!(text_item(&output, 1), "authority and bounds preserved");
         assert!(

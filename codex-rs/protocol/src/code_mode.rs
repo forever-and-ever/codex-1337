@@ -87,6 +87,7 @@ impl crate::protocol::EventMsg {
         use crate::items::TurnItem;
         match self.native_event() {
             Self::ItemCompleted(event) => match &event.item {
+                TurnItem::ToolInput(_) => None,
                 TurnItem::CommandExecution(item)
                     if item.status == CommandExecutionStatus::InProgress =>
                 {
@@ -120,6 +121,7 @@ impl crate::protocol::EventMsg {
             EventMsg::ItemCompleted(event) => match &event.item {
                 TurnItem::CodeMode(item) => Some(Cow::Borrowed(&item.exec_call_id)),
                 TurnItem::FunctionCallOutput(item) => item.call_id.as_deref().map(Cow::Borrowed),
+                TurnItem::ToolInput(item) => Some(Cow::Borrowed(&item.call_id)),
                 TurnItem::ToolOutputTokens(item) => Some(Cow::Borrowed(&item.call_id)),
                 item => Some(Cow::Owned(item.id())),
             },

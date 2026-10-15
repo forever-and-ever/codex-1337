@@ -11,7 +11,7 @@ mod output;
 mod response_adapter;
 mod telemetry;
 mod tool_definitions;
-mod transcript;
+pub(crate) mod transcript;
 mod wait_handler;
 pub(crate) mod wait_spec;
 
