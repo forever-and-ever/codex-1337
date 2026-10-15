@@ -500,6 +500,9 @@ pub(crate) fn scoped_item_cells(
     source: crate::code_mode_transcript::Source,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
+    if let ThreadItem::ToolInput(input) = item {
+        return vec![Arc::new(crate::history_cell::ToolInputCell(input))];
+    }
     if let ThreadItem::CollabAgentToolCall { .. } = &item {
         return crate::multi_agents::tool_call_history_cell(
             &item, /*cached_spawn_request*/ None, metadata,

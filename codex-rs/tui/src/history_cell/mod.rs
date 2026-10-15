@@ -15,6 +15,7 @@ pub(crate) use alarm::AlarmSoundingCell;
 
 mod activity_group;
 mod code_mode;
+mod tool_input;
 mod tool_item;
 pub(crate) use code_mode::CodeModeCell;
 pub(crate) use code_mode::CodeModeFactCell;
@@ -25,6 +26,7 @@ pub(crate) use code_mode::owner_label as code_mode_owner_label;
 pub(crate) use code_mode::reconcile_code_mode;
 pub(crate) use code_mode::reunite_code_mode;
 pub(crate) use code_mode::split_code_mode_members;
+pub(crate) use tool_input::ToolInputCell;
 pub(crate) use tool_item::ToolItemCell;
 pub(crate) mod activity_parts;
 pub(crate) mod invocation;
