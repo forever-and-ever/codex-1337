@@ -278,8 +278,8 @@ impl FeedEntry for PreambleCell {
     fn feed_id(&self) -> String {
         self.id.clone()
     }
-    fn feed_initially_collapsed(&self) -> bool {
-        true
+    fn feed_disclosure(&self) -> crate::transcript_view::HeaderDisclosure {
+        crate::transcript_view::HeaderDisclosure::Collapsed
     }
 
     fn feed_title(&self) -> Line<'static> {

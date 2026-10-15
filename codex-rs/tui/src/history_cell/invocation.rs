@@ -70,12 +70,10 @@ pub(crate) struct Invocation<'a> {
 
 fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
     let read = codex_shell_command::read_intent::ReadIntent::from_tool_input(input)?;
+    let mut lines = vec![crate::exec_cell::rows::read_summary(read.label(&read.path)).into()];
+    mark_lines(&mut lines, OutputProvenance::Formatted);
     Some(super::activity_parts::ActivityParts {
-        lines: captured_lines(
-            &format!("Read {}", read.label(&read.path)),
-            ContextAuthor::Environment,
-            OutputMode::Fmt,
-        ),
+        lines,
         ..Default::default()
     })
 }

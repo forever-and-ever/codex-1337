@@ -40,18 +40,19 @@ impl ChatWidget {
     }
 
     pub(super) fn on_context_compaction_completed(&mut self, id: &str, from_replay: bool) {
-        let mut message = "Context compacted".to_string();
-        if let Some(active) = self.status_state.compaction.as_ref()
-            && active.id == id
-        {
-            if !from_replay {
-                let elapsed = crate::status_indicator_widget::fmt_elapsed_compact(
-                    active.started_at.elapsed().as_secs(),
-                );
-                message = format!("Context compacted · {elapsed}");
-            }
+        let elapsed = self
+            .status_state
+            .compaction
+            .as_ref()
+            .filter(|active| active.id == id)
+            .map(|active| active.started_at.elapsed());
+        if elapsed.is_some() {
             self.clear_context_compaction();
         }
-        self.add_info_message(message, /*hint*/ None);
+        self.add_to_history(crate::history_cell::CompactionCell {
+            id: id.to_owned(),
+            elapsed: elapsed.filter(|_| !from_replay),
+        });
+        self.request_redraw();
     }
 }

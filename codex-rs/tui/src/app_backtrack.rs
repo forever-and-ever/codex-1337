@@ -1091,10 +1091,10 @@ mod tests {
                 vec![Line::from("first")],
                 /*is_first_line*/ true,
             )) as Arc<dyn HistoryCell>,
-            Arc::new(crate::history_cell::new_info_event(
-                "Context compacted".to_string(),
-                /*hint*/ None,
-            )) as Arc<dyn HistoryCell>,
+            Arc::new(crate::history_cell::CompactionCell {
+                id: "compact-1".into(),
+                elapsed: None,
+            }) as Arc<dyn HistoryCell>,
             Arc::new(AgentMessageCell::new(
                 vec![Line::from("second")],
                 /*is_first_line*/ true,
@@ -1111,10 +1111,10 @@ mod tests {
                 vec![Line::from("assistant")],
                 /*is_first_line*/ true,
             )) as Arc<dyn HistoryCell>,
-            Arc::new(crate::history_cell::new_info_event(
-                "Context compacted".to_string(),
-                /*hint*/ None,
-            )) as Arc<dyn HistoryCell>,
+            Arc::new(crate::history_cell::CompactionCell {
+                id: "compact-1".into(),
+                elapsed: None,
+            }) as Arc<dyn HistoryCell>,
         ];
 
         assert!(!has_backtrack_target(&cells));

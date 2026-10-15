@@ -95,11 +95,8 @@ pub(super) fn cells(
                 "<< Code review finished: {review} >>"
             ))));
         }
-        ThreadItem::ContextCompaction { .. } => {
-            cells.push(Arc::new(history_cell::new_info_event(
-                "Context compacted".to_string(),
-                /*hint*/ None,
-            )));
+        ThreadItem::ContextCompaction { id } => {
+            cells.push(Arc::new(history_cell::CompactionCell { id, elapsed: None }));
         }
         // These items do not have richer history-cell presentations yet.
         ThreadItem::HookPrompt { fragments, .. } => {

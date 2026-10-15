@@ -457,7 +457,25 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             exit_code: Some(0),
             duration_ms: Some(0),
         });
-        tests::render(&mut view, &code, 104, 26);
+        let buffer = tests::render(&mut view, &code, 104, 26);
+        let shown = tests::text(&buffer);
+        // Filesystem helpers and shell reads share semantic paint through the same Fmt surface.
+        for label in ["Read src/main.rs", "Read Cargo.toml"] {
+            let (row, line) = shown
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(label))
+                .unwrap();
+            let column = line.find(label).unwrap();
+            assert_eq!(
+                buffer[(column as u16, row as u16)].fg,
+                ratatui::style::Color::Cyan
+            );
+            assert_eq!(
+                buffer[(column as u16, row as u16)].bg,
+                ratatui::style::Color::Reset
+            );
+        }
         let nested = view.current_layout(&code, 0).unwrap();
         assert!(nested.text().contains("Read src/main.rs"));
         assert!(nested.text().contains("Read Cargo.toml"));

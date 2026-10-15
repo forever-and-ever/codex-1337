@@ -10,8 +10,9 @@ qualified forms.
 - Preamble: the initial instructions, tools and managed context of one context
   window. Injections are subsequent arrivals, not refreshed preambles. Preamble
   starts collapsed and opens its client-only census before a separate source
-  fold. Raw shows the retained capture; Fmt changes whitespace and foreground,
-  never inclusion, authorship background or meaning. Unsafe terminal controls are
+  fold. Raw shows the retained capture; Fmt uses the terminal's default background
+  for its structural or semantic projection, without changing context inclusion
+  or meaning. Unsafe terminal controls are
   visibly escaped with a client notice. Tool Declarations contains submitted
   definitions as client JSON, not raw wire bytes or the provider's unobservable
   internal rendering. Its body is model-bound; its heading is human-only.
@@ -19,8 +20,8 @@ qualified forms.
   initially closed Raw Context fold. Older mixed captures
   retain a legacy label rather than guessed section boundaries. User messages are
   blue, assistant prose green, inter-agent prose yellow-green, and other incoming
-  context purple. Disclosed tool-call source also uses purple; syntax highlighting
-  and source formatting do not make it human-only decoration. Human-only headings,
+  context purple. Verbatim tool-call source also uses purple; syntax highlighting
+  alone remains Raw. Human-only headings,
   summaries, notices and diagnostic decoration
   use the terminal's default background, never grey or reverse video. Author
   color does not determine context inclusion. `/context` opens a read-only Context

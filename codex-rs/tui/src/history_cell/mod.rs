@@ -13,6 +13,9 @@
 mod alarm;
 pub(crate) use alarm::AlarmSoundingCell;
 
+mod compaction;
+pub(crate) use compaction::CompactionCell;
+
 mod activity_group;
 mod code_mode;
 mod tool_input;

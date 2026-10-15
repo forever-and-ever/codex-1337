@@ -20,6 +20,9 @@ pub(crate) fn leading(label: &'static str, mut tail: Line<'static>) -> Line<'sta
 }
 
 pub(crate) fn paint(mut line: Line<'static>) -> Line<'static> {
+    // A line-wide foreground is an explicit semantic header color.
+    let mut heading = style();
+    heading.fg = line.style.fg.or(heading.fg);
     for span in &mut line.spans {
         if line
             .style
@@ -27,7 +30,7 @@ pub(crate) fn paint(mut line: Line<'static>) -> Line<'static> {
             .add_modifier
             .contains(Modifier::BOLD)
         {
-            span.style = span.style.patch(style());
+            span.style = span.style.patch(heading);
         }
     }
     line

@@ -259,7 +259,7 @@ impl ToolOutputCell {
                 .flatten()
                 .or_else(|| escaped.as_ref().and_then(|blocks| blocks[index].as_deref()));
             let text = projection.unwrap_or(source);
-            let provenance = if projection.is_some() {
+            let provenance = if mode == OutputMode::Fmt || projection.is_some() {
                 OutputProvenance::Formatted
             } else {
                 OutputProvenance::Captured

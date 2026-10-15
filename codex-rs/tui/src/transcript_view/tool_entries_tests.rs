@@ -369,8 +369,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     styles.push((buffer[(0, 0)].fg, buffer[(0, 0)].bg));
                 }
                 assert_eq!(
-                    styles[0].1, styles[1].1,
-                    "Fmt must retain the author's fill"
+                    styles[1].1,
+                    ratatui::style::Color::Reset,
+                    "Fmt must use the default background"
                 );
                 assert_ne!(styles[0].0, styles[1].0, "Fmt must announce repainting");
                 assert!(
@@ -400,10 +401,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             let promoted = TextLayout::new(promoted, 30);
             let mut buffer = Buffer::empty(Rect::new(0, 0, 30, 1));
             promoted.render(buffer.area, &mut buffer, 0);
-            assert_eq!(
-                buffer[(0, 0)].bg,
-                crate::style::context_message_style().bg.unwrap()
-            );
+            assert_eq!(buffer[(0, 0)].bg, ratatui::style::Color::Reset);
             let layout = TextLayout::new(decorated, 8);
             let area = Rect::new(0, 0, 8, 4);
             let mut buffer = Buffer::empty(area);
@@ -450,7 +448,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 }
             }
             // The same submitted definitions cross Preamble, /context and Injection surfaces.
-            // Rewrapping must retain purple payloads and default-background, uncopyable headings.
+            // Rewrapping must retain mode-specific fills and uncopyable headings.
             let sources = vec![
                 codex_protocol::ContextSource::Prompt {
                     label: "Base instructions".into(),
@@ -513,7 +511,11 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                         .collect();
                     assert!(!definitions.is_empty());
                     assert!(definitions.iter().all(|line| {
-                        line.line.style.bg == crate::style::context_message_style().bg
+                        line.line.style.bg
+                            == match mode {
+                                OutputMode::Raw => crate::style::context_message_style().bg,
+                                OutputMode::Fmt => Some(ratatui::style::Color::Reset),
+                            }
                     }));
                     for line in &lines {
                         let Some(source) = line.source.as_ref() else {

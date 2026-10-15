@@ -62,13 +62,20 @@ use std::ops::Range;
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
 pub(crate) trait FeedEntry {
     fn feed_id(&self) -> String;
-    fn feed_initially_collapsed(&self) -> bool {
-        false
+    fn feed_disclosure(&self) -> HeaderDisclosure {
+        HeaderDisclosure::Expanded
     }
     fn feed_title(&self) -> Line<'static>;
     /// Body rows start at their local origin; the viewport owns their inset.
     /// Rows and controls share one projection of the viewer's disclosure state.
-    fn feed_body(&self, width: u16, expanded: &HashSet<String>, mode: OutputMode) -> ActivityParts;
+    fn feed_body(
+        &self,
+        _width: u16,
+        _expanded: &HashSet<String>,
+        _mode: OutputMode,
+    ) -> ActivityParts {
+        ActivityParts::default()
+    }
 }
 
 pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
@@ -79,8 +86,11 @@ pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
     if let Some(preamble) = any.downcast_ref::<PreambleCell>() {
         return Some(preamble);
     }
-    any.downcast_ref::<crate::history_cell::AlarmSoundingCell>()
-        .map(|alarm| alarm as &dyn FeedEntry)
+    if let Some(alarm) = any.downcast_ref::<crate::history_cell::AlarmSoundingCell>() {
+        return Some(alarm);
+    }
+    any.downcast_ref::<crate::history_cell::CompactionCell>()
+        .map(|compaction| compaction as &dyn FeedEntry)
 }
 
 pub(super) fn entry_body(
@@ -167,15 +177,11 @@ struct Item {
 #[derive(Clone, PartialEq, Eq)]
 enum Kind {
     /// One or more steps; `calls` when any of them made a call.
-    Steps {
-        calls: bool,
-    },
+    Steps { calls: bool },
     /// The step whose seal admitted the input, and the input's place among its user inputs.
-    User {
-        admitted: Option<(String, usize)>,
-    },
+    User { admitted: Option<(String, usize)> },
     Entry {
-        initially_collapsed: bool,
+        initial_disclosure: HeaderDisclosure,
     },
     /// A Code Mode invocation no step claims.
     CodeMode,
@@ -190,7 +196,7 @@ impl Item {
             == matches!(
                 self.kind,
                 Kind::Entry {
-                    initially_collapsed: true
+                    initial_disclosure: HeaderDisclosure::Collapsed
                 }
             )
     }
@@ -248,7 +254,7 @@ pub(super) struct Header {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-enum HeaderDisclosure {
+pub(crate) enum HeaderDisclosure {
     FixedOpen,
     Expanded,
     Collapsed,
@@ -506,6 +512,9 @@ impl FeedIndex {
         width: u16,
         elided: &dyn Fn(usize) -> bool,
     ) -> bool {
+        if let Kind::Entry { initial_disclosure } = item.kind {
+            return initial_disclosure != HeaderDisclosure::FixedOpen;
+        }
         if !matches!(item.kind, Kind::Steps { calls: true }) || item.steps.len() > 1 {
             return true;
         }
@@ -1017,7 +1026,7 @@ fn entry_kind(
     if let Some(entry) = feed_entry(cell.as_ref()) {
         return Some((
             Kind::Entry {
-                initially_collapsed: entry.feed_initially_collapsed(),
+                initial_disclosure: entry.feed_disclosure(),
             },
             entry.feed_id(),
         ));

@@ -75,11 +75,13 @@ pub(crate) fn captured_lines(
         OutputProvenance::Captured
     };
     mark_lines(&mut lines, provenance);
-    for line in &mut lines {
-        let style = author.style();
-        line.line.style = line.line.style.patch(style);
-        if let Some(source) = &mut line.source {
-            source.line_style = source.line_style.patch(style);
+    if provenance == OutputProvenance::Captured {
+        for line in &mut lines {
+            let style = author.style();
+            line.line.style = line.line.style.patch(style);
+            if let Some(source) = &mut line.source {
+                source.line_style = source.line_style.patch(style);
+            }
         }
     }
     if escaped.is_some() {
@@ -228,9 +230,9 @@ impl OutputProvenance {
             Self::Captured | Self::Definitions(OutputMode::Raw) => {
                 crate::style::context_message_style()
             }
-            Self::Formatted | Self::Definitions(OutputMode::Fmt) => {
-                crate::style::context_message_style().patch(crate::style::formatted_output_style())
-            }
+            Self::Formatted | Self::Definitions(OutputMode::Fmt) => Self::Client
+                .style()
+                .patch(crate::style::formatted_output_style()),
             Self::Client => Style::default()
                 .bg(ratatui::style::Color::Reset)
                 .remove_modifier(ratatui::style::Modifier::REVERSED),
@@ -269,8 +271,9 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
             && provenance != OutputProvenance::Client;
         source.output_provenance = provenance;
         source.line_style = source.line_style.patch(style);
-        if provenance == OutputProvenance::Client {
-            // Span-level paint must not override the human-only background boundary.
+        if style.bg == Some(ratatui::style::Color::Reset) {
+            // Reset every paint layer, without erasing semantic foreground colors.
+            let style = OutputProvenance::Client.style();
             for span in &mut line.line.spans {
                 span.style = span.style.patch(style);
             }

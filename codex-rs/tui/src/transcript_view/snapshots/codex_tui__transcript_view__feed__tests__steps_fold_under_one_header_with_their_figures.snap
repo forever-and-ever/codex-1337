@@ -1,5 +1,6 @@
 ---
 source: tui/src/transcript_view/feed_tests.rs
+assertion_line: 418
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 unfolded
@@ -25,9 +26,9 @@ unfolded
         [-] Response
               • No step billed this reply.
 
+            Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
               Check the header alignment
-
 
 
 
@@ -63,9 +64,9 @@ injection opened
         [-] Response
               • No step billed this reply.
 
+            Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
               Check the header alignment
-
 
 
 
@@ -100,9 +101,9 @@ script
         [-] Response
               • No step billed this reply.
 
+            Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
               Check the header alignment
-
 
 
 
@@ -131,5 +132,6 @@ folded
         [-] Response
               • No step billed this reply.
 
+            Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
               Check the header alignment

@@ -50,6 +50,7 @@ use text::TextLayout;
 
 pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use feed::FeedEntry;
+pub(crate) use feed::HeaderDisclosure;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;

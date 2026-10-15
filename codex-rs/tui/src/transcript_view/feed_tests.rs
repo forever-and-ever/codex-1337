@@ -204,6 +204,10 @@ fn steps_fold_under_one_header_with_their_figures() {
         }),
         script_block("exec-1", Some("git status"), None),
         message("msg-4", "No step billed this reply."),
+        Arc::new(crate::history_cell::CompactionCell {
+            id: "compact-layout".into(),
+            elapsed: Some(std::time::Duration::from_secs(83)),
+        }),
         Arc::new(crate::history_cell::AlarmSoundingCell(
             codex_app_server_protocol::alarm_sounding::AlarmSounding {
                 id: "check-layout".into(),
@@ -279,6 +283,7 @@ fn steps_fold_under_one_header_with_their_figures() {
                 "Injection",
                 "Code Mode",
                 "Alarm",
+                "Context compacted",
             ] {
                 if let Some(column) = line.find(label) {
                     assert_eq!(
@@ -287,7 +292,14 @@ fn steps_fold_under_one_header_with_their_figures() {
                         "{line}"
                     );
                     let cell = &buffer[(column as u16, row as u16)];
-                    assert_eq!(cell.fg, crate::render::header::style().fg.unwrap());
+                    assert_eq!(
+                        cell.fg,
+                        if label == "Context compacted" {
+                            ratatui::style::Color::Yellow
+                        } else {
+                            crate::render::header::style().fg.unwrap()
+                        }
+                    );
                     assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
                     assert!(!cell.modifier.contains(ratatui::style::Modifier::DIM));
                 }
@@ -307,6 +319,16 @@ fn steps_fold_under_one_header_with_their_figures() {
     };
     let fresh = screen(&mut view, "unfolded");
     assert!(fresh.contains("[+] Injection"));
+    let compacted = cells
+        .iter()
+        .position(|cell| cell.as_any().is::<crate::history_cell::CompactionCell>())
+        .unwrap();
+    assert!(
+        view.current_layout(&cells, compacted)
+            .unwrap()
+            .fold_targets()
+            .is_empty()
+    );
     assert!(!fresh.contains("<environment_context>"));
     let injection = cells
         .iter()

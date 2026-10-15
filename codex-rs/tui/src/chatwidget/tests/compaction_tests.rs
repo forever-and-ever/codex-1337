@@ -163,7 +163,7 @@ async fn compaction_history_does_not_start_a_timer_or_finish_live_compaction() {
     );
     let history = drain_insert_history(&mut rx);
     let lines: Vec<_> = history.into_iter().flatten().collect();
-    assert_eq!(lines_to_single_string(&lines).trim(), "• Context compacted");
+    assert_eq!(lines_to_single_string(&lines).trim(), "Context compacted");
 }
 
 #[tokio::test]
@@ -205,7 +205,7 @@ async fn compaction_snapshot_restores_elapsed_time_and_clears_on_replayed_comple
         .into_iter()
         .flatten()
         .collect();
-    assert_eq!(lines_to_single_string(&lines).trim(), "• Context compacted");
+    assert_eq!(lines_to_single_string(&lines).trim(), "Context compacted");
 }
 
 #[tokio::test]

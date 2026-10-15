@@ -105,8 +105,12 @@ impl FeedEntry for ArrivalCell {
     fn feed_id(&self) -> String {
         self.0.id.clone()
     }
-    fn feed_initially_collapsed(&self) -> bool {
-        self.0.kind == ArrivalKind::Injection
+    fn feed_disclosure(&self) -> crate::transcript_view::HeaderDisclosure {
+        if self.0.kind == ArrivalKind::Injection {
+            crate::transcript_view::HeaderDisclosure::Collapsed
+        } else {
+            crate::transcript_view::HeaderDisclosure::Expanded
+        }
     }
 
     fn feed_title(&self) -> Line<'static> {

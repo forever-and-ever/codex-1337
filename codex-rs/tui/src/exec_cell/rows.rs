@@ -46,15 +46,9 @@ impl CommandRows {
             .map(|segment| {
                 let source = script[segment.source.clone()].trim();
                 let summary = match summarize_shell_segment(source) {
-                    ParsedCommand::Read { name, .. } => Some(
-                        vec![
-                            "Read ".cyan(),
-                            ReadIntent::parse(source)
-                                .map_or(name.clone(), |read| read.label(&name))
-                                .into(),
-                        ]
-                        .into(),
-                    ),
+                    ParsedCommand::Read { name, .. } => Some(read_summary(
+                        ReadIntent::parse(source).map_or(name.clone(), |read| read.label(&name)),
+                    )),
                     ParsedCommand::ListFiles { path, .. } => {
                         Some(vec!["List ".cyan(), path.unwrap_or_else(|| ".".into()).into()].into())
                     }
@@ -87,6 +81,18 @@ impl ExecCall {
         self.rows
             .get_or_init(|| Arc::new(CommandRows::parse(strip_bash_lc_and_escape(&self.command))))
     }
+}
+
+pub(crate) fn read_summary(label: String) -> Line<'static> {
+    let label = label.chars().fold(String::new(), |mut shown, ch| {
+        if ch.is_control() {
+            shown.extend(ch.escape_default());
+        } else {
+            shown.push(ch);
+        }
+        shown
+    });
+    vec!["Read ".cyan(), label.into()].into()
 }
 
 pub(crate) fn formatted_input(script: &str) -> Option<Vec<HyperlinkLine>> {
