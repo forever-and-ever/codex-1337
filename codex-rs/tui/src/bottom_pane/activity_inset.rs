@@ -1,5 +1,6 @@
 use crate::render::Insets;
 use crate::render::RectExt;
+use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
 use ratatui::buffer::Buffer;
@@ -7,6 +8,18 @@ use ratatui::layout::Rect;
 
 pub(super) fn inset<'a>(activity: impl Renderable + 'a) -> RenderableItem<'a> {
     RenderableItem::Owned(Box::new(ActivityInset(activity)))
+}
+
+pub(super) fn with_tip<'a>(
+    activity: impl Renderable + 'a,
+    tip: Option<&'a impl Renderable>,
+) -> RenderableItem<'a> {
+    let mut group = FlexRenderable::new();
+    group.push(/*flex*/ 0, RenderableItem::Owned(Box::new(activity)));
+    if let Some(tip) = tip {
+        group.push(/*flex*/ 1, RenderableItem::Borrowed(tip));
+    }
+    inset(group)
 }
 
 struct ActivityInset<T>(T);

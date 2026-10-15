@@ -2271,10 +2271,23 @@ impl BottomPane {
             {
                 flex.push(/*flex*/ 0, RenderableItem::Borrowed(banner));
             }
+            let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
+            let has_questions = self
+                .questions
+                .as_ref()
+                .is_some_and(|q| q.unanswered_count() > 0);
+            let has_pending_input = has_questions
+                || !self.pending_input_preview.queued_messages.is_empty()
+                || self.pending_input_preview.pending_steer.is_some()
+                || !self.pending_input_preview.rejected_steers.is_empty();
+            let has_inline_previews = has_pending_thread_approvals || has_pending_input;
             if let Some(status) = self.status_widget() {
                 flex.push(
                     /*flex*/ 0,
-                    activity_inset::inset(status.with_timer(&self.status_timer)),
+                    activity_inset::with_tip(
+                        status.with_timer(&self.status_timer),
+                        options.working_tip.filter(|_| !has_inline_previews),
+                    ),
                 );
             }
             if self.status.is_none()
@@ -2300,24 +2313,8 @@ impl BottomPane {
                     RenderableItem::Borrowed(&self.unified_exec_footer),
                 );
             }
-            let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
-            let has_questions = self
-                .questions
-                .as_ref()
-                .is_some_and(|q| q.unanswered_count() > 0);
-            let has_pending_input = has_questions
-                || !self.pending_input_preview.queued_messages.is_empty()
-                || self.pending_input_preview.pending_steer.is_some()
-                || !self.pending_input_preview.rejected_steers.is_empty();
             let has_activity = self.status_widget().is_some() || self.hook_status_message.is_some();
             let has_status_or_footer = has_activity || show_exec_footer;
-            let has_inline_previews = has_pending_thread_approvals || has_pending_input;
-            if !has_inline_previews
-                && self.status_widget().is_some()
-                && let Some(tip) = options.working_tip
-            {
-                flex.push(/*flex*/ 1, RenderableItem::Borrowed(tip));
-            }
             if has_inline_previews && has_status_or_footer && !has_activity {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
@@ -2341,10 +2338,10 @@ impl BottomPane {
                 },
             );
             let question_editor = self.questions.as_ref().filter(|q| q.expanded);
-            // Activity owns its trailing blank row; footer summaries and tips need one here.
+            // Activity owns its trailing blank row; footer summaries need one here.
             if !has_inline_previews
                 && has_status_or_footer
-                && (!has_activity || options.working_tip.is_some())
+                && !has_activity
                 && options.composer_gap.is_none_or(|gap| gap.needs_separator)
                 && question_editor.is_none_or(|q| q.unanswered_count() > 1)
             {
