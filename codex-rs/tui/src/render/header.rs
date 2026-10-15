@@ -30,8 +30,8 @@ pub(crate) fn paint(line: Line<'static>) -> Line<'static> {
     paint_with(line, style())
 }
 
-pub(crate) fn paint_work(line: Line<'static>) -> Line<'static> {
-    paint_with(line, work_style())
+pub(crate) fn paint_work(line: Line<'static>, active: bool) -> Line<'static> {
+    paint_with(line, if active { work_style() } else { style() })
 }
 
 fn paint_with(mut line: Line<'static>, mut heading: Style) -> Line<'static> {

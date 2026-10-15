@@ -52,6 +52,21 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     assert!(live.contains("live auxiliary"));
     view.sync_live_tail(80, None, |_| None);
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell.clone())];
+    let assert_title_color = |buffer: &ratatui::buffer::Buffer, title: &str, active| {
+        let text = tests::text(buffer);
+        let (row, line) = text
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(title))
+            .unwrap_or_else(|| panic!("missing {title} (active={active}) in {text}"));
+        let column = line.find(title).unwrap();
+        let expected = if active {
+            crate::render::header::work_style()
+        } else {
+            crate::render::header::style()
+        };
+        assert_eq!(Some(buffer[(column as u16, row as u16)].fg), expected.fg);
+    };
     let mut snapshots = Vec::new();
     let mut render =
         |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], width, label: &str| {
@@ -62,6 +77,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             view.current_layout(cells, 0).unwrap()
         };
     let initial = render(&mut view, &cells, 80, "running input");
+    assert_title_color(
+        &tests::render(&mut view, &cells, 80, 26),
+        "Script (bash)",
+        true,
+    );
     assert!(
         initial.text().contains("Search"),
         "initial source: {:?}",
@@ -107,6 +127,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     cells[0] =
         ToolOutputGroup::from_cells([Arc::new(cell) as Arc<dyn HistoryCell>, Arc::new(receipt)]);
     let completed = render(&mut view, &cells, 80, "completed, output hidden");
+    assert_title_color(
+        &tests::render(&mut view, &cells, 80, 26),
+        "Script (bash)",
+        false,
+    );
     assert!(completed.text().contains(script));
     assert!(!completed.text().contains("combined output"));
     select(
@@ -332,6 +357,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let mut code = vec![block];
         let buffer = tests::render(&mut view, &code, 104, 26);
         let shown = tests::text(&buffer);
+        assert_title_color(&buffer, "Code Mode", admitted);
         let header_column = shown
             .lines()
             .find(|line| line.contains("Code Mode"))

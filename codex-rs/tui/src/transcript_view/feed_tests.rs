@@ -329,9 +329,6 @@ fn steps_fold_under_one_header_with_their_figures() {
                         cell.fg,
                         match label {
                             "Context compacted" => ratatui::style::Color::Yellow,
-                            "Command" | "Code Mode" => {
-                                crate::render::header::work_style().fg.unwrap()
-                            }
                             _ => crate::render::header::style().fg.unwrap(),
                         }
                     );

@@ -346,6 +346,17 @@ impl Invocation<'_> {
             .or_else(|| self.outputs.first().map(|output| output.name()))
     }
 
+    pub(crate) fn is_active(&self) -> bool {
+        match &self.source {
+            Source::Code(block) => block.is_active(),
+            Source::Command(call) => call.duration.is_none(),
+            Source::Cells(cells) => cells
+                .iter()
+                .any(|cell| super::has_running_tool_calls(*cell)),
+            Source::Output => false,
+        }
+    }
+
     pub(crate) fn title(&self, input: Option<&ToolInput>) -> Line<'static> {
         let title = if let Source::Code(block) = self.source {
             format!("Code Mode ({})", block.tetrad())

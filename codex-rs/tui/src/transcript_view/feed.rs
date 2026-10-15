@@ -823,7 +823,10 @@ impl FeedIndex {
             } else {
                 (
                     vec![truncate_line_with_ellipsis_if_overflow(
-                        crate::render::header::paint_work(call.title(invocations.input(call.id))),
+                        crate::render::header::paint_work(
+                            call.title(invocations.input(call.id)),
+                            call.is_active(),
+                        ),
                         title_width,
                     )],
                     Vec::new(),
@@ -927,7 +930,13 @@ impl FeedIndex {
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
         if matches!(item.kind, Kind::Steps { calls: true } | Kind::CodeMode) {
-            crate::render::header::paint_work(title)
+            let active = header
+                .scope
+                .iter()
+                .filter_map(|index| cell(*index))
+                .flat_map(crate::history_cell::invocation::collect)
+                .any(|call| call.is_active());
+            crate::render::header::paint_work(title, active)
         } else {
             crate::render::header::paint(title)
         }
