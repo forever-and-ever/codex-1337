@@ -43,20 +43,8 @@ Both ports hidden
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)
-Raw output
-        [-] Code Mode (ωρρλ)                     [in]             [out [raw] [fmt]]
-              Exact output is unavailable in this record
-
-                  Edited
-        [-]           /workspace/receipt.rs (+1, -1)
-                      1 -old
-                      1 +new
-              • Edited
-        [-]       alpha.rs (+1, -0)
-                  1 +created body
-        [+]       beta.rs (+0, -1)
-Formatted output
-        [-] Code Mode (ωρρλ)                     [in]             [out [raw] [fmt]]
+Output open
+        [-] Code Mode (ωρρλ)                     [in]             [out [raw]      ]
               Exact output is unavailable in this record
 
                   Edited

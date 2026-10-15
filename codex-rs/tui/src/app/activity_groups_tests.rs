@@ -1073,11 +1073,12 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     let raw = render(&mut view);
     assert!(raw.contains("+new"));
     assert!(raw.contains("created body"));
-    click(&mut view, &raw, "[out", Some("[fmt]"));
-    let formatted = render(&mut view);
-    assert!(formatted.contains("+new"));
-    assert!(!formatted.contains("deleted body"));
-    file_snapshots.push(format!("Raw output\n{raw}\nFormatted output\n{formatted}"));
+    assert!(
+        raw.lines()
+            .find(|line| line.contains("[out"))
+            .is_some_and(|line| !line.contains("[fmt]"))
+    );
+    file_snapshots.push(format!("Output open\n{raw}"));
     insta::assert_snapshot!("metadata_only_code_mode_receipt", file_snapshots.join("\n"));
     // A later model-visible return contributes one bill; receipt bytes and replay never do.
     app.chat_widget.replay_thread_item(
