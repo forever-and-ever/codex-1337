@@ -30,11 +30,11 @@ expression: "snapshots.join(\"\\n\")"
         "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Rgb(129, 185, 249), bg: Rgb(60, 71, 96), underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Rgb(99, 168, 248), bg: Rgb(47, 56, 75), underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Rgb(60, 71, 96), underline: Reset, modifier: BOLD | DIM,
-        x: 2, y: 2, fg: Rgb(129, 185, 249), bg: Rgb(60, 71, 96), underline: Reset, modifier: NONE,
-        x: 12, y: 2, fg: Reset, bg: Rgb(60, 71, 96), underline: Reset, modifier: NONE,
+        x: 0, y: 2, fg: Reset, bg: Rgb(47, 56, 75), underline: Reset, modifier: BOLD | DIM,
+        x: 2, y: 2, fg: Rgb(99, 168, 248), bg: Rgb(47, 56, 75), underline: Reset, modifier: NONE,
+        x: 12, y: 2, fg: Reset, bg: Rgb(47, 56, 75), underline: Reset, modifier: NONE,
         x: 27, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -48,11 +48,11 @@ expression: "snapshots.join(\"\\n\")"
         "                                ",
     ],
     styles: [
-        x: 0, y: 0, fg: Rgb(10, 17, 26), bg: Rgb(115, 124, 141), underline: Reset, modifier: NONE,
+        x: 0, y: 0, fg: Rgb(245, 249, 254), bg: Rgb(109, 115, 127), underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Rgb(115, 124, 141), underline: Reset, modifier: BOLD | DIM,
-        x: 2, y: 2, fg: Rgb(10, 17, 26), bg: Rgb(115, 124, 141), underline: Reset, modifier: NONE,
-        x: 12, y: 2, fg: Reset, bg: Rgb(115, 124, 141), underline: Reset, modifier: NONE,
+        x: 0, y: 2, fg: Reset, bg: Rgb(109, 115, 127), underline: Reset, modifier: BOLD | DIM,
+        x: 2, y: 2, fg: Rgb(245, 249, 254), bg: Rgb(109, 115, 127), underline: Reset, modifier: NONE,
+        x: 12, y: 2, fg: Reset, bg: Rgb(109, 115, 127), underline: Reset, modifier: NONE,
         x: 27, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

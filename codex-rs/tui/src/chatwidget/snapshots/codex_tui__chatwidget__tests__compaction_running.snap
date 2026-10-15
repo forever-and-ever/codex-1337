@@ -2,8 +2,8 @@
 source: tui/src/chatwidget/tests/compaction_tests.rs
 expression: "normalize_compaction_snapshot(render_bottom_popup(&chat, 80))"
 ---
-• Compacting context (<elapsed> • ⌃c to interrupt)
-  └ Making room to continue.
+  • Compacting context (<elapsed> • ⌃c to interrupt)
+    └ Making room to continue.
 
 
 › Ask Codex to do anything

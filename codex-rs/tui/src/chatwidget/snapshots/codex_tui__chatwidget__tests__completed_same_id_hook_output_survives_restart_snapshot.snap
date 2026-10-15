@@ -5,7 +5,7 @@ expression: "hook_status_and_history_snapshot(&chat, \"restarted\", &history)"
 restarted
 activity:
 "                                                                                "
-"• Checking stop condition                                                       "
+"  • Checking stop condition                                                     "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "

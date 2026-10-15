@@ -18,7 +18,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
                 status for a breakdown.
 ────────────────────────────────────────────────────────────────────────────────
                                              ⚠ 5h limit: only 2% left · /status
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 
 › draft stays
@@ -31,7 +31,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 32 columns, 10 rows, running=true, queued=false
 ────────────────────────────────
                   ⚠ 5h <1% left
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interru…
 
 › draft stays
                               󰜗
@@ -43,7 +43,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 18 columns, 10 rows, running=true, queued=false
 ──────────────────
      ⚠ 5h 5% left
-• Working (0s • ⌃…
+  • Working (0s •…
 
 › draft stays
                 󰜗
@@ -58,7 +58,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
                 status for a breakdown.
 ────────────────────────────────────────────────────────────────────────────────
                                              ⚠ 5h limit: only 2% left · /status
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 • Queued follow-up inputs
   ↳ queued follow-up
@@ -73,7 +73,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
   GPT-5.6-Sol default · /tmp/project
 
 80 columns, 11 rows, running=true, queued=true
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 • Queued follow-up inputs
 

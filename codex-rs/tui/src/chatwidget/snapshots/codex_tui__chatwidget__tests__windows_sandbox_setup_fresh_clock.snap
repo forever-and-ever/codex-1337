@@ -2,8 +2,8 @@
 source: tui/src/chatwidget/tests/permissions.rs
 expression: "setup.replace(&chat.config.cwd.display().to_string(), \"[CWD]\")"
 ---
-• Setting up sandbox... (0s)
-  └ Hang tight, this may take a few minutes
+  • Setting up sandbox... (0s)
+    └ Hang tight, this may take a few minutes
 
 
 › Input disabled until setup completes.

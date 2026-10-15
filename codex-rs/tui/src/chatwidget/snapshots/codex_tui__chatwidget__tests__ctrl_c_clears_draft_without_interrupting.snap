@@ -2,7 +2,7 @@
 source: tui/src/chatwidget/tests/review_mode.rs
 expression: "normalize_snapshot_paths(render_bottom_popup(&chat, 80))"
 ---
-• Working (0s • ⌃c to interrupt)
+  • Working (0s • ⌃c to interrupt)
 
 • Message to be submitted after next tool call (press ⌥i to interrupt and send
   immediately)

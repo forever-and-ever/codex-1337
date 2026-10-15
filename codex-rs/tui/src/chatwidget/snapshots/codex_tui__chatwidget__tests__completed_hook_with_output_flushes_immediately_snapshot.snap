@@ -5,7 +5,7 @@ expression: "format!(\"{running_snapshot}\\n\\n{completed_snapshot}\")"
 running
 activity:
 "                                                                                "
-"• Checking command                                                              "
+"  • Checking command                                                            "
 "                                                                                "
 "                                                                                "
 "› Ask Codex to do anything                                                      "
