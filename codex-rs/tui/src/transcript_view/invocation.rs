@@ -158,7 +158,7 @@ impl Invocations {
         let formatted = call.formatted_input(self.input(call.id), width).is_some();
         let formatted_output = call.has_formatted_output(width);
         let ports = self.ports(call, open, formatted, formatted_output, full);
-        let mut title = crate::render::header::paint(call.title(self.input(call.id)));
+        let mut title = crate::render::header::paint_work(call.title(self.input(call.id)));
         let mut controls = Vec::new();
         let mut strip = Line::default();
         for (port, label, available) in [

@@ -14,14 +14,28 @@ pub(crate) fn style() -> Style {
         .remove_modifier(Modifier::DIM)
 }
 
+pub(crate) fn work_style() -> Style {
+    style().fg(crate::style::readable_color_on(
+        Color::Rgb(194, 217, 139),
+        None,
+    ))
+}
+
 pub(crate) fn leading(label: &'static str, mut tail: Line<'static>) -> Line<'static> {
     tail.spans.insert(0, Span::styled(label, style()));
     tail
 }
 
-pub(crate) fn paint(mut line: Line<'static>) -> Line<'static> {
+pub(crate) fn paint(line: Line<'static>) -> Line<'static> {
+    paint_with(line, style())
+}
+
+pub(crate) fn paint_work(line: Line<'static>) -> Line<'static> {
+    paint_with(line, work_style())
+}
+
+fn paint_with(mut line: Line<'static>, mut heading: Style) -> Line<'static> {
     // A line-wide foreground is an explicit semantic header color.
-    let mut heading = style();
     heading.fg = line.style.fg.or(heading.fg);
     for span in &mut line.spans {
         if line

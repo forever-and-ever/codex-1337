@@ -327,10 +327,12 @@ fn steps_fold_under_one_header_with_their_figures() {
                     let cell = &buffer[(column as u16, row as u16)];
                     assert_eq!(
                         cell.fg,
-                        if label == "Context compacted" {
-                            ratatui::style::Color::Yellow
-                        } else {
-                            crate::render::header::style().fg.unwrap()
+                        match label {
+                            "Context compacted" => ratatui::style::Color::Yellow,
+                            "Command" | "Code Mode" => {
+                                crate::render::header::work_style().fg.unwrap()
+                            }
+                            _ => crate::render::header::style().fg.unwrap(),
                         }
                     );
                     assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));

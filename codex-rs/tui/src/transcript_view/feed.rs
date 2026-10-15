@@ -823,7 +823,7 @@ impl FeedIndex {
             } else {
                 (
                     vec![truncate_line_with_ellipsis_if_overflow(
-                        crate::render::header::paint(call.title(invocations.input(call.id))),
+                        crate::render::header::paint_work(call.title(invocations.input(call.id))),
                         title_width,
                     )],
                     Vec::new(),
@@ -926,7 +926,11 @@ impl FeedIndex {
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
-        crate::render::header::paint(title)
+        if matches!(item.kind, Kind::Steps { calls: true } | Kind::CodeMode) {
+            crate::render::header::paint_work(title)
+        } else {
+            crate::render::header::paint(title)
+        }
     }
 
     fn figures(
