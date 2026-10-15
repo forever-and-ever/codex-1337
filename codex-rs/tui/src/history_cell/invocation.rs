@@ -272,7 +272,10 @@ pub(crate) fn collect(cell: &dyn HistoryCell) -> Vec<Invocation<'_>> {
 }
 
 impl Invocation<'_> {
-    fn name<'a>(&'a self, input: Option<&'a ToolInput>) -> Option<&'a codex_protocol::ToolName> {
+    pub(crate) fn name<'a>(
+        &'a self,
+        input: Option<&'a ToolInput>,
+    ) -> Option<&'a codex_protocol::ToolName> {
         input
             .map(|input| &input.name)
             .or_else(|| self.outputs.first().map(|output| output.name()))
