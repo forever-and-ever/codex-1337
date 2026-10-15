@@ -467,14 +467,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         "print(42)"
     );
     let available = view.invocations.header(&call, true, 80, None, false);
-    // Waiting input is default noise, but remains available by choice and in exports.
-    let mut stdin = TranscriptView::default();
-    stdin.record_tool_input(ToolInput {
-        id: "input:source".into(),
-        call_id: "source".into(),
-        name: ToolName::plain("write_stdin"),
-        payload: ToolInputPayload::Json(r#"{"session_id":7,"chars":""}"#.into()),
-    });
+    // Folded defaults must not hide explicit choices or export content.
     let input_text = |view: &TranscriptView, width, full| {
         view.invocations
             .body(&call, true, width, full, &Default::default())
@@ -484,14 +477,33 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    assert!(input_text(&stdin, 80, false).is_empty());
-    assert!(input_text(&stdin, 80, true).contains("session_id"));
-    stdin.invocations.apply(
-        "source",
-        Action::Toggle(Port::Input, Panel::Visible(OutputMode::Fmt)),
-    );
-    for width in [40, 80] {
-        assert!(input_text(&stdin, width, false).contains("session_id"));
+    for (name, payload, source) in [
+        (
+            "write_stdin",
+            ToolInputPayload::Json(r#"{"session_id":7,"chars":""}"#.into()),
+            "session_id",
+        ),
+        ("bash", ToolInputPayload::Text("echo 42".into()), "echo 42"),
+        ("python", ToolInputPayload::Text("print(42)".into()), "print(42)"),
+    ] {
+        let mut folded = TranscriptView::default();
+        folded.record_tool_input(ToolInput {
+            id: "input:source".into(),
+            call_id: "source".into(),
+            name: ToolName::plain(name),
+            payload,
+        });
+        assert!(input_text(&folded, 80, false).is_empty());
+        let full = input_text(&folded, 80, true);
+        assert!(full.contains(source));
+        assert!(full.contains("plain result, not Python"));
+        folded.invocations.apply(
+            "source",
+            Action::Toggle(Port::Input, Panel::Visible(OutputMode::Fmt)),
+        );
+        for width in [40, 80] {
+            assert!(input_text(&folded, width, false).contains(source));
+        }
     }
     let mut opaque = TranscriptView::default();
     opaque.record_tool_input(input("opaque"));
