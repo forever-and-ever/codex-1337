@@ -510,7 +510,10 @@ impl TranscriptView {
             // Keep that header and its controls in view when reshaping its body.
             anchor.row_bias = layout.row_for_offset(0) as isize;
         }
-        self.position = Position::Reading(anchor);
+        // Like Feed disclosures, visible body changes keep following the expanded tail.
+        if !self.is_following() {
+            self.position = Position::Reading(anchor);
+        }
         if matched {
             self.invalidate_held_search();
         }
