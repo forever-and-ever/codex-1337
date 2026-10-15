@@ -25,7 +25,13 @@ pub(super) const CONTROL_COLUMNS: usize = "[in [raw] [fmt]] [out [raw] [fmt]]".l
 
 fn input_open_by_default(name: Option<&ToolName>) -> bool {
     // Tool-specific presentation policy; explicit port choices always win.
-    const HIDDEN_INPUT_TOOLS: &[&str] = &["write_stdin", "bash", "python"];
+    const HIDDEN_INPUT_TOOLS: &[&str] = &[
+        "write_stdin",
+        "bash",
+        "python",
+        "request_user_input",
+        "request_user_input_async",
+    ];
     !name.is_some_and(|name| {
         name.is_default_namespace() && HIDDEN_INPUT_TOOLS.contains(&name.name.as_str())
     })

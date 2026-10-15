@@ -80,6 +80,28 @@ fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts>
     })
 }
 
+fn write_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+    if !input.name.is_default_namespace() || input.name.name != "fs" {
+        return None;
+    }
+    let arguments: serde_json::Value = serde_json::from_str(input.payload.text()).ok()?;
+    if arguments.get("operation")?.as_str()? != "write" {
+        return None;
+    }
+    let path = arguments.get("path")?.as_str()?;
+    if path.is_empty() {
+        return None;
+    }
+    Some(super::activity_parts::ActivityParts {
+        lines: captured_lines(
+            &format!("Write {path}"),
+            ContextAuthor::Environment,
+            OutputMode::Fmt,
+        ),
+        ..Default::default()
+    })
+}
+
 fn command_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
     if !input.name.is_default_namespace() {
         return None;
@@ -101,7 +123,10 @@ fn command_input(input: &ToolInput) -> Option<super::activity_parts::ActivityPar
 
 fn argument_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
     let input = input?;
-    if let Some(parts) = read_input(input).or_else(|| command_input(input)) {
+    if let Some(parts) = read_input(input)
+        .or_else(|| write_input(input))
+        .or_else(|| command_input(input))
+    {
         return Some(parts);
     }
     let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input.payload else {
@@ -186,23 +211,13 @@ fn input_projection(
 ) -> Option<super::activity_parts::ActivityParts> {
     let any = cell.as_any();
     if let Some(input) = any.downcast_ref::<super::ToolInputCell>() {
-        if let Some(parts) = read_input(&input.0).or_else(|| command_input(&input.0)) {
-            return Some(parts);
+        if input.0.name.is_default_namespace() && input.0.name.name == "update_work_status" {
+            // Activity owns this call's presentation outside the script.
+            return Some(Default::default());
         }
-        let mut lines = captured_lines(
-            &input.0.name.to_string(),
-            ContextAuthor::Environment,
-            OutputMode::Fmt,
-        );
-        lines.extend(captured_lines(
-            input.0.payload.text(),
-            ContextAuthor::Environment,
-            OutputMode::Fmt,
-        ));
-        return Some(super::activity_parts::ActivityParts {
-            lines,
-            ..Default::default()
-        });
+        return read_input(&input.0)
+            .or_else(|| write_input(&input.0))
+            .or_else(|| command_input(&input.0));
     }
     if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
         return input_projection(wrapper.inner.as_ref(), width);
@@ -230,13 +245,12 @@ fn input_projection(
                 })
             })
             .collect()
-    } else if any.is::<super::McpToolCallCell>() {
-        cell.activity_argument_lines(width)
-            .into_iter()
-            .skip(1)
-            .collect()
+    } else if let Some(mcp) = any.downcast_ref::<super::McpToolCallCell>() {
+        mcp.invocation_input(width)
     } else if let Some(dynamic) = any.downcast_ref::<super::DynamicToolCallCell>() {
         dynamic.invocation_input(width)
+    } else if any.is::<crate::multi_agents::AgentToolHistoryCell>() {
+        cell.nested_summary_lines(width)
     } else if any.is::<super::WebSearchCell>() {
         cell.nested_detail_lines(width)
     } else {
@@ -484,29 +498,35 @@ impl Invocation<'_> {
         width: u16,
     ) -> Option<super::activity_parts::ActivityParts> {
         let mut parts = match &self.source {
-            Source::Code(block) => combine_parts(
-                block
-                    .members()
-                    .iter()
-                    .filter(|cell| !cell.as_any().is::<ToolOutputCell>())
-                    .filter_map(|cell| {
-                        // Captured arguments own the input projection. Later native lifecycle
-                        // cells must not replace an already formatted call or duplicate it.
-                        if !cell.as_any().is::<super::ToolInputCell>()
-                            && cell.tool_call_ids().iter().any(|id| {
-                                block.members().iter().any(|member| {
-                                    member
-                                        .as_any()
-                                        .downcast_ref::<super::ToolInputCell>()
-                                        .is_some_and(|input| input.0.call_id == *id)
-                                })
+            Source::Code(block) => {
+                let mut projections = block.members().iter().filter_map(|cell| {
+                    if let Some(input) = cell.as_any().downcast_ref::<super::ToolInputCell>() {
+                        return input_projection(cell.as_ref(), width).or_else(|| {
+                            block.members().iter().find_map(|member| {
+                                (!member.as_any().is::<super::ToolInputCell>()
+                                    && member.tool_call_ids().contains(&input.0.call_id.as_str()))
+                                .then(|| input_projection(member.as_ref(), width))
+                                .flatten()
                             })
-                        {
-                            return None;
-                        }
-                        input_projection(cell.as_ref(), width)
-                    }),
-            ),
+                        });
+                    }
+                    // Captures supply exact arguments, not a replacement renderer. Render
+                    // their native semantic cell at the capture's position, once.
+                    if cell.tool_call_ids().iter().any(|id| {
+                        block.members().iter().any(|member| {
+                            member
+                                .as_any()
+                                .downcast_ref::<super::ToolInputCell>()
+                                .is_some_and(|input| input.0.call_id == *id)
+                        })
+                    }) {
+                        return None;
+                    }
+                    input_projection(cell.as_ref(), width)
+                });
+                let first = projections.next()?;
+                combine_parts(std::iter::once(first).chain(projections))
+            }
             Source::Command(call) => {
                 let script = input
                     .filter(|input| input.name.is_default_namespace() && input.name.name == "bash")
@@ -545,7 +565,7 @@ impl Invocation<'_> {
             },
             Source::Output => return argument_input(input),
         };
-        if parts.lines.is_empty() {
+        if parts.lines.is_empty() && !matches!(self.source, Source::Code(_)) {
             return None;
         }
         mark_lines(&mut parts.lines, OutputProvenance::Formatted);

@@ -3,7 +3,8 @@ source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
 • Called
-  └ metrics.get_nearby_metric({"query":"
+  └ MCP
+    metrics.get_nearby_metric({"query":"
     very_long_query_that_needs_wrapping_
     to_display_properly_in_the_history",
     "limit":1})

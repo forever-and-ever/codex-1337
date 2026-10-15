@@ -118,6 +118,9 @@ impl McpToolCallCell {
     pub(super) fn stored_output_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.render_detail_lines(width, McpToolCallRenderMode::Expanded)
     }
+    pub(super) fn invocation_input(&self, width: u16) -> Vec<HyperlinkLine> {
+        self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary)
+    }
     fn nested_receipt_parts(
         &self,
         width: u16,
@@ -276,7 +279,7 @@ impl McpToolCallCell {
             .and_then(serde_json::Value::as_str)
             .map(|title| title.split_whitespace().collect::<Vec<_>>().join(" "))
             .filter(|title| !title.is_empty());
-        let invocation_line = if compact {
+        let mut invocation_line = if compact {
             Line::from(
                 title
                     .unwrap_or_else(|| {
@@ -287,6 +290,7 @@ impl McpToolCallCell {
         } else {
             line_to_static(&format_mcp_invocation(&self.invocation))
         };
+        invocation_line.spans.insert(0, "MCP ".white().bold());
         let mut compact_spans = vec![bullet.clone(), " ".into()];
         if !nested || status == Some(false) {
             compact_spans.extend([header_text.bold(), " ".into()]);

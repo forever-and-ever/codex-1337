@@ -5,4 +5,4 @@ expression: "rendered.join(\"\\n---\\n\")"
 • Command sleep 5
 
 ---
-• Calling server.tool()
+• Calling MCP server.tool()

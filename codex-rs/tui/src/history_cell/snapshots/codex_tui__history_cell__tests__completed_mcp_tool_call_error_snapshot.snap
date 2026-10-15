@@ -2,5 +2,5 @@
 source: tui/src/history_cell/tests.rs
 expression: rendered
 ---
-• Failed search.find_docs({"query":"ratatui styling","limit":3})
+• Failed MCP search.find_docs({"query":"ratatui styling","limit":3})
   └ Error: network timeout

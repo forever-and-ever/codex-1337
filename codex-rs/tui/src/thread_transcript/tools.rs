@@ -113,7 +113,7 @@ fn replay_command_args(command: &str) -> Option<Vec<String>> {
 }
 
 /// Share the native active row builders with the scoped transcript reducer.
-pub(crate) fn live_tool_cell(
+pub(crate) fn pending_tool_cell(
     item: &ThreadItem,
 ) -> Option<Arc<dyn crate::history_cell::HistoryCell>> {
     match item {

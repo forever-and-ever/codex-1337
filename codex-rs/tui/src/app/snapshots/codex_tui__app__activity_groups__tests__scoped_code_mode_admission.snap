@@ -5,7 +5,7 @@ expression: "examples.join(\"\\n\\n\")"
 Held reading
               Read child-a.rs (whole file)
         [-] Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
-                └ cua_repl.js({"title":"Inspect child-b"})
+              • MCP Inspect child-b
 
 Return to live
               • Before script
@@ -13,7 +13,7 @@ Return to live
         [-] Code Mode (ρξωζ)                     [in [raw] [fmt]] [out]                 10
               Read child-a.rs (whole file)
         [-] Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
-                └ cua_repl.js({"title":"Inspect child-b"})
+              • MCP Inspect child-b
         [+]   • Command
                   Waited for ρξωζ
 

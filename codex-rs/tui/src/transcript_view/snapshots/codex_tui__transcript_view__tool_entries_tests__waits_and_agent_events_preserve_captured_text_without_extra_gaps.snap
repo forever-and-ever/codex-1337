@@ -4,14 +4,17 @@ expression: rendered
 ---
               Before tools
 
-            Command                                               [in]             [out]
+            Command                                               [in [raw] [fmt]] [out]
+            • Started `/root/worker`
             Command (exec)                                    [in]             [out]              47
             Command (exec)                                    [in]             [out]              18
-            Command                                               [in]             [out]
+            Command                                               [in [raw] [fmt]] [out]
+            • Interacted with `/root/worker`
             Command (wait)                                    [in]             [out]              18
             Command (wait)                                    [in]             [out]              47
             Command (exec)                                    [in]             [out]              47
-            Command                                               [in]             [out]
+            Command                                               [in [raw] [fmt]] [out]
+            • Interrupted `/root/worker`
             Command (wait)                                    [in]             [out]              13
             Command (wait)                                    [in]             [out]              13
             Command (exec)                                     [in]             [out]              4

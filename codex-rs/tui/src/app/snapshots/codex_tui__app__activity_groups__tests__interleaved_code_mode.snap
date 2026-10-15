@@ -4,14 +4,14 @@ expression: "expected.iter().enumerate().map(|(index, cell)|\n{\n    let collaps
 ---
 cell 0 collapsed
 • Failed (Code Mode ψγζζ)
-    • Inspect child-a1
-    • Inspect child-a2
+    • MCP Inspect child-a1
+    • MCP Inspect child-a2
     • Viewed image diagram.png
     • Generated Image:
 expanded
 • Failed (Code Mode ψγζζ)
-    • cua_repl.js({"title":"Inspect child-a1"})
-    • cua_repl.js({"title":"Inspect child-a2"})
+    • MCP cua_repl.js({"title":"Inspect child-a1"})
+    • MCP cua_repl.js({"title":"Inspect child-a2"})
     • Viewed image diagram.png
     • Generated Image:
         visible notify-a
@@ -19,10 +19,10 @@ expanded
 
 cell 1 collapsed
 • Interrupted (Code Mode δοτζ)
-    • Inspect child-b
+    • MCP Inspect child-b
 expanded
 • Interrupted (Code Mode δοτζ)
-    • cua_repl.js({"title":"Inspect child-b"})
+    • MCP cua_repl.js({"title":"Inspect child-b"})
   Stored result · exact capture unavailable
 
 cell 2 collapsed
@@ -30,7 +30,7 @@ cell 2 collapsed
   └ Inspect direct
 expanded
 • Called
-  └ cua_repl.js({"title":"Inspect direct"})
+  └ MCP cua_repl.js({"title":"Inspect direct"})
     Stored result · exact capture unavailable
     Result direct
 

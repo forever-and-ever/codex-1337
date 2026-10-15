@@ -256,7 +256,15 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     insta::assert_snapshot!(snapshots.join("\n\n"));
     // A source-first highlight once bypassed every semantic child projection.
     // Hold the initial input until real call arguments arrive; raw remains exact.
-    let script = "const answer = 42;\ntext(await fs.readFile(\"src/main.rs\", \"utf8\"));\nawait tools.update_work_status({activity: \"Reading source\"});\ntext(await tools.exec_command({cmd: \"cat Cargo.toml\"}));\n";
+    let script = concat!(
+        "const answer = 42;\n",
+        "text(await fs.readFile(\"src/main.rs\", \"utf8\"));\n",
+        "await fs.writeFile(\"notes.txt\", \"line one\\nline two\");\n",
+        "await tools.update_work_status({activity: \"Reading source\"});\n",
+        "text(await tools.spawn_agent({message: \"Inspect source\"}));\n",
+        "text(await tools.mcp__depot__sem_read_outline({file: \"src/main.rs\"}));\n",
+        "text(await tools.exec_command({cmd: \"cat Cargo.toml\"}));\n",
+    );
     let owner = codex_app_server_protocol::CodeModeOwner {
         thread_id: codex_protocol::ThreadId::from_u128(7),
         exec_call_id: "code".into(),
@@ -267,20 +275,29 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     for admitted in [true, false] {
         let mut reducers = crate::code_mode_transcript::Reducers::default();
         let mut reduce = |item| {
-            reducers
-                .admit(
-                    owner.thread_id,
-                    crate::code_mode_transcript::Admission::item(
-                        codex_app_server_protocol::CodeModeOwned::new(
-                            owner.clone(),
-                            Box::new(item),
-                        ),
-                        String::new(),
+            let owned =
+                codex_app_server_protocol::CodeModeOwned::new(owner.clone(), Box::new(item));
+            let admission = if admitted {
+                crate::code_mode_transcript::Admission::notification(
+                    &codex_app_server_protocol::ServerNotification::ItemCompleted(
+                        codex_app_server_protocol::ItemCompletedNotification {
+                            thread_id: owner.thread_id.to_string(),
+                            turn_id: String::new(),
+                            item: codex_app_server_protocol::ThreadItem::CodeModeOwned(owned),
+                            completed_at_ms: 0,
+                        },
                     ),
-                    &cwd,
-                    false,
-                    &|_| crate::multi_agents::AgentMetadata::default(),
+                    crate::code_mode_transcript::Source::Live,
                 )
+                .unwrap()
+                .unwrap()
+            } else {
+                crate::code_mode_transcript::Admission::item(owned, String::new())
+            };
+            reducers
+                .admit(owner.thread_id, admission, &cwd, false, &|_| {
+                    crate::multi_agents::AgentMetadata::default()
+                })
                 .unwrap()
                 .block
         };
@@ -353,6 +370,70 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         ));
         code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
             ToolInput {
+                id: "input:write-child".into(),
+                call_id: "write-child".into(),
+                name: ToolName::plain("fs"),
+                payload: ToolInputPayload::Json(
+                    r#"{"operation":"write","path":"notes.txt","data":"line one\nline two"}"#
+                        .into(),
+                ),
+            },
+        ));
+        // Canonical captures and semantic lifecycle cells may arrive in either order.
+        // The capture must not replace the native formatter or duplicate its row.
+        let mcp_input = codex_app_server_protocol::ThreadItem::ToolInput(ToolInput {
+            id: "input:mcp-child".into(),
+            call_id: "mcp-child".into(),
+            name: ToolName::plain("mcp__depot__sem_read_outline"),
+            payload: ToolInputPayload::Json(r#"{"file":"src/main.rs"}"#.into()),
+        });
+        if admitted {
+            code[0] = reduce(mcp_input.clone());
+            tests::render(&mut view, &code, 104, 26);
+            let awaiting_native = view.current_layout(&code, 0).unwrap();
+            assert!(!awaiting_native.text().contains("mcp__depot"));
+            assert!(!awaiting_native.text().contains(r#""file""#));
+        }
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::McpToolCall {
+            id: "mcp-child".into(),
+            server: "depot".into(),
+            tool: "sem.read.outline".into(),
+            status: codex_app_server_protocol::McpToolCallStatus::InProgress,
+            arguments: serde_json::json!({"file": "src/main.rs"}),
+            app_context: None,
+            mcp_app_resource_uri: None,
+            mcp_app_ui: None,
+            plugin_id: None,
+            read_only_hint: Some(true),
+            result: None,
+            error: None,
+            duration_ms: None,
+        });
+        if !admitted {
+            code[0] = reduce(mcp_input);
+        }
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+            ToolInput {
+                id: "input:agent-child".into(),
+                call_id: "agent-child".into(),
+                name: ToolName::plain("spawn_agent"),
+                payload: ToolInputPayload::Json(r#"{"message":"Inspect source"}"#.into()),
+            },
+        ));
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::CollabAgentToolCall {
+            id: "agent-child".into(),
+            tool: codex_app_server_protocol::CollabAgentTool::SpawnAgent,
+            status: codex_app_server_protocol::CollabAgentToolCallStatus::Completed,
+            sender_thread_id: owner.thread_id.to_string(),
+            receiver_thread_ids: vec![codex_protocol::ThreadId::from_u128(8).to_string()],
+            prompt: Some("Inspect source".into()),
+            model: None,
+            reasoning_effort: None,
+            agents_states: Default::default(),
+            wait_completion: None,
+        });
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+            ToolInput {
                 id: "input:command-child".into(),
                 call_id: "command-child".into(),
                 name: ToolName::plain("exec_command"),
@@ -380,8 +461,20 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(nested.text().contains("Read src/main.rs"));
         assert!(nested.text().contains("Read Cargo.toml"));
         assert!(!nested.text().contains("\"cmd\""));
-        assert!(nested.text().contains("update_work_status"));
-        assert!(nested.text().contains("Reading source"));
+        assert_eq!(nested.text().matches("Write notes.txt").count(), 1);
+        assert_eq!(
+            nested.text().matches("MCP depot.sem.read.outline").count(),
+            1
+        );
+        assert!(
+            nested
+                .text()
+                .contains(r#"MCP depot.sem.read.outline({"file":"src/main.rs"})"#)
+        );
+        assert!(nested.text().contains("Spawned"));
+        assert!(!nested.text().contains("line one"));
+        assert!(!nested.text().contains("update_work_status"));
+        assert!(!nested.text().contains("Reading source"));
         assert!(!nested.text().contains("const answer"));
         assert!(nested.fold_position(&format).is_some());
         code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
@@ -570,6 +663,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             "write_stdin",
             ToolInputPayload::Json(r#"{"session_id":7,"chars":""}"#.into()),
             "session_id",
+        ),
+        (
+            "request_user_input",
+            ToolInputPayload::Json(r#"{"questions":[{"question":"Continue?"}]}"#.into()),
+            "Continue?",
+        ),
+        (
+            "request_user_input_async",
+            ToolInputPayload::Json(r#"{"questions":[{"title":"Continue?"}]}"#.into()),
+            "Continue?",
         ),
         ("bash", ToolInputPayload::Text("echo 42".into()), "echo 42"),
         (

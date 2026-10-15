@@ -106,13 +106,7 @@ impl DynamicToolCallCell {
     }
 
     pub(crate) fn invocation_input(&self, width: u16) -> Vec<HyperlinkLine> {
-        let data = self
-            .data
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut lines = plain_hyperlink_lines(vec![Line::from(data.name.clone())]);
-        lines.extend(plain_hyperlink_lines(data.argument_lines()));
-        adaptive_wrap_hyperlink_lines(&lines, RtOptions::new(usize::from(width).max(1)))
+        self.summary_lines(width, CallHeading::Nested)
     }
 
     /// Updates the original retained row when concurrent calls complete in a different order.

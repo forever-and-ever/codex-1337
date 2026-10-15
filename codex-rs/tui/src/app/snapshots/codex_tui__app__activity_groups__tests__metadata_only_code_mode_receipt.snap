@@ -4,7 +4,7 @@ expression: "file_snapshots.join(\"\\n\")"
 ---
 Painted collapsed
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
-                └ semedit.edit({})
+              • MCP semedit.edit({})
 
                   Edited
         [+]           /workspace/receipt.rs (+1, -1)
@@ -13,7 +13,7 @@ Painted collapsed
         [+]       beta.rs (+0, -1)
 Clicked native file
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
-                └ semedit.edit({})
+              • MCP semedit.edit({})
 
                   Edited
         [+]           /workspace/receipt.rs (+1, -1)
@@ -23,7 +23,7 @@ Clicked native file
         [+]       beta.rs (+0, -1)
 Receipt expanded
         [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
-                └ semedit.edit({})
+              • MCP semedit.edit({})
 
                   Edited
         [-]           /workspace/receipt.rs (+1, -1)

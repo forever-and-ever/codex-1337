@@ -4,7 +4,7 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 structured only, direct
 • Called
-  └ lsp.definition({"query":"Widget"})
+  └ MCP lsp.definition({"query":"Widget"})
     Stored result · exact capture unavailable
     {
       "symbol": "Widget",
@@ -17,13 +17,13 @@ structured only, code mode
     {"content":[],"structuredContent":{"symbol":"Widget","file":"src/widget.rs","line":42}}
 
 structured only, captured direct
-• lsp.definition({"query":"Widget"})
+• MCP lsp.definition({"query":"Widget"})
 
     {"content":[],"structuredContent":{"symbol":"Widget","file":"src/widget.rs","line":42}}
 
 with summary, direct
 • Called
-  └ lsp.definition({"query":"Widget"})
+  └ MCP lsp.definition({"query":"Widget"})
     Stored result · exact capture unavailable
     One definition
     {
@@ -38,14 +38,14 @@ with summary, code mode
     {"symbol":"Widget","file":"src/widget.rs","line":42}}
 
 with summary, captured direct
-• lsp.definition({"query":"Widget"})
+• MCP lsp.definition({"query":"Widget"})
 
     {"content":[{"type":"text","text":"One definition"}],"structuredContent":
     {"symbol":"Widget","file":"src/widget.rs","line":42}}
 
 legacy duplicate, direct
 • Called
-  └ lsp.definition({"query":"Widget"})
+  └ MCP lsp.definition({"query":"Widget"})
     Stored result · exact capture unavailable
     {"symbol":"Widget","file":"src/widget.rs","line":42}
 
@@ -55,7 +55,7 @@ legacy duplicate, code mode
     \"line\":42}"}],"structuredContent":{"symbol":"Widget","file":"src/widget.rs","line":42}}
 
 legacy duplicate, captured direct
-• lsp.definition({"query":"Widget"})
+• MCP lsp.definition({"query":"Widget"})
 
     {"content":[{"type":"text","text":"{\"symbol\":\"Widget\",\"file\":\"src/widget.rs\",
     \"line\":42}"}],"structuredContent":{"symbol":"Widget","file":"src/widget.rs","line":42}}

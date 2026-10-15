@@ -22,9 +22,11 @@ output line 12
 ✓ • 0ms
 
 MCP: compact
-• Called example.js({"title":"Inspect page mcp","code":"await cua.getState()"})
-  └ Full result for mcp
+• Called
+  └ MCP example.js({"title":"Inspect page mcp","code":"await cua.getState()"})
+    Full result for mcp
 
 MCP: detailed
-• Called example.js({"title":"Inspect page mcp","code":"await cua.getState()"})
-  └ Full result for mcp
+• Called
+  └ MCP example.js({"title":"Inspect page mcp","code":"await cua.getState()"})
+    Full result for mcp

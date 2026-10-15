@@ -2,6 +2,6 @@
 source: tui/src/history_cell/mcp_tests.rs
 expression: "lines.iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\")"
 ---
-• Failed Inspect a very long sc…
+• Failed MCP Inspect a very lon…
   └ Screenshot partially failed
     Returned image

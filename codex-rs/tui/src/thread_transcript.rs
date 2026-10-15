@@ -527,8 +527,11 @@ pub(crate) fn scoped_item_cells(
         .map(|cell| Arc::new(cell.with_activity_id(id.clone())) as Arc<dyn HistoryCell>)
         .collect();
     }
-    if source == crate::code_mode_transcript::Source::Live
-        && let Some(cell) = tools::live_tool_cell(&item)
+    // A frozen MCP invocation still has exact semantic arguments. Do not flatten
+    // historical page prefixes into an opaque status string before formatting.
+    if (source == crate::code_mode_transcript::Source::Live
+        || matches!(&item, ThreadItem::McpToolCall { .. }))
+        && let Some(cell) = tools::pending_tool_cell(&item)
     {
         return vec![cell];
     }

@@ -1,6 +1,5 @@
 ---
 source: tui/src/history_cell/mcp_tests.rs
-assertion_line: 189
 expression: "format!(\"compact:\\n{}\\n\\nargument previews:\\n{argument_previews}\\n\\nhistory:\\n{}\\n\\ntranscript:\\n{}\",\nvisible_lines(cell.compact_hyperlink_lines(80)).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),\ndisplay.iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),\ntranscript.iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\"),)"
 ---
 compact:
@@ -17,14 +16,14 @@ argument previews:
 • Calling lsp.hover("{\"query...
 
 history:
-• Called search.lookup({"title":"Search query"})
+• Called MCP search.lookup({"title":"Search query"})
   └ first
     second
     third
     +2 lines (⌃t to view transcript)
 
 transcript:
-• Called search.lookup({"title":"Search query"})
+• Called MCP search.lookup({"title":"Search query"})
   └ first
     second
     third

@@ -405,7 +405,7 @@ fn code_mode_output_shares_a_row_budget_across_blocks() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(display, @"
-    • Called Inspect page
+    • Called MCP Inspect page
       └ Page title
         Navigation
         Main content
@@ -450,7 +450,7 @@ fn code_mode_output_preserves_trailing_failure_diagnostics_in_transcript() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(display, @"
-    • Failed Inspect page
+    • Failed MCP Inspect page
       └ Script failed
         Page title
         Navigation
@@ -664,13 +664,13 @@ fn code_mode_preserves_text_fields_on_nontext_and_unknown_blocks() {
     • Called node_repl.js(title="Inspect results")
 
     history:
-    • Called Inspect results
+    • Called MCP Inspect results
       └ Returned image
         image-side output
         unknown-side output
 
     transcript:
-    • Called node_repl.js({"title":"Inspect results"})
+    • Called MCP node_repl.js({"title":"Inspect results"})
       └ Returned image
         Script completed
         Output:
@@ -714,15 +714,15 @@ fn code_mode_preserves_text_fields_on_nontext_and_unknown_blocks() {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    insta::assert_snapshot!(format!("history:\n{display}\n\ntranscript:\n{transcript}"), @r"
+    insta::assert_snapshot!(format!("history:\n{display}\n\ntranscript:\n{transcript}"), @"
     history:
-    • Called cua_repl.js
+    • Called MCP cua_repl.js
       └ Returned image
         image-side output
         unknown-side output
 
     transcript:
-    • Called cua_repl.js()
+    • Called MCP cua_repl.js()
       └ Returned image
         Script completed
         Output:
@@ -747,7 +747,7 @@ fn titled_image_call_keeps_error_and_full_title_when_narrow() {
     );
     assert_eq!(
         cell.display_lines(/*width*/ 80)[0].to_string(),
-        format!("• Calling {title}")
+        format!("• Calling MCP {title}")
     );
     cell.complete(
         Duration::ZERO,

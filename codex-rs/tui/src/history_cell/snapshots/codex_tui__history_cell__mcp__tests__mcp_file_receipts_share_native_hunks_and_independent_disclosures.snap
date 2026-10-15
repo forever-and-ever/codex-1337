@@ -16,7 +16,7 @@ First file expanded
         1 +new
         //remote/workspace/old name.rs → //remote/workspace/new name.rs (+1, -1)
 Transcript
-• Called semedit.edit()
+• Called MCP semedit.edit()
   └ ordinary result remains accessible
     Edited
         /workspace/a.rs (+1, -1)
@@ -56,7 +56,7 @@ First file expanded
         1 +new
         /workspace/refused.rs — not applied; content unavailable
 Transcript
-• Failed semedit.edit()
+• Failed MCP semedit.edit()
   └ Publication partially failed; do not retry.
     Partially applied
         /workspace/a.rs (+1, -1)
@@ -76,7 +76,7 @@ First file expanded
         1 -old
         1 +new
 Transcript
-• Called semedit.edit()
+• Called MCP semedit.edit()
     Edited
         /workspace/a  \u{202e}.rs (+1, -1)
         1 -old
@@ -94,7 +94,7 @@ First file expanded
         1 -old
         1 +new
 Transcript
-• Called semedit.edit()
+• Called MCP semedit.edit()
   └ ordinary result remains accessible
     Preview — not applied
         /workspace/a.rs (+1, -1) — preview
@@ -113,7 +113,7 @@ First file expanded
         /workspace/blob.bin — binary; full diff unavailable
     2 additional files omitted; full diffs unavailable
 Transcript
-• Called semedit.edit()
+• Called MCP semedit.edit()
   └ ordinary result remains accessible
     Edited
         /workspace/blob.bin — binary; full diff unavailable
@@ -129,7 +129,7 @@ First file expanded
     Changes uncertain
     Paths and effects unavailable; changes may have occurred.
 Transcript
-• Called semedit.edit()
+• Called MCP semedit.edit()
   └ ordinary result remains accessible
     Changes uncertain
     Paths and effects unavailable; changes may have occurred.

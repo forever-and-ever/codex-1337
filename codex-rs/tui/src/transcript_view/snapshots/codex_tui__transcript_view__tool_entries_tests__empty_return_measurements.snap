@@ -3,31 +3,37 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "examples.join(\"\\n\\n\")"
 ---
 unknown
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
             Command (tool) · no output
             [in]             [out]
               • Completed `/root/worker`
 
 positive
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
             Command (tool) · no output                         3
             [in]             [out]
               • Completed `/root/worker`
 
 zero
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
               • Completed `/root/worker`
 
 completed
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
               • Completed `/root/worker`
 
 failed
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
             Command (exec) [in]             [out]              0
               • Completed `/root/worker`
 
 media
-            Command           [in]             [out]
+            Command           [in [raw] [fmt]] [out]
+            • Started `/root/worker`
             Command (exec) [in]             [out]              0
               • Completed `/root/worker`
