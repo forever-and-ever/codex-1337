@@ -64,7 +64,9 @@ both files
 
 output and edits
             Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            patched
+            {
+              "result": "patched"
+            }
 
             • Edited
         [-]     alpha.rs (+2, -0)
@@ -76,7 +78,7 @@ output and edits
 
 output format preserves file folds
             Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            patched
+            {"result":"patched"}
 
             • Edited
         [-]     alpha.rs (+2, -0)
@@ -88,7 +90,9 @@ output format preserves file folds
 
 output format preserves file folds
             Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
-            patched
+            {
+              "result": "patched"
+            }
 
             • Edited
         [-]     alpha.rs (+2, -0)

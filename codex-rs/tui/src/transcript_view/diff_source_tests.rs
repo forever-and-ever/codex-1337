@@ -28,7 +28,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         call_id: Some("patch-call".into()),
         name: "apply_patch".into(),
         namespace: None,
-        output: FunctionCallOutputBody::Text("patched".into()),
+        output: FunctionCallOutputBody::Text(r#"{"result":"patched"}"#.into()),
     };
     let cells = crate::thread_transcript::thread_items_to_transcript_cells(
         None,
@@ -144,7 +144,8 @@ fn file_disclosures_are_independent_and_not_copied() {
         assert!(view.focus_fold(&cells, 0, control(Action::Format(Port::Output, mode))));
         view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         let layout = paint(&mut view, 104, "output format preserves file folds");
-        assert!(layout.text().starts_with("patched"));
+        assert!(layout.text().starts_with('{'));
+        assert!(layout.text().contains("\"patched\""));
         assert!(layout.text().contains("Edited"));
         assert!(layout.text().contains("+alpha body"));
         assert!(layout.text().contains("+beta body"));

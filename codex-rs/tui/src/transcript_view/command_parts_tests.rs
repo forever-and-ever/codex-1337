@@ -454,6 +454,27 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                     .is_some()
             );
         }
+        // Inventory navigation must reveal calls even inside a manually folded feed entry.
+        assert!(view.focus_fold(&code, 0, outer.clone()));
+        view.handle_key(KeyCode::Enter.into(), &code);
+        tests::render(&mut view, &code, 104, 26);
+        assert!(view.current_layout(&code, 0).unwrap().text().is_empty());
+        assert!(view.reveal_call(&code, "read-child"));
+        tests::render(&mut view, &code, 104, 26);
+        assert!(
+            view.current_layout(&code, 0)
+                .unwrap()
+                .text()
+                .contains(script)
+        );
+        assert!(view.reveal_call(&code, "code"));
+        tests::render(&mut view, &code, 104, 26);
+        assert!(
+            view.current_layout(&code, 0)
+                .unwrap()
+                .text()
+                .contains(script)
+        );
         if !admitted {
             assert!(view.focus_fold(&code, 0, outer));
             view.handle_key(KeyCode::Enter.into(), &code);
