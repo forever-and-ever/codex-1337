@@ -15,5 +15,19 @@ fn tool_text_matches_reference_tokenizer_without_interpreting_control_markers() 
             count_o200k_text_tokens(&FunctionCallOutputBody::Text(text.into())),
             Some(expected)
         );
+        assert_eq!(
+            count_o200k_arrival(&codex_protocol::step_admission::ArrivalSource::Captured {
+                blocks: vec![text.into()],
+            }),
+            Some(expected)
+        );
+        assert_eq!(
+            count_o200k_arrival(
+                &codex_protocol::step_admission::ArrivalSource::ToolDeclarations {
+                    text: text.into(),
+                }
+            ),
+            Some(expected)
+        );
     }
 }

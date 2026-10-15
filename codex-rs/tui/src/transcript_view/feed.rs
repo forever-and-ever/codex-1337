@@ -959,7 +959,11 @@ impl FeedIndex {
             Kind::Entry { .. } => {
                 let cell = cell?;
                 if let Some(arrival) = cell.as_any().downcast_ref::<ArrivalCell>() {
-                    arrival_figures(bills.step(arrival.response_id()), arrival.id())
+                    arrival_figures(
+                        bills.step(arrival.response_id()),
+                        arrival.id(),
+                        arrival.estimated_tokens(),
+                    )
                 } else {
                     Figures {
                         total: Total::Exact(cell.activity_header_tokens()?),

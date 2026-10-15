@@ -2,12 +2,23 @@
 
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::step_admission::ArrivalSource;
 
 /// Count model-visible text using the bundled o200k vocabulary. This is an
 /// approximation for OpenAI and Claude models, not API usage.
 pub fn count_o200k_text(text: &str) -> u64 {
     // Text spelling a special token is still ordinary untrusted text.
     tiktoken_rs::o200k_base_singleton().count_ordinary(text) as u64
+}
+
+/// Count captured arrival text, independently of a later provider usage report.
+/// Legacy summaries and unavailable captures cannot supply a complete estimate.
+pub fn count_o200k_arrival(source: &ArrivalSource) -> Option<u64> {
+    match source {
+        ArrivalSource::Captured { blocks } => Some(count_o200k_text(&blocks.join("\n"))),
+        ArrivalSource::ToolDeclarations { text } => Some(count_o200k_text(text)),
+        ArrivalSource::Legacy | ArrivalSource::Unavailable => None,
+    }
 }
 
 /// Count completed tool output with `count_o200k_text`.

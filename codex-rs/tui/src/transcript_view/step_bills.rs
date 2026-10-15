@@ -4,8 +4,9 @@
 //! A step's figures are its total, then its split: thought and output from the response's
 //! own usage, self from the next request's seal. A header over several steps sums them ×N. A
 //! pending step shows only what its response reported; a sealed one adds its own results. An
-//! arrival's figure is its share of its step's seal. User input has no arrival item: the feed
-//! bills it on the user's own item when it can place it, and on the admitting step otherwise.
+//! arrival's figure is its sealed share, or a local estimate while that share is unavailable.
+//! User input has no arrival item: the feed bills it on the user's own item when it can place
+//! it, and on the admitting step otherwise.
 
 use super::text::token_label;
 use codex_app_server_protocol::StepAdmissionItem;
@@ -181,18 +182,20 @@ pub(super) fn steps_figures(
     }
 }
 
-/// An arrival's share of its step's seal.
-pub(super) fn arrival_figures(step: Option<&StepAdmissionItem>, id: &str) -> Figures {
+/// Prefer a sealed provider share, otherwise use the estimate prepared with the cell.
+pub(super) fn arrival_figures(
+    step: Option<&StepAdmissionItem>,
+    id: &str,
+    estimated_tokens: Option<u64>,
+) -> Figures {
+    let estimated = estimated_tokens.map_or(Total::Unknown, Total::Approximate);
     let total = match step.map(|step| &step.admission) {
         Some(Admission::Sealed(sealed)) => sealed
             .arrivals
             .iter()
             .find(|arrival| arrival.id == id)
-            .map_or(Total::Severed, |arrival| {
-                share(sealed.precision, arrival.tokens)
-            }),
-        Some(Admission::Severed) => Total::Severed,
-        Some(Admission::Pending) | None => Total::Pending,
+            .map_or(estimated, |arrival| share(sealed.precision, arrival.tokens)),
+        Some(Admission::Severed | Admission::Pending) | None => estimated,
     };
     Figures {
         total,

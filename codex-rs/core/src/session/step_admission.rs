@@ -26,7 +26,7 @@ use codex_protocol::step_admission::ArrivalItem;
 use codex_protocol::step_admission::ArrivalKind;
 use codex_protocol::step_admission::SealedAdmission;
 use codex_protocol::step_admission::StepAdmissionItem;
-use codex_utils_output_truncation::count_o200k_text;
+use codex_utils_output_truncation::count_o200k_arrival;
 use codex_utils_output_truncation::count_o200k_text_tokens;
 
 use super::Session;
@@ -510,16 +510,7 @@ fn seal(mut mark: StepMark, received: i128, admitted: Admitted) -> (String, Step
         admitted
             .arrivals
             .iter()
-            .map(|arrival| match &arrival.source {
-                codex_protocol::step_admission::ArrivalSource::Captured { blocks } => {
-                    Some(count_o200k_text(&blocks.join("\n")))
-                }
-                codex_protocol::step_admission::ArrivalSource::ToolDeclarations { text } => {
-                    Some(count_o200k_text(text))
-                }
-                codex_protocol::step_admission::ArrivalSource::Legacy
-                | codex_protocol::step_admission::ArrivalSource::Unavailable => None,
-            }),
+            .map(|arrival| count_o200k_arrival(&arrival.source)),
     )
     .collect::<Vec<_>>();
     let Apportionment {

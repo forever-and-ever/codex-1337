@@ -1,6 +1,6 @@
 //! Context a step admitted after its results: an injection, or a message from another agent.
-//! A Feed Item of its own, whose figure arrives with the step's seal; see
-//! `transcript_view::step_bills`.
+//! Prepared with a local token estimate before publication. A later step seal may
+//! supersede the estimate; see `transcript_view::step_bills`.
 
 use super::ActivityDisclosure;
 use super::HistoryCell;
@@ -14,34 +14,48 @@ use crate::transcript_view::FeedEntry;
 use crate::wrapping::RtOptions;
 use codex_app_server_protocol::ArrivalItem;
 use codex_protocol::step_admission::ArrivalKind;
+use codex_utils_output_truncation::count_o200k_arrival;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::collections::HashSet;
 
 #[derive(Debug)]
-pub(crate) struct ArrivalCell(ArrivalItem);
+pub(crate) struct ArrivalCell {
+    item: ArrivalItem,
+    estimated_tokens: Option<u64>,
+}
 
 impl ArrivalCell {
     pub(crate) fn new(item: ArrivalItem) -> Self {
-        Self(item)
+        // Preparation is synchronous: neither first paint nor replay waits on a later
+        // provider seal, which may be permanently severed by a server restart.
+        let estimated_tokens = count_o200k_arrival(&item.source);
+        Self {
+            item,
+            estimated_tokens,
+        }
     }
 
     pub(crate) fn id(&self) -> &str {
-        &self.0.id
+        &self.item.id
+    }
+
+    pub(crate) fn estimated_tokens(&self) -> Option<u64> {
+        self.estimated_tokens
     }
 
     /// The response whose step admitted this arrival and bills it.
     pub(crate) fn response_id(&self) -> &str {
-        &self.0.response_id
+        &self.item.response_id
     }
 
     pub(crate) fn placement(&self) -> Option<&codex_protocol::step_admission::ArrivalPlacement> {
-        self.0.placement.as_ref()
+        self.item.placement.as_ref()
     }
 
     fn heading(&self) -> Line<'static> {
-        let label = sanitize_user_text(self.0.label.as_str().into()).replace(['\n', '\t'], " ");
-        let (kind, joint) = match self.0.kind {
+        let label = sanitize_user_text(self.item.label.as_str().into()).replace(['\n', '\t'], " ");
+        let (kind, joint) = match self.item.kind {
             ArrivalKind::InterAgent => ("Message", " from "),
             ArrivalKind::Injection => ("Injection", " · "),
             ArrivalKind::User => ("User input", " · "),
@@ -59,12 +73,12 @@ impl ArrivalCell {
         use super::output_provenance::client_notice;
         use super::output_provenance::context_sources;
         use codex_protocol::step_admission::ArrivalSource;
-        let author = match self.0.kind {
+        let author = match self.item.kind {
             ArrivalKind::InterAgent => ContextAuthor::Subagent,
             ArrivalKind::User => ContextAuthor::User,
             ArrivalKind::Injection => ContextAuthor::Environment,
         };
-        match &self.0.source {
+        match &self.item.source {
             ArrivalSource::Captured { blocks } => captured_blocks(blocks, author, mode),
             ArrivalSource::Unavailable => {
                 vec![client_notice("Readable context capture unavailable")]
@@ -77,7 +91,7 @@ impl ArrivalCell {
                 let mut lines = vec![client_notice(
                     "Legacy arrival — exact context provenance was not recorded",
                 )];
-                if let Some(text) = &self.0.text {
+                if let Some(text) = &self.item.text {
                     lines.extend(client_lines(text, mode));
                 }
                 lines
@@ -86,7 +100,7 @@ impl ArrivalCell {
     }
 
     fn raw_fold(&self) -> String {
-        format!("arrival-raw:{}", self.0.id)
+        format!("arrival-raw:{}", self.item.id)
     }
 
     pub(super) fn context_lines(
@@ -103,10 +117,10 @@ impl ArrivalCell {
 
 impl FeedEntry for ArrivalCell {
     fn feed_id(&self) -> String {
-        self.0.id.clone()
+        self.item.id.clone()
     }
     fn feed_disclosure(&self) -> crate::transcript_view::HeaderDisclosure {
-        if self.0.kind == ArrivalKind::Injection {
+        if self.item.kind == ArrivalKind::Injection {
             crate::transcript_view::HeaderDisclosure::Collapsed
         } else {
             crate::transcript_view::HeaderDisclosure::Expanded
@@ -127,7 +141,7 @@ impl FeedEntry for ArrivalCell {
         use super::output_provenance::OutputProvenance;
         use super::output_provenance::mark_lines;
         let declarations = matches!(
-            self.0.source,
+            self.item.source,
             codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. }
         );
         let heading = if declarations {
@@ -166,22 +180,22 @@ impl FeedEntry for ArrivalCell {
 
 impl HistoryCell for ArrivalCell {
     fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
-        HistoryTimestamp::from_millis(self.0.announced_at_ms)
+        HistoryTimestamp::from_millis(self.item.announced_at_ms)
     }
 
     fn has_formatted_output(&self) -> bool {
-        match &self.0.source {
+        match &self.item.source {
             codex_protocol::step_admission::ArrivalSource::Captured { blocks } => {
                 !blocks.is_empty()
             }
             codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. } => true,
-            codex_protocol::step_admission::ArrivalSource::Legacy => self.0.text.is_some(),
+            codex_protocol::step_admission::ArrivalSource::Legacy => self.item.text.is_some(),
             codex_protocol::step_admission::ArrivalSource::Unavailable => false,
         }
     }
 
     fn activity_ids(&self) -> Vec<String> {
-        vec![self.0.id.clone()]
+        vec![self.item.id.clone()]
     }
 
     fn activity_disclosure(&self, _width: u16) -> Option<ActivityDisclosure> {

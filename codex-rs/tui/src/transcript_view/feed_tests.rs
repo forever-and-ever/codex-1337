@@ -221,6 +221,39 @@ fn steps_fold_under_one_header_with_their_figures() {
             },
         )),
     ];
+    // Restart may sever provider accounting, or replay an arrival before its step.
+    // Neither may strand captured text behind a permanently pending token figure.
+    let arrival = cells
+        .iter()
+        .find(|cell| cell.as_any().is::<ArrivalCell>())
+        .unwrap();
+    let estimated = arrival
+        .as_any()
+        .downcast_ref::<ArrivalCell>()
+        .unwrap()
+        .estimated_tokens()
+        .unwrap();
+    assert!(estimated > 0);
+    for admission in [
+        None,
+        Some(Admission::Pending),
+        Some(Admission::Severed),
+        Some(Admission::Sealed(SealedAdmission {
+            self_tokens: 0,
+            arrivals: Vec::new(),
+            released_tokens: 0,
+            precision: AdmissionPrecision::Exact,
+        })),
+    ] {
+        let mut replay = TranscriptView::default();
+        if let Some(admission) = admission {
+            replay.record_step_admission(step("resp-1", &[], &[], admission));
+        }
+        let buffer =
+            crate::transcript_view::tests::render(&mut replay, &[Arc::clone(arrival)], 104, 4);
+        let rendered = crate::transcript_view::tests::text(&buffer);
+        assert!(rendered.contains(&format!("≈{estimated}")), "{rendered}");
+    }
     let mut view = TranscriptView::default();
     view.record_step_admission(step(
         "resp-1",
@@ -319,6 +352,13 @@ fn steps_fold_under_one_header_with_their_figures() {
     };
     let fresh = screen(&mut view, "unfolded");
     assert!(fresh.contains("[+] Injection"));
+    assert!(
+        fresh
+            .lines()
+            .find(|line| line.contains("Injection"))
+            .unwrap()
+            .contains("≈84")
+    );
     let compacted = cells
         .iter()
         .position(|cell| cell.as_any().is::<crate::history_cell::CompactionCell>())

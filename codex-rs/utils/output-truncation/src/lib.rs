@@ -1,6 +1,7 @@
 //! Shared byte/token truncation for tool and exec output.
 
 mod token_count;
+pub use token_count::count_o200k_arrival;
 pub use token_count::count_o200k_text;
 pub use token_count::count_o200k_text_tokens;
 
