@@ -2385,6 +2385,9 @@ impl ModelClientSession {
                 )
                 .await;
         }
+        let dispatch =
+            self.client
+                .responses_cache_dispatch(model_info, effort.as_ref(), responses_metadata);
         let owner = self.client.auth_owner_generation();
         if self.websocket_session.auth_owner_generation != owner {
             // HTTP sticky routing is account-bound too, not just WS continuation IDs.
@@ -2413,7 +2416,7 @@ impl ModelClientSession {
                         .await?
                     {
                         WebsocketStreamOutcome::Stream(stream) => {
-                            return Ok(stream);
+                            return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
                         }
                         WebsocketStreamOutcome::FallbackToHttp => {
                             self.try_switch_fallback_transport(session_telemetry, model_info);
@@ -2434,7 +2437,7 @@ impl ModelClientSession {
                 .await?
             }
         };
-        Ok(stream)
+        Ok(self.client.observe_prompt_cache_stream(stream, dispatch))
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.

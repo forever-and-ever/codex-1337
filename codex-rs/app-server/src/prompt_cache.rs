@@ -194,7 +194,7 @@ impl Entry {
 fn refusal(lore: Option<WarmingLore>, replay: Option<Unreplayable>) -> Option<&'static str> {
     match (lore, replay) {
         (_, Some(Unreplayable::Subagent)) => Some("Subagents are not warmed."),
-        (None, _) | (_, Some(Unreplayable::Provider)) => {
+        (None | Some(WarmingLore::OpenAi), _) | (_, Some(Unreplayable::Provider)) => {
             Some("Only Claude conversations can be warmed.")
         }
         (

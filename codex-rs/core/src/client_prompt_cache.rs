@@ -5,6 +5,8 @@
 use crate::client::ModelClient;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::responses_metadata::CodexResponsesMetadata;
+use crate::responses_metadata::CodexResponsesRequestKind;
 use codex_api::AnthropicClient;
 use codex_api::AnthropicRequest;
 use codex_api::AnthropicWarmingRequest;
@@ -28,10 +30,13 @@ use std::time::SystemTime;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-/// What a provider promises about its prompt cache: how long a prefix lives, and whether it can
-/// be kept warm.
+/// Provider retention policy for passive estimates and supported keepalive replays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WarmingLore {
+    /// GPT-6-family OpenAI requests use the default 30-minute minimum retention.
+    /// This deployment adopts that window for API and subscription routes; passive estimates
+    /// do not enable request replay.
+    OpenAi,
     /// Native Claude: each request declares its TTL, each read refreshes it, and a zero-output
     /// replay keeps it warm.
     Claude { ttl: AnthropicCacheTtl },
@@ -40,6 +45,7 @@ pub enum WarmingLore {
 impl WarmingLore {
     pub fn lifetime(self) -> Duration {
         match self {
+            Self::OpenAi => Duration::from_secs(/*secs*/ 30 * 60),
             Self::Claude {
                 ttl: AnthropicCacheTtl::FiveMinutes,
             } => Duration::from_secs(/*secs*/ 5 * 60),
@@ -169,17 +175,21 @@ impl ModelClient {
         )
     }
 
-    /// Only native Messages carries an established request TTL; Responses route/model retention
-    /// is not inferred from the provider's brand.
+    /// Retention follows the configured provider, not the shared Responses wire format.
     pub(crate) fn prompt_cache_lore(
         &self,
         model: &ModelInfo,
         effort: Option<&ReasoningEffort>,
     ) -> Option<WarmingLore> {
-        self.uses_claude_subscription()
-            .then(|| WarmingLore::Claude {
+        if self.uses_claude_subscription() {
+            Some(WarmingLore::Claude {
                 ttl: self.anthropic_cache_ttl(model, effort),
             })
+        } else if self.state.provider.info().is_openai() {
+            Some(WarmingLore::OpenAi)
+        } else {
+            None
+        }
     }
 
     /// Captures what a conversation request reports when it completes; none when nothing
@@ -202,6 +212,18 @@ impl ModelClient {
                 replay()
             },
         })
+    }
+
+    /// Only conversation inference refreshes the estimate, not compaction or connection prewarm.
+    pub(crate) fn responses_cache_dispatch(
+        &self,
+        model: &ModelInfo,
+        effort: Option<&ReasoningEffort>,
+        metadata: &CodexResponsesMetadata,
+    ) -> Option<Dispatch> {
+        matches!(metadata.request_kind, Some(CodexResponsesRequestKind::Turn))
+            .then(|| self.prompt_cache_dispatch(model, effort, || Err(Unreplayable::Provider)))
+            .flatten()
     }
 
     pub(super) fn warming_request(
