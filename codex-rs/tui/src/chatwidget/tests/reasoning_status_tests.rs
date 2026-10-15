@@ -111,7 +111,6 @@ async fn reasoning_status_tracks_items_and_restores_after_tool_activity() {
     for width in [80, 40] {
         let view = super::super::work_status::WorkStatusView {
             goal: None,
-            status: None,
             reasoning: chat.reasoning_header.as_deref(),
         };
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(

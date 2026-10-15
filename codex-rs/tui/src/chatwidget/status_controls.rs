@@ -47,6 +47,7 @@ impl ChatWidget {
             details: details.clone(),
             details_max_lines,
         });
+        let header = self.work_status_header(&header);
         let status_indicator_updated = self.bottom_pane.update_status(
             header,
             details,

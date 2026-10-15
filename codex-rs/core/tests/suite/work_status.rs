@@ -29,8 +29,8 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         json!({"activity": "Read renderer"}),
         json!({"activity": "Write tests"}),
         json!({"activity": " "}),
-        json!({"activity": "Release"}),
-        json!({"activity": "x".repeat(161)}),
+        json!({"activity": "🦀".repeat(50)}),
+        json!({"activity": "🦀".repeat(51)}),
     ];
     let mut requests = Vec::new();
     for (index, update) in updates.iter().enumerate() {
@@ -108,7 +108,7 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
             },
             WorkStatus {
                 turn_id,
-                activity: "Release".into(),
+                activity: "🦀".repeat(50),
                 emitted_at: None,
             },
         ]
@@ -118,7 +118,7 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         "Work status updated.",
         "Summaries must contain visible text without control characters.",
         "Work status updated.",
-        "Keep each summary within 160 characters.",
+        "Keep each summary within 50 characters.",
     ]
     .iter()
     .enumerate()

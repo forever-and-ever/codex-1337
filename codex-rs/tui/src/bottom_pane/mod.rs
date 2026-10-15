@@ -2281,17 +2281,12 @@ impl BottomPane {
                 || self.pending_input_preview.pending_steer.is_some()
                 || !self.pending_input_preview.rejected_steers.is_empty();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
-            // Reuse an empty composer gap rather than reserving another blank row.
-            let trailing_rows = u16::from(
-                has_inline_previews || options.composer_gap.is_none_or(|gap| gap.needs_separator),
-            );
             if let Some(status) = self.status_widget() {
                 flex.push(
                     /*flex*/ 0,
                     activity_inset::with_tip(
                         status.with_timer(&self.status_timer),
                         options.working_tip.filter(|_| !has_inline_previews),
-                        trailing_rows,
                     ),
                 );
             }
@@ -2308,7 +2303,6 @@ impl BottomPane {
                                 && self.frame_requester.mode()
                                     == crate::tui::PresentationMode::Normal,
                         },
-                        trailing_rows,
                     ),
                 );
             }

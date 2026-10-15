@@ -267,12 +267,13 @@ impl LiveWorkView {
     }
 
     pub(crate) fn desired_height(&self, width: u16) -> u16 {
-        u16::try_from(self.lines(width).len()).unwrap_or(u16::MAX)
+        u16::try_from(self.lines(crate::render::live_section::content_width(width)).len()).unwrap_or(u16::MAX)
     }
 
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer) {
         self.hits.clear();
         Clear.render(area, buf);
+        let area = crate::render::live_section::content_area(area);
         if area.is_empty() {
             return;
         }
@@ -818,6 +819,7 @@ mod tests {
                 .iter()
                 .find(|(_, focus)| focus == &Focus::Row(Key::Group(group)))
                 .unwrap();
+            assert_eq!(hit.x, area.x + crate::ui_consts::LIVE_PREFIX_COLS);
             let glyph: String = (hit.x..hit.x + 3)
                 .map(|x| buf[(x, hit.y)].symbol())
                 .collect();
