@@ -80,18 +80,29 @@ fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts>
     })
 }
 
+fn command_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+    if !input.name.is_default_namespace() {
+        return None;
+    }
+    let mut lines = match input.name.name.as_str() {
+        "bash" => crate::exec_cell::rows::formatted_input(input.payload.text())?,
+        "exec_command" => {
+            let arguments: serde_json::Value = serde_json::from_str(input.payload.text()).ok()?;
+            crate::exec_cell::rows::formatted_input(arguments.get("cmd")?.as_str()?)?
+        }
+        _ => return None,
+    };
+    mark_lines(&mut lines, OutputProvenance::Formatted);
+    Some(super::activity_parts::ActivityParts {
+        lines,
+        ..Default::default()
+    })
+}
+
 fn argument_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
     let input = input?;
-    if let Some(read) = read_input(input) {
-        return Some(read);
-    }
-    if input.name.is_default_namespace() && input.name.name == "bash" {
-        let mut lines = crate::exec_cell::rows::formatted_input(input.payload.text())?;
-        mark_lines(&mut lines, OutputProvenance::Formatted);
-        return Some(super::activity_parts::ActivityParts {
-            lines,
-            ..Default::default()
-        });
+    if let Some(parts) = read_input(input).or_else(|| command_input(input)) {
+        return Some(parts);
     }
     let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input.payload else {
         return None;
@@ -175,17 +186,8 @@ fn input_projection(
 ) -> Option<super::activity_parts::ActivityParts> {
     let any = cell.as_any();
     if let Some(input) = any.downcast_ref::<super::ToolInputCell>() {
-        if let Some(read) = read_input(&input.0) {
-            return Some(read);
-        }
-        if input.0.name.is_default_namespace()
-            && input.0.name.name == "bash"
-            && let Some(lines) = crate::exec_cell::rows::formatted_input(input.0.payload.text())
-        {
-            return Some(super::activity_parts::ActivityParts {
-                lines,
-                ..Default::default()
-            });
+        if let Some(parts) = read_input(&input.0).or_else(|| command_input(&input.0)) {
+            return Some(parts);
         }
         let mut lines = captured_lines(
             &input.0.name.to_string(),

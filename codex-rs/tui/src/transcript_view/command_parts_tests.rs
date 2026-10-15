@@ -256,7 +256,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     insta::assert_snapshot!(snapshots.join("\n\n"));
     // A source-first highlight once bypassed every semantic child projection.
     // Hold the initial input until real call arguments arrive; raw remains exact.
-    let script = "const answer = 42;\ntext(await fs.readFile(\"src/main.rs\", \"utf8\"));\nawait tools.update_work_status({activity: \"Reading source\"});\n";
+    let script = "const answer = 42;\ntext(await fs.readFile(\"src/main.rs\", \"utf8\"));\nawait tools.update_work_status({activity: \"Reading source\"});\ntext(await tools.exec_command({cmd: \"cat Cargo.toml\"}));\n";
     let owner = codex_app_server_protocol::CodeModeOwner {
         thread_id: codex_protocol::ThreadId::from_u128(7),
         exec_call_id: "code".into(),
@@ -351,6 +351,14 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 payload: ToolInputPayload::Json(r#"{"activity":"Reading source"}"#.into()),
             },
         ));
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+            ToolInput {
+                id: "input:command-child".into(),
+                call_id: "command-child".into(),
+                name: ToolName::plain("exec_command"),
+                payload: ToolInputPayload::Json(r#"{"cmd":"cat Cargo.toml"}"#.into()),
+            },
+        ));
         code[0] = reduce(codex_app_server_protocol::ThreadItem::CommandExecution {
             sandbox_type: None,
             model_context: None,
@@ -370,6 +378,8 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         tests::render(&mut view, &code, 104, 26);
         let nested = view.current_layout(&code, 0).unwrap();
         assert!(nested.text().contains("Read src/main.rs"));
+        assert!(nested.text().contains("Read Cargo.toml"));
+        assert!(!nested.text().contains("\"cmd\""));
         assert!(nested.text().contains("update_work_status"));
         assert!(nested.text().contains("Reading source"));
         assert!(!nested.text().contains("const answer"));
