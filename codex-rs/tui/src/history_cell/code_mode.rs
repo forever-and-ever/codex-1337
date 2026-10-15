@@ -154,16 +154,14 @@ pub(crate) fn insert_fact(facts: &mut Vec<CodeModeItem>, fact: CodeModeItem) {
     }
 }
 
-fn call_ids<'a>(exec_call_id: &'a str, facts: &'a [CodeModeItem]) -> HashSet<&'a str> {
-    std::iter::once(exec_call_id)
-        .chain(facts.iter().filter_map(|fact| match &fact.event {
-            CodeModeEvent::Started { call_id, .. }
-            | CodeModeEvent::ToolCall { call_id }
-            | CodeModeEvent::WaitStarted { call_id, .. }
-            | CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
-            CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
-        }))
-        .collect()
+fn call_ids<'a>(exec_call_id: &'a str, facts: &'a [CodeModeItem]) -> impl Iterator<Item = &'a str> {
+    std::iter::once(exec_call_id).chain(facts.iter().filter_map(|fact| match &fact.event {
+        CodeModeEvent::Started { call_id, .. }
+        | CodeModeEvent::ToolCall { call_id }
+        | CodeModeEvent::WaitStarted { call_id, .. }
+        | CodeModeEvent::WaitCompleted { call_id, .. } => Some(call_id.as_str()),
+        CodeModeEvent::Allocated | CodeModeEvent::Finished { .. } => None,
+    }))
 }
 
 impl LegacyCodeMode {
@@ -178,12 +176,16 @@ impl LegacyCodeMode {
     }
 
     fn calls(&self) -> HashSet<&str> {
-        call_ids(&self.exec_call_id, &self.facts)
+        call_ids(&self.exec_call_id, &self.facts).collect()
     }
 
     fn owns(&self, cell: &dyn HistoryCell) -> bool {
+        if cell.as_any().is::<CodeModeCell>() {
+            return false;
+        }
         let ids = cell.tool_call_ids();
-        !ids.is_empty() && ids.iter().all(|id| self.calls().contains(id))
+        let calls = self.calls();
+        !ids.is_empty() && ids.iter().all(|id| calls.contains(id))
     }
 
     fn insert_member(&mut self, incoming: Arc<dyn HistoryCell>) {
@@ -316,12 +318,16 @@ impl CodeModeCell {
     }
 
     fn calls(&self) -> HashSet<&str> {
-        call_ids(self.exec_call_id(), self.facts())
+        call_ids(self.exec_call_id(), self.facts()).collect()
     }
 
     pub(crate) fn owns(&self, cell: &dyn HistoryCell) -> bool {
+        if cell.as_any().is::<CodeModeCell>() {
+            return false;
+        }
         let ids = cell.tool_call_ids();
-        !ids.is_empty() && ids.iter().all(|id| self.calls().contains(id))
+        let calls = self.calls();
+        !ids.is_empty() && ids.iter().all(|id| calls.contains(id))
     }
 
     fn event_time(&self) -> Option<i64> {
@@ -433,6 +439,14 @@ impl HistoryCell for CodeModeCell {
     }
     fn activity_header(&self) -> Option<ActivityHeader> {
         self.header().as_ref().map(ActivityHeader::at_end)
+    }
+
+    fn tool_call_ids(&self) -> Vec<&str> {
+        let mut seen = HashSet::new();
+        call_ids(self.exec_call_id(), self.facts())
+            .chain(self.members().iter().flat_map(|cell| cell.tool_call_ids()))
+            .filter(|id| seen.insert(*id))
+            .collect()
     }
 
     fn activity_ids(&self) -> Vec<String> {

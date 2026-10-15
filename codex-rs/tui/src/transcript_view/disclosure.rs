@@ -360,6 +360,57 @@ impl TranscriptView {
         })
     }
 
+    pub(crate) fn reveal_call(&mut self, cells: &[Arc<dyn HistoryCell>], call_id: &str) -> bool {
+        use crate::history_cell::invocation::Action;
+        use crate::history_cell::invocation::Panel;
+        use crate::history_cell::invocation::Port;
+
+        let Some(index) = cells
+            .iter()
+            .position(|cell| cell.tool_call_ids().contains(&call_id))
+        else {
+            return false;
+        };
+        self.end_selection(cells);
+        self.jump_to_entry(cells, index);
+        let controls = self
+            .current_layout(cells, index)
+            .map(|layout| layout.fold_targets())
+            .unwrap_or_default();
+        let input = |target: &FoldTarget| {
+            matches!(
+                target,
+                FoldTarget::Invocation {
+                    action: Action::Toggle(Port::Input, _),
+                    ..
+                }
+            )
+        };
+        let target = controls
+            .iter()
+            .find(|target| {
+                input(target)
+                    && matches!(target, FoldTarget::Invocation { call_id: id, .. } if id == call_id)
+            })
+            .or_else(|| controls.iter().find(|target| input(target)))
+            .or_else(|| controls.first())
+            .cloned();
+        if let Some(target) = target {
+            if matches!(
+                target,
+                FoldTarget::Invocation {
+                    action: Action::Toggle(Port::Input, Panel::Visible(_)),
+                    ..
+                }
+            ) {
+                self.toggle_activity(cells, index, target);
+            } else {
+                self.focus_fold(cells, index, target);
+            }
+        }
+        true
+    }
+
     fn focus_activity(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
         let Some(target) = self
             .current_layout(cells, index)

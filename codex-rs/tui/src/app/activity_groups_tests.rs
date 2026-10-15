@@ -648,6 +648,94 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         &|_| crate::multi_agents::AgentMetadata::default(),
     ));
     assert_prompt_arrival_ordering().await;
+    // Work and process inventories identify real calls, not the block's display identity.
+    let navigation = thread_items_to_transcript_cells(
+        Some(thread),
+        &app.config.cwd,
+        [
+            owned_item(
+                &a,
+                code_mode(
+                    "exec-a",
+                    CodeModeEvent::Started {
+                        call_id: "exec-a".into(),
+                        script: Some("await tools.bash('cat child-a.rs');".into()),
+                    },
+                ),
+            ),
+            owned_item(
+                &a,
+                code_mode(
+                    "exec-a",
+                    CodeModeEvent::ToolCall {
+                        call_id: "fact-only".into(),
+                    },
+                ),
+            ),
+            owned_item(
+                &a,
+                ThreadItem::ToolInput(codex_protocol::tool_input::ToolInput {
+                    id: "input:metadata-only".into(),
+                    call_id: "metadata-only".into(),
+                    name: codex_protocol::ToolName::plain("fs"),
+                    payload: codex_protocol::tool_input::ToolInputPayload::Json(
+                        r#"{"operation":"read","path":"input"}"#.into(),
+                    ),
+                }),
+            ),
+            owned_item(&a, call("child-a", ActivityKind::Exploration, "completed")),
+            call("plain-direct", ActivityKind::Exploration, "completed"),
+        ],
+        RawReasoningVisibility::Hidden,
+        None,
+        &|_| Default::default(),
+    );
+    assert_eq!(navigation.len(), 2);
+    for call_id in [
+        "exec-a",
+        "fact-only",
+        "metadata-only",
+        "child-a",
+        "plain-direct",
+    ] {
+        let mut view = crate::transcript_view::TranscriptView::default();
+        render(&mut view, &navigation);
+        assert!(!view.reveal_call(&navigation, "not-loaded"));
+        assert!(view.is_following());
+        assert!(view.reveal_call(&navigation, call_id), "{call_id}");
+        assert!(!view.is_following());
+        assert!(view.is_activity_focused());
+        let revealed = render(&mut view, &navigation);
+        assert!(
+            revealed.contains(if call_id == "plain-direct" {
+                "plain-direct.rs"
+            } else {
+                "child-a.rs"
+            }),
+            "{call_id}: {revealed}"
+        );
+        // Repeating Show in history never folds an already visible input away.
+        assert!(view.reveal_call(&navigation, call_id));
+        assert_eq!(render(&mut view, &navigation), revealed);
+    }
+    // A sparse scoped suffix can share an outer call ID with a legacy descriptor,
+    // but canonical navigation IDs cannot turn one execution block into another's child.
+    let sparse: Arc<dyn HistoryCell> = Arc::new(history_cell::CodeModeCell::Scoped(
+        crate::code_mode_transcript::ScopedCodeMode::new(a.clone(), false),
+    ));
+    assert_eq!(sparse.tool_call_ids(), vec!["exec-a"]);
+    let mut isolated = vec![Arc::clone(&sparse)];
+    let (range, replacements) = history_cell::reconcile_code_mode(&isolated, &legacy_fact).unwrap();
+    isolated.splice(range, replacements);
+    assert_eq!(isolated.len(), 2);
+    assert!(Arc::ptr_eq(&isolated[1], &sparse));
+    assert!(
+        !isolated[0]
+            .as_any()
+            .downcast_ref::<history_cell::CodeModeCell>()
+            .unwrap()
+            .owns(sparse.as_ref())
+    );
     for split in 1..history.len() {
         app.reset_transcript_state_after_clear();
         app.transcript_cells = thread_items_to_transcript_cells(
