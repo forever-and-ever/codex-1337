@@ -73,6 +73,26 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
     // measurements retain descriptors, not a running terminal task or alias map.
     scope.capture_alias("wait-1".into(), &turn);
     let captured_owner = service.transcript.owner("wait-1").unwrap();
+    // Approval emits a synthetic command start before execution begins. It must carry
+    // the same owner or the client creates an unrelated live command without its input.
+    let approval = EventMsg::ExecApprovalRequest(
+        serde_json::from_value(serde_json::json!({
+            "call_id": "wait-1",
+            "started_at_ms": 0,
+            "command": ["true"],
+            "cwd": "/workspace",
+            "parsed_cmd": []
+        }))
+        .unwrap(),
+    );
+    let EventMsg::CodeModeOwned(approval) = service.transcript.wrap(approval, None) else {
+        panic!("approval must carry its Code Mode owner");
+    };
+    assert_eq!(approval.owner, owner);
+    assert!(matches!(
+        approval.payload().as_ref(),
+        EventMsg::ExecApprovalRequest(_)
+    ));
     // Cancellation releases only its own wait; the tracker owns ordered completion.
     scope.capture_alias("wait-2".into(), &turn);
     let target = CodeModeOwner {
