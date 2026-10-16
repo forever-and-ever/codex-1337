@@ -646,7 +646,25 @@ impl TextLayout {
                     .iter()
                     .map(|span| span.content.as_ref()),
             );
-            rows.extend(layout_line(line, start, width, index));
+            // A terminal delimiter belongs to copied source, not an extra painted row.
+            // Retain the logical empty line and its byte offset, including intentional
+            // blank lines before it; suppress only the last row of a captured run.
+            let copy_only = line.origin.output_provenance
+                == crate::history_cell::output_provenance::OutputProvenance::Captured
+                && line
+                    .line
+                    .line
+                    .spans
+                    .iter()
+                    .all(|span| span.content.is_empty())
+                && index > 0
+                && logical[index - 1].origin.output_provenance == line.origin.output_provenance
+                && logical.get(index + 1).is_none_or(|next| {
+                    next.origin.output_provenance != line.origin.output_provenance
+                });
+            if !copy_only {
+                rows.extend(layout_line(line, start, width, index));
+            }
             has_source_line |= !client_label;
             if !client_label && let Some(row) = rows.last_mut() {
                 row.line_end = Some(text.len());

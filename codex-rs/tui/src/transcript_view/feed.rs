@@ -1223,7 +1223,7 @@ const MAX_TITLE: usize = 48 + super::invocation::CONTROL_COLUMNS;
 
 /// How far a header's figures reach along its row.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Reach {
+pub(super) enum Reach {
     Total,
     Split,
     Legend,
@@ -1241,7 +1241,7 @@ impl Reach {
 
 /// How a header divides its row: the title's columns, and how far the figures after it reach.
 /// Every header at one width divides it alike, so their figures line up.
-fn header_columns(width: u16) -> (usize, Reach) {
+pub(super) fn header_columns(width: u16) -> (usize, Reach) {
     let room = usize::from(width)
         .saturating_sub(usize::from(crate::transcript_geometry::TITLE_COLUMN) + 1);
     let reach = [Reach::Legend, Reach::Split]

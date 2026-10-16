@@ -115,6 +115,8 @@ impl App {
     ) -> Result<Rect> {
         let preparation_stage =
             crate::ui_latency::enter(crate::ui_latency::Stage::FramePreparation);
+        self.transcript_view
+            .enable_background_preparation(tui.frame_requester());
         self.prepare_live_work();
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(

@@ -195,7 +195,7 @@ struct CachedLayout {
     animation_tick: Option<u64>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct CellPresentation {
     separated: bool,
     turn_tip_space: bool,
@@ -205,6 +205,18 @@ pub(super) struct CellPresentation {
     /// The digest of the entry's feed rows; zero when it draws as a loose entry.
     feed: u64,
     detailed: bool,
+}
+
+impl CellPresentation {
+    pub(super) fn decorate(self, mut layout: TextLayout) -> TextLayout {
+        if self.separated {
+            layout = layout.with_leading_separator();
+        }
+        if self.turn_tip_space {
+            layout = layout.with_leading_spacer();
+        }
+        layout
+    }
 }
 
 impl TranscriptView {
@@ -365,6 +377,38 @@ impl TranscriptView {
         let output_tokens = &self.tool_output_tokens;
         let input_open = self.feed.input_open(cells, index);
         Some(self.cache.get(cell, width, presentation, || {
+            if mode == HistoryRenderMode::Rich && !detailed && seat.content != Content::Hidden {
+                if let Some(prepared) = invocations.defer(
+                    cell.as_ref(),
+                    super::invocation::PreparationSource::Retained(cell),
+                    || Some(Arc::clone(cell)),
+                    Vec::new(),
+                    width,
+                    presentation,
+                    input_open,
+                    seat.content,
+                    full_content,
+                    output_tokens,
+                    expanded_parts,
+                    || {
+                        seat.header.as_ref().map(|header| {
+                            feed.header_rows(
+                                cells,
+                                header,
+                                bills,
+                                output_tokens,
+                                expanded_parts,
+                                output_mode,
+                                invocations,
+                                full_content,
+                                width,
+                            )
+                        })
+                    },
+                ) {
+                    return prepared;
+                }
+            }
             let content_width = crate::transcript_geometry::content_width(width, mode);
             // A member's clock is its item's header's.
             let timestamp = if loose {
@@ -565,7 +609,7 @@ impl TranscriptView {
                     width,
                 ));
             }
-            layout
+            super::invocation::PreparedLayout::Ready(layout)
         }))
     }
 
@@ -616,12 +660,12 @@ impl LayoutCache {
         }
     }
 
-    pub(super) fn get(
+    pub(super) fn get<R: Into<super::invocation::PreparedLayout>>(
         &mut self,
         cell: &Arc<dyn HistoryCell>,
         width: u16,
         presentation: CellPresentation,
-        render: impl FnOnce() -> TextLayout,
+        render: impl FnOnce() -> R,
     ) -> Arc<TextLayout> {
         let source = Arc::downgrade(cell);
         let animation_tick = cell.transcript_animation_tick();
@@ -640,17 +684,12 @@ impl LayoutCache {
             }
             return layout;
         }
-        let layout = render();
-        let layout = if presentation.separated {
-            layout.with_leading_separator()
-        } else {
-            layout
+        let layout = match render().into() {
+            super::invocation::PreparedLayout::Ready(layout) => layout,
+            super::invocation::PreparedLayout::Cached(layout)
+            | super::invocation::PreparedLayout::Pending(layout) => return layout,
         };
-        let layout = Arc::new(if presentation.turn_tip_space {
-            layout.with_leading_spacer()
-        } else {
-            layout
-        });
+        let layout = Arc::new(presentation.decorate(layout));
         self.entries.retain(|entry| !entry.source.ptr_eq(&source));
         self.entries.push(CachedLayout {
             source,
@@ -666,6 +705,16 @@ impl LayoutCache {
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    pub(super) fn invalidate_call(&mut self, call_id: &str) {
+        self.entries.retain(|entry| {
+            entry.source.upgrade().is_some_and(|cell| {
+                !crate::history_cell::invocation::collect(cell.as_ref())
+                    .iter()
+                    .any(|call| call.id == call_id)
+            })
+        });
     }
 
     fn evict(&mut self) {

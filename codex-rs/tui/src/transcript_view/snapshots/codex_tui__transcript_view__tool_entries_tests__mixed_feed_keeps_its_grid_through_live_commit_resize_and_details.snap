@@ -10,15 +10,15 @@ width=64
 
                 More text
 
-  14:17     Command           [in]             [out]
-            Command           [in]             [out]
-            Command           [in]             [out]
-            Command (exec)                                   128
+  14:17     Command    [in]             [out]
+            Command    [in]             [out]
+            Command    [in]             [out]
+            Command (exec)                                 128
             [in]             [out]
-            Command           [in]             [out]
+            Command    [in]             [out]
               • Edited
         [+]       foo.rs (+1, -0)
-            Command           [in]             [out]
+            Command    [in]             [out]
               • Edited
         [+]       bar.rs (+1, -0)
 
@@ -35,17 +35,17 @@ expanded width=64
 
                 More text
 
-  14:17     Command           [in [raw] [fmt]] [out]
+  14:17     Command    [in [raw] [fmt]] [out]
               Stored execution · exact input unavailable
               poll foo
-            Command           [in]             [out]
-            Command           [in]             [out]
-            Command (exec)                                   128
+            Command    [in]             [out]
+            Command    [in]             [out]
+            Command (exec)                                 128
             [in]             [out]
-            Command           [in]             [out]
+            Command    [in]             [out]
               • Edited
         [+]       foo.rs (+1, -0)
-            Command           [in]             [out]
+            Command    [in]             [out]
               • Edited
         [+]       bar.rs (+1, -0)
 
@@ -99,7 +99,7 @@ width=32
             Command
             [in]
             [out]
-            Command (exec)   128
+            Command (exe…  128
             [in]
             [out]
             Command

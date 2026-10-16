@@ -3,7 +3,7 @@ source: tui/src/transcript_view/diff_source_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 source and file groups
-            Command (apply_patch)                                [in [raw]      ] [out]              123
+            Command (apply_patch)       [in [raw]      ] [out]              123
               *** Begin Patch
               *** Add File: alpha.rs
               +alpha body
@@ -15,13 +15,13 @@ source and file groups
         [+]       beta.rs (+2, -0)
 
 file groups without ports
-            Command (apply_patch)                                [in]             [out]              123
+            Command (apply_patch)       [in]             [out]              123
               • Edited
         [+]       alpha.rs (+2, -0)
         [+]       beta.rs (+2, -0)
 
 second file
-            Command (apply_patch)                                [in]             [out]              123
+            Command (apply_patch)       [in]             [out]              123
               • Edited
         [+]       alpha.rs (+2, -0)
         [-]       beta.rs (+2, -0)
@@ -29,7 +29,7 @@ second file
                   2 +second beta line
 
 input visibility preserves file folds
-            Command (apply_patch)        [in [raw]      ] [out]              123
+            Command (apply_patch)      [in [raw]      ] [out]              123
               *** Begin Patch
               *** Add File: alpha.rs
               +alpha body
@@ -43,7 +43,7 @@ input visibility preserves file folds
                   2 +second beta line
 
 input visibility preserves file folds
-            Command (apply_patch)        [in]             [out]              123
+            Command (apply_patch)      [in]             [out]              123
               • Edited
         [+]       alpha.rs (+2, -0)
         [-]       beta.rs (+2, -0)
@@ -51,7 +51,7 @@ input visibility preserves file folds
                   2 +second beta line
 
 both files
-            Command (apply_patch)                                [in]             [out]              123
+            Command (apply_patch)       [in]             [out]              123
               • Edited
         [-]       alpha.rs (+2, -0)
                   1 +alpha body
@@ -61,7 +61,7 @@ both files
                   2 +second beta line
 
 output and edits
-            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            Command (apply_patch)       [in]             [out [raw] [fmt]]  123
               {
                 "result": "patched"
               }
@@ -74,7 +74,7 @@ output and edits
                   2 +second beta line
 
 output format preserves file folds
-            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            Command (apply_patch)       [in]             [out [raw] [fmt]]  123
               {"result":"patched"}
               • Edited
         [-]       alpha.rs (+2, -0)
@@ -85,7 +85,7 @@ output format preserves file folds
                   2 +second beta line
 
 output format preserves file folds
-            Command (apply_patch)                                [in]             [out [raw] [fmt]]  123
+            Command (apply_patch)       [in]             [out [raw] [fmt]]  123
               {
                 "result": "patched"
               }

@@ -325,7 +325,7 @@ impl TranscriptView {
                     lines
                 };
                 (
-                    TextLayout::new(lines, width),
+                    Arc::new(TextLayout::new(lines, width)),
                     key.is_some_and(|key| key.is_tool_entry),
                 )
             })
@@ -364,7 +364,7 @@ impl TranscriptView {
                     lines.activity.extend(lines.auxiliary);
                     TextLayout::new(lines.activity, width)
                 };
-                (layout, is_tool_entry)
+                (Arc::new(layout), is_tool_entry)
             })
         })
     }
@@ -373,7 +373,7 @@ impl TranscriptView {
         &mut self,
         width: u16,
         key: Option<ActiveCellTranscriptKey>,
-        layout: impl FnOnce(u16, &Self) -> Option<(TextLayout, bool)>,
+        layout: impl FnOnce(u16, &Self) -> Option<(Arc<TextLayout>, bool)>,
     ) -> bool {
         let next = key.map(|key| (width, key));
         if key.is_some_and(|key| key.cacheable) && self.live_key == next {
@@ -382,12 +382,21 @@ impl TranscriptView {
         let revision_changed = self.live_key.is_none()
             || self.live_key.map(|(_, key)| key.revision) != next.map(|(_, key)| key.revision);
         self.live_key = next;
-        self.live_separated = None;
+
         self.live_continuation = key.is_some_and(|key| key.is_stream_continuation);
         let live = layout(width, self).map(|(layout, tool_entry)| {
             self.live_tool_entry = tool_entry;
-            Arc::new(layout)
+            layout
         });
+        if self
+            .live
+            .as_ref()
+            .zip(live.as_ref())
+            .is_some_and(|(old, new)| Arc::ptr_eq(old, new))
+        {
+            return false;
+        }
+        self.live_separated = None;
         if self.live.as_ref().map(|layout| layout.text())
             != live.as_ref().map(|layout| layout.text())
         {

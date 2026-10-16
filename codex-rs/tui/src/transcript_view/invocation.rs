@@ -35,6 +35,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Weak;
 
+#[path = "invocation_prepare.rs"]
+mod preparation;
+pub(super) use preparation::PreparedLayout;
+
 pub(super) const CONTROL_COLUMNS: usize = "[in [raw] [fmt]] [out [raw] [fmt]]".len();
 
 fn input_open_by_default(name: Option<&ToolName>) -> bool {
@@ -51,7 +55,7 @@ fn input_open_by_default(name: Option<&ToolName>) -> bool {
     })
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 struct Choices {
     input: Option<Panel>,
     output: Option<Panel>,
@@ -305,7 +309,8 @@ struct PreparationCache {
 
 #[derive(Default)]
 pub(super) struct Invocations {
-    inputs: HashMap<String, ToolInput>,
+    inputs: HashMap<String, Arc<ToolInput>>,
+    background: RefCell<preparation::Background>,
     choices: HashMap<String, Choices>,
     prepared: RefCell<PreparationCache>,
 }
@@ -375,7 +380,7 @@ impl Invocations {
     }
 
     pub(super) fn input(&self, id: &str) -> Option<&ToolInput> {
-        self.inputs.get(id)
+        self.inputs.get(id).map(AsRef::as_ref)
     }
 
     fn ports(
@@ -464,8 +469,8 @@ impl Invocations {
         full: bool,
     ) -> HeaderRows {
         let bill = tokens.map(|tokens| (tokens, super::text::token_label(tokens)));
-        let bill_width = bill.as_ref().map_or(0, |(_, label)| label.len() as u16 + 2);
-        let width = width.saturating_sub(bill_width).max(1);
+        // The caller supplies the shared title lane; figures occupy the lane after it.
+        let width = width.max(1);
         let formatted = prepared
             .input(call, self.input(call.id), input_width, false)
             .0;
@@ -655,6 +660,24 @@ impl Invocations {
         expanded: &std::collections::HashSet<String>,
         auxiliary: Vec<HyperlinkLine>,
     ) -> Option<TextLayout> {
+        self.layout_inner(
+            cell, source, width, open, placement, full, tokens, expanded, auxiliary, false,
+        )
+    }
+
+    fn layout_inner(
+        &self,
+        cell: &dyn HistoryCell,
+        source: PreparationSource<'_>,
+        width: u16,
+        open: bool,
+        placement: super::feed::Content,
+        full: bool,
+        tokens: &super::tool_output_tokens::ToolOutputTokens,
+        expanded: &std::collections::HashSet<String>,
+        auxiliary: Vec<HyperlinkLine>,
+        pending: bool,
+    ) -> Option<TextLayout> {
         let calls = collect(cell);
         if calls.is_empty() {
             return None;
@@ -680,7 +703,12 @@ impl Invocations {
                     &prepared,
                     input_width,
                     open && calls.len() == 1,
-                    body_width,
+                    super::feed::header_columns(width)
+                        .0
+                        .saturating_sub(usize::from(
+                            indent - crate::transcript_geometry::TITLE_COLUMN,
+                        ))
+                        .min(usize::from(body_width)) as u16,
                     tokens.for_ids(&call.output_ids()),
                     full,
                 );
@@ -698,14 +726,21 @@ impl Invocations {
                 }));
             }
             let body_indent = crate::transcript_geometry::ENTRY_INDENT;
-            let mut body = self.body(
-                call,
-                &prepared,
-                open && calls.len() == 1,
-                body_width.saturating_sub(body_indent).max(1),
-                full,
-                expanded,
-            );
+            let mut body = if pending {
+                ActivityParts::default()
+            } else {
+                self.body(
+                    call,
+                    &prepared,
+                    open && calls.len() == 1,
+                    body_width.saturating_sub(body_indent).max(1),
+                    full,
+                    expanded,
+                )
+            };
+            if pending && index == calls.len() - 1 {
+                body.lines.push(client_notice("Preparing input…"));
+            }
             body.lines = crate::transcript_geometry::gutter_lines(body.lines, body_indent);
             for control in &mut body.controls {
                 control.line += lines.len();
@@ -743,20 +778,60 @@ impl TranscriptView {
         cell: &dyn HistoryCell,
         auxiliary: Vec<HyperlinkLine>,
     ) -> Option<bool> {
-        if self.mode != crate::history_cell::HistoryRenderMode::Rich || self.detailed {
+        if self.mode != crate::history_cell::HistoryRenderMode::Rich
+            || self.detailed
+            || collect(cell).is_empty()
+        {
             return None;
         }
-        if collect(cell).is_empty() {
-            return None;
-        }
-        Some(self.sync_live_layout(width, key, |width, view| {
+        let mut pending = false;
+        let changed = self.sync_live_layout(width, key, |width, view| {
+            let source = key.map_or(PreparationSource::Uncached, |key| {
+                PreparationSource::Live(key.revision)
+            });
+            if let Some(prepared) = view.invocations.defer(
+                cell,
+                source,
+                || {
+                    let any = cell.as_any();
+                    if let Some(cell) = any.downcast_ref::<crate::history_cell::CodeModeCell>() {
+                        Some(Arc::new(cell.clone()) as Arc<dyn HistoryCell>)
+                    } else if let Some(cell) = any.downcast_ref::<crate::exec_cell::ExecCell>() {
+                        Some(Arc::new(cell.clone()) as Arc<dyn HistoryCell>)
+                    } else {
+                        any.downcast_ref::<crate::history_cell::ToolInputCell>()
+                            .map(|cell| {
+                                Arc::new(crate::history_cell::ToolInputCell(cell.0.clone()))
+                                    as Arc<dyn HistoryCell>
+                            })
+                    }
+                },
+                auxiliary.clone(),
+                width,
+                super::layout::CellPresentation::default(),
+                true,
+                super::feed::Content::Loose,
+                false,
+                &view.tool_output_tokens,
+                &view.disclosure.expanded,
+                || None,
+            ) {
+                return Some((
+                    match prepared {
+                        PreparedLayout::Ready(layout) => Arc::new(layout),
+                        PreparedLayout::Cached(layout) => layout,
+                        PreparedLayout::Pending(layout) => {
+                            pending = true;
+                            layout
+                        }
+                    },
+                    true,
+                ));
+            }
             view.invocations
                 .layout(
                     cell,
-                    key.filter(|key| key.cacheable)
-                        .map_or(PreparationSource::Uncached, |key| {
-                            PreparationSource::Live(key.revision)
-                        }),
+                    source,
                     width,
                     true,
                     super::feed::Content::Loose,
@@ -765,8 +840,18 @@ impl TranscriptView {
                     &view.disclosure.expanded,
                     auxiliary,
                 )
-                .map(|layout| (layout, true))
-        }))
+                .map(|layout| (Arc::new(layout), true))
+        });
+        if let Some(layout) = &self.live
+            && let Some(separated) = self.invocations.background.borrow().live_separated(layout)
+        {
+            self.live_separated = Some(separated);
+        }
+        // A placeholder is not the settled revision. Completion requests another frame.
+        if pending {
+            self.live_key = None;
+        }
+        Some(changed)
     }
 
     pub(crate) fn sync_search_invocation_tail(
@@ -804,10 +889,21 @@ impl TranscriptView {
     }
 
     pub(crate) fn record_tool_input(&mut self, input: ToolInput) {
-        if self.invocations.inputs.get(&input.call_id) != Some(&input) {
-            self.invocations.inputs.insert(input.call_id.clone(), input);
-            self.invocations.prepared.borrow_mut().entries.clear();
-            self.cache.clear();
+        if self.invocations.input(&input.call_id) != Some(&input) {
+            let call_id = input.call_id.clone();
+            self.invocations
+                .inputs
+                .insert(call_id.clone(), Arc::new(input));
+            self.invocations
+                .background
+                .borrow_mut()
+                .invalidate(&call_id);
+            self.invocations
+                .prepared
+                .borrow_mut()
+                .entries
+                .retain(|entry| entry.id != call_id);
+            self.cache.invalidate_call(&call_id);
             self.live_key = None;
             self.invalidate_live_search();
         }

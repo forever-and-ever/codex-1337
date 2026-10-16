@@ -93,6 +93,20 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         super::invocation::PreparationSource::Retained(&cells[0]),
     );
     assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
+    // Another call arriving must not evict an unchanged, already-open source pane.
+    view.record_tool_input(ToolInput {
+        id: "input:unrelated".into(),
+        call_id: "unrelated".into(),
+        name: ToolName::plain("python"),
+        payload: ToolInputPayload::Text("print(1)".into()),
+    });
+    assert!(std::rc::Rc::ptr_eq(
+        &retained_prepared,
+        &view.invocations.prepared(
+            &retained_calls[0],
+            super::invocation::PreparationSource::Retained(&cells[0]),
+        )
+    ));
     for _ in 0..3 {
         view.cache.clear();
         tests::render(&mut view, &cells, 80, 26);
@@ -945,4 +959,20 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             super::invocation::PreparationSource::Live(12),
         )
     ));
+    // A final delimiter remains copyable without becoming an extra painted row.
+    for source in ["print(42)\n", "print(42)\n\n"] {
+        let input = ToolInput {
+            id: "input:source".into(),
+            call_id: "source".into(),
+            name: ToolName::plain("python"),
+            payload: ToolInputPayload::Text(source.into()),
+        };
+        let lines = call.raw_input(Some(&input)).unwrap();
+        let layout = super::text::TextLayout::new(lines, 80);
+        assert_eq!(layout.text(), source);
+        assert_eq!(layout.row_count(), source.lines().count());
+        let narrow = layout.rewrap(6);
+        assert_eq!(narrow.text(), source);
+        assert_eq!(narrow.rewrap(80).row_count(), layout.row_count());
+    }
 }

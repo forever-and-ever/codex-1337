@@ -5,7 +5,7 @@ use super::TranscriptView;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-#[derive(Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct ToolOutputTokens {
     by_call: HashMap<String, HashSet<String>>,
     measurements: HashMap<String, Option<u64>>,
@@ -36,6 +36,28 @@ impl TranscriptView {
 }
 
 impl ToolOutputTokens {
+    pub(super) fn subset(&self, ids: &[String]) -> Self {
+        let mut subset = Self::default();
+        for qualified in ids {
+            let Some((kind, id)) = qualified.split_once(':') else {
+                continue;
+            };
+            if kind == "output" {
+                if let Some(count) = self.measurements.get(id) {
+                    subset.measurements.insert(id.to_owned(), *count);
+                }
+            } else if let Some(outputs) = self.by_call.get(id) {
+                subset.by_call.insert(id.to_owned(), outputs.clone());
+                for output in outputs {
+                    if let Some(count) = self.measurements.get(output) {
+                        subset.measurements.insert(output.clone(), *count);
+                    }
+                }
+            }
+        }
+        subset
+    }
+
     pub(super) fn for_ids(&self, ids: &[String]) -> Option<u64> {
         if ids.is_empty() {
             return None;

@@ -3,7 +3,7 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "stages.join(\"\\n\\n\")"
 ---
 Completed
-            Command           [in [raw] [fmt]] [out]
+            Command    [in [raw] [fmt]] [out]
               • Started `/root/worker`
             Command · outcome unavailable
             [in [raw] [fmt]] [out]
