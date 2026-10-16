@@ -500,7 +500,8 @@ impl App {
                     self.last_thread_usage_status_cell = None;
                     self.pending_thread_usage_history_refresh = false;
                     self.refresh_conversation_account(server, thread_id);
-                    self.chat_widget.refresh_openrouter_status(false, true);
+                    self.chat_widget
+                        .refresh_openrouter_status(crate::openrouter::StatusRefresh::Now);
                 }
                 self.chat_widget.add_info_message(
                     if !response.conversation_changed {

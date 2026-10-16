@@ -1,6 +1,7 @@
 use super::*;
 use crate::openrouter::Event;
 use crate::openrouter::ModelMenu;
+use crate::openrouter::StatusRefresh;
 use codex_app_server_protocol::OpenRouterEndpoint;
 use codex_app_server_protocol::OpenRouterHost;
 use codex_app_server_protocol::OpenRouterKey;
@@ -27,14 +28,14 @@ async fn openrouter_model_menu_snapshot() {
     preset.description = "preset for moonshotai/kimi-k3".into();
     chat.show_openrouter_models(
         ModelMenu::New(codex_app_server_protocol::ModelProviderOption {
-            id: "openrouter".into(),
+            id: codex_model_provider_info::OPENROUTER_PROVIDER_ID.into(),
             name: "OpenRouter".into(),
         }),
         crate::model_catalog::ModelListing {
             models: vec![model, preset],
             providers: Vec::new(),
         },
-        Some("moonshotai/kimi-k3".into()),
+        Some("moonshotai/kimi-k3".parse().unwrap()),
         None,
     );
     assert_chatwidget_snapshot!("openrouter_model_menu", render_bottom_popup(&chat, 100));
@@ -102,13 +103,13 @@ async fn openrouter_endpoints_snapshot() {
 #[tokio::test]
 async fn openrouter_status_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(None).await;
-    chat.config.model_provider_id = "openrouter".into();
+    chat.config.model_provider_id = codex_model_provider_info::OPENROUTER_PROVIDER_ID.into();
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     chat.token_info = Some(make_token_info(1000, 128000));
     chat.token_info.as_mut().unwrap().total_token_usage.cost =
         Some(Usd::from_nanodollars(420_000_000));
-    chat.refresh_openrouter_status(true, true);
+    chat.refresh_openrouter_status(StatusRefresh::Show);
     let mut request = None;
     while let Ok(event) = rx.try_recv() {
         if let AppEvent::OpenRouter(Event::RefreshStatus { id, .. }) = event {
@@ -118,7 +119,7 @@ async fn openrouter_status_snapshot() {
     chat.finish_openrouter_status(
         thread_id,
         request.unwrap(),
-        true,
+        StatusRefresh::Show,
         Ok(OpenRouterKeyStatus {
             key: OpenRouterKey {
                 name: "main".parse().unwrap(),

@@ -13,6 +13,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 pub(crate) const VIEW: &str = "openrouter-models";
 pub(crate) const ENDPOINTS_VIEW: &str = "openrouter-endpoints";
 pub(crate) const BUSY_VIEW: &str = "openrouter-busy";
+pub(crate) const ACCOUNT_SELECTION_VIEW: &str = "openrouter-account-selection";
 pub(crate) const MODEL_FOOTER: &str = "enter select · ctrl+p endpoints · ctrl+d forget · esc back";
 
 #[derive(Clone, Debug)]
@@ -34,7 +35,7 @@ impl ModelMenu {
 pub(crate) enum Request {
     Models {
         menu: ModelMenu,
-        selected: Option<String>,
+        selected: Option<ModelSlug>,
     },
     Save {
         menu: ModelMenu,
@@ -82,8 +83,15 @@ impl Request {
 pub(crate) enum Reply {
     Models(ModelListing),
     Endpoints(OpenRouterModelEndpointsResponse),
-    Saved(String),
+    Saved(ModelSlug),
     Done,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StatusRefresh {
+    Show,
+    Now,
+    AfterTurn,
 }
 
 #[derive(Debug)]
@@ -103,7 +111,7 @@ pub(crate) enum Event {
     },
     KeyPathPrompt {
         thread_id: ThreadId,
-        name: String,
+        name: KeyName,
     },
     RemoveKeyConfirm {
         thread_id: ThreadId,
@@ -112,16 +120,20 @@ pub(crate) enum Event {
     RefreshStatus {
         thread_id: ThreadId,
         id: uuid::Uuid,
-        show: bool,
+        mode: StatusRefresh,
     },
     StatusLoaded {
         thread_id: ThreadId,
         id: uuid::Uuid,
-        show: bool,
+        mode: StatusRefresh,
         result: Result<OpenRouterKeyStatus, String>,
     },
     ModelSubmitted {
         menu: ModelMenu,
+        input: String,
+    },
+    KeyNameSubmitted {
+        thread_id: ThreadId,
         input: String,
     },
     KeyFileSubmitted {

@@ -2,6 +2,7 @@ use super::*;
 use crate::openrouter::Event;
 use crate::openrouter::Reply;
 use crate::openrouter::Request;
+use crate::openrouter::StatusRefresh;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::OpenRouterKeyAddParams;
@@ -21,6 +22,7 @@ use codex_app_server_protocol::OpenRouterModelSaveParams;
 use codex_app_server_protocol::OpenRouterModelSaveResponse;
 use codex_app_server_protocol::ThreadAccountListParams;
 use codex_app_server_protocol::ThreadAccountListResponse;
+use codex_model_provider_info::OPENROUTER_PROVIDER_ID;
 
 impl App {
     pub(super) fn handle_openrouter_event(&mut self, server: &mut AppServerSession, event: Event) {
@@ -32,6 +34,20 @@ impl App {
                 Err(error) => self
                     .chat_widget
                     .openrouter_model_prompt(menu, input, Some(error)),
+            },
+            Event::KeyNameSubmitted { thread_id, input } => match input.parse() {
+                Ok(name) => {
+                    self.handle_openrouter_event(server, Event::KeyPathPrompt { thread_id, name })
+                }
+                Err(error) => self.chat_widget.openrouter_key_name_prompt(
+                    thread_id,
+                    if input.starts_with("sk-or-") {
+                        String::new()
+                    } else {
+                        input
+                    },
+                    Some(error),
+                ),
             },
             Event::KeyFileSubmitted {
                 thread_id,
@@ -48,7 +64,7 @@ impl App {
                 ),
                 Err(error) => self.chat_widget.openrouter_key_path_prompt(
                     thread_id,
-                    name.to_string(),
+                    name,
                     if input.starts_with("sk-or-") {
                         String::new()
                     } else {
@@ -88,13 +104,15 @@ impl App {
                                     .request_typed::<ModelListResponse>(ClientRequest::ModelList {
                                         request_id,
                                         params: ModelListParams {
-                                            model_provider: Some("openrouter".into()),
+                                            model_provider: Some(OPENROUTER_PROVIDER_ID.into()),
                                             include_hidden: Some(false),
                                             ..Default::default()
                                         },
                                     })
                                     .await?;
-                                if response.model_provider.as_deref() != Some("openrouter") {
+                                if response.model_provider.as_deref()
+                                    != Some(OPENROUTER_PROVIDER_ID)
+                                {
                                     anyhow::bail!(
                                         "The server does not support OpenRouter model selection"
                                     );
@@ -119,7 +137,9 @@ impl App {
                                         },
                                     )
                                     .await?;
-                                Ok(Reply::Saved(response.model.model))
+                                Ok(Reply::Saved(
+                                    response.model.model.parse().map_err(anyhow::Error::msg)?,
+                                ))
                             }
                             Request::Forget { slug, .. } => {
                                 handle
@@ -237,7 +257,7 @@ impl App {
                             server,
                             Event::Request(Request::Models {
                                 menu,
-                                selected: Some(slug.to_string()),
+                                selected: Some(slug),
                             }),
                         );
                     }
@@ -255,7 +275,8 @@ impl App {
                         Ok(Reply::Done),
                     ) => {
                         self.open_account_picker(server, thread_id);
-                        self.chat_widget.refresh_openrouter_status(false, true);
+                        self.chat_widget
+                            .refresh_openrouter_status(StatusRefresh::Now);
                     }
                     (request, Err(error)) => {
                         self.chat_widget.show_openrouter_failure(request, error)
@@ -268,7 +289,7 @@ impl App {
             Event::RefreshStatus {
                 thread_id,
                 id,
-                show,
+                mode,
             } => {
                 let handle = server.request_handle();
                 let request_id = server.next_request_id();
@@ -290,7 +311,7 @@ impl App {
                     tx.send(AppEvent::OpenRouter(Event::StatusLoaded {
                         thread_id,
                         id,
-                        show,
+                        mode,
                         result,
                     }));
                 });
@@ -298,12 +319,12 @@ impl App {
             Event::StatusLoaded {
                 thread_id,
                 id,
-                show,
+                mode,
                 result,
             } => {
                 if self.current_displayed_thread_id() == Some(thread_id) {
                     self.chat_widget
-                        .finish_openrouter_status(thread_id, id, show, result);
+                        .finish_openrouter_status(thread_id, id, mode, result);
                 }
             }
         }

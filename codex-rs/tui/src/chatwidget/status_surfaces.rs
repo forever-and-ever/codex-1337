@@ -771,11 +771,11 @@ impl ChatWidget {
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
                 .map(|used| format!("Context {used}% used")),
-            StatusLineItem::FiveHourLimit if self.config.model_provider_id == "openrouter" => {
+            StatusLineItem::FiveHourLimit if self.on_openrouter() => {
                 self.openrouter_balance_value()
             }
-            StatusLineItem::WeeklyLimit if self.config.model_provider_id == "openrouter" => {
-                self.openrouter_balance_value()
+            StatusLineItem::WeeklyLimit if self.on_openrouter() => {
+                self.openrouter_weekly_spend_value()
             }
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self

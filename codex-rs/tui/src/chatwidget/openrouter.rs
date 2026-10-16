@@ -1,7 +1,9 @@
 use super::*;
+use crate::openrouter::ACCOUNT_SELECTION_VIEW;
 use crate::openrouter::Event;
 use crate::openrouter::ModelMenu;
 use crate::openrouter::Request;
+use crate::openrouter::StatusRefresh;
 use crate::openrouter::VIEW;
 use codex_app_server_protocol::OpenRouterKeyState;
 use codex_app_server_protocol::OpenRouterKeyStatus;
@@ -34,14 +36,25 @@ impl ChatWidget {
         }
     }
 
+    pub(super) fn on_openrouter(&self) -> bool {
+        self.config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
+    }
+
     pub(super) fn open_openrouter_model_menu(&mut self) -> bool {
-        if self.config.model_provider_id != "openrouter" {
+        if !self.on_openrouter() {
             return false;
         }
+        let selected = match self.current_model().parse::<ModelSlug>() {
+            Ok(slug) => slug,
+            Err(error) => {
+                self.show_openrouter_error(error);
+                return true;
+            }
+        };
         self.app_event_tx
             .send(AppEvent::OpenRouter(Event::Request(Request::Models {
                 menu: ModelMenu::Current,
-                selected: Some(self.current_model().to_owned()),
+                selected: Some(selected),
             })));
         true
     }
@@ -79,7 +92,7 @@ impl ChatWidget {
         &mut self,
         menu: ModelMenu,
         listing: crate::model_catalog::ModelListing,
-        selected: Option<String>,
+        selected: Option<ModelSlug>,
         error: Option<String>,
     ) {
         self.bottom_pane.dismiss_view_by_id(VIEW);
@@ -92,8 +105,7 @@ impl ChatWidget {
             self.refresh_effective_service_tier();
             self.refresh_model_dependent_surfaces();
         }
-        let params =
-            self.openrouter_model_params(&menu, &listing.models, selected.as_deref(), error);
+        let params = self.openrouter_model_params(&menu, &listing.models, selected.as_ref(), error);
         let view = views::ModelView::new(
             params,
             listing.models,
@@ -108,7 +120,7 @@ impl ChatWidget {
         &self,
         menu: &ModelMenu,
         models: &[ModelPreset],
-        selected: Option<&str>,
+        selected: Option<&ModelSlug>,
         error: Option<String>,
     ) -> SelectionViewParams {
         let mut items = models
@@ -155,8 +167,11 @@ impl ChatWidget {
             view_id: Some(VIEW),
             title: Some(menu.title().into()),
             subtitle: error,
-            initial_selected_idx: selected
-                .and_then(|selected| models.iter().position(|model| model.model == selected)),
+            initial_selected_idx: selected.and_then(|selected| {
+                models
+                    .iter()
+                    .position(|model| model.model == selected.as_str())
+            }),
             items,
             is_searchable: true,
             footer_hint: Some(crate::openrouter::MODEL_FOOTER.into()),
@@ -227,7 +242,7 @@ impl ChatWidget {
                 path,
             } => self.openrouter_key_path_prompt(
                 thread_id,
-                name.to_string(),
+                name,
                 path.to_string_lossy().into_owned(),
                 Some(error),
             ),
@@ -272,10 +287,10 @@ impl ChatWidget {
             "Key name".into(),
             initial,
             error,
-            Box::new(move |name| {
-                tx.send(AppEvent::OpenRouter(Event::KeyPathPrompt {
+            Box::new(move |input| {
+                tx.send(AppEvent::OpenRouter(Event::KeyNameSubmitted {
                     thread_id,
-                    name,
+                    input,
                 }))
             }),
         ));
@@ -284,25 +299,10 @@ impl ChatWidget {
     pub(crate) fn openrouter_key_path_prompt(
         &mut self,
         thread_id: ThreadId,
-        name: String,
+        name: KeyName,
         initial: String,
         error: Option<String>,
     ) {
-        let name = match name.parse::<KeyName>() {
-            Ok(name) => name,
-            Err(error) => {
-                self.openrouter_key_name_prompt(
-                    thread_id,
-                    if name.starts_with("sk-or-") {
-                        String::new()
-                    } else {
-                        name
-                    },
-                    Some(error),
-                );
-                return;
-            }
-        };
         let tx = self.app_event_tx.clone();
         self.bottom_pane.show_text_prompt(CustomPromptView::new(
             format!("OpenRouter key · {name}"),
@@ -419,20 +419,20 @@ impl ChatWidget {
         self.openrouter_ui.status = None;
         self.openrouter_ui.status_request = None;
         self.openrouter_ui.last_refresh = None;
-        self.refresh_openrouter_status(false, true);
+        self.refresh_openrouter_status(StatusRefresh::Now);
     }
 
-    pub(crate) fn refresh_openrouter_status(&mut self, show: bool, force: bool) -> bool {
-        if self.config.model_provider_id != "openrouter" {
+    pub(crate) fn refresh_openrouter_status(&mut self, mode: StatusRefresh) -> bool {
+        if !self.on_openrouter() {
             return false;
         }
         let Some(thread_id) = self.thread_id else {
             return false;
         };
-        if self.openrouter_ui.status_request.is_some() && !show {
+        if self.openrouter_ui.status_request.is_some() && mode != StatusRefresh::Show {
             return true;
         }
-        if !force
+        if mode == StatusRefresh::AfterTurn
             && self
                 .openrouter_ui
                 .last_refresh
@@ -443,14 +443,14 @@ impl ChatWidget {
         let id = uuid::Uuid::new_v4();
         self.openrouter_ui.status_request = Some(id);
         self.openrouter_ui.last_refresh = Some(Instant::now());
-        if show {
+        if mode == StatusRefresh::Show {
             self.add_status_output(false, None);
         }
         self.app_event_tx
             .send(AppEvent::OpenRouter(Event::RefreshStatus {
                 thread_id,
                 id,
-                show,
+                mode,
             }));
         true
     }
@@ -459,7 +459,7 @@ impl ChatWidget {
         &mut self,
         thread_id: ThreadId,
         id: uuid::Uuid,
-        show: bool,
+        mode: StatusRefresh,
         result: Result<OpenRouterKeyStatus, String>,
     ) {
         if self.thread_id != Some(thread_id) || self.openrouter_ui.status_request != Some(id) {
@@ -470,7 +470,7 @@ impl ChatWidget {
         if let Some(status) = &self.openrouter_ui.status {
             self.active_account_label = Some(format!("OpenRouter · {}", status.key.name));
         }
-        if show {
+        if mode == StatusRefresh::Show {
             let spend = self
                 .token_info
                 .as_ref()
@@ -501,7 +501,7 @@ impl ChatWidget {
 
     pub(crate) fn show_openrouter_account_selection(&mut self, name: &str) {
         self.bottom_pane.show_selection_view(SelectionViewParams {
-            view_id: Some("openrouter-account-selection"),
+            view_id: Some(ACCOUNT_SELECTION_VIEW),
             title: Some(format!("OpenRouter · {name}")),
             items: vec![SelectionItem {
                 name: "Selecting key…".into(),
@@ -516,9 +516,8 @@ impl ChatWidget {
         &mut self,
         result: &Result<codex_app_server_protocol::ThreadAccountSelectResponse, String>,
     ) -> bool {
-        let visible = self.bottom_pane.active_view_id() == Some("openrouter-account-selection");
-        self.bottom_pane
-            .dismiss_view_by_id("openrouter-account-selection");
+        let visible = self.bottom_pane.active_view_id() == Some(ACCOUNT_SELECTION_VIEW);
+        self.bottom_pane.dismiss_view_by_id(ACCOUNT_SELECTION_VIEW);
         if visible && let Err(error) = result {
             self.show_openrouter_error(format!("Cannot change OpenRouter key: {error}"));
             return true;
@@ -538,7 +537,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn openrouter_account_label(&self) -> Option<String> {
-        if self.config.model_provider_id != "openrouter" {
+        if !self.on_openrouter() {
             return None;
         }
         self.openrouter_ui
@@ -558,6 +557,13 @@ impl ChatWidget {
                 };
                 remaining.map(|amount| format!("{amount} left"))
             }
+            OpenRouterKeyState::Failed { .. } => None,
+        }
+    }
+
+    pub(super) fn openrouter_weekly_spend_value(&self) -> Option<String> {
+        match &self.openrouter_ui.status.as_ref()?.state {
+            OpenRouterKeyState::Read { spend, .. } => Some(format!("{} this week", spend.weekly)),
             OpenRouterKeyState::Failed { .. } => None,
         }
     }

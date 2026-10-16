@@ -33,7 +33,9 @@ impl App {
         event: ProviderModelEvent,
     ) {
         match event {
-            ProviderModelEvent::Open(provider) if provider.id == "openrouter" => {
+            ProviderModelEvent::Open(provider)
+                if provider.id == codex_model_provider_info::OPENROUTER_PROVIDER_ID =>
+            {
                 self.handle_openrouter_event(
                     server,
                     crate::openrouter::Event::Request(crate::openrouter::Request::Models {

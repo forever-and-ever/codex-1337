@@ -137,6 +137,12 @@ struct HostRow {
     description: String,
 }
 
+#[derive(Clone, Copy)]
+enum EndpointMark {
+    Allow,
+    Block,
+}
+
 pub(super) struct EndpointsView {
     inner: ListSelectionView,
     menu: ModelMenu,
@@ -189,7 +195,7 @@ impl EndpointsView {
         }
     }
 
-    fn toggle(&mut self, only: bool) {
+    fn toggle(&mut self, mark: EndpointMark) {
         let Some(row) = self
             .inner
             .selected_index()
@@ -197,19 +203,18 @@ impl EndpointsView {
         else {
             return;
         };
-        let mut slugs = match (&self.filter, only) {
-            (EndpointFilter::Only(set), true) | (EndpointFilter::Ignore(set), false) => {
-                set.slugs().clone()
-            }
+        let mut slugs = match (&self.filter, mark) {
+            (EndpointFilter::Only(set), EndpointMark::Allow)
+            | (EndpointFilter::Ignore(set), EndpointMark::Block) => set.slugs().clone(),
             _ => BTreeSet::new(),
         };
         if !slugs.remove(&row.slug) {
             slugs.insert(row.slug.clone());
         }
-        self.filter = match EndpointSet::new(slugs) {
-            Some(set) if only => EndpointFilter::Only(set),
-            Some(set) => EndpointFilter::Ignore(set),
-            None => EndpointFilter::All,
+        self.filter = match (EndpointSet::new(slugs), mark) {
+            (Some(set), EndpointMark::Allow) => EndpointFilter::Only(set),
+            (Some(set), EndpointMark::Block) => EndpointFilter::Ignore(set),
+            (None, _) => EndpointFilter::All,
         };
         self.rebuild();
     }
@@ -253,12 +258,12 @@ impl BottomPaneView for EndpointsView {
                 code: KeyCode::Char('w'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => self.toggle(true),
+            } => self.toggle(EndpointMark::Allow),
             KeyEvent {
                 code: KeyCode::Char('b'),
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => self.toggle(false),
+            } => self.toggle(EndpointMark::Block),
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers: KeyModifiers::NONE,
