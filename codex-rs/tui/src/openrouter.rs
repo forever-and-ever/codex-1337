@@ -143,3 +143,17 @@ pub(crate) enum Event {
     },
     Error(String),
 }
+
+pub(crate) fn title_route<'a>(
+    provider_id: &'a str,
+    model: &'a str,
+    title_model: &'a str,
+    has_chatgpt_account: bool,
+) -> Option<(&'a str, &'a str)> {
+    if provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID {
+        // Automatic titles are Codex-initiated work, never billable OpenRouter requests.
+        has_chatgpt_account.then_some((codex_model_provider_info::OPENAI_PROVIDER_ID, title_model))
+    } else {
+        Some((provider_id, model))
+    }
+}
