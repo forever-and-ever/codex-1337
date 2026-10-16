@@ -160,6 +160,7 @@ mod warnings;
 mod work_status;
 
 pub(crate) use activity_details::ActivityDetails;
+pub(crate) use activity_lifecycle::has_active_invocations;
 pub(crate) use activity_lifecycle::has_running_tool_calls;
 pub(crate) use activity_lifecycle::reconcile_tool_calls;
 pub(crate) use activity_preview::ActivityDisclosure;

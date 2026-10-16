@@ -12,6 +12,32 @@ use crate::exec_cell::ExecCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+// Match invocation::collect(...).any(is_active), including its wrapper boundaries.
+// TELOS(fast-ui-thread): title color must not materialize invocation/output projections.
+pub(crate) fn has_active_invocations(cell: &dyn HistoryCell) -> bool {
+    let any = cell.as_any();
+    if let Some(block) = any.downcast_ref::<super::CodeModeCell>() {
+        return block.is_active();
+    }
+    if let Some(group) = any.downcast_ref::<ToolOutputGroup>() {
+        return group
+            .members
+            .iter()
+            .any(|member| has_active_invocations(member.as_ref()));
+    }
+    if let Some(exec) = any.downcast_ref::<ExecCell>() {
+        return exec.is_active() || exec.group.details.members().any(has_active_invocations);
+    }
+    if let Some(computer) = any.downcast_ref::<ComputerActivityCell>() {
+        return computer.is_active()
+            || computer.group.details.members().any(has_active_invocations);
+    }
+    let source = any
+        .downcast_ref::<super::ToolItemCell>()
+        .map_or(cell, |wrapper| wrapper.inner.as_ref());
+    has_running_tool_calls(source)
+}
+
 pub(crate) fn has_running_tool_calls(cell: &dyn HistoryCell) -> bool {
     if let Some(block) = cell.as_any().downcast_ref::<super::CodeModeCell>() {
         return block.is_active();
