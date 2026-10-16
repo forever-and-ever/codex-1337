@@ -3,6 +3,7 @@ use crate::openrouter::ACCOUNT_SELECTION_VIEW;
 use crate::openrouter::Event;
 use crate::openrouter::ModelMenu;
 use crate::openrouter::Request;
+use crate::openrouter::StatusFailure;
 use crate::openrouter::StatusRefresh;
 use crate::openrouter::VIEW;
 use codex_app_server_protocol::OpenRouterKeyState;
@@ -356,16 +357,17 @@ impl ChatWidget {
                     spend,
                     ..
                 } => {
-                    let last4: String = label
+                    let suffix: String = label
                         .chars()
                         .rev()
+                        .take_while(char::is_ascii_alphanumeric)
                         .take(4)
                         .collect::<Vec<_>>()
                         .into_iter()
                         .rev()
                         .collect();
                     format!(
-                        "key …{last4} · {} this month{}",
+                        "key …{suffix} · {} this month{}",
                         spend.monthly,
                         balance
                             .map(|amount| format!(" · {amount} balance"))
@@ -460,7 +462,7 @@ impl ChatWidget {
         thread_id: ThreadId,
         id: uuid::Uuid,
         mode: StatusRefresh,
-        result: Result<OpenRouterKeyStatus, String>,
+        result: Result<OpenRouterKeyStatus, StatusFailure>,
     ) {
         if self.thread_id != Some(thread_id) || self.openrouter_ui.status_request != Some(id) {
             return;
@@ -475,24 +477,27 @@ impl ChatWidget {
                 .token_info
                 .as_ref()
                 .and_then(|info| info.total_token_usage.cost);
+            let status = result.as_ref().map_err(ToString::to_string);
             self.add_to_history(history_cell::PlainHistoryCell::new(views::status_lines(
-                result.as_ref().map_err(String::as_str),
+                status.as_ref().copied().map_err(String::as_str),
                 spend,
             )));
         } else {
-            let error = match &result {
-                Err(error) => Some(error),
-                Ok(OpenRouterKeyStatus {
+            match &result {
+                Err(error @ StatusFailure::Removed(_)) => {
+                    self.add_info_message(error.to_string(), None);
+                }
+                Err(StatusFailure::Failed(error))
+                | Ok(OpenRouterKeyStatus {
                     state: OpenRouterKeyState::Failed { error },
                     ..
-                }) => Some(error),
+                }) => {
+                    self.add_error_message(format!("Cannot refresh OpenRouter key: {error}"));
+                }
                 Ok(OpenRouterKeyStatus {
                     state: OpenRouterKeyState::Read { .. },
                     ..
-                }) => None,
-            };
-            if let Some(error) = error {
-                self.add_error_message(format!("Cannot refresh OpenRouter key: {error}"));
+                }) => {}
             }
         }
         self.refresh_status_line();
@@ -561,9 +566,9 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn openrouter_weekly_spend_value(&self) -> Option<String> {
+    pub(super) fn openrouter_daily_spend_value(&self) -> Option<String> {
         match &self.openrouter_ui.status.as_ref()?.state {
-            OpenRouterKeyState::Read { spend, .. } => Some(format!("{} this week", spend.weekly)),
+            OpenRouterKeyState::Read { spend, .. } => Some(format!("{} today", spend.daily)),
             OpenRouterKeyState::Failed { .. } => None,
         }
     }

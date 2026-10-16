@@ -1,3 +1,9 @@
+use codex_api::ResponseStream as ApiResponseStream;
+use tokio::sync::mpsc;
+
+#[path = "client_openrouter_tools.rs"]
+mod tools;
+
 use super::CurrentClientSetup;
 use super::ModelClient;
 use crate::agent::control::ProviderAccountSelection;
@@ -109,9 +115,10 @@ impl ModelClient {
     pub(super) async fn route_openrouter_request(
         &self,
         request: &mut ResponsesApiRequest,
-    ) -> Result<()> {
+        prompt: &Prompt,
+    ) -> Result<Option<tools::Projection>> {
         if !self.uses_openrouter() {
-            return Ok(());
+            return Ok(None);
         }
         let slug = request
             .model
@@ -138,7 +145,7 @@ impl ModelClient {
         // belong to OpenAI, regardless of configured or inherited model metadata.
         request.store = false;
         request.access_programs = None;
-        Ok(())
+        Ok(Some(tools::Projection::request(request, &prompt.tools)?))
     }
 
     pub(super) fn map_request_error(&self, mut error: ApiError, model: &str) -> CodexErr {
@@ -169,6 +176,13 @@ impl ModelClient {
         if status == StatusCode::BAD_REQUEST && message.contains("is not a valid model ID") {
             return CodexErr::InvalidRequest(format!("OpenRouter has no model {model}"));
         }
+        if terminal_status(status) {
+            return CodexErr::InvalidRequest(if message.is_empty() {
+                format!("OpenRouter rejected the request ({status})")
+            } else {
+                message.chars().take(300).collect()
+            });
+        }
         match &mut error {
             ApiError::Transport(TransportError::Http {
                 url, headers, body, ..
@@ -192,8 +206,93 @@ fn remote_message(body: &str) -> Option<String> {
     #[derive(Deserialize)]
     struct RemoteError {
         message: String,
+        metadata: Option<Metadata>,
     }
-    serde_json::from_str::<Envelope>(body)
-        .ok()
-        .map(|envelope| envelope.error.message)
+    #[derive(Deserialize)]
+    struct Metadata {
+        #[serde(rename = "provider_name")]
+        host_name: Option<String>,
+        raw: Option<String>,
+    }
+    let error = serde_json::from_str::<Envelope>(body).ok()?.error;
+    let host_message = error.metadata.and_then(|metadata| {
+        let host = metadata.host_name?;
+        let raw = serde_json::from_str::<Envelope>(&metadata.raw?).ok()?;
+        Some(format!(
+            "OpenRouter host {host} rejected the request: {}",
+            raw.error.message
+        ))
+    });
+    Some(
+        host_message
+            .unwrap_or(error.message)
+            .chars()
+            .take(300)
+            .collect(),
+    )
+}
+
+fn terminal_status(status: StatusCode) -> bool {
+    status.is_client_error()
+        && !matches!(
+            status,
+            StatusCode::PAYMENT_REQUIRED
+                | StatusCode::REQUEST_TIMEOUT
+                | StatusCode::TOO_MANY_REQUESTS
+        )
+}
+
+pub(super) fn project_stream(
+    mut stream: ApiResponseStream,
+    projection: Option<tools::Projection>,
+) -> ApiResponseStream {
+    let Some(mut projection) = projection else {
+        return stream;
+    };
+    let (tx, rx_event) = mpsc::channel(super::RESPONSE_STREAM_CHANNEL_CAPACITY);
+    let upstream_request_id = stream.upstream_request_id.take();
+    let interrupt = stream.interrupt.take();
+    tokio::spawn(async move {
+        loop {
+            let event = tokio::select! {
+                _ = tx.closed() => return,
+                event = stream.rx_event.recv() => event,
+            };
+            let Some(event) = event else {
+                return;
+            };
+            let events = match event {
+                Ok(event) => projection.event(event).into_iter().map(Ok).collect(),
+                Err(error) => {
+                    let message = match &error {
+                        ApiError::Transport(TransportError::Http { status, body, .. })
+                            if terminal_status(*status) =>
+                        {
+                            Some(body.as_deref().and_then(remote_message).unwrap_or_else(|| {
+                                format!("OpenRouter rejected the request ({status})")
+                            }))
+                        }
+                        ApiError::Api { status, message } if terminal_status(*status) => {
+                            Some(message.chars().take(300).collect())
+                        }
+                        _ => None,
+                    };
+                    vec![Err(match message {
+                        Some(message) => ApiError::InvalidRequest { message },
+                        None => error,
+                    })]
+                }
+            };
+            for event in events {
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+        }
+    });
+    ApiResponseStream {
+        rx_event,
+        upstream_request_id,
+        interrupt,
+    }
 }

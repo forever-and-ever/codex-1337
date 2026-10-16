@@ -67,8 +67,20 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
     };
     let mut description = format!(
         "{} in · {} out per M · {} context",
-        price(model.pricing.prompt),
-        price(model.pricing.completion),
+        price(
+            allowed
+                .iter()
+                .filter_map(|endpoint| endpoint.pricing.prompt)
+                .min_by_key(|price| price.per_mtok())
+                .or(model.pricing.prompt)
+        ),
+        price(
+            allowed
+                .iter()
+                .filter_map(|endpoint| endpoint.pricing.completion)
+                .min_by_key(|price| price.per_mtok())
+                .or(model.pricing.completion)
+        ),
         context_label(context)
     );
     if matches!(slug, ModelSlug::Preset(_)) {

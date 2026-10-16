@@ -299,6 +299,7 @@ fn host_row(host: &OpenRouterHost) -> HostRow {
         .endpoints
         .iter()
         .filter_map(|endpoint| endpoint.quantization.as_deref())
+        .filter(|quantization| !quantization.eq_ignore_ascii_case("unknown"))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>()

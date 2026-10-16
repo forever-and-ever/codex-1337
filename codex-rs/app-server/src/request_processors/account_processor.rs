@@ -94,7 +94,7 @@ pub(crate) struct AccountRequestProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     config: Arc<Config>,
     scoped_config: Option<Arc<Config>>,
-    scoped_provider_account_id: Option<String>,
+    scoped_provider_account: Option<account_scope::ScopedProviderAccount>,
     config_manager: ConfigManager,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
     quota_cache: Arc<quota_cache::QuotaCache>,
@@ -123,8 +123,13 @@ impl AccountRequestProcessor {
                 .map_err(|error| invalid_request(format!("Invalid thread ID: {error}")))?;
             if let Ok(thread) = self.thread_manager.get_thread(id).await {
                 scoped.auth_manager = thread.auth_manager();
-                scoped.scoped_config = Some(thread.config().await);
-                scoped.scoped_provider_account_id = thread.committed_provider_account_id();
+                let config = thread.config().await;
+                scoped.scoped_provider_account =
+                    account_scope::ScopedProviderAccount::from_committed(
+                        config.model_provider.adapter,
+                        thread.committed_provider_account_id(),
+                    )?;
+                scoped.scoped_config = Some(config);
                 if scoped.auth_manager.is_account_scoped() {
                     scoped.auth_manager.reload().await;
                 }
@@ -156,7 +161,7 @@ impl AccountRequestProcessor {
             outgoing,
             config,
             scoped_config: None,
-            scoped_provider_account_id: None,
+            scoped_provider_account: None,
             config_manager,
             active_login: Arc::new(Mutex::new(None)),
             quota_cache: Arc::default(),

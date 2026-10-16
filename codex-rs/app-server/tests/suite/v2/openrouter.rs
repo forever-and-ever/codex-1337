@@ -116,6 +116,12 @@ request_max_retries = 0
                     responses::ev_response_created("spare-turn"),
                     responses::ev_completed("spare-turn"),
                 ])),
+                ResponseTemplate::new(422).set_body_json(json!({"error": {
+                    "message": "Host failed", "metadata": {
+                        "provider_name": "Moonshot AI",
+                        "raw": json!({"error": {"message": "Only function tools are supported"}}).to_string()
+                    }
+                }})),
             ],
         )
         .await;
@@ -154,6 +160,14 @@ request_max_retries = 0
         assert_eq!(accounts.selected_openrouter_key.as_ref().map(|name| name.as_str()), Some("main"));
         assert_eq!(accounts.pending_openrouter_key, None);
         assert_eq!(accounts.openrouter_keys.len(), 1);
+        for scope in [json!({"threadId": started.thread.id}), json!({"newThread": {"modelProvider": "openrouter"}})] {
+            let request = app.send_request("account/read", Some(scope)).await?;
+            let account: codex_app_server_protocol::GetAccountResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+            assert_eq!(account.account_id.as_deref(), Some("main"));
+            assert!(account.display_name.is_none());
+            assert!(account.account.is_none());
+            assert!(!account.requires_openai_auth);
+        }
         let request = app.send_request("openrouter/model/endpoints", Some(json!({
             "slug": "moonshotai/kimi-test"
         }))).await?;
@@ -192,6 +206,7 @@ request_max_retries = 0
         assert_eq!(body["provider"], json!({"sort": "exacto", "only": ["moonshotai"]}));
         assert_eq!(body["model"], "moonshotai/kimi-test");
         assert_eq!(body["store"], false);
+        assert!(body["tools"].as_array().expect("request tools").iter().all(|tool| tool["type"] == "function"));
 
         let request = app.send_turn_start_request(TurnStartParams {
             thread_id: started.thread.id.clone(),
@@ -255,7 +270,7 @@ request_max_retries = 0
             vec!["main", "spare"]);
 
         let request = app.send_turn_start_request(TurnStartParams {
-            thread_id: started.thread.id,
+            thread_id: started.thread.id.clone(),
             input: vec![UserInput::Text { text: "Continue with the spare key.".into(), text_elements: Vec::new() }],
             ..Default::default()
         }).await?;
@@ -266,6 +281,18 @@ request_max_retries = 0
         let requests = wire.requests();
         assert_eq!(requests.len(), 3);
         assert_eq!(requests[2].header("authorization"), Some("Bearer sk-or-spare".into()));
+        let request = app.send_turn_start_request(TurnStartParams {
+            thread_id: started.thread.id,
+            input: vec![UserInput::Text { text: "Check the host rejection.".into(), text_elements: Vec::new() }],
+            ..Default::default()
+        }).await?;
+        let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        let error: ErrorNotification = timeout(READ_TIMEOUT, app.read_notification("error")).await??;
+        assert!(!error.will_retry);
+        assert!(error.error.message.contains("OpenRouter host Moonshot AI rejected the request: Only function tools are supported"));
+        let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
+        assert_eq!(completed.turn.status, TurnStatus::Failed);
+        assert_eq!(wire.requests().len(), 4);
         Ok(())
     }).await
 }

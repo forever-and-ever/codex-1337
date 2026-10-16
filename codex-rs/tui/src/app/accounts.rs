@@ -454,7 +454,15 @@ impl App {
             )
             .await
             .map_err(|_| "Selection not confirmed; reopen /account to check".to_owned())
-            .and_then(|result| result.map_err(|error| error.to_string()));
+            .and_then(|result| {
+                result.map_err(|error| {
+                    if provider == AccountProvider::OpenRouter {
+                        crate::openrouter::error_message(&error.into())
+                    } else {
+                        error.to_string()
+                    }
+                })
+            });
             tx.send(AppEvent::AccountSelectionFinished { thread_id, result });
         });
     }

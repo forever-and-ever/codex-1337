@@ -891,7 +891,10 @@ impl StatusHistoryCell {
             lines.push(formatter.line("Context window", spans));
         }
 
-        lines.extend(self.rate_limit_lines(&rate_limit_state, available_width, &formatter));
+        if self.model_provider.as_deref() != Some(codex_model_provider_info::OPENROUTER_PROVIDER_ID)
+        {
+            lines.extend(self.rate_limit_lines(&rate_limit_state, available_width, &formatter));
+        }
         let thread_usage_lines = self.thread_usage.lines(&formatter, value_width);
         if !thread_usage_lines.is_empty() {
             lines.push(Line::from(Vec::<Span<'static>>::new()));

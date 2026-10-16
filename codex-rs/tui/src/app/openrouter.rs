@@ -2,6 +2,7 @@ use super::*;
 use crate::openrouter::Event;
 use crate::openrouter::Reply;
 use crate::openrouter::Request;
+use crate::openrouter::StatusFailure;
 use crate::openrouter::StatusRefresh;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -9,7 +10,6 @@ use codex_app_server_protocol::OpenRouterKeyAddParams;
 use codex_app_server_protocol::OpenRouterKeyAddResponse;
 use codex_app_server_protocol::OpenRouterKeyRemoveParams;
 use codex_app_server_protocol::OpenRouterKeyRemoveResponse;
-use codex_app_server_protocol::OpenRouterKeyStatus;
 use codex_app_server_protocol::OpenRouterKeyStatusParams;
 use codex_app_server_protocol::OpenRouterKeyStatusResponse;
 use codex_app_server_protocol::OpenRouterModelEndpointsParams;
@@ -216,7 +216,7 @@ impl App {
                             .to_owned()
                     })
                     .and_then(|result: anyhow::Result<Reply>| {
-                        result.map_err(|error| error.to_string())
+                        result.map_err(|error| crate::openrouter::error_message(&error))
                     });
                     tx.send(AppEvent::OpenRouter(Event::Finished {
                         id,
@@ -297,17 +297,58 @@ impl App {
                 let tx = self.app_event_tx.clone();
                 tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(30), async {
-                        let accounts = handle.request_typed::<ThreadAccountListResponse>(ClientRequest::ThreadAccountList {
-                            request_id, params: ThreadAccountListParams { thread_id: thread_id.to_string() },
-                        }).await?;
-                        let name = accounts.selected_openrouter_key.ok_or_else(|| anyhow::anyhow!("Choose an OpenRouter key with /account"))?;
-                        let response = handle.request_typed::<OpenRouterKeyStatusResponse>(ClientRequest::OpenRouterKeyStatus {
-                            request_id: status_request_id, params: OpenRouterKeyStatusParams { name: Some(name.clone()) },
-                        }).await?;
-                        response.keys.into_iter().find(|status| status.key.name == name)
-                            .ok_or_else(|| anyhow::anyhow!("OpenRouter key {name} is no longer configured; choose a key with /account"))
-                    }).await.map_err(|_| "OpenRouter key status timed out".to_owned())
-                        .and_then(|result: anyhow::Result<OpenRouterKeyStatus>| result.map_err(|error| error.to_string()));
+                        let accounts = handle
+                            .request_typed::<ThreadAccountListResponse>(
+                                ClientRequest::ThreadAccountList {
+                                    request_id,
+                                    params: ThreadAccountListParams {
+                                        thread_id: thread_id.to_string(),
+                                    },
+                                },
+                            )
+                            .await
+                            .map_err(|error| {
+                                StatusFailure::Failed(crate::openrouter::error_message(
+                                    &error.into(),
+                                ))
+                            })?;
+                        let name = accounts.selected_openrouter_key.ok_or_else(|| {
+                            StatusFailure::Failed("Choose an OpenRouter key with /account".into())
+                        })?;
+                        if !accounts
+                            .openrouter_keys
+                            .iter()
+                            .any(|status| status.key.name == name)
+                        {
+                            return Err(StatusFailure::Removed(name));
+                        }
+                        let response = handle
+                            .request_typed::<OpenRouterKeyStatusResponse>(
+                                ClientRequest::OpenRouterKeyStatus {
+                                    request_id: status_request_id,
+                                    params: OpenRouterKeyStatusParams {
+                                        name: Some(name.clone()),
+                                    },
+                                },
+                            )
+                            .await
+                            .map_err(|error| {
+                                StatusFailure::Failed(crate::openrouter::error_message(
+                                    &error.into(),
+                                ))
+                            })?;
+                        response
+                            .keys
+                            .into_iter()
+                            .find(|status| status.key.name == name)
+                            .ok_or(StatusFailure::Removed(name))
+                    })
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(StatusFailure::Failed(
+                            "OpenRouter key status timed out".into(),
+                        ))
+                    });
                     tx.send(AppEvent::OpenRouter(Event::StatusLoaded {
                         thread_id,
                         id,

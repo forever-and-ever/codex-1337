@@ -94,6 +94,14 @@ pub(crate) enum StatusRefresh {
     AfterTurn,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum StatusFailure {
+    #[error("OpenRouter key {0} was removed; choose a key with /account")]
+    Removed(KeyName),
+    #[error("{0}")]
+    Failed(String),
+}
+
 #[derive(Debug)]
 pub(crate) enum Event {
     Request(Request),
@@ -126,7 +134,7 @@ pub(crate) enum Event {
         thread_id: ThreadId,
         id: uuid::Uuid,
         mode: StatusRefresh,
-        result: Result<OpenRouterKeyStatus, String>,
+        result: Result<OpenRouterKeyStatus, StatusFailure>,
     },
     ModelSubmitted {
         menu: ModelMenu,
@@ -155,5 +163,14 @@ pub(crate) fn title_route<'a>(
         has_chatgpt_account.then_some((codex_model_provider_info::OPENAI_PROVIDER_ID, title_model))
     } else {
         Some((provider_id, model))
+    }
+}
+
+pub(crate) fn error_message(error: &anyhow::Error) -> String {
+    match error.downcast_ref::<codex_app_server_client::TypedRequestError>() {
+        Some(codex_app_server_client::TypedRequestError::Server { source, .. }) => {
+            source.message.clone()
+        }
+        _ => error.to_string(),
     }
 }
