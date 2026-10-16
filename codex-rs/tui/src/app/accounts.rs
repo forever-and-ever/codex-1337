@@ -1,9 +1,9 @@
 use super::*;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::LoginAccountResponse;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_app_server_protocol::ThreadAccountListParams;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectParams;
@@ -84,7 +84,7 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
-        provider: SubscriptionAccountProvider,
+        provider: AccountProvider,
         account_id: String,
         nickname: String,
     ) {
@@ -415,7 +415,7 @@ impl App {
         server: &mut AppServerSession,
         thread_id: ThreadId,
         account_id: String,
-        provider: SubscriptionAccountProvider,
+        provider: AccountProvider,
     ) {
         if self.account_ui.selection_request.is_some()
             || self.account_ui.claude_login.is_some()
@@ -469,7 +469,7 @@ impl App {
                 }
                 // The ChatGPT default is the server's active login, not configuration.
                 if response.default_saved
-                    && response.provider == SubscriptionAccountProvider::ClaudeSubscription
+                    && response.provider == AccountProvider::ClaudeSubscription
                 {
                     self.config.wrangler.default_claude_account = Some(response.account_id.clone());
                 }

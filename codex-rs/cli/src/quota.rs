@@ -8,11 +8,11 @@ use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 use codex_app_server_client::RemoteAppServerEndpoint;
 use codex_app_server_client::app_server_control_socket_path;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::AccountQuotaReadParams;
 use codex_app_server_protocol::AccountQuotaReadResponse;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_core::config::find_codex_home;
 use codex_utils_cli::CliConfigOverrides;
 use serde::Serialize;
@@ -69,10 +69,8 @@ pub async fn read_account_quotas(
                     request_id: RequestId::Integer(1),
                     params: AccountQuotaReadParams {
                         provider: match args.provider.unwrap_or(QuotaProvider::Openai) {
-                            QuotaProvider::Openai => SubscriptionAccountProvider::Openai,
-                            QuotaProvider::Anthropic => {
-                                SubscriptionAccountProvider::ClaudeSubscription
-                            }
+                            QuotaProvider::Openai => AccountProvider::Openai,
+                            QuotaProvider::Anthropic => AccountProvider::ClaudeSubscription,
                         },
                         account: args.account,
                     },

@@ -141,6 +141,8 @@ pub enum ModelProviderAdapter {
     #[default]
     OpenaiCompatible,
     ClaudeSubscription,
+    #[serde(rename = "openrouter")]
+    OpenRouter,
 }
 
 /// Serializable representation of a provider definition.
@@ -249,14 +251,14 @@ impl ModelProviderInfo {
     }
 
     pub fn validate(&self) -> std::result::Result<(), String> {
-        if self.adapter == ModelProviderAdapter::ClaudeSubscription
+        if self.adapter.speaks_anthropic_messages()
             && (self.requires_openai_auth || self.supports_websockets)
         {
             return Err(
                 "Claude subscriptions require independent authentication and HTTP streaming".into(),
             );
         }
-        if self.adapter == ModelProviderAdapter::ClaudeSubscription {
+        if self.adapter.speaks_anthropic_messages() {
             self.native_claude_url()?;
             if self.model_catalog_url.is_some() {
                 return Err(
@@ -274,6 +276,9 @@ impl ModelProviderInfo {
                 return Err("Native Anthropic subscriptions require account-registry authentication without custom credentials or headers".into());
             }
             return Ok(());
+        }
+        if self.adapter == ModelProviderAdapter::OpenRouter {
+            return openrouter::validate(self);
         }
         if let Some(gateway) = &self.gateway_oauth {
             gateway.validate(self)?;
@@ -358,14 +363,14 @@ impl ModelProviderInfo {
             .clone()
             .unwrap_or_else(|| default_base_url.to_string());
 
-        let mut headers = if self.adapter == ModelProviderAdapter::ClaudeSubscription {
+        let mut headers = if self.adapter.speaks_anthropic_messages() {
             self.validate().map_err(CodexErr::InvalidRequest)?;
             base_url = ANTHROPIC_BASE_URL.to_string();
             HeaderMap::new()
         } else {
             self.build_header_map()?
         };
-        if self.adapter != ModelProviderAdapter::ClaudeSubscription
+        if !self.adapter.speaks_anthropic_messages()
             && let Some(requirement) = read_managed_residency_requirement()
         {
             let value = match requirement {
@@ -511,7 +516,7 @@ impl ModelProviderInfo {
     }
 
     pub fn has_command_auth(&self) -> bool {
-        self.adapter != ModelProviderAdapter::ClaudeSubscription && self.auth.is_some()
+        !self.adapter.speaks_anthropic_messages() && self.auth.is_some()
     }
 }
 
@@ -530,6 +535,7 @@ pub fn built_in_model_providers(
 
     [
         (OPENAI_PROVIDER_ID, openai_provider),
+        (OPENROUTER_PROVIDER_ID, openrouter::provider()),
         (
             CLAUDE_SUBSCRIPTION_PROVIDER_ID,
             P {
@@ -555,8 +561,8 @@ pub fn built_in_model_providers(
 
 /// Merge configured providers into the built-in provider catalog.
 ///
-/// Configured providers extend the built-in set. Only the native subscription
-/// provider can override its built-in defaults; native validation still applies.
+/// Configured providers extend the built-in set. Native Claude and OpenRouter
+/// definitions replace their built-in defaults and retain adapter validation.
 pub fn merge_configured_model_providers(
     mut model_providers: HashMap<String, ModelProviderInfo>,
     configured_model_providers: HashMap<String, ModelProviderInfo>,
@@ -567,14 +573,17 @@ pub fn merge_configured_model_providers(
                 "model_providers.{key}: Amazon Bedrock is no longer supported"
             ));
         }
-        if key == CLAUDE_SUBSCRIPTION_PROVIDER_ID
-            && provider.adapter != ModelProviderAdapter::ClaudeSubscription
-        {
+        if key == CLAUDE_SUBSCRIPTION_PROVIDER_ID && !provider.adapter.speaks_anthropic_messages() {
             return Err(format!(
                 "model_providers.{key}: set adapter = \"claude_subscription\" for the native Claude provider"
             ));
         }
-        if key == CLAUDE_SUBSCRIPTION_PROVIDER_ID {
+        if key == OPENROUTER_PROVIDER_ID && provider.adapter != ModelProviderAdapter::OpenRouter {
+            return Err(format!(
+                "model_providers.{key}: set adapter = \"openrouter\" for OpenRouter"
+            ));
+        }
+        if key == CLAUDE_SUBSCRIPTION_PROVIDER_ID || key == OPENROUTER_PROVIDER_ID {
             model_providers.insert(key, provider);
         } else {
             model_providers.entry(key).or_insert(provider);
@@ -630,6 +639,9 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
     }
 }
 
+mod adapter;
+mod openrouter;
 #[cfg(test)]
 #[path = "model_provider_info_tests.rs"]
 mod tests;
+pub use openrouter::OPENROUTER_PROVIDER_ID;

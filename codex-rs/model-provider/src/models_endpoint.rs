@@ -365,7 +365,9 @@ impl OpenAiModelsEndpoint {
 impl ModelsEndpointClient for OpenAiModelsEndpoint {
     fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
         match self.provider_info.adapter {
-            ModelProviderAdapter::OpenaiCompatible => std::convert::identity,
+            ModelProviderAdapter::OpenaiCompatible | ModelProviderAdapter::OpenRouter => {
+                std::convert::identity
+            }
             ModelProviderAdapter::ClaudeSubscription => crate::claude_catalog::normalize_model_info,
         }
     }
@@ -377,7 +379,9 @@ impl ModelsEndpointClient for OpenAiModelsEndpoint {
                     .map(|catalog| catalog.models)
                     .unwrap_or_default()
             }
-            ModelProviderAdapter::ClaudeSubscription => Vec::new(),
+            ModelProviderAdapter::ClaudeSubscription | ModelProviderAdapter::OpenRouter => {
+                Vec::new()
+            }
         }
     }
 

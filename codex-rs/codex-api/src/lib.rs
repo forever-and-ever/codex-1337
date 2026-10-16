@@ -143,3 +143,5 @@ pub use anthropic::AnthropicStreamError;
 pub use anthropic::AnthropicStreamProgress;
 pub use codex_protocol::protocol::RealtimeAudioFrame;
 pub use codex_protocol::protocol::RealtimeEvent;
+
+pub mod openrouter;

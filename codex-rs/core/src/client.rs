@@ -367,6 +367,7 @@ fn responses_request_properties_match(
     current: &ResponsesApiRequest,
 ) -> bool {
     let ResponsesApiRequest {
+        openrouter: previous_openrouter,
         model: previous_model,
         input: _,
         tools: previous_tools,
@@ -384,6 +385,7 @@ fn responses_request_properties_match(
         access_programs: _,
     } = previous;
     let ResponsesApiRequest {
+        openrouter: current_openrouter,
         model: current_model,
         input: _,
         tools: current_tools,
@@ -401,7 +403,8 @@ fn responses_request_properties_match(
         access_programs: _,
     } = current;
 
-    previous_model == current_model
+    previous_openrouter == current_openrouter
+        && previous_model == current_model
         && previous_tools == current_tools
         && previous_tool_choice == current_tool_choice
         && previous_parallel_tool_calls == current_parallel_tool_calls
@@ -1107,6 +1110,7 @@ impl ModelClient {
             text,
             client_metadata: Some(client_metadata),
             access_programs: None,
+            openrouter: None,
         };
         Ok(request)
     }

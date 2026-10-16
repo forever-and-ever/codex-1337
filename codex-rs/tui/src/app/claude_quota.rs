@@ -1,10 +1,10 @@
 use super::App;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::AccountQuotaReadParams;
 use codex_app_server_protocol::AccountQuotaReadResponse;
 use codex_app_server_protocol::ClientRequest;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 
 impl App {
     pub(super) fn refresh_claude_quota(
@@ -28,7 +28,7 @@ impl App {
                 .request_typed::<AccountQuotaReadResponse>(ClientRequest::AccountQuotaRead {
                     request_id: rpc_request_id,
                     params: AccountQuotaReadParams {
-                        provider: SubscriptionAccountProvider::ClaudeSubscription,
+                        provider: AccountProvider::ClaudeSubscription,
                         account: account.clone(),
                     },
                 })

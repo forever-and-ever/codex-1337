@@ -313,6 +313,7 @@ pub(super) fn sample_turn_token_usage_fact(thread_id: &str, turn_id: &str) -> Tu
             output_tokens: 140,
             reasoning_output_tokens: 13,
             codex_rollout_budget_units: None,
+            cost: None,
         },
     }
 }

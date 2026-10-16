@@ -394,6 +394,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
             reasoning_output_tokens: 13,
             total_tokens: 102,
             codex_rollout_budget_units: None,
+            cost: None,
         }
     );
 

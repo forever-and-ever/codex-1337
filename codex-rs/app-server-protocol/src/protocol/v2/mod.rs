@@ -101,3 +101,6 @@ mod stream_discard;
 #[cfg(test)]
 mod tests;
 pub use stream_discard::StreamItemsDiscardedNotification;
+
+mod openrouter;
+pub use openrouter::*;

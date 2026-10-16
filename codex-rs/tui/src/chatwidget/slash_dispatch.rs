@@ -868,9 +868,9 @@ impl ChatWidget {
                         thread_id,
                         account_id: trimmed.to_owned(),
                         provider: if trimmed.starts_with("codex-account-") {
-                            codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription
+                            codex_app_server_protocol::AccountProvider::ClaudeSubscription
                         } else {
-                            codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                            codex_app_server_protocol::AccountProvider::Openai
                         },
                     });
                 } else {

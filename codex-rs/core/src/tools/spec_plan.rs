@@ -994,7 +994,8 @@ fn register_code_mode_executors(
         codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
             codex_code_mode::presentation::ToolDialect::Anthropic
         }
-        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+        | codex_model_provider_info::ModelProviderAdapter::OpenRouter => {
             codex_code_mode::presentation::ToolDialect::Responses
         }
     };

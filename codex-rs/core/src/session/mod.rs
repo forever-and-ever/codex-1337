@@ -4901,6 +4901,7 @@ impl Session {
                 reasoning_output_tokens: 0,
                 total_tokens: estimated_total_tokens.max(0),
                 codex_rollout_budget_units: None,
+                cost: None,
             };
 
             if let Some(model_context_window) = turn_context.model_context_window() {

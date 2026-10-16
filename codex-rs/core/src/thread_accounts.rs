@@ -152,7 +152,8 @@ pub(crate) async fn account_auth_for_provider(
         .get(&config.model_provider_id)
         .and_then(|selection| match selection.as_ref() {
             ProviderAccountSelection::Chatgpt { id } => Some(id.clone()),
-            ProviderAccountSelection::ClaudeSubscription { .. } => None,
+            ProviderAccountSelection::ClaudeSubscription { .. }
+            | ProviderAccountSelection::OpenRouter { .. } => None,
         })
         .or(persisted)
         .or_else(|| inherited.and_then(|auth| auth.selected_account_id()));

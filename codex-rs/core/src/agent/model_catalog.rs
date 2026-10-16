@@ -73,9 +73,7 @@ impl Session {
             .account_selection
             .get(&config.model_provider_id)
             .map(|selection| selection.as_ref().clone());
-        if account.is_none()
-            && config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription
-        {
+        if account.is_none() && config.model_provider.adapter.speaks_anthropic_messages() {
             account = codex_config::read_account_preferences(config.codex_home.as_path())
                 .await
                 .map_err(|error| error.to_string())?
@@ -104,10 +102,13 @@ impl Session {
         {
             return Ok(cached.manager.clone());
         }
-        let manager = if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+        let manager = if config.model_provider.adapter.speaks_anthropic_messages() {
             let account = match key.account.as_ref() {
                 Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => Some(id.clone()),
-                Some(ProviderAccountSelection::Chatgpt { .. }) => {
+                Some(
+                    ProviderAccountSelection::Chatgpt { .. }
+                    | ProviderAccountSelection::OpenRouter { .. },
+                ) => {
                     return Err(
                         "Configured Anthropic provider has a foreign account binding".into(),
                     );

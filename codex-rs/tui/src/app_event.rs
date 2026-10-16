@@ -371,17 +371,17 @@ pub(crate) enum AppEvent {
     SelectAccount {
         thread_id: ThreadId,
         account_id: String,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
     },
     RenameAccountPrompt {
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
         account_id: String,
         nickname: Option<String>,
     },
     SetAccountNickname {
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
         account_id: String,
         nickname: String,
     },

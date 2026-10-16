@@ -1319,6 +1319,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                 turn_id: "turn-1".to_string(),
                 token_usage: ThreadTokenUsage {
                     total: TokenUsageBreakdown {
+                        cost: None,
                         total_tokens: 42,
                         input_tokens: 10,
                         cached_input_tokens: 3,
@@ -1327,6 +1328,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                         reasoning_output_tokens: 7,
                     },
                     last: TokenUsageBreakdown {
+                        cost: None,
                         total_tokens: 42,
                         input_tokens: 10,
                         cached_input_tokens: 3,

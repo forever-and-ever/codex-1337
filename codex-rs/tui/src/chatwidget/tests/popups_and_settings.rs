@@ -16,9 +16,9 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn account_picker_snapshot() {
+    use codex_app_server_protocol::AccountProvider;
     use codex_app_server_protocol::ClaudeSubscriptionAccount;
     use codex_app_server_protocol::SavedAccount;
-    use codex_app_server_protocol::SubscriptionAccountProvider;
     use codex_app_server_protocol::ThreadAccountListResponse;
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
@@ -38,7 +38,7 @@ async fn account_picker_snapshot() {
     chat.show_account_picker(
         thread_id,
         ThreadAccountListResponse {
-            conversation_provider: Some(SubscriptionAccountProvider::Openai),
+            conversation_provider: Some(AccountProvider::Openai),
             selected_account_id: Some("alice:personal".into()),
             pending_account_id: Some("bob:personal".into()),
             selected_claude_account_id: Some(
@@ -46,6 +46,9 @@ async fn account_picker_snapshot() {
             ),
             pending_claude_account_id: None,
             claude_management_error: None,
+            openrouter_keys: Vec::new(),
+            selected_openrouter_key: None,
+            pending_openrouter_key: None,
             claude_accounts: vec![ClaudeSubscriptionAccount {
                 id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
                 email: Some("claude@example.com".into()),
@@ -77,7 +80,7 @@ async fn account_picker_snapshot() {
     );
     chat.show_account_nickname_prompt(
         thread_id,
-        SubscriptionAccountProvider::ClaudeSubscription,
+        AccountProvider::ClaudeSubscription,
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
         Some("work Claude".into()),
     );

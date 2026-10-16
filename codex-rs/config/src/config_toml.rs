@@ -168,6 +168,7 @@ pub struct WranglerConfig {
     /// Display-only names keyed first by billing provider, then stable account ID.
     pub account_nicknames:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    pub openrouter: crate::OpenRouterConfig,
 }
 
 pub use crate::farm::FarmConfig;

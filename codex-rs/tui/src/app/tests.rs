@@ -7714,6 +7714,7 @@ fn token_usage_notification(
         turn_id: turn_id.to_string(),
         token_usage: ThreadTokenUsage {
             total: TokenUsageBreakdown {
+                cost: None,
                 total_tokens: 10,
                 input_tokens: 4,
                 cached_input_tokens: 1,
@@ -7722,6 +7723,7 @@ fn token_usage_notification(
                 reasoning_output_tokens: 0,
             },
             last: TokenUsageBreakdown {
+                cost: None,
                 total_tokens: 10,
                 input_tokens: 4,
                 cached_input_tokens: 1,

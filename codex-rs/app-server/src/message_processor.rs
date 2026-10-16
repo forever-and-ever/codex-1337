@@ -1530,7 +1530,7 @@ impl MessageProcessor {
             }
             ClientRequest::ThreadAccountSelect { params, .. } => {
                 let activates_login = params.provider.is_none_or(|provider| {
-                    provider == codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                    provider == codex_app_server_protocol::AccountProvider::Openai
                 });
                 let response = self
                     .turn_processor
@@ -1922,6 +1922,15 @@ impl MessageProcessor {
             }
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
+            }
+            ClientRequest::OpenRouterKeyAdd { .. }
+            | ClientRequest::OpenRouterKeyRemove { .. }
+            | ClientRequest::OpenRouterKeyStatus { .. }
+            | ClientRequest::OpenRouterModelSave { .. }
+            | ClientRequest::OpenRouterModelForget { .. }
+            | ClientRequest::OpenRouterModelEndpoints { .. }
+            | ClientRequest::OpenRouterModelRoute { .. } => {
+                crate::request_processors::openrouter::unavailable()
             }
             ClientRequest::AccountQuotaRead { params, .. } => {
                 self.account_processor.read_account_quota(params).await

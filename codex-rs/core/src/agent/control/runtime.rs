@@ -256,12 +256,14 @@ pub(crate) struct ProviderAccountSelections {
 pub(crate) enum ProviderAccountSelection {
     Chatgpt { id: String },
     ClaudeSubscription { id: String },
+    OpenRouter { key: codex_protocol::KeyName },
 }
 
 impl ProviderAccountSelection {
     pub(crate) fn id(&self) -> &str {
         match self {
             Self::Chatgpt { id } | Self::ClaudeSubscription { id, .. } => id,
+            Self::OpenRouter { key } => key.as_str(),
         }
     }
 }

@@ -69,7 +69,11 @@ impl ModelClient {
         let route = self.state.provider_account.load_full();
         let id = match route.as_ref().map(|route| &route.selection) {
             Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => id,
-            Some(ProviderAccountSelection::Chatgpt { .. }) | None => {
+            Some(
+                ProviderAccountSelection::Chatgpt { .. }
+                | ProviderAccountSelection::OpenRouter { .. },
+            )
+            | None => {
                 return Err(CodexErr::InvalidRequest(
                     "Select an Anthropic subscription account before sending a message".into(),
                 ));

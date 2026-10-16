@@ -77,6 +77,7 @@ async fn agents_navigation_roster_tracks_background_metadata_without_replaying_a
         // Match the status line: session totals, excluding cached input, with
         // reasoning already included in output (not counted a second time).
         event.token_usage.total = TokenUsageBreakdown {
+            cost: None,
             total_tokens: 20_000_000,
             input_tokens: 19_000_000,
             cached_input_tokens: 18_500_000,

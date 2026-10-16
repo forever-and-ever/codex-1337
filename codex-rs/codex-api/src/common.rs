@@ -222,6 +222,8 @@ impl Serialize for ResponsesApiTools {
 
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct ResponsesApiRequest {
+    #[serde(rename = "provider", skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<crate::openrouter::OpenRouterRouting>,
     // Keep routing fields first: serde serializes struct fields in declaration order, and
     // gateways may inspect request bodies incrementally before potentially multi-megabyte input.
     pub model: String,
@@ -251,6 +253,7 @@ pub struct ResponsesApiRequest {
 impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
     fn from(request: &'a ResponsesApiRequest) -> Self {
         Self {
+            openrouter: request.openrouter.as_ref(),
             model: &request.model,
             previous_response_id: None,
             input: &request.input,
@@ -274,6 +277,8 @@ impl<'a> From<&'a ResponsesApiRequest> for ResponseCreateWsRequest<'a> {
 
 #[derive(Debug, Serialize)]
 pub struct ResponseCreateWsRequest<'a> {
+    #[serde(rename = "provider", skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<&'a crate::openrouter::OpenRouterRouting>,
     // Keep routing fields first: serde serializes struct fields in declaration order, and
     // gateways may inspect request bodies incrementally before potentially multi-megabyte input.
     pub model: &'a str,

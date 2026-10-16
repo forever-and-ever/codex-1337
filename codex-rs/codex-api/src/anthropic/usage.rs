@@ -115,6 +115,7 @@ impl Usage {
                 .unwrap_or(0),
             total_tokens: total,
             codex_rollout_budget_units: None,
+            cost: None,
         })
     }
 }

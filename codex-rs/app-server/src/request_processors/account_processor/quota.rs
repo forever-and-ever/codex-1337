@@ -6,13 +6,13 @@ use super::quota_cache::QuotaRead;
 use super::quota_cache::QuotaUsage;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::AccountQuota;
 use codex_app_server_protocol::AccountQuotaReadParams;
 use codex_app_server_protocol::AccountQuotaReadResponse;
 use codex_app_server_protocol::AccountQuotaWindow;
 use codex_app_server_protocol::ClientResponsePayload;
 use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_backend_client::Client;
 use codex_backend_client::RequestError;
 use codex_login::anthropic::AccountStore;
@@ -44,7 +44,10 @@ impl AccountRequestProcessor {
             .account_nicknames
             .get(params.provider.config_id());
         let mut accounts: Vec<QuotaIdentity> = match params.provider {
-            SubscriptionAccountProvider::Openai => self
+            AccountProvider::OpenRouter => {
+                return Err(invalid_request("Use openrouter/key/status"));
+            }
+            AccountProvider::Openai => self
                 .auth_manager
                 .saved_accounts()
                 .map_err(|_| internal_error("OpenAI account registry unavailable"))?
@@ -55,7 +58,7 @@ impl AccountRequestProcessor {
                     email: account.email,
                 })
                 .collect(),
-            SubscriptionAccountProvider::ClaudeSubscription => {
+            AccountProvider::ClaudeSubscription => {
                 AccountStore::new(config.codex_home.to_path_buf())
                     .list()
                     .map_err(|_| internal_error("Claude account registry unavailable"))?
@@ -77,7 +80,7 @@ impl AccountRequestProcessor {
                 return Err(invalid_request("Account selector is empty"));
             }
             let exact_id = accounts.iter().any(|account| account.id == selector);
-            let alias = (params.provider == SubscriptionAccountProvider::Openai)
+            let alias = (params.provider == AccountProvider::Openai)
                 .then(|| config.wrangler.account_aliases.get(selector))
                 .flatten();
             accounts.retain(|account| {
@@ -102,7 +105,10 @@ impl AccountRequestProcessor {
         let mut accounts =
             futures::future::join_all(accounts.into_iter().map(|account| async move {
                 let result = match params.provider {
-                    SubscriptionAccountProvider::Openai => {
+                    AccountProvider::OpenRouter => {
+                        Err(std::io::Error::other("Use openrouter/key/status"))
+                    }
+                    AccountProvider::Openai => {
                         self.read_openai_quota(
                             account.id.clone(),
                             QuotaCapability::Passive,
@@ -110,7 +116,7 @@ impl AccountRequestProcessor {
                         )
                         .await
                     }
-                    SubscriptionAccountProvider::ClaudeSubscription => {
+                    AccountProvider::ClaudeSubscription => {
                         let runtime = self.auth_manager.runtime_config();
                         let id = account.id.clone();
                         self.quota_cache
@@ -194,7 +200,7 @@ impl AccountRequestProcessor {
         self.quota_cache
             .read(
                 QuotaKey {
-                    provider: SubscriptionAccountProvider::Openai,
+                    provider: AccountProvider::Openai,
                     account: id.clone(),
                     luna_reserve: reserve,
                 },

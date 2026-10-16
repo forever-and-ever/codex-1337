@@ -262,6 +262,7 @@ impl LunaSampler {
             text: None,
             client_metadata: None,
             access_programs: None,
+            openrouter: None,
         };
         execution::SamplingExecution {
             auth_owner_generation,

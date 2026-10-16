@@ -137,16 +137,16 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
 
     /// Returns the preferred model used for memory extraction.
     ///
-    /// Providers that require backend-specific model IDs should override this.
-    fn memory_extraction_preferred_model(&self) -> &'static str {
-        DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
+    /// None: this provider runs no memory work.
+    fn memory_extraction_preferred_model(&self) -> Option<&'static str> {
+        Some(DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL)
     }
 
     /// Returns the preferred model used for memory consolidation.
     ///
-    /// Providers that require backend-specific model IDs should override this.
-    fn memory_consolidation_preferred_model(&self) -> &'static str {
-        DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL
+    /// None: this provider runs no memory work.
+    fn memory_consolidation_preferred_model(&self) -> Option<&'static str> {
+        Some(DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL)
     }
 
     /// Returns whether requests made through this provider should include attestation.
@@ -446,7 +446,8 @@ impl ConfiguredModelProvider {
     ) -> SharedModelsManager {
         if let Some(mut catalog) = config_model_catalog {
             let normalize: fn(ModelInfo) -> ModelInfo = match self.info.adapter {
-                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
+                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+                | codex_model_provider_info::ModelProviderAdapter::OpenRouter => {
                     std::convert::identity
                 }
                 codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
@@ -514,24 +515,26 @@ impl ModelProvider for ConfiguredModelProvider {
         }
     }
 
-    fn memory_extraction_preferred_model(&self) -> &'static str {
+    fn memory_extraction_preferred_model(&self) -> Option<&'static str> {
         match self.info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter => None,
             codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                "claude-haiku-5-5"
+                Some("claude-haiku-5-5")
             }
             codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
-                DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL
+                Some(DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL)
             }
         }
     }
 
-    fn memory_consolidation_preferred_model(&self) -> &'static str {
+    fn memory_consolidation_preferred_model(&self) -> Option<&'static str> {
         match self.info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter => None,
             codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
-                "claude-sonnet-5-5"
+                Some("claude-sonnet-5-5")
             }
             codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
-                DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL
+                Some(DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL)
             }
         }
     }

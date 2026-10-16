@@ -172,6 +172,7 @@ fn token_usage_delta(start: &TokenUsage, end: &TokenUsage) -> TokenUsage {
             .max(0),
         total_tokens: (end.total_tokens - start.total_tokens).max(0),
         codex_rollout_budget_units: None,
+        cost: codex_protocol::openrouter::cost_since(end.cost, start.cost),
     }
 }
 

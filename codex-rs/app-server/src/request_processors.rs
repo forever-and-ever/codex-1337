@@ -743,3 +743,5 @@ pub(crate) fn build_legacy_api_turns_from_rollout_items(items: &[RolloutItem]) -
     }
     builder.finish()
 }
+
+pub(crate) mod openrouter;
