@@ -11,7 +11,6 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
 
-
 impl TurnRequestProcessor {
     pub(crate) async fn thread_account_list(
         &self,
@@ -55,9 +54,18 @@ impl TurnRequestProcessor {
             .model_provider_adapter
             .speaks_anthropic_messages();
         let is_chatgpt = thread_provider.requires_openai_auth;
+        let is_openrouter = matches!(
+            thread_provider.model_provider_adapter,
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter
+        );
+        let openrouter = codex_config::read_openrouter_config(&config.codex_home)
+            .await
+            .map_err(|_| internal_error("Cannot read OpenRouter preferences"))?;
         Ok(Some(
             ThreadAccountListResponse {
-                conversation_provider: if is_claude {
+                conversation_provider: if is_openrouter {
+                    Some(AccountProvider::OpenRouter)
+                } else if is_claude {
                     Some(AccountProvider::ClaudeSubscription)
                 } else if is_chatgpt {
                     Some(AccountProvider::Openai)
@@ -81,9 +89,23 @@ impl TurnRequestProcessor {
                 },
                 pending_claude_account_id: is_claude.then(|| thread.pending_account_id()).flatten(),
                 claude_management_error,
-                openrouter_keys: Vec::new(),
-                selected_openrouter_key: None,
-                pending_openrouter_key: None,
+                openrouter_keys: self.openrouter_key_statuses(&config, None).await?,
+                selected_openrouter_key: if is_openrouter {
+                    thread
+                        .committed_provider_account_id()
+                        .map(|name| name.parse().map_err(internal_error))
+                        .transpose()?
+                } else {
+                    openrouter.default_key().cloned()
+                },
+                pending_openrouter_key: if is_openrouter {
+                    thread
+                        .pending_account_id()
+                        .map(|name| name.parse().map_err(internal_error))
+                        .transpose()?
+                } else {
+                    None
+                },
             }
             .into(),
         ))
@@ -110,7 +132,9 @@ impl TurnRequestProcessor {
         // Preserve the pre-Claude API default without guessing billing from an ID string.
         let provider = params.provider.unwrap_or(AccountProvider::Openai);
         if provider == AccountProvider::OpenRouter {
-            return super::openrouter::unavailable();
+            return self
+                .openrouter_key_select(&config, &thread, params.account_id)
+                .await;
         }
         if provider == AccountProvider::ClaudeSubscription {
             let _lock = codex_config::lock_account_preferences(config.codex_home.as_path())

@@ -1923,14 +1923,26 @@ impl MessageProcessor {
             ClientRequest::GetAuthStatus { params, .. } => {
                 self.account_processor.get_auth_status(params).await
             }
-            ClientRequest::OpenRouterKeyAdd { .. }
-            | ClientRequest::OpenRouterKeyRemove { .. }
-            | ClientRequest::OpenRouterKeyStatus { .. }
-            | ClientRequest::OpenRouterModelSave { .. }
-            | ClientRequest::OpenRouterModelForget { .. }
-            | ClientRequest::OpenRouterModelEndpoints { .. }
-            | ClientRequest::OpenRouterModelRoute { .. } => {
-                crate::request_processors::openrouter::unavailable()
+            ClientRequest::OpenRouterKeyAdd { params, .. } => {
+                self.turn_processor.openrouter_key_add(params).await
+            }
+            ClientRequest::OpenRouterKeyRemove { params, .. } => {
+                self.turn_processor.openrouter_key_remove(params).await
+            }
+            ClientRequest::OpenRouterKeyStatus { params, .. } => {
+                self.turn_processor.openrouter_key_status(params).await
+            }
+            ClientRequest::OpenRouterModelSave { params, .. } => {
+                self.turn_processor.openrouter_model_save(params).await
+            }
+            ClientRequest::OpenRouterModelForget { params, .. } => {
+                self.turn_processor.openrouter_model_forget(params).await
+            }
+            ClientRequest::OpenRouterModelEndpoints { params, .. } => {
+                self.turn_processor.openrouter_model_endpoints(params).await
+            }
+            ClientRequest::OpenRouterModelRoute { params, .. } => {
+                self.turn_processor.openrouter_model_route(params).await
             }
             ClientRequest::AccountQuotaRead { params, .. } => {
                 self.account_processor.read_account_quota(params).await
