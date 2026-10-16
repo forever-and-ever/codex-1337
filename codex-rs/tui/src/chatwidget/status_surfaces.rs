@@ -772,11 +772,9 @@ impl ChatWidget {
                 .status_line_context_used_percent()
                 .map(|used| format!("Context {used}% used")),
             StatusLineItem::FiveHourLimit if self.on_openrouter() => {
-                self.openrouter_balance_value()
+                self.openrouter_daily_spend_value()
             }
-            StatusLineItem::WeeklyLimit if self.on_openrouter() => {
-                self.openrouter_weekly_spend_value()
-            }
+            StatusLineItem::WeeklyLimit if self.on_openrouter() => self.openrouter_balance_value(),
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id

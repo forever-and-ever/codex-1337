@@ -157,3 +157,12 @@ pub(crate) fn title_route<'a>(
         Some((provider_id, model))
     }
 }
+
+pub(crate) fn error_message(error: &anyhow::Error) -> String {
+    match error.downcast_ref::<codex_app_server_client::TypedRequestError>() {
+        Some(codex_app_server_client::TypedRequestError::Server { source, .. }) => {
+            source.message.clone()
+        }
+        _ => error.to_string(),
+    }
+}

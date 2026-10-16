@@ -145,6 +145,16 @@ async fn openrouter_status_snapshot() {
             },
         }),
     );
+    assert_eq!(
+        chat.status_line_value(crate::bottom_pane::StatusLineItem::WeeklyLimit)
+            .as_deref(),
+        Some("$20.00 left")
+    );
+    assert_eq!(
+        chat.status_line_value(crate::bottom_pane::StatusLineItem::FiveHourLimit)
+            .as_deref(),
+        Some("$0.42 today")
+    );
     let history = drain_insert_history(&mut rx);
     let block = history
         .last()

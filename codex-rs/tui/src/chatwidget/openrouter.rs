@@ -356,16 +356,17 @@ impl ChatWidget {
                     spend,
                     ..
                 } => {
-                    let last4: String = label
+                    let suffix: String = label
                         .chars()
                         .rev()
+                        .take_while(char::is_ascii_alphanumeric)
                         .take(4)
                         .collect::<Vec<_>>()
                         .into_iter()
                         .rev()
                         .collect();
                     format!(
-                        "key …{last4} · {} this month{}",
+                        "key …{suffix} · {} this month{}",
                         spend.monthly,
                         balance
                             .map(|amount| format!(" · {amount} balance"))
@@ -492,7 +493,13 @@ impl ChatWidget {
                 }) => None,
             };
             if let Some(error) = error {
-                self.add_error_message(format!("Cannot refresh OpenRouter key: {error}"));
+                if error.starts_with("OpenRouter key ")
+                    && error.ends_with(" was removed; choose a key with /account.")
+                {
+                    self.add_info_message(error.clone(), None);
+                } else {
+                    self.add_error_message(format!("Cannot refresh OpenRouter key: {error}"));
+                }
             }
         }
         self.refresh_status_line();
@@ -561,9 +568,9 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn openrouter_weekly_spend_value(&self) -> Option<String> {
+    pub(super) fn openrouter_daily_spend_value(&self) -> Option<String> {
         match &self.openrouter_ui.status.as_ref()?.state {
-            OpenRouterKeyState::Read { spend, .. } => Some(format!("{} this week", spend.weekly)),
+            OpenRouterKeyState::Read { spend, .. } => Some(format!("{} today", spend.daily)),
             OpenRouterKeyState::Failed { .. } => None,
         }
     }

@@ -216,7 +216,7 @@ impl App {
                             .to_owned()
                     })
                     .and_then(|result: anyhow::Result<Reply>| {
-                        result.map_err(|error| error.to_string())
+                        result.map_err(|error| crate::openrouter::error_message(&error))
                     });
                     tx.send(AppEvent::OpenRouter(Event::Finished {
                         id,
@@ -301,13 +301,20 @@ impl App {
                             request_id, params: ThreadAccountListParams { thread_id: thread_id.to_string() },
                         }).await?;
                         let name = accounts.selected_openrouter_key.ok_or_else(|| anyhow::anyhow!("Choose an OpenRouter key with /account"))?;
+                        if !accounts.openrouter_keys.iter().any(|status| status.key.name == name) {
+                            anyhow::bail!("OpenRouter key {name} was removed; choose a key with /account.");
+                        }
                         let response = handle.request_typed::<OpenRouterKeyStatusResponse>(ClientRequest::OpenRouterKeyStatus {
                             request_id: status_request_id, params: OpenRouterKeyStatusParams { name: Some(name.clone()) },
-                        }).await?;
+                        }).await.map_err(|error| {
+                            if matches!(&error, codex_app_server_client::TypedRequestError::Server { source, .. } if source.message == format!("OpenRouter key {name} is not configured")) {
+                                anyhow::anyhow!("OpenRouter key {name} was removed; choose a key with /account.")
+                            } else { error.into() }
+                        })?;
                         response.keys.into_iter().find(|status| status.key.name == name)
-                            .ok_or_else(|| anyhow::anyhow!("OpenRouter key {name} is no longer configured; choose a key with /account"))
+                            .ok_or_else(|| anyhow::anyhow!("OpenRouter key {name} was removed; choose a key with /account."))
                     }).await.map_err(|_| "OpenRouter key status timed out".to_owned())
-                        .and_then(|result: anyhow::Result<OpenRouterKeyStatus>| result.map_err(|error| error.to_string()));
+                        .and_then(|result: anyhow::Result<OpenRouterKeyStatus>| result.map_err(|error| crate::openrouter::error_message(&error)));
                     tx.send(AppEvent::OpenRouter(Event::StatusLoaded {
                         thread_id,
                         id,
