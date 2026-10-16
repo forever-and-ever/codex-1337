@@ -695,8 +695,7 @@ impl Session {
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        let native = config.model_provider.adapter
-            == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription;
+        let native = config.model_provider.adapter.speaks_anthropic_messages();
         if native {
             // Explicit models bypass get_default_model discovery. Native metadata
             // must be hydrated even for resumed/fresh children before get_model_info.
@@ -721,14 +720,13 @@ impl Session {
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = crate::openrouter::default_model(
+            &config,
+            &models_manager,
+            allow_provider_model_fallback,
+            refresh_strategy,
+        )
+        .await?;
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),

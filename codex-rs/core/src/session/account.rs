@@ -17,6 +17,7 @@ impl Session {
                     CodexErrorDetails::RefreshTokenFailed(_)
                         | CodexErrorDetails::UsageLimitReached(_)
                         | CodexErrorDetails::QuotaExceeded
+                        | CodexErrorDetails::OpenRouterKeyExhausted { .. }
                         | CodexErrorDetails::UsageNotIncluded
                         | CodexErrorDetails::ServerOverloaded
                 ))

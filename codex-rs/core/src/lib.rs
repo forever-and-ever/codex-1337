@@ -9,6 +9,7 @@ mod apply_patch;
 mod apps;
 mod backpressure;
 mod client;
+mod openrouter;
 pub use client::prompt_cache::CompletedRequest;
 pub use client::prompt_cache::PromptCacheFact;
 pub use client::prompt_cache::PromptCacheManager;

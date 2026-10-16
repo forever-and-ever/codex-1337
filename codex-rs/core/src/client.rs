@@ -44,6 +44,9 @@ pub(crate) mod prompt_cache;
 #[path = "client_anthropic.rs"]
 mod anthropic;
 
+#[path = "client_openrouter.rs"]
+mod openrouter;
+
 use crate::CodexResponsesHeaders;
 use crate::agent::control::ProviderAccountSelection;
 use crate::tools::ExecutedToolCalls;
@@ -159,7 +162,6 @@ use codex_model_provider::WorkspaceRoutingContext;
 use codex_model_provider::create_model_provider;
 #[cfg(test)]
 use codex_model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS;
-use codex_model_provider_info::ModelProviderAdapter;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::WireApi;
 use codex_protocol::error::CodexErr;
@@ -727,7 +729,11 @@ impl ModelClient {
     }
 
     pub(crate) fn uses_claude_subscription(&self) -> bool {
-        self.state.provider.info().adapter == ModelProviderAdapter::ClaudeSubscription
+        self.state
+            .provider
+            .info()
+            .adapter
+            .speaks_anthropic_messages()
     }
 
     pub(crate) fn commit_provider_account(&self, selection: ProviderAccountSelection) {
@@ -986,7 +992,7 @@ impl ModelClient {
         Reasoning {
             effort: effort
                 .or_else(|| model_info.default_reasoning_level.clone())
-                .map(|effort| model_info.resolve_reasoning_effort(effort)),
+                .map(|effort| self.reasoning_effort_for_request(model_info, effort)),
             summary: (model_info.supports_reasoning_summary_parameter
                 && summary != ReasoningSummaryConfig::None)
                 .then_some(summary),
@@ -1009,6 +1015,7 @@ impl ModelClient {
         responses_metadata: &CodexResponsesMetadata,
         include_internal: bool,
     ) -> Result<ResponsesApiRequest> {
+        self.validate_openrouter_tools(prompt)?;
         let mut input = prompt.get_formatted_input_for_request(model_info);
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
@@ -1087,7 +1094,7 @@ impl ModelClient {
             prompt.output_schema_strict,
         );
         let prompt_cache_key = Some(self.prompt_cache_key(responses_metadata));
-        let service_tier = model_info.service_tier_for_request(service_tier);
+        let service_tier = self.service_tier_for_request(model_info, service_tier);
         if !include_internal {
             for item in &mut input {
                 item.clear_tool_result_metadata();
@@ -1145,6 +1152,9 @@ impl ModelClient {
     /// This centralizes setup used by both prewarm and normal request paths so they stay in
     /// lockstep when auth/provider resolution changes.
     async fn current_client_setup(&self, routing: ClientRouting) -> Result<CurrentClientSetup> {
+        if self.uses_openrouter() {
+            return self.openrouter_setup().await;
+        }
         let auth_changes = self
             .state
             .provider
@@ -1852,6 +1862,7 @@ impl ModelClientSession {
                 prompt.cyber_access_program,
                 self.client.api_key_cyber_access_programs,
             )?;
+            self.client.route_openrouter_request(&mut request).await?;
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
@@ -1929,7 +1940,7 @@ impl ModelClientSession {
                 Err(err) => {
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
-                    let err = self.client.state.provider.map_api_error(err);
+                    let err = self.client.map_request_error(err, &model_info.slug);
                     inference_trace_attempt.record_failed(
                         &err,
                         response_debug_context.request_id.as_deref(),

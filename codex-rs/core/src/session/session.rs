@@ -1793,11 +1793,10 @@ impl Session {
             );
             let reasoning_effort_override_enabled =
                 config.features.enabled(Feature::ReasoningEffortOverride) && !title_request;
-            let initial_provider_account = (config.model_provider.adapter
-                == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription)
-                .then(|| local_agent_runtime.account_selection.get(&config.model_provider_id))
-                .flatten()
-                .filter(|selection| matches!(selection.as_ref(), crate::agent::control::ProviderAccountSelection::ClaudeSubscription { .. }));
+            let initial_provider_account = crate::openrouter::initial_account(
+                config.model_provider.adapter,
+                local_agent_runtime.account_selection.get(&config.model_provider_id),
+            );
             let services = SessionServices {
                 // Start with an empty connection set. The initialized set is
                 // published after SessionConfigured so MCP events follow it.
