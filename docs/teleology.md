@@ -413,6 +413,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50434 adds keyboard copy selection to the owned transcript; #50808 prunes TUI snapshots; #50109 bounds fullscreen prompts.
 - Evidence: 1cf770bb6b, b78ff3aff3, eaefb734ab, ae20fc5bef, cdc2ec4845.
 
+### fast-ui-thread
+
+- Telos: typing, navigation and cancellation remain responsive while agent work, history updates and rendering preparation progress.
+- Holds: required invariant: the UI dispatcher performs bounded state transitions and cached presentation; it does not await server responses or perform unbounded I/O or source preparation. Background completions preserve ordering, input ownership and uncertain outcomes without holding unrelated editing. Sequential parsing, semantic formatting, highlighting and token counting finish before an item is published, outside the input dispatcher when costly. Unchanged source preparation is reused across headers, bodies and cosmetic ticks; animation changes paint rather than rebuilding content. Ordinary editing does not require a full-screen paint, and runtime input does not wait for an entire event backlog to drain.
+- Owners: `codex-rs/tui/src/app/startup.rs`, `codex-rs/tui/src/app/owned_transcript.rs`, `codex-rs/tui/src/transcript_view/invocation.rs`, `codex-rs/tui/src/history_cell/invocation.rs`, `codex-rs/tui/src/history_cell/activity_lifecycle.rs`, `codex-rs/tui/src/transcript_view/layout.rs`.
+- Tripwire: no end-to-end latency bound. Existing queue gating, pre-key painting and inline RPC waits do not yet satisfy this invariant.
+- Pressure: upstream event ordering and rendering changes may put preparation or waits back in the dispatcher; asynchronous syntax alone does not keep its input branch running.
+- Evidence: owner decision, 2026-10-15.
+
 ### attention-gated-painting
 
 - Telos: an unwatched TUI spends no CPU on painting.
@@ -522,6 +531,9 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/protocol/src/items.rs`: human-only-facts
 - `codex-rs/protocol/src/models.rs`: native-robustness
 - `codex-rs/rollout/src/policy.rs`: human-only-facts
+- `codex-rs/tui/src/app/startup.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_event_buffer.rs`: durable-approvals-and-queues
@@ -556,6 +568,9 @@ Upstream files, where merge conflicts arise:
 
 Fork-owned files, absent upstream:
 
+- `codex-rs/tui/src/transcript_view/invocation.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/invocation.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/activity_lifecycle.rs`: fast-ui-thread
 - `AGENTS.md`: fullscreen-only, minimal-upstream-delta
 - `codex-rs/app-server-embedding/src/lib.rs`: pipelined-crate-graph
 - `codex-rs/app-server-protocol/src/delegation.rs`: server-hosted-agents
