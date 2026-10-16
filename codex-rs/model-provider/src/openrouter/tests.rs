@@ -14,7 +14,7 @@ fn normalization_contract() {
             include_str!("fixtures/kimi-model.json"),
             include_str!("fixtures/kimi-endpoints.json"),
             "Kimi K3",
-            "$0.30 in · $11.94 out per M · 1M context",
+            "$0.29 in · $8.25 out per M · 1M context",
             ReasoningEffort::Max,
             false,
             vec!["priority"],
@@ -23,7 +23,7 @@ fn normalization_contract() {
             include_str!("fixtures/deepseek-model.json"),
             include_str!("fixtures/deepseek-endpoints.json"),
             "DeepSeek V4.1 Flash",
-            "$0.04 in · $0.64 out per M · 1M context",
+            "$0.04 in · $0.18 out per M · 1M context",
             ReasoningEffort::High,
             false,
             vec!["priority", "flex"],
@@ -32,7 +32,7 @@ fn normalization_contract() {
             include_str!("fixtures/openai-model.json"),
             include_str!("fixtures/openai-endpoints.json"),
             "GPT-5.5",
-            "$5.00 in · $30.00 out per M · 1.05M context",
+            "$2.50 in · $15.00 out per M · 1.05M context",
             ReasoningEffort::Medium,
             true,
             vec!["priority", "flex"],
@@ -175,6 +175,17 @@ fn normalization_contract() {
     let routed = normalize(&resolved, &only, 0);
     assert_eq!(routed.context_window, Some(1_040_000));
     assert!(routed.service_tiers.is_empty());
+    assert_eq!(
+        routed.description.as_deref(),
+        Some("$0.10 in · $0.72 out per M · 1.04M context")
+    );
+    let deepseek = EndpointFilter::Only(
+        EndpointSet::new(BTreeSet::from(["deepseek".parse().expect("host")])).expect("nonempty"),
+    );
+    assert_eq!(
+        normalize(&resolved, &deepseek, 0).description.as_deref(),
+        Some("$0.15 in · $0.60 out per M · 1M context")
+    );
     let ignore = EndpointFilter::Ignore(
         EndpointSet::new(BTreeSet::from([
             "deepinfra".parse().expect("host"),
