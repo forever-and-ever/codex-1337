@@ -7,6 +7,8 @@ use codex_core::StartIfIdleSubmission;
 
 #[path = "thread_accounts.rs"]
 mod accounts;
+#[path = "openrouter.rs"]
+pub(super) mod openrouter;
 mod farm;
 use codex_agent_extension::AgentInvocation;
 use codex_agent_extension::AgentRun;
@@ -120,6 +122,7 @@ pub(crate) struct TurnRequestProcessor {
     thread_watch_manager: ThreadWatchManager,
     skills_watcher: Arc<SkillsWatcher>,
     turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
+    openrouter_key_cache: openrouter::KeyStatusCache,
 }
 
 fn map_additional_context(
@@ -197,6 +200,7 @@ impl TurnRequestProcessor {
             thread_watch_manager,
             skills_watcher,
             turn_cost_worker,
+            openrouter_key_cache: Default::default(),
         }
     }
 
