@@ -70,6 +70,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     let mut snapshots = Vec::new();
     let mut render =
         |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], width, label: &str| {
+            for cell in cells {
+                // The color-only traversal must agree without building these projections.
+                assert_eq!(
+                    crate::history_cell::has_active_invocations(cell.as_ref()),
+                    crate::history_cell::invocation::collect(cell.as_ref())
+                        .iter()
+                        .any(|call| call.is_active()),
+                    "{label}",
+                );
+            }
             view.jump_to_latest();
             let buffer = tests::render(view, cells, width, 26);
             let text = tests::text(&buffer);

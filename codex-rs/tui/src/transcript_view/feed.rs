@@ -934,8 +934,7 @@ impl FeedIndex {
                 .scope
                 .iter()
                 .filter_map(|index| cell(*index))
-                .flat_map(crate::history_cell::invocation::collect)
-                .any(|call| call.is_active());
+                .any(crate::history_cell::has_active_invocations);
             crate::render::header::paint_work(title, active)
         } else {
             crate::render::header::paint(title)
