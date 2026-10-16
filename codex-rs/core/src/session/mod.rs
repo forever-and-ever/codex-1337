@@ -1481,8 +1481,7 @@ impl Session {
     ) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
             if self.services.auth_manager.is_account_scoped()
-                || (self.services.model_client.uses_claude_subscription()
-                    && self.services.model_client.provider_account_id().is_some())
+                || self.services.model_client.provider_account_id().is_some()
             {
                 // Ownership must be durable when the rollout first materializes, not when a
                 // blank composer opens. Serialize the snapshot with explicit account changes.
