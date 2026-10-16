@@ -38,7 +38,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     }
     fn command(status: &str) -> ThreadItem {
         serde_json::from_value(serde_json::json!({
-            "type": "commandExecution", "id": "command", "command": "sleep 20",
+            "type": "commandExecution", "id": "command", "command": "/usr/bin/zsh -lc 'sleep 20'",
             "cwd": "/tmp/project", "processId": "session", "status": status,
             "commandActions": [], "aggregatedOutput": null, "exitCode": null,
             "durationMs": null,
@@ -88,6 +88,18 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     assert_eq!(store.active_turn_id(), Some("turn-2"));
     assert_eq!(store.turns, turns);
     assert_eq!(store.operations.rows(thread_id).len(), 2);
+    assert_eq!(
+        store
+            .operations
+            .rows(thread_id)
+            .iter()
+            .flat_map(|row| &row.children)
+            .next()
+            .unwrap()
+            .summary
+            .to_string(),
+        "Command · sleep 20"
+    );
     assert!(store.operations.rows(ThreadId::new()).is_empty());
 
     let mut refreshed_store = ThreadEventStore::new(8);
@@ -268,6 +280,46 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     assert_eq!(store.active_turn_id(), Some("turn-3"));
     assert_eq!(store.operations.rows(thread_id).len(), 1);
 
+    // Approval starts are placeholders, not independent process lifetimes. A
+    // terminal command or its enclosing cell must retire them without a turn change.
+    for status in ["completed", "failed", "declined"] {
+        let mut approval = command("inProgress");
+        if let ThreadItem::CommandExecution { id, process_id, .. } = &mut approval {
+            *id = format!("approval-{status}");
+            *process_id = None;
+        }
+        store.push_notification(event(thread_id, "turn-3", owned(approval.clone()), true));
+        assert_eq!(store.operations.rows(thread_id)[0].children.len(), 1);
+        if let ThreadItem::CommandExecution {
+            status: outcome, ..
+        } = &mut approval
+        {
+            *outcome = serde_json::from_value(serde_json::json!(status)).unwrap();
+        }
+        store.push_notification(event(thread_id, "turn-3", owned(approval), false));
+        assert!(store.operations.rows(thread_id)[0].children.is_empty());
+    }
+    let mut approval = command("inProgress");
+    if let ThreadItem::CommandExecution { id, process_id, .. } = &mut approval {
+        *id = "approval-cell-finish".to_owned();
+        *process_id = None;
+    }
+    store.push_notification(event(thread_id, "turn-3", owned(approval), true));
+    let other_owner = CodeModeOwner {
+        exec_call_id: "other-exec".to_owned(),
+        cell_id: Some("other-cell".to_owned()),
+        ..owner.clone()
+    };
+    let other_owned =
+        |item| ThreadItem::CodeModeOwned(CodeModeOwned::new(other_owner.clone(), Box::new(item)));
+    store.push_notification(event(
+        thread_id,
+        "turn-3",
+        other_owned(command("inProgress")),
+        true,
+    ));
+    store.push_notification(event(thread_id, "turn-3", command("inProgress"), true));
+
     let finished = fact(
         "end",
         CodeModeEvent::Finished {
@@ -276,6 +328,14 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     );
     store.push_notification(event(thread_id, "turn-3", finished.clone(), false));
     store.push_notification(event(thread_id, "turn-1", started.clone(), false));
+    assert_eq!(store.operations.rows(thread_id).len(), 2);
+    store.push_notification(event(
+        thread_id,
+        "turn-3",
+        other_owned(command("completed")),
+        false,
+    ));
+    store.push_notification(event(thread_id, "turn-3", command("completed"), false));
     assert!(store.operations.rows(thread_id).is_empty());
     refreshed_store.set_session(
         session.clone(),
