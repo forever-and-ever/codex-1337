@@ -1,6 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "AbsolutePathBuf": {
+      "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
+      "type": "string"
+    },
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openRouter"
+      ],
+      "type": "string"
+    },
     "ClaudeSubscriptionAccount": {
       "properties": {
         "available": {
@@ -33,6 +45,163 @@
       "required": [
         "available",
         "id"
+      ],
+      "type": "object"
+    },
+    "KeyName": {
+      "type": "string"
+    },
+    "OpenRouterKey": {
+      "properties": {
+        "isDefault": {
+          "type": "boolean"
+        },
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        },
+        "path": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "isDefault",
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyLimit": {
+      "properties": {
+        "limit": {
+          "$ref": "#/definitions/Usd"
+        },
+        "remaining": {
+          "$ref": "#/definitions/Usd"
+        },
+        "reset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "limit",
+        "remaining"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyState": {
+      "oneOf": [
+        {
+          "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Usd"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "capturedAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "expiresAt": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "label": {
+              "type": "string"
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/OpenRouterKeyLimit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "spend": {
+              "$ref": "#/definitions/OpenRouterSpend"
+            },
+            "type": {
+              "enum": [
+                "read"
+              ],
+              "title": "ReadOpenRouterKeyStateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "capturedAt",
+            "label",
+            "spend",
+            "type"
+          ],
+          "title": "ReadOpenRouterKeyState",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "failed"
+              ],
+              "title": "FailedOpenRouterKeyStateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "type"
+          ],
+          "title": "FailedOpenRouterKeyState",
+          "type": "object"
+        }
+      ]
+    },
+    "OpenRouterKeyStatus": {
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/OpenRouterKey"
+        },
+        "state": {
+          "$ref": "#/definitions/OpenRouterKeyState"
+        }
+      },
+      "required": [
+        "key",
+        "state"
+      ],
+      "type": "object"
+    },
+    "OpenRouterSpend": {
+      "properties": {
+        "daily": {
+          "$ref": "#/definitions/Usd"
+        },
+        "monthly": {
+          "$ref": "#/definitions/Usd"
+        },
+        "weekly": {
+          "$ref": "#/definitions/Usd"
+        }
+      },
+      "required": [
+        "daily",
+        "monthly",
+        "weekly"
       ],
       "type": "object"
     },
@@ -71,12 +240,9 @@
       ],
       "type": "object"
     },
-    "SubscriptionAccountProvider": {
-      "enum": [
-        "openai",
-        "claudeSubscription"
-      ],
-      "type": "string"
+    "Usd": {
+      "format": "double",
+      "type": "number"
     }
   },
   "properties": {
@@ -101,12 +267,18 @@
     "conversationProvider": {
       "anyOf": [
         {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         },
         {
           "type": "null"
         }
       ]
+    },
+    "openrouterKeys": {
+      "items": {
+        "$ref": "#/definitions/OpenRouterKeyStatus"
+      },
+      "type": "array"
     },
     "pendingAccountId": {
       "description": "Selected target whose handoff is not yet complete.",
@@ -121,6 +293,16 @@
         "null"
       ]
     },
+    "pendingOpenrouterKey": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/KeyName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "selectedAccountId": {
       "type": [
         "string",
@@ -132,11 +314,22 @@
         "string",
         "null"
       ]
+    },
+    "selectedOpenrouterKey": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/KeyName"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
     "accounts",
-    "claudeAccounts"
+    "claudeAccounts",
+    "openrouterKeys"
   ],
   "title": "ThreadAccountListResponse",
   "type": "object"

@@ -41,6 +41,25 @@ class ClaudeSubscriptionAccount(BaseModel):
     type: Annotated[Literal["claudeSubscription"], Field(title="ClaudeSubscriptionAccountType")]
 
 
+class AccountProvider(Enum):
+    openai = "openai"
+    claude_subscription = "claudeSubscription"
+    open_router = "openRouter"
+
+
+class AccountQuotaReadParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account: Annotated[
+        str | None,
+        Field(
+            description="Saved account ID, nickname or email. Omit to read every saved account of this provider."
+        ),
+    ] = None
+    provider: AccountProvider
+
+
 class AccountQuotaWindow(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1486,6 +1505,21 @@ class DynamicToolSpec(RootModel[FunctionDynamicToolSpec | NamespaceDynamicToolSp
     root: FunctionDynamicToolSpec | NamespaceDynamicToolSpec
 
 
+class EmptyFilter(BaseModel):
+    pass
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+
+
+class EndpointSlug(RootModel[str]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: str
+
+
 class EnvironmentConnectionNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2288,6 +2322,14 @@ class HooksListParams(BaseModel):
     ] = None
 
 
+class IgnoreFilter(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    ignore: Annotated[list[EndpointSlug], Field(min_length=1)]
+
+
 class ImageDetail(Enum):
     auto = "auto"
     low = "low"
@@ -2439,6 +2481,13 @@ class DeletedJiraResult(BaseModel):
         populate_by_name=True,
     )
     type: Annotated[Literal["deleted"], Field(title="DeletedJiraResultType")]
+
+
+class KeyName(RootModel[str]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: str
 
 
 class LegacyAppPathString(RootModel[str]):
@@ -3081,6 +3130,13 @@ class ModelServiceTier(BaseModel):
     name: str
 
 
+class ModelSlug(RootModel[str]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: str
+
+
 class ModelUpgradeInfo(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3262,6 +3318,102 @@ class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | 
     root: Annotated[
         GetAccountTokenUsageParams | None, Field(title="Nullable_GetAccountTokenUsageParams")
     ]
+
+
+class OnlyFilter(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    only: Annotated[list[EndpointSlug], Field(min_length=1)]
+
+
+class OpenRouterKey(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    is_default: Annotated[bool, Field(alias="isDefault")]
+    name: KeyName
+    path: AbsolutePathBuf
+
+
+class OpenRouterKeyAddParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: KeyName
+    path: AbsolutePathBuf
+
+
+class OpenRouterKeyAddResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: OpenRouterKey
+
+
+class OpenRouterKeyRemoveParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: KeyName
+
+
+class OpenRouterKeyRemoveResponse(BaseModel):
+    pass
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+class FailedOpenRouterKeyState(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    error: str
+    type: Annotated[Literal["failed"], Field(title="FailedOpenRouterKeyStateType")]
+
+
+class OpenRouterKeyStatusParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: KeyName | None = None
+
+
+class OpenRouterModelEndpointsParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    slug: ModelSlug
+
+
+class OpenRouterModelForgetParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    slug: ModelSlug
+
+
+class OpenRouterModelForgetResponse(BaseModel):
+    pass
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+class OpenRouterModelRouteResponse(BaseModel):
+    pass
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+
+
+class OpenRouterModelSaveParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    slug: ModelSlug
 
 
 class PatchApplyStatus(Enum):
@@ -5430,11 +5582,6 @@ class SubagentMigration(BaseModel):
     name: str
 
 
-class SubscriptionAccountProvider(Enum):
-    openai = "openai"
-    claude_subscription = "claudeSubscription"
-
-
 class TerminalInteractionNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5490,28 +5637,6 @@ class ThreadAccountListParams(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
-class ThreadAccountListResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    accounts: list[SavedAccount]
-    claude_accounts: Annotated[list[ClaudeSubscriptionAccount1], Field(alias="claudeAccounts")]
-    claude_management_error: Annotated[str | None, Field(alias="claudeManagementError")] = None
-    conversation_provider: Annotated[
-        SubscriptionAccountProvider | None, Field(alias="conversationProvider")
-    ] = None
-    pending_account_id: Annotated[
-        str | None,
-        Field(
-            alias="pendingAccountId",
-            description="Selected target whose handoff is not yet complete.",
-        ),
-    ] = None
-    pending_claude_account_id: Annotated[str | None, Field(alias="pendingClaudeAccountId")] = None
-    selected_account_id: Annotated[str | None, Field(alias="selectedAccountId")] = None
-    selected_claude_account_id: Annotated[str | None, Field(alias="selectedClaudeAccountId")] = None
-
-
 class ThreadAccountSelectParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5524,7 +5649,7 @@ class ThreadAccountSelectParams(BaseModel):
         ),
     ]
     provider: Annotated[
-        SubscriptionAccountProvider | None,
+        AccountProvider | None,
         Field(
             description="Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit."
         ),
@@ -5554,7 +5679,7 @@ class ThreadAccountSelectResponse(BaseModel):
     pending: Annotated[
         bool | None, Field(description="Whether this thread's account handoff is still pending.")
     ] = False
-    provider: SubscriptionAccountProvider
+    provider: AccountProvider
 
 
 class ThreadActiveFlag(Enum):
@@ -6990,18 +7115,6 @@ class ThreadWarmingStoppedNotification(BaseModel):
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
-class TokenUsageBreakdown(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    cache_write_input_tokens: Annotated[int | None, Field(alias="cacheWriteInputTokens")] = 0
-    cached_input_tokens: Annotated[int, Field(alias="cachedInputTokens")]
-    input_tokens: Annotated[int, Field(alias="inputTokens")]
-    output_tokens: Annotated[int, Field(alias="outputTokens")]
-    reasoning_output_tokens: Annotated[int, Field(alias="reasoningOutputTokens")]
-    total_tokens: Annotated[int, Field(alias="totalTokens")]
-
-
 class Tool(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7164,6 +7277,13 @@ class TurnSteerResponse(BaseModel):
         populate_by_name=True,
     )
     turn_id: Annotated[str, Field(alias="turnId")]
+
+
+class Usd(RootModel[float]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: float
 
 
 class TextUserInput(BaseModel):
@@ -7495,7 +7615,7 @@ class AccountNicknameSetParams(BaseModel):
     nickname: Annotated[
         str, Field(description="Empty or whitespace-only text clears the nickname.")
     ]
-    provider: SubscriptionAccountProvider
+    provider: AccountProvider
 
 
 class AccountNicknameSetResponse(BaseModel):
@@ -7504,7 +7624,7 @@ class AccountNicknameSetResponse(BaseModel):
     )
     account_id: Annotated[str, Field(alias="accountId")]
     nickname: str | None = None
-    provider: SubscriptionAccountProvider
+    provider: AccountProvider
 
 
 class AccountQuota(BaseModel):
@@ -7537,19 +7657,6 @@ class AccountQuota(BaseModel):
         ),
     ]
     seven_day: Annotated[AccountQuotaWindow | None, Field(alias="sevenDay")] = None
-
-
-class AccountQuotaReadParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    account: Annotated[
-        str | None,
-        Field(
-            description="Saved account ID, nickname or email. Omit to read every saved account of this provider."
-        ),
-    ] = None
-    provider: SubscriptionAccountProvider
 
 
 class AccountQuotaReadResponse(BaseModel):
@@ -8566,6 +8673,71 @@ class AccountReloadRequest(BaseModel):
     params: None = None
 
 
+class OpenrouterKeyAddRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["openrouter/key/add"], Field(title="Openrouter/key/addRequestMethod")]
+    params: OpenRouterKeyAddParams
+
+
+class OpenrouterKeyRemoveRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/key/remove"], Field(title="Openrouter/key/removeRequestMethod")
+    ]
+    params: OpenRouterKeyRemoveParams
+
+
+class OpenrouterKeyStatusRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/key/status"], Field(title="Openrouter/key/statusRequestMethod")
+    ]
+    params: OpenRouterKeyStatusParams
+
+
+class OpenrouterModelSaveRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/model/save"], Field(title="Openrouter/model/saveRequestMethod")
+    ]
+    params: OpenRouterModelSaveParams
+
+
+class OpenrouterModelForgetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/model/forget"], Field(title="Openrouter/model/forgetRequestMethod")
+    ]
+    params: OpenRouterModelForgetParams
+
+
+class OpenrouterModelEndpointsRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/model/endpoints"],
+        Field(title="Openrouter/model/endpointsRequestMethod"),
+    ]
+    params: OpenRouterModelEndpointsParams
+
+
 class AccountQuotaReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9048,6 +9220,13 @@ class ContentItem(
         | InputAudioContentItem
         | OutputTextContentItem
     )
+
+
+class EndpointFilter(RootModel[EmptyFilter | OnlyFilter | IgnoreFilter]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: EmptyFilter | OnlyFilter | IgnoreFilter
 
 
 class ExperimentalFeature(BaseModel):
@@ -10004,6 +10183,69 @@ class NullableGetWorkspaceMessagesParams(RootModel[GetWorkspaceMessagesParams | 
     ]
 
 
+class OpenRouterEndpoint(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    completion_per_mtok: Annotated[Usd | None, Field(alias="completionPerMtok")] = None
+    context_length: Annotated[int, Field(alias="contextLength")]
+    prompt_per_mtok: Annotated[Usd | None, Field(alias="promptPerMtok")] = None
+    quantization: str | None = None
+    service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+    slug: EndpointSlug
+    uptime_percent: Annotated[float | None, Field(alias="uptimePercent")] = None
+
+
+class OpenRouterHost(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    endpoints: list[OpenRouterEndpoint]
+    name: str
+    slug: EndpointSlug
+
+
+class OpenRouterKeyLimit(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    limit: Usd
+    remaining: Usd
+    reset: str | None = None
+
+
+class OpenRouterModelEndpointsResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    filter: EndpointFilter
+    hosts: list[OpenRouterHost]
+
+
+class OpenRouterModelRouteParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    filter: EndpointFilter
+    slug: ModelSlug
+
+
+class OpenRouterModelSaveResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    model: Model
+
+
+class OpenRouterSpend(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    daily: Usd
+    monthly: Usd
+    weekly: Usd
+
+
 class OverriddenMetadata(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10198,17 +10440,6 @@ class RateLimitSnapshot(BaseModel):
             description="Backend-reported spend-control state. `None` is unavailable, not a sparse-update recovery.",
         ),
     ] = None
-
-
-class RawResponseCompletedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    response_id: Annotated[str, Field(alias="responseId")]
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
-    usage: TokenUsageBreakdown | None = None
-    usage_metadata: Annotated[ResponseUsageMetadata | None, Field(alias="usageMetadata")] = None
 
 
 class ResetCreditConfirmation(BaseModel):
@@ -11808,24 +12039,6 @@ class RealtimeThreadTimelineEntry(BaseModel):
     type: Annotated[Literal["realtime"], Field(title="RealtimeThreadTimelineEntryType")]
 
 
-class ThreadTokenUsage(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    last: TokenUsageBreakdown
-    model_context_window: Annotated[int | None, Field(alias="modelContextWindow")] = None
-    total: TokenUsageBreakdown
-
-
-class ThreadTokenUsageUpdatedNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    thread_id: Annotated[str, Field(alias="threadId")]
-    token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
-    turn_id: Annotated[str, Field(alias="turnId")]
-
-
 class ThreadTurnsListParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11877,6 +12090,19 @@ class ThreadWorkStatusUpdatedNotification(BaseModel):
     )
     status: WorkStatus
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class TokenUsageBreakdown(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    cache_write_input_tokens: Annotated[int | None, Field(alias="cacheWriteInputTokens")] = 0
+    cached_input_tokens: Annotated[int, Field(alias="cachedInputTokens")]
+    cost: Usd | None = None
+    input_tokens: Annotated[int, Field(alias="inputTokens")]
+    output_tokens: Annotated[int, Field(alias="outputTokens")]
+    reasoning_output_tokens: Annotated[int, Field(alias="reasoningOutputTokens")]
+    total_tokens: Annotated[int, Field(alias="totalTokens")]
 
 
 class ToolsV2(BaseModel):
@@ -12206,6 +12432,17 @@ class AccountLoginStartRequest(BaseModel):
         Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
     ]
     params: LoginAccountParams
+
+
+class OpenrouterModelRouteRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/model/route"], Field(title="Openrouter/model/routeRequestMethod")
+    ]
+    params: OpenRouterModelRouteParams
 
 
 class AccountRateLimitsReadRequest(BaseModel):
@@ -12728,6 +12965,41 @@ class ModelsRequirements(BaseModel):
     new_thread: Annotated[NewThreadModelDefaults | None, Field(alias="newThread")] = None
 
 
+class ReadOpenRouterKeyState(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    balance: Usd | None = None
+    captured_at: Annotated[int, Field(alias="capturedAt")]
+    expires_at: Annotated[int | None, Field(alias="expiresAt")] = None
+    label: str
+    limit: OpenRouterKeyLimit | None = None
+    spend: OpenRouterSpend
+    type: Annotated[Literal["read"], Field(title="ReadOpenRouterKeyStateType")]
+
+
+class OpenRouterKeyState(RootModel[ReadOpenRouterKeyState | FailedOpenRouterKeyState]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ReadOpenRouterKeyState | FailedOpenRouterKeyState
+
+
+class OpenRouterKeyStatus(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    key: OpenRouterKey
+    state: OpenRouterKeyState
+
+
+class OpenRouterKeyStatusResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    keys: list[OpenRouterKeyStatus]
+
+
 class PluginShareContext(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12828,6 +13100,17 @@ class PluginSummary(BaseModel):
         str | None,
         Field(description="Version advertised by the remote marketplace backend when available."),
     ] = None
+
+
+class RawResponseCompletedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    response_id: Annotated[str, Field(alias="responseId")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+    usage: TokenUsageBreakdown | None = None
+    usage_metadata: Annotated[ResponseUsageMetadata | None, Field(alias="usageMetadata")] = None
 
 
 class FunctionCallOutputResponseItem(BaseModel):
@@ -12975,24 +13258,6 @@ class ThreadSettingsUpdatedServerNotification(BaseModel):
         Literal["thread/settings/updated"], Field(title="Thread/settings/updatedNotificationMethod")
     ]
     params: ThreadSettingsUpdatedNotification
-
-
-class ThreadTokenUsageUpdatedServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    emitted_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="emittedAtMs",
-            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
-        ),
-    ] = None
-    method: Annotated[
-        Literal["thread/tokenUsage/updated"],
-        Field(title="Thread/tokenUsage/updatedNotificationMethod"),
-    ]
-    params: ThreadTokenUsageUpdatedNotification
 
 
 class HookCompletedServerNotification(BaseModel):
@@ -13185,6 +13450,31 @@ class SessionSource(RootModel[SessionSourceValue | CustomSessionSource | SubAgen
     root: SessionSourceValue | CustomSessionSource | SubAgentSessionSource
 
 
+class ThreadAccountListResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    accounts: list[SavedAccount]
+    claude_accounts: Annotated[list[ClaudeSubscriptionAccount1], Field(alias="claudeAccounts")]
+    claude_management_error: Annotated[str | None, Field(alias="claudeManagementError")] = None
+    conversation_provider: Annotated[
+        AccountProvider | None, Field(alias="conversationProvider")
+    ] = None
+    openrouter_keys: Annotated[list[OpenRouterKeyStatus], Field(alias="openrouterKeys")]
+    pending_account_id: Annotated[
+        str | None,
+        Field(
+            alias="pendingAccountId",
+            description="Selected target whose handoff is not yet complete.",
+        ),
+    ] = None
+    pending_claude_account_id: Annotated[str | None, Field(alias="pendingClaudeAccountId")] = None
+    pending_openrouter_key: Annotated[KeyName | None, Field(alias="pendingOpenrouterKey")] = None
+    selected_account_id: Annotated[str | None, Field(alias="selectedAccountId")] = None
+    selected_claude_account_id: Annotated[str | None, Field(alias="selectedClaudeAccountId")] = None
+    selected_openrouter_key: Annotated[KeyName | None, Field(alias="selectedOpenrouterKey")] = None
+
+
 class ThreadContextInventoryResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13324,6 +13614,24 @@ class TurnCompletedThreadTimelineEntry(BaseModel):
     status: TurnStatus
     turn_id: str
     type: Annotated[Literal["turnCompleted"], Field(title="TurnCompletedThreadTimelineEntryType")]
+
+
+class ThreadTokenUsage(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    last: TokenUsageBreakdown
+    model_context_window: Annotated[int | None, Field(alias="modelContextWindow")] = None
+    total: TokenUsageBreakdown
+
+
+class ThreadTokenUsageUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+    token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
+    turn_id: Annotated[str, Field(alias="turnId")]
 
 
 class TurnToolOutput(BaseModel):
@@ -13653,6 +13961,24 @@ class RequestPermissionProfile(BaseModel):
     network: AdditionalNetworkPermissions | None = None
 
 
+class ThreadTokenUsageUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/tokenUsage/updated"],
+        Field(title="Thread/tokenUsage/updatedNotificationMethod"),
+    ]
+    params: ThreadTokenUsageUpdatedNotification
+
+
 class TurnStartParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13887,6 +14213,13 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountReloadRequest
+        | OpenrouterKeyAddRequest
+        | OpenrouterKeyRemoveRequest
+        | OpenrouterKeyStatusRequest
+        | OpenrouterModelSaveRequest
+        | OpenrouterModelForgetRequest
+        | OpenrouterModelEndpointsRequest
+        | OpenrouterModelRouteRequest
         | AccountQuotaReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest
@@ -14012,6 +14345,13 @@ class ClientRequest(
         | AccountLoginCancelRequest
         | AccountLogoutRequest
         | AccountReloadRequest
+        | OpenrouterKeyAddRequest
+        | OpenrouterKeyRemoveRequest
+        | OpenrouterKeyStatusRequest
+        | OpenrouterModelSaveRequest
+        | OpenrouterModelForgetRequest
+        | OpenrouterModelEndpointsRequest
+        | OpenrouterModelRouteRequest
         | AccountQuotaReadRequest
         | AccountRateLimitsReadRequest
         | AccountRateLimitResetCreditConsumeRequest

@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EmptyFilter": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EmptyFilter"
+        },
+        {
+          "$ref": "#/definitions/OnlyFilter"
+        },
+        {
+          "$ref": "#/definitions/IgnoreFilter"
+        }
+      ]
+    },
+    "EndpointSlug": {
+      "type": "string"
+    },
+    "IgnoreFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "ModelSlug": {
+      "type": "string"
+    },
+    "OnlyFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    }
+  },
+  "properties": {
+    "filter": {
+      "$ref": "#/definitions/EndpointFilter"
+    },
+    "slug": {
+      "$ref": "#/definitions/ModelSlug"
+    }
+  },
+  "required": [
+    "filter",
+    "slug"
+  ],
+  "title": "OpenRouterModelRouteParams",
+  "type": "object"
+}

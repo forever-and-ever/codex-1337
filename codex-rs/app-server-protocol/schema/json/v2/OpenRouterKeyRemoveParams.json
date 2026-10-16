@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "KeyName": {
+      "type": "string"
+    }
+  },
+  "properties": {
+    "name": {
+      "$ref": "#/definitions/KeyName"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "OpenRouterKeyRemoveParams",
+  "type": "object"
+}

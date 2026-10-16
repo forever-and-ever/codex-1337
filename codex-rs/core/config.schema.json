@@ -1491,6 +1491,26 @@
       "minItems": 1,
       "type": "array"
     },
+    "EmptyFilter": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EmptyFilter"
+        },
+        {
+          "$ref": "#/definitions/OnlyFilter"
+        },
+        {
+          "$ref": "#/definitions/IgnoreFilter"
+        }
+      ]
+    },
+    "EndpointSlug": {
+      "type": "string"
+    },
     "ExperimentalRequestUserInput": {
       "additionalProperties": false,
       "properties": {
@@ -2389,6 +2409,26 @@
       },
       "type": "object"
     },
+    "IgnoreFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "KeyName": {
+      "type": "string"
+    },
     "KeybindingsSpec": {
       "anyOf": [
         {
@@ -2749,7 +2789,8 @@
       "description": "Provider semantics that cannot be inferred from the shared Responses wire format.",
       "enum": [
         "openai_compatible",
-        "claude_subscription"
+        "claude_subscription",
+        "openrouter"
       ],
       "type": "string"
     },
@@ -3454,6 +3495,51 @@
           "type": "string"
         }
       ]
+    },
+    "OnlyFilter": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    },
+    "OpenRouterConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default_key": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeyName"
+            }
+          ],
+          "default": null
+        },
+        "key_files": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AbsolutePathBuf"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "models": {
+          "additionalProperties": {
+            "$ref": "#/definitions/EndpointFilter"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
     },
     "OrchestratorToml": {
       "additionalProperties": false,
@@ -6967,6 +7053,18 @@
             "reasoning_effort": null
           },
           "description": "Executor and additive child instructions for direct user delegation."
+        },
+        "openrouter": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OpenRouterConfig"
+            }
+          ],
+          "default": {
+            "default_key": null,
+            "key_files": {},
+            "models": {}
+          }
         }
       },
       "type": "object"
@@ -8205,6 +8303,11 @@
           "model": null,
           "providers": {},
           "reasoning_effort": null
+        },
+        "openrouter": {
+          "default_key": null,
+          "key_files": {},
+          "models": {}
         }
       },
       "description": "Downstream conversation-account preferences."
