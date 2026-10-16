@@ -161,10 +161,13 @@ impl AccountRequestProcessor {
         params: GetAccountParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.refresh_token_if_requested(params.refresh_token).await;
-        let read = self.read_account(None).await.map_err(|error| match error {
-            AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
-            AccountReadError::Routing(error) => internal_error(error.to_string()),
-        })?;
+        let read = self
+            .read_account(/*request*/ None)
+            .await
+            .map_err(|error| match error {
+                AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
+                AccountReadError::Routing(error) => internal_error(error.to_string()),
+            })?;
         let preferences = self.config_manager.load_non_project_config().await.ok();
         let config = preferences
             .as_ref()

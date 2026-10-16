@@ -94,6 +94,14 @@ pub(crate) enum StatusRefresh {
     AfterTurn,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum StatusFailure {
+    #[error("OpenRouter key {0} was removed; choose a key with /account")]
+    Removed(KeyName),
+    #[error("{0}")]
+    Failed(String),
+}
+
 #[derive(Debug)]
 pub(crate) enum Event {
     Request(Request),
@@ -126,7 +134,7 @@ pub(crate) enum Event {
         thread_id: ThreadId,
         id: uuid::Uuid,
         mode: StatusRefresh,
-        result: Result<OpenRouterKeyStatus, String>,
+        result: Result<OpenRouterKeyStatus, StatusFailure>,
     },
     ModelSubmitted {
         menu: ModelMenu,
