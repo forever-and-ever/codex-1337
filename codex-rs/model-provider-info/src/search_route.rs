@@ -1,4 +1,3 @@
-use crate::ModelProviderAdapter;
 use crate::ModelProviderInfo;
 use crate::OPENAI_PROVIDER_ID;
 use codex_protocol::config_types::WebSearchMode;
@@ -19,6 +18,13 @@ impl SearchRoute {
     ) -> Self {
         if mode == WebSearchMode::Disabled {
             Self::Unavailable
+        } else if provider.adapter.borrows_chatgpt() {
+            // Adapter-owned delegation cannot be overridden by a hosted-tool capability flag.
+            if providers.contains_key(OPENAI_PROVIDER_ID) {
+                Self::ChatgptDelegate
+            } else {
+                Self::Unavailable
+            }
         } else if provider.is_openai()
             || provider.uses_openai_actor_authorization()
             || provider.supports_standalone_web_search
@@ -26,10 +32,6 @@ impl SearchRoute {
             Self::Own {
                 provider: Box::new(provider.clone()),
             }
-        } else if provider.adapter == ModelProviderAdapter::ClaudeSubscription
-            && providers.contains_key(OPENAI_PROVIDER_ID)
-        {
-            Self::ChatgptDelegate
         } else {
             Self::Unavailable
         }

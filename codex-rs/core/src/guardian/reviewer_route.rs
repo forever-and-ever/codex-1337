@@ -1,4 +1,4 @@
-//! Routes Claude approval reviews through a ChatGPT account without permitting API-key billing.
+//! Routes borrowed ChatGPT approval reviews without permitting hidden parent-provider billing.
 
 use super::GuardianReviewContext;
 use crate::agent::child_config::switch_agent_provider;
@@ -25,10 +25,14 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
+pub(super) const OPENROUTER_REVIEW_LOGIN_REQUIRED: &str =
+    "Auto-review for OpenRouter conversations needs a ChatGPT login; choose one with /account.";
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ReviewerRoute {
     #[default]
     ParentProvider,
+    OpenRouterUnavailable,
     ChatgptAutoReview {
         account_id: String,
     },
@@ -68,10 +72,13 @@ impl ReviewerRouteQuarantine {
 impl ReviewerRoute {
     pub(crate) async fn resolve(session: &Session, context: &GuardianReviewContext) -> Self {
         let config = &context.turn().config;
-        if config.model_provider.adapter != ModelProviderAdapter::ClaudeSubscription
-            || !config.model_providers.contains_key(OPENAI_PROVIDER_ID)
-        {
-            return Self::ParentProvider;
+        let fallback = match config.model_provider.adapter {
+            ModelProviderAdapter::OpenaiCompatible => return Self::ParentProvider,
+            ModelProviderAdapter::ClaudeSubscription => Self::ParentProvider,
+            ModelProviderAdapter::OpenRouter => Self::OpenRouterUnavailable,
+        };
+        if !config.model_providers.contains_key(OPENAI_PROVIDER_ID) {
+            return fallback;
         }
         tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
             let (candidate, auth, manager) =
@@ -102,7 +109,7 @@ impl ReviewerRoute {
         .await
         .ok()
         .flatten()
-        .unwrap_or(Self::ParentProvider)
+        .unwrap_or(fallback)
     }
 
     pub(crate) fn apply(&self, config: &mut Config) {
@@ -145,6 +152,9 @@ impl ReviewerRoute {
         session: &Session,
         provider: &ModelProviderInfo,
     ) -> anyhow::Result<()> {
+        if matches!(self, Self::OpenRouterUnavailable) {
+            anyhow::bail!(OPENROUTER_REVIEW_LOGIN_REQUIRED);
+        }
         if let Self::ChatgptAutoReview { account_id } = self
             && (!uses_chatgpt_login(provider)
                 || session.provider_id != OPENAI_PROVIDER_ID
@@ -197,6 +207,10 @@ impl ReviewerRoute {
             .reviewer_route_quarantine;
         if let Some(cause) = cause {
             quarantine.insert(account_id, cause).await;
+        }
+        // OpenRouter must never receive the OpenAI reviewer id or hidden fallback spend.
+        if session.get_config().await.model_provider.adapter == ModelProviderAdapter::OpenRouter {
+            return None;
         }
         *self = Self::ParentProvider;
         Some(reason)

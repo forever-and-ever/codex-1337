@@ -14,4 +14,11 @@ impl ModelProviderAdapter {
             Self::OpenaiCompatible => false,
         }
     }
+
+    pub fn supports_background_scoring(self) -> bool {
+        match self {
+            Self::OpenaiCompatible | Self::ClaudeSubscription => true,
+            Self::OpenRouter => false,
+        }
+    }
 }

@@ -357,7 +357,8 @@ async fn run_review_on_session(
         super::reviewer_route::ReviewerRoute::ParentProvider => {
             &params.parent_session.services.models_manager
         }
-        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. } => {
+        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. }
+        | super::reviewer_route::ReviewerRoute::OpenRouterUnavailable => {
             &review_session.session.services.models_manager
         }
     };

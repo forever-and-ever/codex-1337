@@ -63,3 +63,16 @@ pub(crate) async fn default_model(
         )
         .await)
 }
+
+pub(crate) fn require_realtime(adapter: ModelProviderAdapter) -> Result<()> {
+    match adapter {
+        ModelProviderAdapter::OpenaiCompatible => Ok(()),
+        ModelProviderAdapter::ClaudeSubscription => Err(CodexErr::InvalidRequest(
+            "Realtime conversations are not supported by Claude subscriptions.".into(),
+        )),
+        // OpenRouter Responses does not expose OpenAI's realtime transport or model ids.
+        ModelProviderAdapter::OpenRouter => Err(CodexErr::InvalidRequest(
+            "Realtime conversations are not supported by OpenRouter.".into(),
+        )),
+    }
+}

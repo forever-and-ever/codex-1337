@@ -24,21 +24,27 @@ pub struct ChatgptDelegate(Weak<Session>);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChatgptDelegateError {
-    #[error(
-        "Web search for Claude conversations needs an active ChatGPT login; choose one with /account."
-    )]
-    NoChatgptLogin,
-    #[error("Web search for Claude conversations needs the configured openai provider.")]
-    MissingOpenaiProvider,
+    #[error("Web search for {} conversations needs an active ChatGPT login; choose one with /account.", conversation_name(*.0))]
+    NoChatgptLogin(ModelProviderAdapter),
+    #[error("Web search for {} conversations needs the configured openai provider.", conversation_name(*.0))]
+    MissingOpenaiProvider(ModelProviderAdapter),
     #[error("Web search could not load the ChatGPT model catalog: {0}")]
     CatalogUnavailable(String),
     #[error("Web search conversation is no longer available.")]
     ConversationUnavailable,
 }
 
+fn conversation_name(adapter: ModelProviderAdapter) -> &'static str {
+    match adapter {
+        ModelProviderAdapter::OpenaiCompatible => "OpenAI",
+        ModelProviderAdapter::ClaudeSubscription => "Claude",
+        ModelProviderAdapter::OpenRouter => "OpenRouter",
+    }
+}
+
 impl ChatgptDelegate {
     pub(crate) fn install(session: &Arc<Session>, config: &Config) {
-        if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+        if config.model_provider.adapter.borrows_chatgpt() {
             session
                 .services
                 .thread_extension_data
@@ -80,12 +86,16 @@ pub(crate) async fn borrow_chatgpt(
     config: &Config,
 ) -> Result<(Config, Arc<AuthManager>, SharedModelsManager), ChatgptDelegateError> {
     if !config.model_providers.contains_key(OPENAI_PROVIDER_ID) {
-        return Err(ChatgptDelegateError::MissingOpenaiProvider);
+        return Err(ChatgptDelegateError::MissingOpenaiProvider(
+            config.model_provider.adapter,
+        ));
     }
     let mut candidate = config.clone();
     switch_agent_provider(&mut candidate, OPENAI_PROVIDER_ID);
     if !uses_chatgpt_login(&candidate.model_provider) {
-        return Err(ChatgptDelegateError::NoChatgptLogin);
+        return Err(ChatgptDelegateError::NoChatgptLogin(
+            config.model_provider.adapter,
+        ));
     }
     let auth = account_auth_for_provider(
         &candidate,
@@ -95,13 +105,17 @@ pub(crate) async fn borrow_chatgpt(
         &AccountInheritance::OtherProvider,
     )
     .await
-    .map_err(|_| ChatgptDelegateError::NoChatgptLogin)?
-    .ok_or(ChatgptDelegateError::NoChatgptLogin)?;
+    .map_err(|_| ChatgptDelegateError::NoChatgptLogin(config.model_provider.adapter))?
+    .ok_or(ChatgptDelegateError::NoChatgptLogin(
+        config.model_provider.adapter,
+    ))?;
     if !auth
         .auth_cached()
         .is_some_and(|auth| auth.is_chatgpt_auth())
     {
-        return Err(ChatgptDelegateError::NoChatgptLogin);
+        return Err(ChatgptDelegateError::NoChatgptLogin(
+            config.model_provider.adapter,
+        ));
     }
     let manager = build_models_manager(&candidate, auth.clone());
     Ok((candidate, auth, manager))
@@ -115,7 +129,7 @@ pub(crate) fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
         && provider.auth.is_none()
 }
 
-/// Anthropic conversations search through a borrowed ChatGPT login, so the hosted-search
+/// Claude and OpenRouter conversations search through a borrowed ChatGPT login, so the hosted-search
 /// capability and its rollout flag do not gate them.
 pub(crate) fn delegates_web_search(turn: &TurnContext) -> bool {
     matches!(
