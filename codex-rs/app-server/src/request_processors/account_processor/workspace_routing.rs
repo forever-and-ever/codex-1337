@@ -180,9 +180,9 @@ impl AccountRequestProcessor {
                     .or(self.scoped_config.as_deref())
                     .unwrap_or(self.config.as_ref());
                 let provider = if self.scoped_provider_account_id.is_some() {
-                    codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription
+                    codex_app_server_protocol::AccountProvider::ClaudeSubscription
                 } else {
-                    codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                    codex_app_server_protocol::AccountProvider::Openai
                 };
                 config
                     .wrangler
@@ -191,7 +191,7 @@ impl AccountRequestProcessor {
                     .and_then(|names| names.get(id))
                     .cloned()
                     .or_else(|| {
-                        (provider == codex_app_server_protocol::SubscriptionAccountProvider::Openai)
+                        (provider == codex_app_server_protocol::AccountProvider::Openai)
                             .then(|| {
                                 config.wrangler.account_aliases.iter().find_map(
                                     |(alias, account)| (account == id).then(|| alias.clone()),

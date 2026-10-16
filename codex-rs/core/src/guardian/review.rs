@@ -144,6 +144,9 @@ pub(super) async fn guardian_review_session_config_for_route(
         None => None,
     };
     let (review_model, guardian_model_info) = match route {
+        super::reviewer_route::ReviewerRoute::OpenRouterUnavailable => {
+            anyhow::bail!(super::reviewer_route::OPENROUTER_REVIEW_LOGIN_REQUIRED);
+        }
         super::reviewer_route::ReviewerRoute::ParentProvider => {
             super::reviewer_config::resolve_review_model(session, context).await
         }

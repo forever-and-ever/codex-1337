@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/tests/openrouter_tests.rs
+expression: block
+---
+OpenRouter
+  Key: main
+  Label: sk-or-v1-…abcd
+  Balance: $24.62
+  Key limit: $30.00 · $20.00 remaining · resets monthly
+  Spend: $0.42 today · $1.76 this week · $3.88 this month
+  This conversation: $0.42

@@ -15,7 +15,7 @@
           "type": "string"
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -24,6 +24,14 @@
         "provider"
       ],
       "type": "object"
+    },
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openrouter"
+      ],
+      "type": "string"
     },
     "AccountQuotaReadParams": {
       "properties": {
@@ -35,7 +43,7 @@
           ]
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -951,6 +959,62 @@
           "type": "object"
         }
       ]
+    },
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EndpointFilterAll"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterOnly"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterIgnore"
+        }
+      ],
+      "description": "Which endpoints may serve a saved model."
+    },
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilterIgnore": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "EndpointFilterOnly": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    },
+    "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "type": "string"
     },
     "EnvironmentSkillsParams": {
       "properties": {
@@ -2034,6 +2098,10 @@
       ],
       "type": "object"
     },
+    "KeyName": {
+      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
+      "type": "string"
+    },
     "LegacyAppPathString": {
       "type": "string"
     },
@@ -2625,6 +2693,9 @@
     "ModelProviderCapabilitiesReadParams": {
       "type": "object"
     },
+    "ModelSlug": {
+      "type": "string"
+    },
     "MultiAgentMode": {
       "description": "Controls the effective multi-agent delegation instructions for a turn. `custom` means the configured mode hint defines the policy instead of a built-in policy.",
       "oneOf": [
@@ -2686,6 +2757,96 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "OpenRouterKeyAddParams": {
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        },
+        "path": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyRemoveParams": {
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyStatusParams": {
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeyName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "OpenRouterModelEndpointsParams": {
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterModelForgetParams": {
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterModelRouteParams": {
+      "properties": {
+        "filter": {
+          "$ref": "#/definitions/EndpointFilter"
+        },
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "filter",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterModelSaveParams": {
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
       "type": "object"
     },
     "PermissionProfileListParams": {
@@ -4710,13 +4871,6 @@
       ],
       "type": "object"
     },
-    "SubscriptionAccountProvider": {
-      "enum": [
-        "openai",
-        "claudeSubscription"
-      ],
-      "type": "string"
-    },
     "TextElement": {
       "properties": {
         "byteRange": {
@@ -4760,7 +4914,7 @@
         "provider": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SubscriptionAccountProvider"
+              "$ref": "#/definitions/AccountProvider"
             },
             {
               "type": "null"
@@ -9277,6 +9431,174 @@
         "method"
       ],
       "title": "Account/reloadRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/key/add"
+          ],
+          "title": "Openrouter/key/addRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterKeyAddParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/key/addRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/key/remove"
+          ],
+          "title": "Openrouter/key/removeRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterKeyRemoveParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/key/removeRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/key/status"
+          ],
+          "title": "Openrouter/key/statusRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterKeyStatusParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/key/statusRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/model/save"
+          ],
+          "title": "Openrouter/model/saveRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterModelSaveParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/model/saveRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/model/forget"
+          ],
+          "title": "Openrouter/model/forgetRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterModelForgetParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/model/forgetRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/model/endpoints"
+          ],
+          "title": "Openrouter/model/endpointsRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterModelEndpointsParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/model/endpointsRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "openrouter/model/route"
+          ],
+          "title": "Openrouter/model/routeRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/OpenRouterModelRouteParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Openrouter/model/routeRequest",
       "type": "object"
     },
     {

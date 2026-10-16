@@ -1,0 +1,9 @@
+{
+  "data": {
+    "designated_version": {
+      "config": {
+        "model": "deepseek/deepseek-v4.1-flash"
+      }
+    }
+  }
+}

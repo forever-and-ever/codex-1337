@@ -120,7 +120,7 @@
           "type": "string"
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -144,7 +144,7 @@
           ]
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -153,6 +153,14 @@
       ],
       "title": "AccountNicknameSetResponse",
       "type": "object"
+    },
+    "AccountProvider": {
+      "enum": [
+        "openai",
+        "claudeSubscription",
+        "openrouter"
+      ],
+      "type": "string"
     },
     "AccountQuota": {
       "properties": {
@@ -230,7 +238,7 @@
           ]
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -4729,6 +4737,174 @@
             },
             "method": {
               "enum": [
+                "openrouter/key/add"
+              ],
+              "title": "Openrouter/key/addRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterKeyAddParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/key/addRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/key/remove"
+              ],
+              "title": "Openrouter/key/removeRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterKeyRemoveParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/key/removeRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/key/status"
+              ],
+              "title": "Openrouter/key/statusRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterKeyStatusParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/key/statusRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/model/save"
+              ],
+              "title": "Openrouter/model/saveRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterModelSaveParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/model/saveRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/model/forget"
+              ],
+              "title": "Openrouter/model/forgetRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterModelForgetParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/model/forgetRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/model/endpoints"
+              ],
+              "title": "Openrouter/model/endpointsRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterModelEndpointsParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/model/endpointsRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "openrouter/model/route"
+              ],
+              "title": "Openrouter/model/routeRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/OpenRouterModelRouteParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Openrouter/model/routeRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
                 "account/quota/read"
               ],
               "title": "Account/quota/readRequestMethod",
@@ -8084,6 +8260,62 @@
           "type": "object"
         }
       ]
+    },
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EndpointFilterAll"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterOnly"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterIgnore"
+        }
+      ],
+      "description": "Which endpoints may serve a saved model."
+    },
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilterIgnore": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "EndpointFilterOnly": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    },
+    "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "type": "string"
     },
     "EnvironmentConnectionNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -11669,6 +11901,10 @@
       ],
       "type": "object"
     },
+    "KeyName": {
+      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
+      "type": "string"
+    },
     "LegacyAppPathString": {
       "type": "string"
     },
@@ -13522,6 +13758,9 @@
       ],
       "type": "object"
     },
+    "ModelSlug": {
+      "type": "string"
+    },
     "ModelUpgradeInfo": {
       "properties": {
         "migrationMarkdown": {
@@ -13888,6 +14127,418 @@
         }
       ],
       "title": "Nullable_GetWorkspaceMessagesParams"
+    },
+    "OpenRouterEndpoint": {
+      "properties": {
+        "completionPerMtok": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contextLength": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "promptPerMtok": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quantization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slug": {
+          "$ref": "#/definitions/EndpointSlug"
+        },
+        "uptimePercent": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "contextLength",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterHost": {
+      "properties": {
+        "endpoints": {
+          "items": {
+            "$ref": "#/definitions/OpenRouterEndpoint"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "$ref": "#/definitions/EndpointSlug"
+        }
+      },
+      "required": [
+        "endpoints",
+        "name",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKey": {
+      "properties": {
+        "isDefault": {
+          "type": "boolean"
+        },
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        },
+        "path": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "isDefault",
+        "name",
+        "path"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyAddParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        },
+        "path": {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "title": "OpenRouterKeyAddParams",
+      "type": "object"
+    },
+    "OpenRouterKeyAddResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/OpenRouterKey"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "OpenRouterKeyAddResponse",
+      "type": "object"
+    },
+    "OpenRouterKeyLimit": {
+      "properties": {
+        "limit": {
+          "$ref": "#/definitions/Usd"
+        },
+        "remaining": {
+          "$ref": "#/definitions/Usd"
+        },
+        "reset": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "limit",
+        "remaining"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyRemoveParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/KeyName"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "OpenRouterKeyRemoveParams",
+      "type": "object"
+    },
+    "OpenRouterKeyRemoveResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "OpenRouterKeyRemoveResponse",
+      "type": "object"
+    },
+    "OpenRouterKeyState": {
+      "oneOf": [
+        {
+          "properties": {
+            "balance": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Usd"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "capturedAt": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "expiresAt": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "label": {
+              "type": "string"
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/OpenRouterKeyLimit"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "spend": {
+              "$ref": "#/definitions/OpenRouterSpend"
+            },
+            "type": {
+              "enum": [
+                "read"
+              ],
+              "title": "ReadOpenRouterKeyStateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "capturedAt",
+            "label",
+            "spend",
+            "type"
+          ],
+          "title": "ReadOpenRouterKeyState",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "failed"
+              ],
+              "title": "FailedOpenRouterKeyStateType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "type"
+          ],
+          "title": "FailedOpenRouterKeyState",
+          "type": "object"
+        }
+      ]
+    },
+    "OpenRouterKeyStatus": {
+      "properties": {
+        "key": {
+          "$ref": "#/definitions/OpenRouterKey"
+        },
+        "state": {
+          "$ref": "#/definitions/OpenRouterKeyState"
+        }
+      },
+      "required": [
+        "key",
+        "state"
+      ],
+      "type": "object"
+    },
+    "OpenRouterKeyStatusParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeyName"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "OpenRouterKeyStatusParams",
+      "type": "object"
+    },
+    "OpenRouterKeyStatusResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "keys": {
+          "items": {
+            "$ref": "#/definitions/OpenRouterKeyStatus"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "keys"
+      ],
+      "title": "OpenRouterKeyStatusResponse",
+      "type": "object"
+    },
+    "OpenRouterModelEndpointsParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "title": "OpenRouterModelEndpointsParams",
+      "type": "object"
+    },
+    "OpenRouterModelEndpointsResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "filter": {
+          "$ref": "#/definitions/EndpointFilter"
+        },
+        "hosts": {
+          "items": {
+            "$ref": "#/definitions/OpenRouterHost"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "filter",
+        "hosts"
+      ],
+      "title": "OpenRouterModelEndpointsResponse",
+      "type": "object"
+    },
+    "OpenRouterModelForgetParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "title": "OpenRouterModelForgetParams",
+      "type": "object"
+    },
+    "OpenRouterModelForgetResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "OpenRouterModelForgetResponse",
+      "type": "object"
+    },
+    "OpenRouterModelRouteParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "filter": {
+          "$ref": "#/definitions/EndpointFilter"
+        },
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "filter",
+        "slug"
+      ],
+      "title": "OpenRouterModelRouteParams",
+      "type": "object"
+    },
+    "OpenRouterModelRouteResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "OpenRouterModelRouteResponse",
+      "type": "object"
+    },
+    "OpenRouterModelSaveParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "slug": {
+          "$ref": "#/definitions/ModelSlug"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "title": "OpenRouterModelSaveParams",
+      "type": "object"
+    },
+    "OpenRouterModelSaveResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "properties": {
+        "model": {
+          "$ref": "#/definitions/Model"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "OpenRouterModelSaveResponse",
+      "type": "object"
+    },
+    "OpenRouterSpend": {
+      "properties": {
+        "daily": {
+          "$ref": "#/definitions/Usd"
+        },
+        "monthly": {
+          "$ref": "#/definitions/Usd"
+        },
+        "weekly": {
+          "$ref": "#/definitions/Usd"
+        }
+      },
+      "required": [
+        "daily",
+        "monthly",
+        "weekly"
+      ],
+      "type": "object"
     },
     "OverriddenMetadata": {
       "properties": {
@@ -20845,13 +21496,6 @@
       ],
       "type": "object"
     },
-    "SubscriptionAccountProvider": {
-      "enum": [
-        "openai",
-        "claudeSubscription"
-      ],
-      "type": "string"
-    },
     "TerminalInteractionNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -21212,12 +21856,18 @@
         "conversationProvider": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SubscriptionAccountProvider"
+              "$ref": "#/definitions/AccountProvider"
             },
             {
               "type": "null"
             }
           ]
+        },
+        "openrouterKeys": {
+          "items": {
+            "$ref": "#/definitions/OpenRouterKeyStatus"
+          },
+          "type": "array"
         },
         "pendingAccountId": {
           "description": "Selected target whose handoff is not yet complete.",
@@ -21232,6 +21882,16 @@
             "null"
           ]
         },
+        "pendingOpenrouterKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeyName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "selectedAccountId": {
           "type": [
             "string",
@@ -21243,11 +21903,22 @@
             "string",
             "null"
           ]
+        },
+        "selectedOpenrouterKey": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeyName"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "accounts",
-        "claudeAccounts"
+        "claudeAccounts",
+        "openrouterKeys"
       ],
       "title": "ThreadAccountListResponse",
       "type": "object"
@@ -21262,7 +21933,7 @@
         "provider": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SubscriptionAccountProvider"
+              "$ref": "#/definitions/AccountProvider"
             },
             {
               "type": "null"
@@ -21301,7 +21972,7 @@
           "type": "boolean"
         },
         "provider": {
-          "$ref": "#/definitions/SubscriptionAccountProvider"
+          "$ref": "#/definitions/AccountProvider"
         }
       },
       "required": [
@@ -26641,6 +27312,16 @@
           "format": "int64",
           "type": "integer"
         },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "inputTokens": {
           "format": "int64",
           "type": "integer"
@@ -27492,6 +28173,10 @@
         "data"
       ],
       "type": "object"
+    },
+    "Usd": {
+      "format": "double",
+      "type": "number"
     },
     "UserInput": {
       "oneOf": [

@@ -2306,6 +2306,9 @@ pub struct TokenUsage {
     #[schemars(skip)]
     #[ts(skip)]
     pub codex_rollout_budget_units: Option<serde_json::Number>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number | null")]
+    pub cost: Option<crate::Usd>,
 }
 
 /// Best-effort Responses API usage observed for one completed response.
@@ -2369,6 +2372,7 @@ impl TokenUsageInfo {
         self.model_context_window = Some(context_window);
         self.total_token_usage = TokenUsage {
             total_tokens: context_window,
+            cost: self.total_token_usage.cost,
             ..TokenUsage::default()
         };
         self.last_token_usage = TokenUsage {
@@ -2520,6 +2524,7 @@ impl TokenUsage {
         self.output_tokens += other.output_tokens;
         self.reasoning_output_tokens += other.reasoning_output_tokens;
         self.total_tokens += other.total_tokens;
+        crate::openrouter::add_cost(&mut self.cost, other.cost);
     }
 }
 
@@ -6448,6 +6453,7 @@ mod tests {
             reasoning_output_tokens: 0,
             total_tokens: 10,
             codex_rollout_budget_units: None,
+            cost: None,
         });
 
         let info = TokenUsageInfo::new_or_append(&initial, &last, Some(128_000))
@@ -6471,6 +6477,7 @@ mod tests {
             reasoning_output_tokens: 0,
             total_tokens: 10,
             codex_rollout_budget_units: None,
+            cost: None,
         });
 
         let info =

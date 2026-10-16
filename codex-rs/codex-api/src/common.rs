@@ -228,6 +228,9 @@ pub struct ResponsesApiRequest {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+    /// OpenRouter endpoint routing, sent as `provider`.
+    #[serde(rename = "provider", skip_serializing_if = "Option::is_none")]
+    pub openrouter: Option<crate::openrouter::OpenRouterRouting>,
     pub input: Vec<ResponseItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<ResponsesApiTools>,

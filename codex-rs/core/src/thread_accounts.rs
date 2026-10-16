@@ -52,6 +52,34 @@ impl ThreadManagerState {
                 }
                 _ => None,
             });
+        if config.model_provider.adapter == ModelProviderAdapter::OpenRouter {
+            let selected = agent_control
+                .runtime()
+                .account_selection
+                .get(&config.model_provider_id)
+                .is_some_and(|selection| {
+                    matches!(
+                        selection.as_ref(),
+                        ProviderAccountSelection::OpenRouter { .. }
+                    )
+                });
+            if !selected {
+                let key = match persisted {
+                    Some(key) => Some(key.parse().map_err(CodexErr::InvalidRequest)?),
+                    None => codex_config::read_openrouter_config(config.codex_home.as_path())
+                        .await?
+                        .default_key()
+                        .cloned(),
+                };
+                if let Some(key) = key {
+                    agent_control.runtime().account_selection.select(
+                        &config.model_provider_id,
+                        ProviderAccountSelection::OpenRouter { key },
+                    );
+                }
+            }
+            return Ok(None);
+        }
         let inherited = if let Some(parent) = parent {
             // A resumed child can outlive its loaded parent. Its persisted
             // binding remains authoritative when the parent has been evicted.
@@ -73,7 +101,7 @@ impl ThreadManagerState {
         } else {
             AccountInheritance::None
         };
-        if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription
+        if config.model_provider.adapter.speaks_anthropic_messages()
             && config.model_provider.requires_openai_auth
         {
             return Err(CodexErr::InvalidRequest(
@@ -81,7 +109,7 @@ impl ThreadManagerState {
             ));
         }
         if !config.model_provider.requires_openai_auth {
-            if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+            if config.model_provider.adapter.speaks_anthropic_messages() {
                 let selected = agent_control
                     .runtime()
                     .account_selection
@@ -152,7 +180,8 @@ pub(crate) async fn account_auth_for_provider(
         .get(&config.model_provider_id)
         .and_then(|selection| match selection.as_ref() {
             ProviderAccountSelection::Chatgpt { id } => Some(id.clone()),
-            ProviderAccountSelection::ClaudeSubscription { .. } => None,
+            ProviderAccountSelection::ClaudeSubscription { .. }
+            | ProviderAccountSelection::OpenRouter { .. } => None,
         })
         .or(persisted)
         .or_else(|| inherited.and_then(|auth| auth.selected_account_id()));

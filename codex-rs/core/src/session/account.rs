@@ -17,6 +17,7 @@ impl Session {
                     CodexErrorDetails::RefreshTokenFailed(_)
                         | CodexErrorDetails::UsageLimitReached(_)
                         | CodexErrorDetails::QuotaExceeded
+                        | CodexErrorDetails::OpenRouterKeyExhausted { .. }
                         | CodexErrorDetails::UsageNotIncluded
                         | CodexErrorDetails::ServerOverloaded
                 ))
@@ -28,44 +29,47 @@ impl Session {
     }
 
     fn pending_account_selection(&self) -> Option<Arc<ProviderAccountSelection>> {
-        if self.services.model_client.uses_claude_subscription() {
-            return self
-                .services
-                .local_agent_runtime
-                .account_selection
-                .get(&self.provider_id)
-                .filter(|selection| {
-                    matches!(
-                        selection.as_ref(),
-                        ProviderAccountSelection::ClaudeSubscription { .. }
-                    ) && self
-                        .services
-                        .model_client
-                        .provider_account_selection()
-                        .as_ref()
-                        != Some(selection.as_ref())
-                });
-        }
-        if !self.services.auth_manager.is_account_scoped() {
-            return None;
-        }
         self.services
             .local_agent_runtime
             .account_selection
             .get(&self.provider_id)
-            .filter(|selection| {
-                matches!(selection.as_ref(), ProviderAccountSelection::Chatgpt { .. })
-                    && (self.account_refresh_pending.load(Ordering::Acquire)
-                        || self.services.auth_manager.selected_account_id().as_deref()
-                            != Some(selection.id()))
+            .filter(|selection| match selection.as_ref() {
+                ProviderAccountSelection::ClaudeSubscription { .. } => {
+                    self.services.model_client.uses_claude_subscription()
+                        && self
+                            .services
+                            .model_client
+                            .provider_account_selection()
+                            .as_ref()
+                            != Some(selection.as_ref())
+                }
+                ProviderAccountSelection::OpenRouter { .. } => {
+                    self.services.model_client.uses_openrouter()
+                        && self
+                            .services
+                            .model_client
+                            .provider_account_selection()
+                            .as_ref()
+                            != Some(selection.as_ref())
+                }
+                ProviderAccountSelection::Chatgpt { .. } => {
+                    !self.services.model_client.uses_claude_subscription()
+                        && !self.services.model_client.uses_openrouter()
+                        && self.services.auth_manager.is_account_scoped()
+                        && (self.account_refresh_pending.load(Ordering::Acquire)
+                            || self.services.auth_manager.selected_account_id().as_deref()
+                                != Some(selection.id()))
+                }
             })
     }
 
     /// Accept a family-wide selection without changing credentials under running work.
     pub(crate) async fn select_account(&self, id: &str) -> std::io::Result<()> {
-        if self.services.model_client.uses_claude_subscription() {
+        if self.services.model_client.uses_claude_subscription()
+            || self.services.model_client.uses_openrouter()
+        {
             return Err(std::io::Error::other(
-                "Select a saved Claude subscription account explicitly.",
+                "Select this conversation's saved provider account explicitly.",
             ));
         }
         if !self.services.auth_manager.is_account_scoped() {
@@ -96,6 +100,23 @@ impl Session {
         .await
     }
 
+    pub(crate) async fn select_openrouter_key(
+        &self,
+        key: &codex_protocol::KeyName,
+    ) -> std::io::Result<()> {
+        let config = self.get_config().await;
+        if !self.services.model_client.uses_openrouter()
+            || !codex_config::read_openrouter_config(&config.codex_home)
+                .await?
+                .key_files
+                .contains_key(key)
+        {
+            return Err(std::io::Error::other("OpenRouter key is not saved."));
+        }
+        self.publish_account_selection(ProviderAccountSelection::OpenRouter { key: key.clone() })
+            .await
+    }
+
     async fn publish_account_selection(
         &self,
         selection: ProviderAccountSelection,
@@ -124,12 +145,8 @@ impl Session {
                 ));
             }
             if root.session.provider_id != self.provider_id
-                || root
-                    .session
-                    .services
-                    .model_client
-                    .uses_claude_subscription()
-                    != self.services.model_client.uses_claude_subscription()
+                || root.session.get_config().await.model_provider.adapter
+                    != self.get_config().await.model_provider.adapter
                 || root.session.services.auth_manager.is_account_scoped()
                     != self.services.auth_manager.is_account_scoped()
             {
@@ -221,7 +238,11 @@ impl Session {
             return Ok(());
         };
         let id = selection.id().to_owned();
-        if self.services.model_client.uses_claude_subscription() {
+        if matches!(
+            selection.as_ref(),
+            ProviderAccountSelection::ClaudeSubscription { .. }
+                | ProviderAccountSelection::OpenRouter { .. }
+        ) {
             let msg = self.persist_account_binding(&id).await?;
             self.services
                 .model_client

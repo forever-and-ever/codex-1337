@@ -1299,6 +1299,7 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
             response_id: "resp-1".to_string(),
             usage_metadata: serde_json::from_value(expected_metadata)?,
             usage: Some(TokenUsageBreakdown {
+                cost: None,
                 total_tokens: 37,
                 input_tokens: 30,
                 cached_input_tokens: 11,

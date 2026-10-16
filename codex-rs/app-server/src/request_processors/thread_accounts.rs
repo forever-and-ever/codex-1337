@@ -2,15 +2,14 @@ use super::claude_account_controller::ClaudeAccountController;
 use super::*;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::SavedAccount;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_app_server_protocol::ThreadAccountListParams;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectParams;
 use codex_app_server_protocol::ThreadAccountSelectResponse;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
-use codex_model_provider_info::ModelProviderAdapter;
 
 impl TurnRequestProcessor {
     pub(crate) async fn thread_account_list(
@@ -32,7 +31,7 @@ impl TurnRequestProcessor {
                 nickname: config
                     .wrangler
                     .account_nicknames
-                    .get(SubscriptionAccountProvider::Openai.config_id())
+                    .get(AccountProvider::Openai.config_id())
                     .and_then(|names| names.get(&account.id))
                     .cloned(),
                 alias: config
@@ -51,15 +50,25 @@ impl TurnRequestProcessor {
                 Err(error) => (Vec::new(), Some(error.to_string())),
             };
         let thread_provider = thread.config_snapshot().await;
-        let is_claude =
-            thread_provider.model_provider_adapter == ModelProviderAdapter::ClaudeSubscription;
+        let is_claude = thread_provider
+            .model_provider_adapter
+            .speaks_anthropic_messages();
         let is_chatgpt = thread_provider.requires_openai_auth;
+        let is_openrouter = matches!(
+            thread_provider.model_provider_adapter,
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter
+        );
+        let openrouter = codex_config::read_openrouter_config(&config.codex_home)
+            .await
+            .map_err(|_| internal_error("Cannot read OpenRouter preferences"))?;
         Ok(Some(
             ThreadAccountListResponse {
-                conversation_provider: if is_claude {
-                    Some(SubscriptionAccountProvider::ClaudeSubscription)
+                conversation_provider: if is_openrouter {
+                    Some(AccountProvider::OpenRouter)
+                } else if is_claude {
+                    Some(AccountProvider::ClaudeSubscription)
                 } else if is_chatgpt {
-                    Some(SubscriptionAccountProvider::Openai)
+                    Some(AccountProvider::Openai)
                 } else {
                     None
                 },
@@ -80,6 +89,23 @@ impl TurnRequestProcessor {
                 },
                 pending_claude_account_id: is_claude.then(|| thread.pending_account_id()).flatten(),
                 claude_management_error,
+                openrouter_keys: self.openrouter_key_statuses(&config, None).await?,
+                selected_openrouter_key: if is_openrouter {
+                    thread
+                        .committed_provider_account_id()
+                        .map(|name| name.parse().map_err(internal_error))
+                        .transpose()?
+                } else {
+                    openrouter.default_key().cloned()
+                },
+                pending_openrouter_key: if is_openrouter {
+                    thread
+                        .pending_account_id()
+                        .map(|name| name.parse().map_err(internal_error))
+                        .transpose()?
+                } else {
+                    None
+                },
             }
             .into(),
         ))
@@ -99,14 +125,18 @@ impl TurnRequestProcessor {
             .await
             .map_err(|error| internal_error(error.to_string()))?;
         let thread_provider = thread.config_snapshot().await;
-        let is_claude_thread =
-            thread_provider.model_provider_adapter == ModelProviderAdapter::ClaudeSubscription;
+        let is_claude_thread = thread_provider
+            .model_provider_adapter
+            .speaks_anthropic_messages();
         let is_chatgpt_thread = thread_provider.requires_openai_auth;
         // Preserve the pre-Claude API default without guessing billing from an ID string.
-        let provider = params
-            .provider
-            .unwrap_or(SubscriptionAccountProvider::Openai);
-        if provider == SubscriptionAccountProvider::ClaudeSubscription {
+        let provider = params.provider.unwrap_or(AccountProvider::Openai);
+        if provider == AccountProvider::OpenRouter {
+            return self
+                .openrouter_key_select(&config, &thread, params.account_id)
+                .await;
+        }
+        if provider == AccountProvider::ClaudeSubscription {
             let _lock = codex_config::lock_account_preferences(config.codex_home.as_path())
                 .await
                 .map_err(|error| internal_error(error.to_string()))?;
@@ -202,7 +232,12 @@ impl TurnRequestProcessor {
             .await
             .map_err(|error| internal_error(error.to_string()))?;
         match params.provider {
-            SubscriptionAccountProvider::Openai => {
+            AccountProvider::OpenRouter => {
+                return Err(invalid_request(
+                    "OpenRouter keys are named by their key name",
+                ));
+            }
+            AccountProvider::Openai => {
                 if !self
                     .auth_manager
                     .saved_accounts()
@@ -222,7 +257,7 @@ impl TurnRequestProcessor {
                     ));
                 }
             }
-            SubscriptionAccountProvider::ClaudeSubscription => {
+            AccountProvider::ClaudeSubscription => {
                 ClaudeAccountController::new(&config)
                     .validate_selection(&params.account_id)
                     .map_err(|error| invalid_request(error.to_string()))?;

@@ -488,6 +488,7 @@ fn thread_id(chat: &ChatWidget) -> String {
 
 fn token_usage_breakdown(usage: TokenUsage) -> codex_app_server_protocol::TokenUsageBreakdown {
     codex_app_server_protocol::TokenUsageBreakdown {
+        cost: usage.cost,
         total_tokens: usage.total_tokens,
         input_tokens: usage.input_tokens,
         cached_input_tokens: usage.cached_input_tokens,

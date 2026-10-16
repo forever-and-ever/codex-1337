@@ -71,9 +71,9 @@ async fn provider_thread_starts_without_openai_account() -> Result<()> {
 async fn claude_subscription_accounts_are_native_and_conversation_scoped() -> Result<()> {
     use codex_app_server_protocol::Account;
     use codex_app_server_protocol::AccountNicknameSetResponse;
+    use codex_app_server_protocol::AccountProvider;
     use codex_app_server_protocol::ClaudeSubscriptionAccount;
     use codex_app_server_protocol::GetAccountResponse;
-    use codex_app_server_protocol::SubscriptionAccountProvider;
     use codex_login::anthropic::AccountIdentity;
     use codex_login::anthropic::AccountInfo;
     use codex_login::anthropic::AccountStore;
@@ -174,7 +174,7 @@ default_claude_account = {}
     assert_eq!(
         renamed,
         AccountNicknameSetResponse {
-            provider: SubscriptionAccountProvider::ClaudeSubscription,
+            provider: AccountProvider::ClaudeSubscription,
             account_id: ids[1].clone(),
             nickname: Some("work".into())
         }
@@ -191,7 +191,7 @@ default_claude_account = {}
         selected,
         ThreadAccountSelectResponse {
             account_id: ids[1].clone(),
-            provider: SubscriptionAccountProvider::ClaudeSubscription,
+            provider: AccountProvider::ClaudeSubscription,
             conversation_changed: true,
             pending: false,
             default_saved: true
@@ -371,7 +371,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         selected,
         ThreadAccountSelectResponse {
             account_id: "bob:bob".into(),
-            provider: codex_app_server_protocol::SubscriptionAccountProvider::Openai,
+            provider: codex_app_server_protocol::AccountProvider::Openai,
             conversation_changed: true,
             pending: false,
             default_saved: true
@@ -931,7 +931,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         selected,
         ThreadAccountSelectResponse {
             account_id: "bob:bob".into(),
-            provider: codex_app_server_protocol::SubscriptionAccountProvider::Openai,
+            provider: codex_app_server_protocol::AccountProvider::Openai,
             conversation_changed: true,
             pending: true,
             default_saved: true

@@ -1370,6 +1370,42 @@ client_request_definitions! {
         response: v2::ReloadAccountResponse,
     },
 
+    OpenRouterKeyAdd => "openrouter/key/add" {
+        params: v2::OpenRouterKeyAddParams,
+        serialization: global("account-auth"),
+        response: v2::OpenRouterKeyAddResponse,
+    },
+    OpenRouterKeyRemove => "openrouter/key/remove" {
+        params: v2::OpenRouterKeyRemoveParams,
+        serialization: global("account-auth"),
+        response: v2::OpenRouterKeyRemoveResponse,
+    },
+    OpenRouterKeyStatus => "openrouter/key/status" {
+        params: v2::OpenRouterKeyStatusParams,
+        serialization: None,
+        response: v2::OpenRouterKeyStatusResponse,
+    },
+    OpenRouterModelSave => "openrouter/model/save" {
+        params: v2::OpenRouterModelSaveParams,
+        serialization: global("account-auth"),
+        response: v2::OpenRouterModelSaveResponse,
+    },
+    OpenRouterModelForget => "openrouter/model/forget" {
+        params: v2::OpenRouterModelForgetParams,
+        serialization: global("account-auth"),
+        response: v2::OpenRouterModelForgetResponse,
+    },
+    OpenRouterModelEndpoints => "openrouter/model/endpoints" {
+        params: v2::OpenRouterModelEndpointsParams,
+        serialization: None,
+        response: v2::OpenRouterModelEndpointsResponse,
+    },
+    OpenRouterModelRoute => "openrouter/model/route" {
+        params: v2::OpenRouterModelRouteParams,
+        serialization: global("account-auth"),
+        response: v2::OpenRouterModelRouteResponse,
+    },
+
     AccountQuotaRead => "account/quota/read" {
         params: v2::AccountQuotaReadParams,
         serialization: None,

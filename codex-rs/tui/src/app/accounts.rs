@@ -1,9 +1,9 @@
 use super::*;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::LoginAccountResponse;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_app_server_protocol::ThreadAccountListParams;
 use codex_app_server_protocol::ThreadAccountListResponse;
 use codex_app_server_protocol::ThreadAccountSelectParams;
@@ -84,7 +84,7 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
-        provider: SubscriptionAccountProvider,
+        provider: AccountProvider,
         account_id: String,
         nickname: String,
     ) {
@@ -271,13 +271,15 @@ impl App {
                 .collect::<String>();
             (!safe.is_empty()).then_some(safe)
         });
-        let active_account_label = match (&response.account, account_label) {
-            (Some(Account::Chatgpt { .. }), Some(label)) => Some(format!("ChatGPT · {label}")),
-            (Some(Account::ClaudeSubscription { .. }), Some(label)) => {
-                Some(format!("Claude · {label}"))
-            }
-            _ => None,
-        };
+        let active_account_label = self.chat_widget.openrouter_account_label().or(
+            match (&response.account, account_label) {
+                (Some(Account::Chatgpt { .. }), Some(label)) => Some(format!("ChatGPT · {label}")),
+                (Some(Account::ClaudeSubscription { .. }), Some(label)) => {
+                    Some(format!("Claude · {label}"))
+                }
+                _ => None,
+            },
+        );
         if self
             .account_ui
             .displayed
@@ -415,7 +417,7 @@ impl App {
         server: &mut AppServerSession,
         thread_id: ThreadId,
         account_id: String,
-        provider: SubscriptionAccountProvider,
+        provider: AccountProvider,
     ) {
         if self.account_ui.selection_request.is_some()
             || self.account_ui.claude_login.is_some()
@@ -423,7 +425,15 @@ impl App {
         {
             return;
         }
+        if provider == AccountProvider::OpenRouter && self.chat_widget.openrouter_request_pending()
+        {
+            return;
+        }
         self.account_ui.selection_request = Some(thread_id);
+        if provider == AccountProvider::OpenRouter {
+            self.chat_widget
+                .show_openrouter_account_selection(&account_id);
+        }
         self.account_ui.picker_request = None;
         let request_id = server.next_request_id();
         let handle = server.request_handle();
@@ -456,6 +466,13 @@ impl App {
         result: Result<ThreadAccountSelectResponse, String>,
     ) {
         self.account_ui.selection_request = None;
+        if self.current_displayed_thread_id() == Some(thread_id)
+            && self
+                .chat_widget
+                .finish_openrouter_account_selection(&result)
+        {
+            return;
+        }
         match result {
             Ok(response) => {
                 if response.conversation_changed {
@@ -469,7 +486,7 @@ impl App {
                 }
                 // The ChatGPT default is the server's active login, not configuration.
                 if response.default_saved
-                    && response.provider == SubscriptionAccountProvider::ClaudeSubscription
+                    && response.provider == AccountProvider::ClaudeSubscription
                 {
                     self.config.wrangler.default_claude_account = Some(response.account_id.clone());
                 }
@@ -483,6 +500,8 @@ impl App {
                     self.last_thread_usage_status_cell = None;
                     self.pending_thread_usage_history_refresh = false;
                     self.refresh_conversation_account(server, thread_id);
+                    self.chat_widget
+                        .refresh_openrouter_status(crate::openrouter::StatusRefresh::Now);
                 }
                 self.chat_widget.add_info_message(
                     if !response.conversation_changed {

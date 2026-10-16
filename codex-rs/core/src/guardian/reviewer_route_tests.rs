@@ -237,6 +237,9 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
                             retry_at: None,
                         })
                     }
+                    ReviewerRoute::OpenRouterUnavailable => {
+                        unreachable!("Claude test cannot require an OpenRouter login")
+                    }
                     ReviewerRoute::ParentProvider => {
                         GuardianReviewOutcome::Completed(assessment.clone())
                     }

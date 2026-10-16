@@ -1,6 +1,6 @@
 //! Account-local polling shared by quota clients and ordinary statusline reads.
 
-use codex_app_server_protocol::SubscriptionAccountProvider;
+use codex_app_server_protocol::AccountProvider;
 use codex_backend_client::RateLimitsWithResetCredits;
 use codex_http_client::RetryAfter;
 use codex_model_provider::AnthropicQuota;
@@ -14,7 +14,7 @@ use tokio::time::Instant;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) struct QuotaKey {
-    pub provider: SubscriptionAccountProvider,
+    pub provider: AccountProvider,
     pub account: String,
     // Reserve-capable reads can record backend exposure; passive polls cannot opt in.
     pub luna_reserve: bool,

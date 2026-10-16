@@ -195,6 +195,7 @@ impl ChatWidget {
         let effort = self.effective_reasoning_effort();
         self.bottom_pane
             .set_active_reasoning_effort_baseline(effort.as_ref());
+        self.reset_openrouter_status(previous_thread_id != self.thread_id);
         self.refresh_model_display();
         self.refresh_status_surfaces();
         if previous_thread_id != self.thread_id

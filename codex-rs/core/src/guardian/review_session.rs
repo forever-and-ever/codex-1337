@@ -172,6 +172,7 @@ fn token_usage_delta(start: &TokenUsage, end: &TokenUsage) -> TokenUsage {
             .max(0),
         total_tokens: (end.total_tokens - start.total_tokens).max(0),
         codex_rollout_budget_units: None,
+        cost: codex_protocol::openrouter::cost_since(end.cost, start.cost),
     }
 }
 
@@ -356,7 +357,8 @@ async fn run_review_on_session(
         super::reviewer_route::ReviewerRoute::ParentProvider => {
             &params.parent_session.services.models_manager
         }
-        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. } => {
+        super::reviewer_route::ReviewerRoute::ChatgptAutoReview { .. }
+        | super::reviewer_route::ReviewerRoute::OpenRouterUnavailable => {
             &review_session.session.services.models_manager
         }
     };

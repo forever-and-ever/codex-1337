@@ -245,3 +245,7 @@ pub use thread_config::ThreadConfigLoaderFuture;
 pub use thread_config::ThreadConfigSource;
 pub use thread_config::UserThreadConfig;
 pub use toml::Value as TomlValue;
+
+pub mod openrouter;
+pub use openrouter::OpenRouterConfig;
+pub use openrouter::read_openrouter_config;

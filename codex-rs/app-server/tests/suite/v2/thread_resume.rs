@@ -4301,6 +4301,7 @@ async fn thread_resume_token_usage_replay_can_belong_to_interrupted_turn() -> Re
                         reasoning_output_tokens: 15,
                         total_tokens: 230,
                         codex_rollout_budget_units: None,
+                        cost: None,
                     },
                     last_token_usage: TokenUsage {
                         input_tokens: 90,
@@ -4310,6 +4311,7 @@ async fn thread_resume_token_usage_replay_can_belong_to_interrupted_turn() -> Re
                         reasoning_output_tokens: 12,
                         total_tokens: 130,
                         codex_rollout_budget_units: None,
+                        cost: None,
                     },
                     model_context_window: Some(200_000),
                 }),

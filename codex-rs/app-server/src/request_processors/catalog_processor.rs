@@ -203,7 +203,12 @@ impl CatalogRequestProcessor {
             }
             None => None,
         };
-        let catalog = if let Some(thread) = thread {
+        let catalog = if let Some(catalog) = super::turn_processor::openrouter::catalog_for_list(
+            config.clone(),
+            self.config_manager.clone(),
+        )? {
+            catalog
+        } else if let Some(thread) = thread {
             let manager = thread
                 .models_manager(&config)
                 .await
@@ -215,8 +220,11 @@ impl CatalogRequestProcessor {
             ))
         } else if config.model_provider_id == self.config.model_provider_id
             && config.model_provider == self.config.model_provider
-            && config.model_provider.adapter
-                != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+            && match config.model_provider.adapter {
+                codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => true,
+                codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
+                | codex_model_provider_info::ModelProviderAdapter::OpenRouter => false,
+            }
         {
             self.model_catalog.clone()
         } else {
@@ -357,6 +365,7 @@ impl CatalogRequestProcessor {
                 },
             )
             .collect::<Vec<_>>();
+        super::turn_processor::openrouter::offer_provider(config, &mut providers).await?;
         providers.sort_by(|a, b| a.id.cmp(&b.id));
 
         if total == 0 {

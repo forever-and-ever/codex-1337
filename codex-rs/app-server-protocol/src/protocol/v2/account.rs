@@ -316,7 +316,7 @@ pub type NullableGetAccountRateLimitsParams = Option<GetAccountRateLimitsParams>
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct AccountQuotaReadParams {
-    pub provider: SubscriptionAccountProvider,
+    pub provider: AccountProvider,
     /// Saved account ID, nickname or email. Omit to read every saved account of this provider.
     #[ts(optional = nullable)]
     pub account: Option<String>,
@@ -730,17 +730,21 @@ pub struct SavedAccount {
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
-pub enum SubscriptionAccountProvider {
+pub enum AccountProvider {
     #[default]
     Openai,
     ClaudeSubscription,
+    #[serde(rename = "openrouter")]
+    #[ts(rename = "openrouter")]
+    OpenRouter,
 }
 
-impl SubscriptionAccountProvider {
+impl AccountProvider {
     pub fn config_id(self) -> &'static str {
         match self {
             Self::Openai => "openai",
             Self::ClaudeSubscription => "claude_subscription",
+            Self::OpenRouter => "openrouter",
         }
     }
 }
@@ -762,7 +766,7 @@ pub struct ClaudeSubscriptionAccount {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct AccountNicknameSetParams {
-    pub provider: SubscriptionAccountProvider,
+    pub provider: AccountProvider,
     pub account_id: String,
     /// Empty or whitespace-only text clears the nickname.
     pub nickname: String,
@@ -772,7 +776,7 @@ pub struct AccountNicknameSetParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct AccountNicknameSetResponse {
-    pub provider: SubscriptionAccountProvider,
+    pub provider: AccountProvider,
     pub account_id: String,
     pub nickname: Option<String>,
 }
@@ -781,7 +785,7 @@ pub struct AccountNicknameSetResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadAccountListResponse {
-    pub conversation_provider: Option<SubscriptionAccountProvider>,
+    pub conversation_provider: Option<AccountProvider>,
     pub accounts: Vec<SavedAccount>,
     pub selected_account_id: Option<String>,
     /// Selected target whose handoff is not yet complete.
@@ -790,6 +794,9 @@ pub struct ThreadAccountListResponse {
     pub selected_claude_account_id: Option<String>,
     pub pending_claude_account_id: Option<String>,
     pub claude_management_error: Option<String>,
+    pub openrouter_keys: Vec<super::OpenRouterKeyStatus>,
+    pub selected_openrouter_key: Option<codex_protocol::KeyName>,
+    pub pending_openrouter_key: Option<codex_protocol::KeyName>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -801,7 +808,7 @@ pub struct ThreadAccountSelectParams {
     pub account_id: String,
     /// Defaults to ChatGPT for pre-Claude clients; Claude selection must be explicit.
     #[ts(optional = nullable)]
-    pub provider: Option<SubscriptionAccountProvider>,
+    pub provider: Option<AccountProvider>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -809,7 +816,7 @@ pub struct ThreadAccountSelectParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadAccountSelectResponse {
     pub account_id: String,
-    pub provider: SubscriptionAccountProvider,
+    pub provider: AccountProvider,
     /// False when choosing the other provider's new-conversation default.
     pub conversation_changed: bool,
     /// Whether this thread's account handoff is still pending.

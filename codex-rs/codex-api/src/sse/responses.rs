@@ -122,12 +122,15 @@ struct ResponseCompletedUsage {
     total_tokens: i64,
     #[serde(default)]
     codex_rollout_budget_units: Option<serde_json::Number>,
+    #[serde(default)]
+    cost: Option<codex_protocol::Usd>,
 }
 
 impl From<ResponseCompletedUsage> for TokenUsage {
     fn from(val: ResponseCompletedUsage) -> Self {
         let input_tokens_details = val.input_tokens_details.unwrap_or_default();
         TokenUsage {
+            cost: val.cost,
             input_tokens: val.input_tokens,
             cached_input_tokens: input_tokens_details.cached_tokens,
             cache_write_input_tokens: input_tokens_details.cache_write_tokens,
@@ -855,6 +858,7 @@ mod tests {
                 reasoning_output_tokens: 5,
                 total_tokens: 110,
                 codex_rollout_budget_units: serde_json::Number::from_f64(2.5),
+                cost: None,
             }
         );
     }

@@ -3743,6 +3743,7 @@ mod tests {
                 reasoning_output_tokens: 9,
                 total_tokens: 200,
                 codex_rollout_budget_units: None,
+                cost: None,
             },
             last_token_usage: TokenUsage {
                 input_tokens: 10,
@@ -3752,6 +3753,7 @@ mod tests {
                 reasoning_output_tokens: 1,
                 total_tokens: 23,
                 codex_rollout_budget_units: None,
+                cost: None,
             },
             model_context_window: Some(4096),
         };

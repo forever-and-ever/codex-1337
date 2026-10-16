@@ -10995,6 +10995,16 @@
           "format": "int64",
           "type": "integer"
         },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "inputTokens": {
           "format": "int64",
           "type": "integer"
@@ -11370,6 +11380,10 @@
         "inProgress"
       ],
       "type": "string"
+    },
+    "Usd": {
+      "format": "double",
+      "type": "number"
     },
     "UserInput": {
       "oneOf": [

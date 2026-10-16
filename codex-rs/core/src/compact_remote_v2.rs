@@ -1307,6 +1307,7 @@ mod tests {
                     reasoning_output_tokens: 5,
                     total_tokens: 123_498,
                     codex_rollout_budget_units: None,
+                    cost: None,
                 }),
                 usage_metadata: Some(codex_protocol::ResponseUsageMetadata {
                     reported_reasoning_tokens: None,
@@ -1348,6 +1349,7 @@ mod tests {
                 reasoning_output_tokens: 5,
                 total_tokens: 123_498,
                 codex_rollout_budget_units: None,
+                cost: None,
             })
         );
     }

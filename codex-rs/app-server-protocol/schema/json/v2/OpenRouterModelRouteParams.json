@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EndpointFilterAll"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterOnly"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterIgnore"
+        }
+      ],
+      "description": "Which endpoints may serve a saved model."
+    },
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilterIgnore": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "EndpointFilterOnly": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    },
+    "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "type": "string"
+    },
+    "ModelSlug": {
+      "type": "string"
+    }
+  },
+  "properties": {
+    "filter": {
+      "$ref": "#/definitions/EndpointFilter"
+    },
+    "slug": {
+      "$ref": "#/definitions/ModelSlug"
+    }
+  },
+  "required": [
+    "filter",
+    "slug"
+  ],
+  "title": "OpenRouterModelRouteParams",
+  "type": "object"
+}

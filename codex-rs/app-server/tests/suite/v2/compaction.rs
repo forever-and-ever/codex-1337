@@ -364,6 +364,7 @@ async fn thread_compact_start_triggers_compaction_and_returns_empty_response() -
                     metadata: Some(expected_metadata),
                 }),
                 usage: Some(TokenUsageBreakdown {
+                    cost: None,
                     total_tokens: 200,
                     input_tokens: 200,
                     cached_input_tokens: 0,

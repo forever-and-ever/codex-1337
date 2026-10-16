@@ -53,6 +53,14 @@ qualified forms.
   permanently and keeps its saved history. Unloading drops a thread's in-memory
   runtime and keeps it in its family. `ThreadClosed` reports that a runtime
   stopped, not a change of membership.
+- OpenRouter host, endpoint, provider: a host is a company serving OpenRouter
+  models, named by its base endpoint slug (`deepseek`); an endpoint is one of its
+  serving units, `host[/variant][/region][/tier]` (`deepinfra/turbo`). OpenRouter's
+  own documentation calls hosts "providers"; in Codex a provider is only a model
+  provider such as `openrouter`. A saved model's endpoint filter admits all
+  endpoints, only listed ones, or all but listed ones. An OpenRouter key is a named
+  API key whose secret stays in its file; spend is summed `usage.cost` in dollars,
+  and balance is credits minus usage.
 - reload, idle restart: `/reload` replaces the TUI process through the reload host
   without detaching its server connection. An idle restart replaces it after five
   quiet minutes when a newer installation exists, through the reload host when one
@@ -208,7 +216,14 @@ does not repair the existing queue gate, pre-key paint or inline-RPC debt.
 
 ## Provider data
 
-OpenAI and Anthropic are equally trusted with conversation data. A privacy or
-data-locality rule either permits both or forbids both. Moving a conversation's
-data from one to the other, for example to an approval reviewer, a subagent or a
-summary, needs no separate privacy decision.
+OpenAI, Anthropic and OpenRouter are equally trusted with conversation data. A
+privacy or data-locality rule either permits all three or forbids all three.
+Moving a conversation's data between them, for example to an approval reviewer,
+a subagent or a summary, needs no separate privacy decision. OpenRouter forwards
+each request to an endpoint its saved model's filter admits; that filter is the
+user's locality control, and Codex never widens it.
+
+OpenRouter bills per token. Codex sends it only requests for models the user
+chose, as a conversation's model or a subagent's. Work Codex starts on its own
+(approval review, web search, memories, titles, scoring) runs on the ChatGPT
+login or not at all.

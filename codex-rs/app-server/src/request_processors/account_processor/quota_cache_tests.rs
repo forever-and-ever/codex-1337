@@ -22,7 +22,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
     // lose a refresh nor let the next poll bypass the account's backoff.
     let cache = Arc::new(QuotaCache::default());
     let key = QuotaKey {
-        provider: SubscriptionAccountProvider::ClaudeSubscription,
+        provider: AccountProvider::ClaudeSubscription,
         account: "alice".into(),
         luna_reserve: false,
     };

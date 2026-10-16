@@ -75,6 +75,7 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
     }
 
     let tokens = TokenUsageBreakdown {
+        cost: None,
         total_tokens: 17_000,
         input_tokens: 13_000,
         cached_input_tokens: 1_000,

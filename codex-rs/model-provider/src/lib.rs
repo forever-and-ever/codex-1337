@@ -8,6 +8,7 @@ mod combined_auth;
 mod models_endpoint;
 mod models_identity;
 mod native_claude_catalog;
+pub mod openrouter;
 mod provider;
 mod shared_state;
 pub mod test_support;

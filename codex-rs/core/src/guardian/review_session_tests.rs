@@ -683,6 +683,7 @@ fn token_usage_delta_never_reports_negative_usage() {
         reasoning_output_tokens: 4,
         total_tokens: 28,
         codex_rollout_budget_units: None,
+        cost: None,
     };
     let end = TokenUsage {
         input_tokens: 15,
@@ -692,6 +693,7 @@ fn token_usage_delta_never_reports_negative_usage() {
         reasoning_output_tokens: 2,
         total_tokens: 34,
         codex_rollout_budget_units: None,
+        cost: None,
     };
 
     assert_eq!(
@@ -704,6 +706,7 @@ fn token_usage_delta_never_reports_negative_usage() {
             reasoning_output_tokens: 0,
             total_tokens: 6,
             codex_rollout_budget_units: None,
+            cost: None,
         }
     );
 }

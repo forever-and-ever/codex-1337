@@ -802,6 +802,10 @@ impl Session {
                     - token_usage_at_turn_start.total_tokens)
                     .max(0),
                 codex_rollout_budget_units: None,
+                cost: codex_protocol::openrouter::cost_since(
+                    total_token_usage.cost,
+                    token_usage_at_turn_start.cost,
+                ),
             };
             let current_span = Span::current();
             current_span.record(

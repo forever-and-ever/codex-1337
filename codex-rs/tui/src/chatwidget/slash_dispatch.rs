@@ -588,7 +588,9 @@ impl ChatWidget {
             SlashCommand::Reload => self.app_event_tx.send(AppEvent::ReloadUi),
             SlashCommand::Warnings => self.app_event_tx.send(AppEvent::OpenWarnings),
             SlashCommand::Status => {
-                if self.request_status_with_claude_quota() {
+                if self.refresh_openrouter_status(crate::openrouter::StatusRefresh::Show)
+                    || self.request_status_with_claude_quota()
+                {
                     return;
                 }
                 if self.should_prefetch_rate_limits() {
@@ -868,9 +870,9 @@ impl ChatWidget {
                         thread_id,
                         account_id: trimmed.to_owned(),
                         provider: if trimmed.starts_with("codex-account-") {
-                            codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription
+                            codex_app_server_protocol::AccountProvider::ClaudeSubscription
                         } else {
-                            codex_app_server_protocol::SubscriptionAccountProvider::Openai
+                            codex_app_server_protocol::AccountProvider::Openai
                         },
                     });
                 } else {

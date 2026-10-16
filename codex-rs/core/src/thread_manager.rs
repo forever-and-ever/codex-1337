@@ -2360,7 +2360,8 @@ impl ThreadManagerState {
                     .get(&config.model_provider_id)
                     .and_then(|selection| match selection.as_ref() {
                         ProviderAccountSelection::ClaudeSubscription { id, .. } => Some(id.clone()),
-                        ProviderAccountSelection::Chatgpt { .. } => None,
+                        ProviderAccountSelection::Chatgpt { .. }
+                        | ProviderAccountSelection::OpenRouter { .. } => None,
                     });
                 build_models_manager_with_anthropic_account(&config, auth_manager.clone(), account)
             } else if config.model_provider == self.model_catalog_provider {

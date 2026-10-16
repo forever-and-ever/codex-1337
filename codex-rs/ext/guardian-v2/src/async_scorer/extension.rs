@@ -47,7 +47,14 @@ impl ThreadLifecycleContributor<Config> for GuardianV2Extension {
         input: ThreadStartInput<'a, Config>,
     ) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
-            if !input.config.features.enabled(Feature::GuardianApproval) {
+            // OpenRouter cannot serve the OpenAI classifier; synchronous review borrows ChatGPT.
+            if !input.config.features.enabled(Feature::GuardianApproval)
+                || !input
+                    .config
+                    .model_provider
+                    .adapter
+                    .supports_background_scoring()
+            {
                 return;
             }
 

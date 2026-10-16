@@ -256,6 +256,7 @@ mod plugin_mentions;
 mod presentation;
 mod prompt_order;
 mod provider_models;
+mod openrouter;
 mod transcript_splice;
 pub(crate) use provider_models::ProviderModelChoice;
 pub(crate) use provider_models::ProviderModelEvent;

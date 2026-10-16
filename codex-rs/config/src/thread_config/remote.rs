@@ -175,6 +175,9 @@ fn model_provider_from_proto(
             Ok(proto::ModelProviderAdapter::OpenaiCompatible) => {
                 codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
             }
+            Ok(proto::ModelProviderAdapter::OpenRouter) => {
+                codex_model_provider_info::ModelProviderAdapter::OpenRouter
+            }
             Ok(proto::ModelProviderAdapter::ClaudeSubscription) => {
                 codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
             }
@@ -248,6 +251,9 @@ fn model_provider_to_proto(
         adapter: match adapter {
             codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {
                 proto::ModelProviderAdapter::OpenaiCompatible
+            }
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter => {
+                proto::ModelProviderAdapter::OpenRouter
             }
             codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
                 proto::ModelProviderAdapter::ClaudeSubscription

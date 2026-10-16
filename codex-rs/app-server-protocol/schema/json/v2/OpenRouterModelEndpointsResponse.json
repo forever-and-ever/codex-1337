@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EndpointFilter": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EndpointFilterAll"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterOnly"
+        },
+        {
+          "$ref": "#/definitions/EndpointFilterIgnore"
+        }
+      ],
+      "description": "Which endpoints may serve a saved model."
+    },
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilterIgnore": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "EndpointFilterOnly": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
+    },
+    "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "type": "string"
+    },
+    "OpenRouterEndpoint": {
+      "properties": {
+        "completionPerMtok": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contextLength": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "promptPerMtok": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Usd"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quantization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "serviceTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slug": {
+          "$ref": "#/definitions/EndpointSlug"
+        },
+        "uptimePercent": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "contextLength",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "OpenRouterHost": {
+      "properties": {
+        "endpoints": {
+          "items": {
+            "$ref": "#/definitions/OpenRouterEndpoint"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "slug": {
+          "$ref": "#/definitions/EndpointSlug"
+        }
+      },
+      "required": [
+        "endpoints",
+        "name",
+        "slug"
+      ],
+      "type": "object"
+    },
+    "Usd": {
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "properties": {
+    "filter": {
+      "$ref": "#/definitions/EndpointFilter"
+    },
+    "hosts": {
+      "items": {
+        "$ref": "#/definitions/OpenRouterHost"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "filter",
+    "hosts"
+  ],
+  "title": "OpenRouterModelEndpointsResponse",
+  "type": "object"
+}

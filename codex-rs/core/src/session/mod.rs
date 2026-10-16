@@ -695,8 +695,7 @@ impl Session {
         } else {
             codex_models_manager::manager::RefreshStrategy::OnlineIfUncached
         };
-        let native = config.model_provider.adapter
-            == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription;
+        let native = config.model_provider.adapter.speaks_anthropic_messages();
         if native {
             // Explicit models bypass get_default_model discovery. Native metadata
             // must be hydrated even for resumed/fresh children before get_model_info.
@@ -721,14 +720,13 @@ impl Session {
                 .list_models(refresh_strategy, config.http_client_factory())
                 .await;
         }
-        let model = models_manager
-            .get_default_model(
-                &config.model,
-                allow_provider_model_fallback,
-                refresh_strategy,
-                config.http_client_factory(),
-            )
-            .await;
+        let model = crate::openrouter::default_model(
+            &config,
+            &models_manager,
+            allow_provider_model_fallback,
+            refresh_strategy,
+        )
+        .await?;
         if model.trim().is_empty() {
             return Err(CodexErr::InvalidRequest(
                 "No models are available. Set `model` explicitly or check your model catalog configuration.".to_string(),
@@ -1483,8 +1481,7 @@ impl Session {
     ) -> std::io::Result<()> {
         if let Some(live_thread) = self.live_thread() {
             if self.services.auth_manager.is_account_scoped()
-                || (self.services.model_client.uses_claude_subscription()
-                    && self.services.model_client.provider_account_id().is_some())
+                || self.services.model_client.provider_account_id().is_some()
             {
                 // Ownership must be durable when the rollout first materializes, not when a
                 // blank composer opens. Serialize the snapshot with explicit account changes.
@@ -4901,6 +4898,7 @@ impl Session {
                 reasoning_output_tokens: 0,
                 total_tokens: estimated_total_tokens.max(0),
                 codex_rollout_budget_units: None,
+                cost: None,
             };
 
             if let Some(model_context_window) = turn_context.model_context_window() {

@@ -271,5 +271,6 @@ fn token_usage(
         reasoning_output_tokens,
         total_tokens,
         codex_rollout_budget_units: None,
+        cost: None,
     }
 }

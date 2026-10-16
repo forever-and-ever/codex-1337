@@ -56,6 +56,7 @@ message ModelProvider {
 enum ModelProviderAdapter {
   OPENAI_COMPATIBLE = 0;
   CLAUDE_SUBSCRIPTION = 1;
+  OPEN_ROUTER = 2;
 }
 
 message StringMap {

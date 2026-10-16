@@ -1021,6 +1021,10 @@ impl CodexThread {
         self.session.select_claude_account(id).await
     }
 
+    pub async fn select_openrouter_key(&self, key: &codex_protocol::KeyName) -> std::io::Result<()> {
+        self.session.select_openrouter_key(key).await
+    }
+
     pub fn pending_account_id(&self) -> Option<String> {
         self.session.pending_account_id()
     }

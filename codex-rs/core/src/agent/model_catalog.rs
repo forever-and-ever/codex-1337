@@ -73,9 +73,7 @@ impl Session {
             .account_selection
             .get(&config.model_provider_id)
             .map(|selection| selection.as_ref().clone());
-        if account.is_none()
-            && config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription
-        {
+        if account.is_none() && config.model_provider.adapter.speaks_anthropic_messages() {
             account = codex_config::read_account_preferences(config.codex_home.as_path())
                 .await
                 .map_err(|error| error.to_string())?
@@ -104,10 +102,13 @@ impl Session {
         {
             return Ok(cached.manager.clone());
         }
-        let manager = if config.model_provider.adapter == ModelProviderAdapter::ClaudeSubscription {
+        let manager = if config.model_provider.adapter.speaks_anthropic_messages() {
             let account = match key.account.as_ref() {
                 Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => Some(id.clone()),
-                Some(ProviderAccountSelection::Chatgpt { .. }) => {
+                Some(
+                    ProviderAccountSelection::Chatgpt { .. }
+                    | ProviderAccountSelection::OpenRouter { .. },
+                ) => {
                     return Err(
                         "Configured Anthropic provider has a foreign account binding".into(),
                     );
@@ -133,6 +134,14 @@ impl Session {
         config: &Config,
         refresh: RefreshStrategy,
     ) -> Vec<ProviderModels> {
+        let openrouter_available =
+            match codex_config::read_openrouter_config(&config.codex_home).await {
+                Ok(preferences) => !preferences.key_files.is_empty(),
+                Err(error) => {
+                    tracing::warn!(%error, "cannot read OpenRouter subagent preferences");
+                    false
+                }
+            };
         let required_provider = config.config_layer_stack.required_model_provider();
         let mut providers = std::iter::once((&config.model_provider_id, &config.model_provider))
             .chain(
@@ -145,7 +154,11 @@ impl Session {
                 required_provider.is_none_or(|required| required == id.as_str())
                     && (id.as_str() == config.model_provider_id
                         || provider.requires_openai_auth
-                        || provider.adapter == ModelProviderAdapter::ClaudeSubscription
+                        || match provider.adapter {
+                            ModelProviderAdapter::ClaudeSubscription => true,
+                            ModelProviderAdapter::OpenRouter => openrouter_available,
+                            ModelProviderAdapter::OpenaiCompatible => false,
+                        }
                         || provider.model_catalog_url.is_some())
             })
             .collect::<Vec<_>>();
@@ -211,7 +224,9 @@ pub(crate) fn advertised_agent_models(
                     return None;
                 }
                 let mut model = model.clone();
-                if occurrences[model.model.as_str()] > 1 {
+                if occurrences[model.model.as_str()] > 1
+                    || catalog.provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
+                {
                     model.model = format!("{}/{}", catalog.provider_id, model.model);
                 }
                 Some(model)

@@ -1,7 +1,6 @@
 use crate::agent::control::ProviderAccountSelection;
 use crate::config::Config;
 use crate::session::session::Session;
-use codex_model_provider_info::ModelProviderAdapter;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_protocol::error::CodexErr;
@@ -14,12 +13,16 @@ impl Session {
         &self,
         config: &Config,
     ) -> Result<SharedModelsManager> {
-        if config.model_provider.adapter != ModelProviderAdapter::ClaudeSubscription {
+        if !config.model_provider.adapter.speaks_anthropic_messages() {
             return Ok(self.services.models_manager.clone());
         }
         let account = match self.services.model_client.provider_account_selection() {
             Some(ProviderAccountSelection::ClaudeSubscription { id, .. }) => id,
-            Some(ProviderAccountSelection::Chatgpt { .. }) | None => {
+            Some(
+                ProviderAccountSelection::Chatgpt { .. }
+                | ProviderAccountSelection::OpenRouter { .. },
+            )
+            | None => {
                 return Err(CodexErr::InvalidRequest(
                     "Select an Anthropic account before discovering models".into(),
                 ));

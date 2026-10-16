@@ -168,6 +168,10 @@ pub enum CodexErrorDetails {
     #[error("Quota exceeded. Check your plan and billing details.")]
     QuotaExceeded,
     #[error(
+        "OpenRouter key {key} is out of credit: add credits, raise the key's limit, or choose another key with /account."
+    )]
+    OpenRouterKeyExhausted { key: crate::KeyName },
+    #[error(
         "To use Codex with your ChatGPT plan, upgrade to Plus: https://chatgpt.com/explore/plus."
     )]
     UsageNotIncluded,
@@ -211,7 +215,10 @@ pub enum CodexErrorDetails {
 
 impl From<&CodexErr> for CodexErrKind {
     fn from(error: &CodexErr) -> Self {
-        error.details().into()
+        match error.details() {
+            CodexErrorDetails::OpenRouterKeyExhausted { .. } => Self::QuotaExceeded,
+            details => details.into(),
+        }
     }
 }
 
@@ -403,6 +410,7 @@ impl CodexErr {
             | CodexErrorDetails::Fatal(_)
             | CodexErrorDetails::UsageNotIncluded
             | CodexErrorDetails::QuotaExceeded
+            | CodexErrorDetails::OpenRouterKeyExhausted { .. }
             | CodexErrorDetails::InvalidImageRequest()
             | CodexErrorDetails::InvalidRequest(_)
             | CodexErrorDetails::InvalidPrompt { .. }
@@ -477,6 +485,7 @@ impl CodexErr {
             CodexErrorDetails::RateLimitExceeded(_) => CodexErrorInfo::RateLimitExceeded,
             CodexErrorDetails::UsageLimitReached(_)
             | CodexErrorDetails::QuotaExceeded
+            | CodexErrorDetails::OpenRouterKeyExhausted { .. }
             | CodexErrorDetails::UsageNotIncluded => CodexErrorInfo::UsageLimitExceeded,
             CodexErrorDetails::ServerOverloaded => CodexErrorInfo::ServerOverloaded,
             CodexErrorDetails::FlexUnavailable => CodexErrorInfo::FlexUnavailable,

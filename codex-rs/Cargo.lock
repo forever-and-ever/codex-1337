@@ -3471,6 +3471,7 @@ dependencies = [
  "chrono",
  "codex-agent-identity",
  "codex-api",
+ "codex-config",
  "codex-feedback",
  "codex-http-client",
  "codex-keyring-store",

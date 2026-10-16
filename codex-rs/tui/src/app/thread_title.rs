@@ -78,14 +78,6 @@ impl App {
         destination: ThreadTitleDestination,
         prompt: String,
     ) {
-        let std::collections::hash_map::Entry::Vacant(entry) =
-            self.pending_thread_titles.entry((thread_id, destination))
-        else {
-            return;
-        };
-        let cancellation = entry.insert(CancellationToken::new()).clone();
-        self.sync_thread_title_progress();
-        let request_handle = app_server.request_handle();
         let model = if self.chat_widget.config_ref().model_provider_id == "openai"
             && self.chat_widget.has_chatgpt_account()
             && self
@@ -98,12 +90,30 @@ impl App {
         } else {
             self.chat_widget.current_model().to_string()
         };
+        let Some((provider_id, model)) = crate::openrouter::title_route(
+            &self.chat_widget.config_ref().model_provider_id,
+            &model,
+            THREAD_TITLE_MODEL,
+            self.chat_widget.has_chatgpt_account(),
+        ) else {
+            return;
+        };
+        let provider_id = provider_id.to_owned();
+        let model = model.to_owned();
+        let std::collections::hash_map::Entry::Vacant(entry) =
+            self.pending_thread_titles.entry((thread_id, destination))
+        else {
+            return;
+        };
+        let cancellation = entry.insert(CancellationToken::new()).clone();
+        self.sync_thread_title_progress();
+        let request_handle = app_server.request_handle();
         let effort = (model == THREAD_TITLE_MODEL).then_some(ReasoningEffort::Low);
         let config = self.chat_widget.config_ref();
         let options = TemporaryStructuredThreadOptions {
             thread_source: ThreadSource::Feature("thread_title".to_string()),
             model,
-            model_provider: config.model_provider_id.clone(),
+            model_provider: provider_id,
             cwd: config.cwd.display().to_string(),
             active_permission_profile: config
                 .permissions

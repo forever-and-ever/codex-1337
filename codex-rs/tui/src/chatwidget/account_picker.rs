@@ -15,7 +15,9 @@ impl ChatWidget {
         thread_id: ThreadId,
         response: codex_app_server_protocol::ThreadAccountListResponse,
     ) {
-        use codex_app_server_protocol::SubscriptionAccountProvider;
+        let mut openrouter_items = Vec::new();
+        self.append_openrouter_accounts(thread_id, &response, &mut openrouter_items);
+        use codex_app_server_protocol::AccountProvider;
         let mut items: Vec<SelectionItem> = response
             .accounts
             .into_iter()
@@ -51,7 +53,7 @@ impl ChatWidget {
                         tx.send(AppEvent::SelectAccount {
                             thread_id,
                             account_id: account.id.clone(),
-                            provider: SubscriptionAccountProvider::Openai,
+                            provider: AccountProvider::Openai,
                         })
                     })],
                     secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
@@ -60,7 +62,7 @@ impl ChatWidget {
                         action: Box::new(move |tx| {
                             tx.send(AppEvent::RenameAccountPrompt {
                                 thread_id,
-                                provider: SubscriptionAccountProvider::Openai,
+                                provider: AccountProvider::Openai,
                                 account_id: rename_id.clone(),
                                 nickname: rename_name.clone(),
                             })
@@ -103,7 +105,7 @@ impl ChatWidget {
                     tx.send(AppEvent::SelectAccount {
                         thread_id,
                         account_id: account.id.clone(),
-                        provider: SubscriptionAccountProvider::ClaudeSubscription,
+                        provider: AccountProvider::ClaudeSubscription,
                     })
                 })],
                 secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
@@ -112,7 +114,7 @@ impl ChatWidget {
                     action: Box::new(move |tx| {
                         tx.send(AppEvent::RenameAccountPrompt {
                             thread_id,
-                            provider: SubscriptionAccountProvider::ClaudeSubscription,
+                            provider: AccountProvider::ClaudeSubscription,
                             account_id: rename_id.clone(),
                             nickname: rename_name.clone(),
                         })
@@ -122,6 +124,7 @@ impl ChatWidget {
                 ..Default::default()
             }
         }));
+        items.extend(openrouter_items);
         items.push(SelectionItem {
             name: "Add Claude account".to_owned(),
             description: Some("Sign in with your Claude subscription".to_owned()),
@@ -141,8 +144,9 @@ impl ChatWidget {
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Accounts".to_owned()),
             subtitle: Some(match response.conversation_provider {
-                Some(SubscriptionAccountProvider::Openai) => "ChatGPT changes this conversation; Claude sets its new-conversation default.",
-                Some(SubscriptionAccountProvider::ClaudeSubscription) => "Claude changes this conversation; ChatGPT sets its new-conversation default.",
+                Some(AccountProvider::Openai) => "ChatGPT changes this conversation; other accounts set their new-conversation defaults.",
+                Some(AccountProvider::ClaudeSubscription) => "Claude changes this conversation; other accounts set their new-conversation defaults.",
+                Some(AccountProvider::OpenRouter) => "OpenRouter changes this conversation; other accounts set their new-conversation defaults.",
                 None => "Selections set new-conversation defaults; this conversation uses another provider.",
             }.to_owned()),
             items,
@@ -154,15 +158,17 @@ impl ChatWidget {
     pub(crate) fn show_account_nickname_prompt(
         &mut self,
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
         account_id: String,
         nickname: Option<String>,
     ) {
         let title = match provider {
-            codex_app_server_protocol::SubscriptionAccountProvider::Openai => {
-                "Rename ChatGPT account"
+            codex_app_server_protocol::AccountProvider::OpenRouter => {
+                self.add_error_message("OpenRouter keys are named by their key name".to_owned());
+                return;
             }
-            codex_app_server_protocol::SubscriptionAccountProvider::ClaudeSubscription => {
+            codex_app_server_protocol::AccountProvider::Openai => "Rename ChatGPT account",
+            codex_app_server_protocol::AccountProvider::ClaudeSubscription => {
                 "Rename Claude account"
             }
         };

@@ -296,6 +296,7 @@ mod agent {
         parent_permission_profile: PermissionProfile,
         provider: &dyn ModelProvider,
     ) -> Option<Config> {
+        let preferred_model = provider.memory_consolidation_preferred_model()?;
         let root = config
             .codex_home
             .join(config.memories.version.directory_name());
@@ -346,7 +347,7 @@ mod agent {
                 .memories
                 .consolidation_model
                 .clone()
-                .unwrap_or_else(|| provider.memory_consolidation_preferred_model().to_string()),
+                .unwrap_or_else(|| preferred_model.to_string()),
         );
         agent_config.model_reasoning_effort = Some(crate::stage_two::REASONING_EFFORT);
 

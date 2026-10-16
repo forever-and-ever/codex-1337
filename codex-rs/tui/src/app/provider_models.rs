@@ -33,6 +33,17 @@ impl App {
         event: ProviderModelEvent,
     ) {
         match event {
+            ProviderModelEvent::Open(provider)
+                if provider.id == codex_model_provider_info::OPENROUTER_PROVIDER_ID =>
+            {
+                self.handle_openrouter_event(
+                    server,
+                    crate::openrouter::Event::Request(crate::openrouter::Request::Models {
+                        menu: crate::openrouter::ModelMenu::New(provider),
+                        selected: None,
+                    }),
+                );
+            }
             ProviderModelEvent::Open(provider) => {
                 let request_id = uuid::Uuid::new_v4();
                 self.chat_widget

@@ -2063,6 +2063,7 @@ impl App {
                 }
             }
             AppEvent::ProviderModel(event) => self.handle_provider_model_event(tui, app_server, event).await,
+            AppEvent::OpenRouter(event) => self.handle_openrouter_event(app_server, event),
             AppEvent::OpenProviderReasoning { provider, model } => self.chat_widget.show_provider_reasoning(provider, model),
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);

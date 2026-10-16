@@ -371,17 +371,17 @@ pub(crate) enum AppEvent {
     SelectAccount {
         thread_id: ThreadId,
         account_id: String,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
     },
     RenameAccountPrompt {
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
         account_id: String,
         nickname: Option<String>,
     },
     SetAccountNickname {
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::SubscriptionAccountProvider,
+        provider: codex_app_server_protocol::AccountProvider,
         account_id: String,
         nickname: String,
     },
@@ -1763,6 +1763,7 @@ pub(crate) enum AppEvent {
     LiveWork(crate::app::live_work::Event),
     LocalShellRequest(crate::local_shell::LocalShellRequest),
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
+    OpenRouter(crate::openrouter::Event),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

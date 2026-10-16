@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 use anyhow::bail;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::ClaudeSubscriptionAccount;
-use codex_app_server_protocol::SubscriptionAccountProvider;
 use codex_core::config::Config;
 use codex_login::anthropic::AccountId;
 use codex_login::anthropic::AccountStore;
@@ -30,7 +30,7 @@ impl ClaudeAccountController {
                     nickname: config
                         .wrangler
                         .account_nicknames
-                        .get(SubscriptionAccountProvider::ClaudeSubscription.config_id())
+                        .get(AccountProvider::ClaudeSubscription.config_id())
                         .and_then(|names| names.get(&id))
                         .cloned(),
                     id,
