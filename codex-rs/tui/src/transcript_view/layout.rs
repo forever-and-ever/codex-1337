@@ -168,11 +168,22 @@ pub(super) struct LayoutCache {
 }
 
 #[derive(PartialEq, Eq)]
-struct RenderState {
+pub(super) struct RenderState {
     theme: u64,
     foreground: Option<(u8, u8, u8)>,
     background: Option<(u8, u8, u8)>,
     color_level: crate::terminal_palette::StdoutColorLevel,
+}
+
+impl RenderState {
+    pub(super) fn current() -> Self {
+        Self {
+            theme: crate::render::highlight::syntax_theme_revision(),
+            foreground: crate::terminal_palette::default_fg(),
+            background: crate::terminal_palette::default_bg(),
+            color_level: crate::terminal_palette::stdout_color_level(),
+        }
+    }
 }
 
 struct CachedLayout {
@@ -419,6 +430,7 @@ impl TranscriptView {
                     .then(|| {
                         invocations.layout(
                             cell.as_ref(),
+                            super::invocation::PreparationSource::Retained(cell),
                             width,
                             input_open,
                             seat.content,
@@ -597,12 +609,7 @@ impl LayoutCache {
 
     pub(super) fn begin_frame(&mut self) {
         self.frame = self.frame.wrapping_add(/*rhs*/ 1);
-        let state = RenderState {
-            theme: crate::render::highlight::syntax_theme_revision(),
-            foreground: crate::terminal_palette::default_fg(),
-            background: crate::terminal_palette::default_bg(),
-            color_level: crate::terminal_palette::stdout_color_level(),
-        };
+        let state = RenderState::current();
         if self.render_state.as_ref() != Some(&state) {
             self.entries.clear();
             self.render_state = Some(state);

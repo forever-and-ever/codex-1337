@@ -131,8 +131,22 @@ impl McpToolCallCell {
     pub(super) fn stored_output_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.render_detail_lines(width, McpToolCallRenderMode::Expanded)
     }
-    pub(super) fn invocation_input(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary)
+    pub(super) fn invocation_input(&self, width: u16) -> super::invocation::InvocationInput {
+        super::invocation::InvocationInput {
+            parts: super::activity_parts::ActivityParts {
+                lines: self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary),
+                ..Default::default()
+            },
+            // Summary reserves its last column for ellipsis; width 1 drops the marker.
+            indicators: (self.success().is_none() && width > 1)
+                .then(|| super::invocation::ActivityIndicator {
+                    line: 0,
+                    start: self.start_time,
+                    mode: MotionMode::from_animations_enabled(self.animations_enabled),
+                })
+                .into_iter()
+                .collect(),
+        }
     }
     fn nested_receipt_parts(
         &self,

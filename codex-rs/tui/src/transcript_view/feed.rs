@@ -818,7 +818,25 @@ impl FeedIndex {
         };
         let (titles, mut controls) = if let Some(call) = &invocation {
             if header.disclosure.unfolded() {
-                let rows = invocations.header(call, true, title_width as u16, None, full);
+                let source = match header.title {
+                    Title::Owned(index) => {
+                        super::invocation::PreparationSource::Retained(&cells[index])
+                    }
+                    _ => unreachable!("invocation header requires an owned source"),
+                };
+                let prepared = invocations.prepared(call, source);
+                let input_width = width
+                    .saturating_sub(TITLE_COLUMN + crate::transcript_geometry::ENTRY_INDENT)
+                    .max(1);
+                let rows = invocations.header(
+                    call,
+                    &prepared,
+                    input_width,
+                    true,
+                    title_width as u16,
+                    None,
+                    full,
+                );
                 (rows.lines, rows.controls)
             } else {
                 (

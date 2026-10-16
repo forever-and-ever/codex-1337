@@ -87,6 +87,17 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             view.current_layout(cells, 0).unwrap()
         };
     let initial = render(&mut view, &cells, 80, "running input");
+    let retained_calls = crate::history_cell::invocation::collect(cells[0].as_ref());
+    let retained_prepared = view.invocations.prepared(
+        &retained_calls[0],
+        super::invocation::PreparationSource::Retained(&cells[0]),
+    );
+    assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
+    for _ in 0..3 {
+        view.cache.clear();
+        tests::render(&mut view, &cells, 80, 26);
+    }
+    assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
     assert_title_color(
         &tests::render(&mut view, &cells, 80, 26),
         "Script (bash)",
@@ -513,6 +524,19 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             );
         }
         let nested = view.current_layout(&code, 0).unwrap();
+        let block = code[0]
+            .as_any()
+            .downcast_ref::<crate::history_cell::CodeModeCell>()
+            .unwrap();
+        let native = block
+            .members()
+            .iter()
+            .find(|cell| cell.as_any().is::<crate::history_cell::McpToolCallCell>())
+            .unwrap();
+        let native_call = crate::history_cell::invocation::collect(native.as_ref()).remove(0);
+        let narrow = native_call.formatted_input(None, 1).unwrap();
+        assert!(narrow.indicators.is_empty());
+        assert_eq!(narrow.paint().lines[0].line.to_string(), "…");
         assert!(nested.text().contains("Read src/main.rs"));
         assert!(nested.text().contains("Read Cargo.toml"));
         assert!(!nested.text().contains("\"cmd\""));
@@ -677,9 +701,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         "source",
         Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
     );
-    let python = view
-        .invocations
-        .body(&call, true, 80, false, &Default::default());
+    let python = view.invocations.body(
+        &call,
+        &view
+            .invocations
+            .prepared(&call, super::invocation::PreparationSource::Uncached),
+        true,
+        80,
+        false,
+        &Default::default(),
+    );
     assert_eq!(
         python
             .lines
@@ -689,7 +720,17 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .join("\n"),
         "print(42)"
     );
-    let available = view.invocations.header(&call, true, 80, None, false);
+    let available = view.invocations.header(
+        &call,
+        &view
+            .invocations
+            .prepared(&call, super::invocation::PreparationSource::Uncached),
+        80,
+        true,
+        80,
+        None,
+        false,
+    );
     assert!(available.controls.iter().all(|control| !matches!(
         control.target,
         FoldTarget::Invocation {
@@ -707,7 +748,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     // Folded defaults must not hide explicit choices or export content.
     let input_text = |view: &TranscriptView, width, full| {
         view.invocations
-            .body(&call, true, width, full, &Default::default())
+            .body(
+                &call,
+                &view
+                    .invocations
+                    .prepared(&call, super::invocation::PreparationSource::Uncached),
+                true,
+                width,
+                full,
+                &Default::default(),
+            )
             .lines
             .into_iter()
             .map(|line| line.line.to_string())
@@ -762,7 +812,17 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         "source",
         Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
     );
-    let reserved = opaque.invocations.header(&call, true, 80, None, false);
+    let reserved = opaque.invocations.header(
+        &call,
+        &opaque
+            .invocations
+            .prepared(&call, super::invocation::PreparationSource::Uncached),
+        80,
+        true,
+        80,
+        None,
+        false,
+    );
     assert!(
         reserved
             .lines
@@ -802,4 +862,87 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .unwrap()
             .columns,
     );
+    // Animation keys invalidate paint, not source preparation; hidden panes stay unbuilt.
+    let mut reuse = TranscriptView::default();
+    reuse.record_tool_input(ToolInput {
+        id: "input:source".into(),
+        call_id: "source".into(),
+        name: ToolName::plain("bash"),
+        payload: ToolInputPayload::Text("echo sample".into()),
+    });
+    let key = |revision, tick| {
+        Some(crate::chatwidget::ActiveCellTranscriptKey {
+            cacheable: true,
+            revision,
+            is_stream_continuation: false,
+            is_tool_entry: true,
+            animation_tick: Some(tick),
+        })
+    };
+    for tick in 0..4 {
+        assert_eq!(
+            reuse.sync_live_invocation_tail(80, key(11, tick), &output, vec![]),
+            Some(true)
+        );
+    }
+    let prepared = reuse
+        .invocations
+        .prepared(&call, super::invocation::PreparationSource::Live(11));
+    assert_eq!(prepared.work(), [1, 1, 0, 0]);
+    reuse
+        .invocations
+        .apply("source", Action::Format(Port::Input, OutputMode::Raw));
+    reuse
+        .invocations
+        .apply("source", Action::Format(Port::Output, OutputMode::Raw));
+    for tick in 4..8 {
+        reuse.sync_live_invocation_tail(80, key(11, tick), &output, vec![]);
+    }
+    assert_eq!(prepared.work(), [1, 1, 1, 1]);
+    let live = reuse.live.as_ref().unwrap().text();
+    assert!(live.contains("echo sample"));
+    assert!(live.contains("plain result, not Python"));
+    reuse.sync_live_invocation_tail(40, key(11, 8), &output, vec![]);
+    assert_eq!(prepared.work(), [2, 1, 1, 2]);
+    reuse.sync_live_invocation_tail(80, key(11, 9), &output, vec![]);
+    assert_eq!(prepared.work(), [2, 1, 1, 2]);
+    let updated = ToolOutputCell::from_output(
+        "source-updated",
+        Some("source"),
+        "bash",
+        None,
+        &FunctionCallOutputBody::Text("updated result".into()),
+    )
+    .unwrap();
+    reuse.sync_live_invocation_tail(80, key(12, 10), &updated, vec![]);
+    assert!(
+        reuse
+            .live
+            .as_ref()
+            .unwrap()
+            .text()
+            .contains("updated result")
+    );
+    let updated_call = crate::history_cell::invocation::collect(&updated).remove(0);
+    let changed = reuse.invocations.prepared(
+        &updated_call,
+        super::invocation::PreparationSource::Live(12),
+    );
+    assert!(!std::rc::Rc::ptr_eq(&prepared, &changed));
+    assert_eq!(changed.work(), [1, 1, 1, 1]);
+    reuse.record_tool_input(ToolInput {
+        id: "input:source".into(),
+        call_id: "source".into(),
+        name: ToolName::plain("bash"),
+        payload: ToolInputPayload::Text("echo changed".into()),
+    });
+    reuse.sync_live_invocation_tail(80, key(12, 11), &updated, vec![]);
+    assert!(reuse.live.as_ref().unwrap().text().contains("echo changed"));
+    assert!(!std::rc::Rc::ptr_eq(
+        &changed,
+        &reuse.invocations.prepared(
+            &updated_call,
+            super::invocation::PreparationSource::Live(12),
+        )
+    ));
 }

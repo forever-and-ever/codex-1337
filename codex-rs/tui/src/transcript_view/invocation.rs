@@ -21,6 +21,20 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use std::collections::HashMap;
 
+use crate::history_cell::activity_parts::ActivityParts;
+use crate::history_cell::activity_parts::PartControl;
+use crate::history_cell::invocation::ActivityIndicator;
+use crate::history_cell::invocation::InvocationInput;
+use crate::history_cell::invocation::Source;
+use crate::terminal_hyperlinks::TerminalHyperlink;
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::mem::size_of;
+use std::mem::size_of_val;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::Weak;
+
 pub(super) const CONTROL_COLUMNS: usize = "[in [raw] [fmt]] [out [raw] [fmt]]".len();
 
 fn input_open_by_default(name: Option<&ToolName>) -> bool {
@@ -58,13 +72,308 @@ impl Ports {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum PreparationSource<'a> {
+    Retained(&'a Arc<dyn HistoryCell>),
+    Live(u64),
+    Uncached,
+}
+
+enum SourceRevision {
+    Retained(Weak<dyn HistoryCell>),
+    Live(u64),
+}
+
+impl SourceRevision {
+    fn matches(&self, source: PreparationSource<'_>) -> bool {
+        match (self, source) {
+            (Self::Retained(old), PreparationSource::Retained(source)) => {
+                old.ptr_eq(&Arc::downgrade(source))
+            }
+            (Self::Live(old), PreparationSource::Live(revision)) => *old == revision,
+            _ => false,
+        }
+    }
+}
+
+enum PreparedInput {
+    Unavailable,
+    Cached {
+        parts: Rc<InvocationInput>,
+        bytes: usize,
+    },
+    Oversized,
+}
+
+fn line_bytes(line: &Line<'_>) -> usize {
+    line.spans.capacity() * size_of::<Span<'_>>()
+        + line
+            .spans
+            .iter()
+            .map(|span| match &span.content {
+                std::borrow::Cow::Owned(text) => text.capacity(),
+                std::borrow::Cow::Borrowed(_) => 0,
+            })
+            .sum::<usize>()
+}
+
+#[expect(
+    clippy::ptr_arg,
+    reason = "vector capacity is part of the retained allocation charge"
+)]
+fn retained_lines_bytes(lines: &Vec<HyperlinkLine>) -> usize {
+    // Copy metadata owns arbitrarily nested Markdown; do not retain it in this cache.
+    if lines.iter().any(|line| {
+        line.source
+            .as_ref()
+            .is_some_and(|source| source.copy.is_some())
+    }) {
+        return usize::MAX;
+    }
+    lines.capacity() * size_of::<HyperlinkLine>()
+        + lines
+            .iter()
+            .map(|line| {
+                line_bytes(&line.line)
+                    + line.hyperlinks.capacity() * size_of::<TerminalHyperlink>()
+                    + line
+                        .hyperlinks
+                        .iter()
+                        .map(|link| link.destination.capacity())
+                        .sum::<usize>()
+                    + line.source.as_ref().map_or(0, |source| {
+                        source.text.len()
+                            + size_of_val(source.styles.as_ref())
+                            + line_bytes(&source.continuation_indent)
+                    })
+            })
+            .sum::<usize>()
+}
+
+pub(super) struct PreparedInvocation {
+    source: Option<SourceRevision>,
+    id: String,
+    inputs: RefCell<Vec<(u16, PreparedInput)>>,
+    retained_bytes: Cell<usize>,
+    #[cfg(test)]
+    work: Cell<[usize; 4]>,
+    raw: RefCell<Option<Vec<HyperlinkLine>>>,
+    formatted_output: RefCell<Vec<(u16, bool)>>,
+    outputs: RefCell<Vec<(u16, OutputMode, Vec<HyperlinkLine>, usize)>>,
+}
+
+impl PreparedInvocation {
+    #[cfg(test)]
+    fn count_work(&self, index: usize) {
+        let mut work = self.work.get();
+        work[index] += 1;
+        self.work.set(work);
+    }
+
+    #[cfg(test)]
+    pub(super) fn work(&self) -> [usize; 4] {
+        self.work.get()
+    }
+
+    fn has_formatted_output(&self, call: &Invocation<'_>, width: u16) -> bool {
+        // Captured JSON capability never uses width; stored native output does.
+        let key = if call.outputs.is_empty() { width } else { 0 };
+        let mut capabilities = self.formatted_output.borrow_mut();
+        if let Some((_, available)) = capabilities.iter().find(|(width, _)| *width == key) {
+            return *available;
+        }
+        #[cfg(test)]
+        self.count_work(1);
+        let available = call.has_formatted_output(width);
+        if capabilities.len() == 3 {
+            capabilities.remove(0);
+        }
+        capabilities.push((key, available));
+        available
+    }
+
+    fn admit(&self, bytes: usize) -> bool {
+        // 32 sources × 512 KiB; oversized pane projections are rendered, never retained.
+        let total = self.retained_bytes.get().saturating_add(bytes);
+        if total > 512 * 1024 {
+            return false;
+        }
+        self.retained_bytes.set(total);
+        true
+    }
+
+    fn raw_input(
+        &self,
+        call: &Invocation<'_>,
+        input: Option<&ToolInput>,
+    ) -> Option<Vec<HyperlinkLine>> {
+        if let Some(lines) = self.raw.borrow().as_ref() {
+            return Some(lines.clone());
+        }
+        #[cfg(test)]
+        self.count_work(2);
+        let lines = call.raw_input(input)?;
+        if self.admit(retained_lines_bytes(&lines)) {
+            *self.raw.borrow_mut() = Some(lines.clone());
+        }
+        Some(lines)
+    }
+
+    fn input(
+        &self,
+        call: &Invocation<'_>,
+        input: Option<&ToolInput>,
+        width: u16,
+        materialize: bool,
+    ) -> (bool, Option<Rc<InvocationInput>>) {
+        let mut inputs = self.inputs.borrow_mut();
+        if let Some((_, prepared)) = inputs.iter().find(|(cached, _)| *cached == width) {
+            return match prepared {
+                PreparedInput::Unavailable => (false, None),
+                PreparedInput::Cached { parts, .. } => (true, Some(Rc::clone(parts))),
+                PreparedInput::Oversized if !materialize => (true, None),
+                PreparedInput::Oversized => {
+                    #[cfg(test)]
+                    self.count_work(0);
+                    (true, call.formatted_input(input, width).map(Rc::new))
+                }
+            };
+        }
+        #[cfg(test)]
+        self.count_work(0);
+        if inputs.len() == 3
+            && let (_, PreparedInput::Cached { bytes, .. }) = inputs.remove(0)
+        {
+            self.retained_bytes.set(self.retained_bytes.get() - bytes);
+        }
+        // Native renderers own capability detection. Keep their settled result when it fits.
+        let parts = call.formatted_input(input, width).map(Rc::new);
+        let bytes = parts.as_ref().map_or(0, |parts| {
+            retained_lines_bytes(&parts.parts.lines)
+                .saturating_add(size_of::<InvocationInput>() + 2 * size_of::<usize>())
+                .saturating_add(parts.parts.controls.capacity() * size_of::<PartControl>())
+                .saturating_add(
+                    parts
+                        .parts
+                        .controls
+                        .iter()
+                        .map(|control| control.id.capacity())
+                        .sum::<usize>(),
+                )
+                .saturating_add(parts.indicators.capacity() * size_of::<ActivityIndicator>())
+        });
+        let prepared = match &parts {
+            None => PreparedInput::Unavailable,
+            Some(parts) if self.admit(bytes) => PreparedInput::Cached {
+                parts: Rc::clone(parts),
+                bytes,
+            },
+            Some(_) => PreparedInput::Oversized,
+        };
+        inputs.push((width, prepared));
+        (parts.is_some(), parts)
+    }
+
+    fn output(&self, call: &Invocation<'_>, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        let mut outputs = self.outputs.borrow_mut();
+        if let Some((_, _, lines, _)) = outputs
+            .iter()
+            .find(|(cached, paint, _, _)| *cached == width && *paint == mode)
+        {
+            return lines.clone();
+        }
+        #[cfg(test)]
+        self.count_work(3);
+        let lines = call.output(width, mode);
+        if outputs.len() == 6 {
+            let (_, _, _, bytes) = outputs.remove(0);
+            self.retained_bytes.set(self.retained_bytes.get() - bytes);
+        }
+        let bytes = retained_lines_bytes(&lines);
+        if self.admit(bytes) {
+            outputs.push((width, mode, lines.clone(), bytes));
+        }
+        lines
+    }
+}
+
+#[derive(Default)]
+struct PreparationCache {
+    render: Option<super::layout::RenderState>,
+    entries: Vec<Rc<PreparedInvocation>>,
+}
+
 #[derive(Default)]
 pub(super) struct Invocations {
     inputs: HashMap<String, ToolInput>,
     choices: HashMap<String, Choices>,
+    prepared: RefCell<PreparationCache>,
 }
 
 impl Invocations {
+    pub(super) fn prepared(
+        &self,
+        call: &Invocation<'_>,
+        source: PreparationSource<'_>,
+    ) -> Rc<PreparedInvocation> {
+        // TELOS(fast-ui-thread): source preparation outlives cosmetic animation layouts.
+        // Weak ownership prevents address reuse without retaining discarded transcript cells.
+        let mut cache = self.prepared.borrow_mut();
+        let render = super::layout::RenderState::current();
+        if cache.render.as_ref() != Some(&render) {
+            cache.entries.clear();
+            cache.render = Some(render);
+        }
+        if let Some(index) = cache.entries.iter().position(|entry| {
+            entry.id == call.id && entry.source.as_ref().is_some_and(|old| old.matches(source))
+        }) {
+            let entry = cache.entries.remove(index);
+            cache.entries.push(Rc::clone(&entry));
+            return entry;
+        }
+        let stable = match &call.source {
+            Source::Code(block) => block
+                .members()
+                .iter()
+                .all(|cell| cell.has_stable_transcript_height()),
+            Source::Cells(cells) => cells.iter().all(|cell| cell.has_stable_transcript_height()),
+            _ => true,
+        };
+        let source = if stable
+            && call.id.len() <= 1024
+            && !matches!(source, PreparationSource::Retained(owner) if !owner.has_stable_transcript_height())
+        {
+            source
+        } else {
+            PreparationSource::Uncached
+        };
+        let entry = Rc::new(PreparedInvocation {
+            source: match source {
+                PreparationSource::Retained(source) => {
+                    Some(SourceRevision::Retained(Arc::downgrade(source)))
+                }
+                PreparationSource::Live(revision) => Some(SourceRevision::Live(revision)),
+                PreparationSource::Uncached => None,
+            },
+            id: call.id.to_owned(),
+            inputs: Default::default(),
+            retained_bytes: Default::default(),
+            #[cfg(test)]
+            work: Default::default(),
+            raw: Default::default(),
+            formatted_output: Default::default(),
+            outputs: Default::default(),
+        });
+        if entry.source.is_some() {
+            cache.entries.retain(|entry| !matches!(&entry.source, Some(SourceRevision::Retained(source)) if source.strong_count() == 0));
+            if cache.entries.len() == 32 {
+                cache.entries.remove(0);
+            }
+            cache.entries.push(Rc::clone(&entry));
+        }
+        entry
+    }
+
     pub(super) fn input(&self, id: &str) -> Option<&ToolInput> {
         self.inputs.get(id)
     }
@@ -105,7 +414,7 @@ impl Invocations {
             if open
                 && input_open_by_default(call.name(self.input(call.id)))
                 && (formatted
-                    || (!matches!(call.source, crate::history_cell::invocation::Source::Code(block)
+                    || (!matches!(call.source, Source::Code(block)
                             if block.status().is_none())
                         && call.raw_source(self.input(call.id)).is_some()))
             {
@@ -147,6 +456,8 @@ impl Invocations {
     pub(super) fn header(
         &self,
         call: &Invocation<'_>,
+        prepared: &PreparedInvocation,
+        input_width: u16,
         open: bool,
         width: u16,
         tokens: Option<u64>,
@@ -155,8 +466,10 @@ impl Invocations {
         let bill = tokens.map(|tokens| (tokens, super::text::token_label(tokens)));
         let bill_width = bill.as_ref().map_or(0, |(_, label)| label.len() as u16 + 2);
         let width = width.saturating_sub(bill_width).max(1);
-        let formatted = call.formatted_input(self.input(call.id), width).is_some();
-        let formatted_output = call.has_formatted_output(width);
+        let formatted = prepared
+            .input(call, self.input(call.id), input_width, false)
+            .0;
+        let formatted_output = prepared.has_formatted_output(call, input_width);
         let ports = self.ports(call, open, formatted, formatted_output, full);
         let mut title =
             crate::render::header::paint_work(call.title(self.input(call.id)), call.is_active());
@@ -278,27 +591,30 @@ impl Invocations {
     pub(super) fn body(
         &self,
         call: &Invocation<'_>,
+        prepared: &PreparedInvocation,
         open: bool,
         width: u16,
         full: bool,
         expanded: &std::collections::HashSet<String>,
-    ) -> crate::history_cell::activity_parts::ActivityParts {
-        use crate::history_cell::activity_parts::ActivityParts;
+    ) -> ActivityParts {
         let input = self.input(call.id);
-        let formatted = call.formatted_input(input, width);
+        let formatted = prepared.input(call, input, width, false).0;
         let ports = self.ports(
             call,
             open,
-            formatted.is_some(),
-            call.has_formatted_output(width),
+            formatted,
+            prepared.has_formatted_output(call, width),
             full,
         );
         let mut parts = ActivityParts::default();
         if ports.input.visible() {
             parts = if ports.input.mode() == OutputMode::Fmt {
-                formatted
+                prepared
+                    .input(call, input, width, true)
+                    .1
+                    .map(|input| input.paint())
             } else {
-                call.raw_input(input).map(|lines| ActivityParts {
+                prepared.raw_input(call, input).map(|lines| ActivityParts {
                     lines,
                     ..Default::default()
                 })
@@ -312,7 +628,9 @@ impl Invocations {
             if !parts.lines.is_empty() {
                 parts.lines.push(client_notice(""));
             }
-            parts.lines.extend(call.output(width, ports.output.mode()));
+            parts
+                .lines
+                .extend(prepared.output(call, width, ports.output.mode()));
         }
         let mut edits = call.edit_parts(width, expanded, full);
         if !edits.lines.is_empty() {
@@ -328,6 +646,7 @@ impl Invocations {
     pub(super) fn layout(
         &self,
         cell: &dyn HistoryCell,
+        source: PreparationSource<'_>,
         width: u16,
         open: bool,
         placement: super::feed::Content,
@@ -351,9 +670,15 @@ impl Invocations {
             };
         let body_width = width.saturating_sub(indent).max(1);
         for (index, call) in calls.iter().enumerate() {
+            let prepared = self.prepared(call, source);
+            let input_width = body_width
+                .saturating_sub(crate::transcript_geometry::ENTRY_INDENT)
+                .max(1);
             if placement != super::feed::Content::Beheaded || index != 0 {
                 let header = self.header(
                     call,
+                    &prepared,
+                    input_width,
                     open && calls.len() == 1,
                     body_width,
                     tokens.for_ids(&call.output_ids()),
@@ -375,6 +700,7 @@ impl Invocations {
             let body_indent = crate::transcript_geometry::ENTRY_INDENT;
             let mut body = self.body(
                 call,
+                &prepared,
                 open && calls.len() == 1,
                 body_width.saturating_sub(body_indent).max(1),
                 full,
@@ -427,6 +753,10 @@ impl TranscriptView {
             view.invocations
                 .layout(
                     cell,
+                    key.filter(|key| key.cacheable)
+                        .map_or(PreparationSource::Uncached, |key| {
+                            PreparationSource::Live(key.revision)
+                        }),
                     width,
                     true,
                     super::feed::Content::Loose,
@@ -458,6 +788,10 @@ impl TranscriptView {
         Some(self.sync_search_live_layout(width, key, |width, view| {
             view.invocations.layout(
                 cell,
+                key.filter(|key| key.cacheable)
+                    .map_or(PreparationSource::Uncached, |key| {
+                        PreparationSource::Live(key.revision)
+                    }),
                 width,
                 true,
                 super::feed::Content::Loose,
@@ -472,6 +806,7 @@ impl TranscriptView {
     pub(crate) fn record_tool_input(&mut self, input: ToolInput) {
         if self.invocations.inputs.get(&input.call_id) != Some(&input) {
             self.invocations.inputs.insert(input.call_id.clone(), input);
+            self.invocations.prepared.borrow_mut().entries.clear();
             self.cache.clear();
             self.live_key = None;
             self.invalidate_live_search();

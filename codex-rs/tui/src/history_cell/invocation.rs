@@ -68,6 +68,68 @@ pub(crate) struct Invocation<'a> {
     pub(crate) outputs: Vec<&'a ToolOutputCell>,
 }
 
+#[derive(Clone)]
+pub(crate) struct ActivityIndicator {
+    pub(crate) line: usize,
+    pub(crate) start: std::time::Instant,
+    pub(crate) mode: crate::motion::MotionMode,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct InvocationInput {
+    pub(crate) parts: super::activity_parts::ActivityParts,
+    pub(crate) indicators: Vec<ActivityIndicator>,
+}
+
+impl From<super::activity_parts::ActivityParts> for InvocationInput {
+    fn from(parts: super::activity_parts::ActivityParts) -> Self {
+        Self {
+            parts,
+            indicators: Vec::new(),
+        }
+    }
+}
+
+impl InvocationInput {
+    pub(crate) fn paint(&self) -> super::activity_parts::ActivityParts {
+        let mut parts = self.parts.clone();
+        for indicator in &self.indicators {
+            let Some(line) = parts.lines.get_mut(indicator.line) else {
+                continue;
+            };
+            let Some(span) = line.line.spans.first_mut() else {
+                continue;
+            };
+            let next = crate::motion::activity_indicator(
+                Some(indicator.start),
+                indicator.mode,
+                crate::motion::ReducedMotionIndicator::StaticBullet,
+            )
+            .expect("activity marker is visible in both motion modes");
+            if let Some(source) = &mut line.source {
+                source.prefix_bytes =
+                    source.prefix_bytes.saturating_sub(span.content.len()) + next.content.len();
+            }
+            *span = next;
+        }
+        parts
+    }
+}
+
+fn combine_inputs(parts: impl IntoIterator<Item = InvocationInput>) -> InvocationInput {
+    let mut indicators = Vec::new();
+    let mut offset = 0;
+    let parts = combine_parts(parts.into_iter().map(|mut input| {
+        for indicator in &mut input.indicators {
+            indicator.line += offset;
+        }
+        offset += input.parts.lines.len();
+        indicators.extend(input.indicators);
+        input.parts
+    }));
+    InvocationInput { parts, indicators }
+}
+
 fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
     let read = codex_shell_command::read_intent::ReadIntent::from_tool_input(input)?;
     let mut lines = vec![crate::exec_cell::rows::read_summary(read.label(&read.path)).into()];
@@ -203,10 +265,7 @@ fn edit_projection(
     )
 }
 
-fn input_projection(
-    cell: &dyn HistoryCell,
-    width: u16,
-) -> Option<super::activity_parts::ActivityParts> {
+fn input_projection(cell: &dyn HistoryCell, width: u16) -> Option<InvocationInput> {
     let any = cell.as_any();
     if let Some(input) = any.downcast_ref::<super::ToolInputCell>() {
         if input.0.name.is_default_namespace() && input.0.name.name == "update_work_status" {
@@ -215,13 +274,14 @@ fn input_projection(
         }
         return read_input(&input.0)
             .or_else(|| write_input(&input.0))
-            .or_else(|| command_input(&input.0));
+            .or_else(|| command_input(&input.0))
+            .map(Into::into);
     }
     if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
         return input_projection(wrapper.inner.as_ref(), width);
     }
     if let Some(group) = any.downcast_ref::<ToolOutputGroup>() {
-        return Some(combine_parts(
+        return Some(combine_inputs(
             group
                 .members
                 .iter()
@@ -242,7 +302,7 @@ fn input_projection(
             })
             .collect()
     } else if let Some(mcp) = any.downcast_ref::<super::McpToolCallCell>() {
-        mcp.invocation_input(width)
+        return Some(mcp.invocation_input(width));
     } else if let Some(dynamic) = any.downcast_ref::<super::DynamicToolCallCell>() {
         dynamic.invocation_input(width)
     } else if any.is::<crate::multi_agents::AgentToolHistoryCell>() {
@@ -252,10 +312,13 @@ fn input_projection(
     } else {
         return None;
     };
-    Some(super::activity_parts::ActivityParts {
-        lines,
-        ..Default::default()
-    })
+    Some(
+        super::activity_parts::ActivityParts {
+            lines,
+            ..Default::default()
+        }
+        .into(),
+    )
 }
 
 pub(crate) fn collect(cell: &dyn HistoryCell) -> Vec<Invocation<'_>> {
@@ -503,7 +566,7 @@ impl Invocation<'_> {
         &self,
         input: Option<&ToolInput>,
         width: u16,
-    ) -> Option<super::activity_parts::ActivityParts> {
+    ) -> Option<InvocationInput> {
         let mut parts = match &self.source {
             Source::Code(block) => {
                 let mut projections = block.members().iter().filter_map(|cell| {
@@ -532,7 +595,7 @@ impl Invocation<'_> {
                     input_projection(cell.as_ref(), width)
                 });
                 let first = projections.next()?;
-                combine_parts(std::iter::once(first).chain(projections))
+                combine_inputs(std::iter::once(first).chain(projections))
             }
             Source::Command(call) => {
                 let script = input
@@ -550,10 +613,13 @@ impl Invocation<'_> {
                             &script,
                             OutputMode::Fmt,
                         ));
-                        return Some(super::activity_parts::ActivityParts {
-                            lines,
-                            ..Default::default()
-                        });
+                        return Some(
+                            super::activity_parts::ActivityParts {
+                                lines,
+                                ..Default::default()
+                            }
+                            .into(),
+                        );
                     }
                     None => return None,
                 };
@@ -561,21 +627,22 @@ impl Invocation<'_> {
                     lines,
                     ..Default::default()
                 }
+                .into()
             }
             Source::Cells(cells) => match cells
                 .iter()
                 .map(|cell| input_projection(*cell, width))
                 .collect::<Option<Vec<_>>>()
             {
-                Some(parts) => combine_parts(parts),
-                None => return argument_input(input),
+                Some(parts) => combine_inputs(parts),
+                None => return argument_input(input).map(Into::into),
             },
-            Source::Output => return argument_input(input),
+            Source::Output => return argument_input(input).map(Into::into),
         };
-        if parts.lines.is_empty() && !matches!(self.source, Source::Code(_)) {
+        if parts.parts.lines.is_empty() && !matches!(self.source, Source::Code(_)) {
             return None;
         }
-        mark_lines(&mut parts.lines, OutputProvenance::Formatted);
+        mark_lines(&mut parts.parts.lines, OutputProvenance::Formatted);
         Some(parts)
     }
 

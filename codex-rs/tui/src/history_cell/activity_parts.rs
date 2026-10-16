@@ -42,13 +42,14 @@ impl FoldTarget {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct PartControl {
     pub(crate) id: String,
     pub(crate) line: usize,
     pub(crate) expanded: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ActivityParts {
     pub(crate) lines: Vec<HyperlinkLine>,
     pub(crate) header: Option<ActivityHeader>,
