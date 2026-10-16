@@ -135,6 +135,77 @@ Continue a thread only in a build at least as new as the last one that wrote it:
 older build also drops model input it cannot parse. `scripts/uninstall-local
 --staging` removes staging alone.
 
+## UI latency recorder
+
+Each TUI worker keeps content-free, fixed-capacity wall-time counters. Inspect it
+directly, without its dispatcher, Tokio runtime, reload host or app server:
+
+```sh
+codex debug ui list
+codex debug ui dump --pid PID
+codex debug ui dump --pid PID --json
+codex debug ui reset --pid PID --json
+```
+
+`list --json` includes responsive worker identities, unresponsive PIDs and a
+`partial` flag. Discovery stops after two seconds, 1024 directory entries or
+64 worker candidates; use an exact PID when discovery is incomplete. Identity
+includes PID, Linux process-start ticks, build commit, installed channel,
+terminal device and reload generation. PID/start and same-UID peer credentials
+are checked on each request, so PID reuse cannot silently select another worker.
+
+JSON has `schema_version: 1`, fixed stage names, nanosecond durations and
+`histogram_upper_ns` bucket bounds. `timing: wall_inclusive` means parent and
+child totals overlap: never sum them as disjoint CPU work. `IdleSelect` is
+select polling and waiting, normally idle rather than a handler. A slow
+synchronous select poll cannot be distinguished from ordinary waiting here. Other stages identify coarse dispatcher
+occupancy, key/pre-key painting, frame preparation/painting, invocation
+materialization, and terminal diff/write/flush. Selected inline server awaits
+are `RpcWait`; uninstrumented callees and awaits remain handler occupancy.
+A long handler does not prove CPU work or rendering is responsible. The slow
+ring retains the latest 128 completed non-idle spans of at least 8 ms; human
+reports mark 50 ms or more prominently. Ring sequence numbers reveal overwritten
+history. All completed spans, including faster ones and idle waits, enter fixed
+histograms. Input reports the gate reason, three queue sizes and the latest
+consumed-input timestamp; it cannot measure physical key-to-consumption latency
+while input is gated.
+
+Current top/parent stages are published before work. Last-committed progress
+remains separate; a suspended publisher never makes snapshots wait for it.
+Each accepted atomic record is consistent, but records are not one simultaneous
+cut. `incomplete_records` marks interrupted publications; `suppressed_scopes`
+marks nesting beyond the recorder's fixed capacity. An unavailable current
+record is not evidence that the UI is idle.
+
+Reset immediately selects a new logical reporting epoch, not a physical memory
+clear or remote cancellation. `reset_pending` stays true until the UI next
+crosses a boundary. Counters and slow records from older epochs disappear from
+the report immediately; spans entered before reset never count toward the new
+epoch. Current and last-committed markers deliberately remain visible with their
+original epoch, including a handler that never resumes.
+
+The dedicated OS thread sleeps when unused and serves one bounded request at a
+time, with a 200 ms total client deadline and fixed-size binary response.
+Endpoints are worker-owned `ui-latency-PID-START.sock` files (0600) in the
+validated private `codex-uds` user runtime directory. Normal shutdown removes
+only that worker's endpoint. SIGKILL may leave a stale socket until runtime
+directory expiry; discovery ignores dead process identities and never sweeps
+others' files. Listener startup failure logs one warning and does not prevent
+the UI from starting.
+
+Normal collection allocates no heap memory, acquires no locks, formats no
+strings, logs nothing and writes no files. Recorder state has a compile-time
+64 KiB bound, excluding its 128 KiB listener stack and socket buffers. Clocks and
+atomic stores still cost time; see measured evidence before claiming numerical
+overhead. Dumps default to stdout; redirect JSON explicitly to retain it. There
+is no automatic disk stream, saved-report directory or built-in retention policy.
+
+The listener can answer while the UI is synchronously blocked, awaiting a
+server response or blocked on terminal output, provided its own OS thread can
+run. It is not a crash debugger: SIGSTOP, death, process-wide corruption, severe
+resource exhaustion and total CPU starvation can prevent a reply. The recorder
+does not repair the existing queue gate, pre-key paint or inline-RPC debt.
+
 ## Provider data
 
 OpenAI and Anthropic are equally trusted with conversation data. A privacy or

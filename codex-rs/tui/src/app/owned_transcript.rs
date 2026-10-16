@@ -113,6 +113,8 @@ impl App {
         tui: &mut tui::Tui,
         screen_size: Size,
     ) -> Result<Rect> {
+        let preparation_stage =
+            crate::ui_latency::enter(crate::ui_latency::Stage::FramePreparation);
         self.prepare_live_work();
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(
@@ -211,6 +213,7 @@ impl App {
         let mut feedback_tick = None;
         let mut blossom_tick = None;
         let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
+        drop(preparation_stage);
         tui.draw(screen_size.height, |frame| {
             ratatui::widgets::Clear.render(
                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
@@ -409,6 +412,8 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        let _routing_stage = matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_))
+            .then(|| crate::ui_latency::enter(crate::ui_latency::Stage::KeyRouting));
         let has_modal = self.chat_widget.has_active_modal();
         if !self.chat_widget.no_modal_or_popup_active()
             || self.chat_widget.is_external_writer_view()
@@ -537,8 +542,12 @@ impl App {
             }
         }
         if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
-            let size = tui.prepare_draw_size()?;
-            self.render_owned_transcript(tui, size)?;
+            {
+                let _prepaint_stage =
+                    crate::ui_latency::enter(crate::ui_latency::Stage::PreKeyPaint);
+                let size = tui.prepare_draw_size()?;
+                self.render_owned_transcript(tui, size)?;
+            }
             if self.handle_live_work_input(event) {
                 tui.frame_requester().schedule_frame();
                 return Ok(true);

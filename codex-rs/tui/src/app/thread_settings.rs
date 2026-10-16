@@ -240,7 +240,7 @@ impl App {
         {
             return false;
         }
-        match app_server.thread_settings_update(params).await {
+        match crate::ui_latency::rpc(app_server.thread_settings_update(params)).await {
             Ok(settings_updated) => {
                 if settings_updated
                     && changes_permissions

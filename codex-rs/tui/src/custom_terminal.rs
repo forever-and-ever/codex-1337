@@ -431,7 +431,10 @@ where
         }
         let mut frame = self.get_frame();
 
-        render_callback(&mut frame).map_err(Into::into)?;
+        {
+            let _paint_stage = crate::ui_latency::enter(crate::ui_latency::Stage::FramePaint);
+            render_callback(&mut frame).map_err(Into::into)?;
+        }
 
         // We can't change the cursor position right away because we have to flush the frame to
         // stdout first. But we also can't keep the frame around, since it holds a &mut to
@@ -441,7 +444,11 @@ where
 
         // Not every terminal or multiplexer hides intermediate cursor moves inside a
         // synchronized update, especially when the frame spans multiple writes.
-        let updates = diff_buffers(self.previous_buffer(), self.current_buffer());
+        let updates = {
+            let _diff_stage = crate::ui_latency::enter(crate::ui_latency::Stage::TerminalDiff);
+            diff_buffers(self.previous_buffer(), self.current_buffer())
+        };
+        let write_stage = crate::ui_latency::enter(crate::ui_latency::Stage::TerminalWrite);
         if !updates.is_empty() && !self.hidden_cursor {
             self.hide_cursor()?;
         }
@@ -459,6 +466,8 @@ where
 
         self.swap_buffers();
 
+        drop(write_stage);
+        let _flush_stage = crate::ui_latency::enter(crate::ui_latency::Stage::TerminalFlush);
         Backend::flush(&mut self.backend)?;
 
         Ok(())

@@ -1046,9 +1046,7 @@ impl App {
                 branch,
                 cwd: _cwd,
             } => {
-                if let Err(err) = app_server
-                    .thread_metadata_update_branch(thread_id, branch)
-                    .await
+                if let Err(err) = crate::ui_latency::rpc(app_server.thread_metadata_update_branch(thread_id, branch)).await
                 {
                     tracing::warn!("failed to sync thread git branch from directive: {err}");
                 }
@@ -2732,17 +2730,15 @@ impl App {
                     ThreadTitleDestination::Automatic => {
                         if let Ok(response) = result
                             && let Some(title) = super::thread_title::parse_thread_title(&response)
-                            && let Ok(thread) = app_server
-                                .thread_read(thread_id, /*include_turns*/ false)
-                                .await
+                            && let Ok(thread) = crate::ui_latency::rpc(app_server.thread_read(thread_id, /*include_turns*/ false)).await
                             && thread.name.is_none()
                         {
-                            match app_server.thread_allocate_name(codex_app_server_protocol::ThreadSetNameParams {
+                            match crate::ui_latency::rpc(app_server.thread_allocate_name(codex_app_server_protocol::ThreadSetNameParams {
                                 thread_id: thread_id.to_string(),
                                 name: title,
                                 naming_mode: Some(codex_app_server_protocol::ThreadNameMode::Generated),
                                 conflict_thread_ids: None,
-                            }).await {
+                            })).await {
                                 Ok(title) => self
                                     .chat_widget
                                     .on_thread_name_updated(thread_id, Some(title)),

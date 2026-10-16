@@ -254,6 +254,7 @@ mod transcript_view;
 mod tui;
 mod turn_tip;
 mod ui_consts;
+pub mod ui_latency;
 mod unarchive_prompt;
 pub(crate) mod update_action;
 pub use update_action::UpdateAction;
@@ -1985,7 +1986,7 @@ async fn run_ratatui_app(
 
     // Keep the large event-loop future out of the enclosing startup futures so session
     // transitions have enough stack headroom to rebuild configuration and the chat widget.
-    let app_result = Box::pin(App::run(
+    let app_result = ui_latency::scope(Box::pin(App::run(
         &mut tui,
         app_server,
         config,
@@ -2009,7 +2010,7 @@ async fn run_ratatui_app(
         startup_hooks_browser,
         daemon_startup_warning,
         startup_draft,
-    ))
+    )))
     .await;
 
     terminal_restore_guard.restore_silently();

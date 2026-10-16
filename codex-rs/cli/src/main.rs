@@ -94,6 +94,7 @@ mod sandbox_setup;
 mod sandbox_uninstall;
 mod staging;
 mod state_db_recovery;
+mod ui_latency;
 #[cfg(not(windows))]
 mod wsl_paths;
 
@@ -269,6 +270,8 @@ struct DebugCommand {
 
 #[derive(Debug, clap::Subcommand)]
 enum DebugSubcommand {
+    /// Inspect a TUI worker without involving its dispatcher or app server.
+    Ui(ui_latency::Command),
     /// Internal client-replacement protocol negotiation.
     #[clap(hide = true)]
     TuiRestartProbe,
@@ -988,6 +991,13 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = MultitoolCli::parse();
+    if let Some(Subcommand::Debug(DebugCommand {
+        subcommand: DebugSubcommand::Ui(command),
+    })) = subcommand.as_ref()
+    {
+        ui_latency::run(command).await?;
+        return Ok(());
+    }
     staging::admit(subcommand.as_ref())?;
     if matches!(
         subcommand,
@@ -1652,6 +1662,9 @@ async fn cli_main(
                 unreachable!(
                     "the restart probe is handled before configuration and authentication"
                 );
+            }
+            DebugSubcommand::Ui(_) => {
+                unreachable!("UI diagnostics dispatched before ordinary startup")
             }
             DebugSubcommand::Models(cmd) => {
                 reject_remote_mode_for_subcommand(

@@ -8,7 +8,7 @@ impl App {
         server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        match server.thread_context_inventory(thread_id).await {
+        match crate::ui_latency::rpc(server.thread_context_inventory(thread_id)).await {
             Ok(inventory) => {
                 self.overlay = Some(Overlay::new_transcript(
                     vec![std::sync::Arc::new(

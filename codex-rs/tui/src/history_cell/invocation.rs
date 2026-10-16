@@ -532,6 +532,7 @@ impl Invocation<'_> {
     }
 
     pub(crate) fn raw_input(&self, input: Option<&ToolInput>) -> Option<Vec<HyperlinkLine>> {
+        let _stage = crate::ui_latency::enter(crate::ui_latency::Stage::InvocationPreparation);
         let source = self.raw_source(input)?;
         let Some(language) = self
             .script_language(input)
@@ -567,6 +568,7 @@ impl Invocation<'_> {
         input: Option<&ToolInput>,
         width: u16,
     ) -> Option<InvocationInput> {
+        let _stage = crate::ui_latency::enter(crate::ui_latency::Stage::InvocationPreparation);
         let mut parts = match &self.source {
             Source::Code(block) => {
                 let mut projections = block.members().iter().filter_map(|cell| {
@@ -702,6 +704,7 @@ impl Invocation<'_> {
     }
 
     pub(crate) fn output(&self, width: u16, mode: OutputMode) -> Vec<HyperlinkLine> {
+        let _stage = crate::ui_latency::enter(crate::ui_latency::Stage::InvocationPreparation);
         if self.outputs.is_empty() {
             let mut lines = vec![client_notice("Exact output is unavailable in this record")];
             if mode == OutputMode::Fmt {

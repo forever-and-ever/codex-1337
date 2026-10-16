@@ -235,7 +235,9 @@ impl App {
         daemon_startup_warning: Option<String>,
         mut startup_draft: StartupDraftPump,
     ) -> Result<AppExitInfo> {
+        use crate::ui_latency::{Stage, enter};
         use tokio_stream::StreamExt;
+        let startup_stage = enter(Stage::Startup);
 
         async fn shutdown_on_startup_error(
             app_server: AppServerSession,
@@ -1154,10 +1156,12 @@ See the Codex keymap documentation for supported actions and examples."
         #[cfg(debug_assertions)]
         let pre_loop_exit_reason: Option<ExitReason> = None;
 
+        drop(startup_stage);
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
         } else {
             loop {
+                let maintenance_stage = enter(Stage::Maintenance);
                 app.drive_server_operations(&app_server);
                 app.retry_pending_thread_delivery().await;
                 // Reconnect can dismiss an overlay from the server-event path.
@@ -1253,6 +1257,26 @@ See the Codex keymap documentation for supported actions and examples."
                     .chat_widget
                     .rate_limit_refresh_interval()
                     .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
+                crate::ui_latency::admission(
+                    if app.pending_thread_switch_resets != 0 {
+                        crate::ui_latency::InputGate::ThreadSwitch
+                    } else if !app.reconnect.offline
+                        && app.thread_delivery.primary_replay_thread.is_some()
+                    {
+                        crate::ui_latency::InputGate::Replay
+                    } else if !app.reconnect.offline
+                        && block_terminal_input_for_pending_startup_events
+                    {
+                        crate::ui_latency::InputGate::Startup
+                    } else {
+                        crate::ui_latency::InputGate::Open
+                    },
+                    app_event_rx.len(),
+                    app.active_thread_rx.as_ref().map_or(0, mpsc::Receiver::len),
+                    app.pending_primary_events.len(),
+                );
+                drop(maintenance_stage);
+                let select_stage = enter(Stage::IdleSelect);
                 let control = select! {
                     result = async {
                         #[cfg(target_os = "linux")]
@@ -1265,6 +1289,8 @@ See the Codex keymap documentation for supported actions and examples."
                         #[cfg(not(target_os = "linux"))]
                         std::future::pending::<std::result::Result<(), tokio::sync::watch::error::RecvError>>().await
                     } => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Timer);
                         #[cfg(target_os = "linux")]
                         {
                         let previous = tui.presentation_mode();
@@ -1285,6 +1311,8 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }
                     Some(event) = app_event_rx.recv() => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::AppEvent);
                         let is_initial_session_header = matches!(
                             &event,
                             AppEvent::InsertHistoryCell(cell)
@@ -1319,6 +1347,8 @@ See the Codex keymap documentation for supported actions and examples."
                         waiting_for_initial_session_configured,
                         app.active_thread_rx.is_some()
                     ) && !has_pending_app_events && !app.reconnect.offline => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::ThreadEvent);
                         if let Some(event) = active {
                             if let Err(err) = app.handle_active_thread_event(tui, &mut app_server, event).await {
                                 break Err(err);
@@ -1331,7 +1361,10 @@ See the Codex keymap documentation for supported actions and examples."
                     event = tui_events.next(), if app.pending_thread_switch_resets == 0
                         && (app.reconnect.offline || app.thread_delivery.primary_replay_thread.is_none())
                         && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::TerminalEvent);
                         if let Some(event) = event {
+                            crate::ui_latency::input_consumed(&event);
                             if !matches!(event, TuiEvent::Draw | TuiEvent::FocusLost) {
                                 idle_restart.postpone();
                             }
@@ -1366,6 +1399,8 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }
                     Some(completion) = app.server_operations.control_rx.recv() => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::ServerCompletion);
                         match app.handle_server_completion(tui, &mut app_server, completion).await {
                             Ok(control) => control,
                             Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
@@ -1374,6 +1409,8 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     completion = app.thread_delivery.completion_rx.recv(), if !app.thread_delivery.is_blocked()
                         && app.thread_delivery.primary_replay_thread.is_none() => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::DeliveryCompletion);
                         if let Some(completion) = completion {
                             match app.handle_local_thread_completion(&mut app_server, completion).await {
                                 Ok(()) => {},
@@ -1389,6 +1426,8 @@ See the Codex keymap documentation for supported actions and examples."
                         && (app.primary_thread_id.is_none() && app.pending_primary_events.len() < THREAD_EVENT_CHANNEL_CAPACITY
                             || app.primary_thread_id.is_some() && app.pending_primary_events.is_empty())
                         && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::ServerEvent);
                         match app_server_event {
                             Some(event) => app.handle_app_server_event(&app_server, event).await,
                             None => {
@@ -1400,6 +1439,8 @@ See the Codex keymap documentation for supported actions and examples."
                         AppRunControl::Continue
                     }
                     result = async { match reconnect.as_mut() { Some(future) => future.await, None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Reconnect);
                         reconnect = None;
                         match result {
                             Ok(connected) => {
@@ -1426,6 +1467,8 @@ See the Codex keymap documentation for supported actions and examples."
                             None => std::future::pending().await,
                         }
                     }, if listen_for_app_server_events => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Timer);
                         app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::Periodic);
                         AppRunControl::Continue
                     }
@@ -1437,6 +1480,8 @@ See the Codex keymap documentation for supported actions and examples."
                             None => std::future::pending().await,
                         }
                     }, if tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Timer);
                         app.chat_widget.refresh_goal_status_indicator_for_time_tick();
                         app.chat_widget.refresh_thread_title_progress_for_time_tick();
                         app.chat_widget.refresh_terminal_title();
@@ -1451,17 +1496,22 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                     }, if !has_pending_app_events
                         && tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Timer);
                         crate::session_log::log_commit_tick();
                         app.chat_widget.on_commit_tick();
                         AppRunControl::Continue
                     }
                     () = idle_restart.tick(), if !has_pending_app_events => {
+                        drop(select_stage);
+                        let _handler_stage = enter(Stage::Timer);
                         if app_event_rx.is_empty() {
                             app.try_idle_restart(tui, &mut idle_restart).await;
                         }
                         AppRunControl::Continue
                     }
                 };
+                let _maintenance_stage = enter(Stage::Maintenance);
                 if App::should_stop_waiting_for_initial_session(
                     waiting_for_initial_session_configured,
                     app.primary_thread_id,

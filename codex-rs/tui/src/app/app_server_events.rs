@@ -158,7 +158,7 @@ impl App {
         {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 5);
             for attempt in 0..2 {
-                let result = tokio::time::timeout_at(
+                let result = crate::ui_latency::rpc(tokio::time::timeout_at(
                     deadline,
                     app_server_client
                         .request_handle()
@@ -171,7 +171,7 @@ impl App {
                                 include_turns: false,
                             },
                         }),
-                )
+                ))
                 .await;
                 match result {
                     Ok(Ok(response))
