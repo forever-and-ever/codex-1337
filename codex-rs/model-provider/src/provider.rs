@@ -369,27 +369,20 @@ pub fn create_model_provider_with_anthropic_account(
     auth_manager: Option<Arc<AuthManager>>,
     default_account: Option<String>,
 ) -> SharedModelProvider {
-    let anthropic_auth_context = (provider_info.adapter
-        == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription)
-        .then(|| {
-            provider_info.validate()?;
-            let runtime = auth_manager
-                .as_ref()
-                .ok_or_else(|| {
-                    "Anthropic requires authentication runtime configuration".to_string()
-                })?
-                .runtime_config();
-            AnthropicAuthContext::new(&runtime, default_account)
-                .map(Arc::new)
-                .map_err(|error| error.to_string())
-        });
+    let anthropic_auth_context = provider_info.adapter.speaks_anthropic_messages().then(|| {
+        provider_info.validate()?;
+        let runtime = auth_manager
+            .as_ref()
+            .ok_or_else(|| "Anthropic requires authentication runtime configuration".to_string())?
+            .runtime_config();
+        AnthropicAuthContext::new(&runtime, default_account)
+            .map(Arc::new)
+            .map_err(|error| error.to_string())
+    });
     let gateway_auth_manager = provider_info
         .gateway_oauth
         .as_ref()
-        .filter(|_| {
-            provider_info.adapter
-                != codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription
-        })
+        .filter(|_| !provider_info.adapter.speaks_anthropic_messages())
         .map(|config| {
             provider_info.validate()?;
             let manager = auth_manager
@@ -444,6 +437,9 @@ impl ConfiguredModelProvider {
         config_model_catalog: Option<ModelsResponse>,
         cache: ModelsCacheConfig,
     ) -> SharedModelsManager {
+        if self.info.adapter == codex_model_provider_info::ModelProviderAdapter::OpenRouter {
+            return crate::openrouter::catalog_for_provider(&self.info, self.auth_manager.as_ref());
+        }
         if let Some(mut catalog) = config_model_catalog {
             let normalize: fn(ModelInfo) -> ModelInfo = match self.info.adapter {
                 codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible

@@ -189,7 +189,7 @@ pub(crate) fn auth_manager_for_provider(
     auth_manager: Option<Arc<AuthManager>>,
     provider: &ModelProviderInfo,
 ) -> Option<Arc<AuthManager>> {
-    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+    if provider.adapter.speaks_anthropic_messages() {
         return None;
     }
     match provider.auth.clone() {
@@ -202,7 +202,12 @@ pub(crate) fn resolve_provider_auth(
     auth: Option<&CodexAuth>,
     provider: &ModelProviderInfo,
 ) -> codex_protocol::error::Result<SharedAuthProvider> {
-    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
+    if provider.adapter == codex_model_provider_info::ModelProviderAdapter::OpenRouter {
+        return Err(CodexErr::InvalidRequest(
+            "Choose an OpenRouter key with /account".into(),
+        ));
+    }
+    if provider.adapter.speaks_anthropic_messages() {
         provider.validate().map_err(CodexErr::InvalidRequest)?;
         return Ok(unauthenticated_auth_provider());
     }

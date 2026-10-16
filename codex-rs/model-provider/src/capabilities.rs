@@ -30,13 +30,24 @@ impl Default for ProviderCapabilities {
 impl ProviderCapabilities {
     pub(crate) fn from_config(info: &ModelProviderInfo) -> Self {
         // TELOS(adapter-not-transport): Responses overrides cannot select Claude's protocol.
-        if info.adapter == codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription {
-            return Self {
-                remote_compaction: RemoteCompactionSupport::AnthropicSigned,
-                image_generation: false,
-                web_search: false,
-                ..Self::default()
-            };
+        match info.adapter {
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter => {
+                return Self {
+                    image_generation: false,
+                    web_search: false,
+                    external_web_access: false,
+                    remote_compaction: RemoteCompactionSupport::Unsupported,
+                };
+            }
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible => {}
+            codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => {
+                return Self {
+                    remote_compaction: RemoteCompactionSupport::AnthropicSigned,
+                    image_generation: false,
+                    web_search: false,
+                    ..Self::default()
+                };
+            }
         }
         let defaults = Self {
             remote_compaction: if info.is_openai()
