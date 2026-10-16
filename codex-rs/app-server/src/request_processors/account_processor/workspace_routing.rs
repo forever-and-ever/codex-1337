@@ -3,7 +3,9 @@
 //! Credential refreshes invalidate the cache, but do not cancel same-owner discovery.
 //! Model sessions retain their original bootstrap scope across configuration changes.
 
+use super::account_scope::ScopedProviderAccount;
 use super::*;
+use codex_app_server_protocol::AccountProvider;
 use codex_app_server_protocol::AccountRoutingOverride;
 use codex_backend_client::AccountEntry;
 use codex_login::WorkspaceRouting;
@@ -159,31 +161,32 @@ impl AccountRequestProcessor {
         params: GetAccountParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         self.refresh_token_if_requested(params.refresh_token).await;
-        let read = self
-            .read_account(/*request*/ None)
-            .await
-            .map_err(|error| match error {
-                AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
-                AccountReadError::Routing(error) => internal_error(error.to_string()),
-            })?;
+        let read = self.read_account(None).await.map_err(|error| match error {
+            AccountReadError::InvalidAccount(error) => invalid_request(error.to_string()),
+            AccountReadError::Routing(error) => internal_error(error.to_string()),
+        })?;
         let preferences = self.config_manager.load_non_project_config().await.ok();
-        let account_id = self.scoped_provider_account_id.clone().or_else(|| {
-            self.auth_manager
-                .is_account_scoped()
-                .then(|| self.auth_manager.selected_account_id())
-                .flatten()
-        });
-        let display_name =
+        let config = preferences
+            .as_ref()
+            .or(self.scoped_config.as_deref())
+            .unwrap_or(self.config.as_ref());
+        let account_id = self
+            .scoped_provider_account
+            .as_ref()
+            .map(ScopedProviderAccount::id)
+            .or_else(|| {
+                self.auth_manager
+                    .is_account_scoped()
+                    .then(|| self.auth_manager.selected_account_id())
+                    .flatten()
+            });
+        let nickname_provider = match &self.scoped_provider_account {
+            Some(ScopedProviderAccount::Claude(_)) => Some(AccountProvider::ClaudeSubscription),
+            Some(ScopedProviderAccount::OpenRouter(_)) => None,
+            None => Some(AccountProvider::Openai),
+        };
+        let display_name = nickname_provider.and_then(|provider| {
             account_id.as_deref().and_then(|id| {
-                let config = preferences
-                    .as_ref()
-                    .or(self.scoped_config.as_deref())
-                    .unwrap_or(self.config.as_ref());
-                let provider = if self.scoped_provider_account_id.is_some() {
-                    codex_app_server_protocol::AccountProvider::ClaudeSubscription
-                } else {
-                    codex_app_server_protocol::AccountProvider::Openai
-                };
                 config
                     .wrangler
                     .account_nicknames
@@ -191,7 +194,7 @@ impl AccountRequestProcessor {
                     .and_then(|names| names.get(id))
                     .cloned()
                     .or_else(|| {
-                        (provider == codex_app_server_protocol::AccountProvider::Openai)
+                        (provider == AccountProvider::Openai)
                             .then(|| {
                                 config.wrangler.account_aliases.iter().find_map(
                                     |(alias, account)| (account == id).then(|| alias.clone()),
@@ -199,33 +202,29 @@ impl AccountRequestProcessor {
                             })
                             .flatten()
                     })
-            });
+            })
+        });
+        let account = match &self.scoped_provider_account {
+            Some(ScopedProviderAccount::Claude(id)) => {
+                let email =
+                    codex_login::anthropic::AccountStore::new(config.codex_home.to_path_buf())
+                        .list()
+                        .map_err(|error| internal_error(error.to_string()))?
+                        .into_iter()
+                        .find(|account| account.identity.id() == *id)
+                        .ok_or_else(|| invalid_request("Claude subscription account is not saved"))?
+                        .email;
+                Some(Account::ClaudeSubscription { email })
+            }
+            Some(ScopedProviderAccount::OpenRouter(_)) | None => {
+                read.account_state.account.map(Account::from)
+            }
+        };
         Ok(Some(
             GetAccountResponse {
                 account_id,
                 display_name,
-                account: if let Some(id) = &self.scoped_provider_account_id {
-                    let config = preferences
-                        .as_ref()
-                        .or(self.scoped_config.as_deref())
-                        .unwrap_or(self.config.as_ref());
-                    let account_id: codex_login::anthropic::AccountId = id
-                        .parse()
-                        .map_err(|error: std::io::Error| invalid_request(error.to_string()))?;
-                    let email =
-                        codex_login::anthropic::AccountStore::new(config.codex_home.to_path_buf())
-                            .list()
-                            .map_err(|error| internal_error(error.to_string()))?
-                            .into_iter()
-                            .find(|account| account.identity.id() == account_id)
-                            .ok_or_else(|| {
-                                invalid_request("Claude subscription account is not saved")
-                            })?
-                            .email;
-                    Some(Account::ClaudeSubscription { email })
-                } else {
-                    read.account_state.account.map(Account::from)
-                },
+                account,
                 requires_openai_auth: read.account_state.requires_openai_auth,
                 workspace_routing: read.workspace_routing.map(|routing| {
                     codex_app_server_protocol::WorkspaceRouting {

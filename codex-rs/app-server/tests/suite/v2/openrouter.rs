@@ -160,6 +160,14 @@ request_max_retries = 0
         assert_eq!(accounts.selected_openrouter_key.as_ref().map(|name| name.as_str()), Some("main"));
         assert_eq!(accounts.pending_openrouter_key, None);
         assert_eq!(accounts.openrouter_keys.len(), 1);
+        for scope in [json!({"threadId": started.thread.id}), json!({"newThread": {"modelProvider": "openrouter"}})] {
+            let request = app.send_request("account/read", Some(scope)).await?;
+            let account: codex_app_server_protocol::GetAccountResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+            assert_eq!(account.account_id.as_deref(), Some("main"));
+            assert!(account.display_name.is_none());
+            assert!(account.account.is_none());
+            assert!(!account.requires_openai_auth);
+        }
         let request = app.send_request("openrouter/model/endpoints", Some(json!({
             "slug": "moonshotai/kimi-test"
         }))).await?;

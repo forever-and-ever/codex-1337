@@ -210,12 +210,13 @@ fn remote_message(body: &str) -> Option<String> {
     }
     #[derive(Deserialize)]
     struct Metadata {
-        provider_name: Option<String>,
+        #[serde(rename = "provider_name")]
+        host_name: Option<String>,
         raw: Option<String>,
     }
     let error = serde_json::from_str::<Envelope>(body).ok()?.error;
     let host_message = error.metadata.and_then(|metadata| {
-        let host = metadata.provider_name?;
+        let host = metadata.host_name?;
         let raw = serde_json::from_str::<Envelope>(&metadata.raw?).ok()?;
         Some(format!(
             "OpenRouter host {host} rejected the request: {}",
