@@ -112,6 +112,10 @@ request_max_retries = 0
                 ResponseTemplate::new(402).set_body_json(json!({
                     "error": {"message": "Insufficient credits", "code": 402}
                 })),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("spare-turn"),
+                    responses::ev_completed("spare-turn"),
+                ])),
             ],
         )
         .await;
@@ -190,7 +194,7 @@ request_max_retries = 0
         assert_eq!(body["store"], false);
 
         let request = app.send_turn_start_request(TurnStartParams {
-            thread_id: started.thread.id,
+            thread_id: started.thread.id.clone(),
             input: vec![UserInput::Text { text: "Use the exhausted key.".into(), text_elements: Vec::new() }],
             ..Default::default()
         }).await?;
@@ -203,6 +207,65 @@ request_max_retries = 0
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Failed);
         assert_eq!(wire.requests().len(), 2);
+
+        let spare_path = home.path().join("openrouter-spare.key");
+        std::fs::write(&spare_path, "sk-or-spare\n")?;
+        Mock::given(method("GET"))
+            .and(path("/key"))
+            .and(header("authorization", "Bearer sk-or-spare"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {
+                "label": "…pare", "limit": null, "limit_remaining": null,
+                "limit_reset": null, "usage_daily": 0, "usage_weekly": 0,
+                "usage_monthly": 0, "expires_at": null
+            }})))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/credits"))
+            .and(header("authorization", "Bearer sk-or-spare"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"data": {"total_credits": 10, "total_usage": 0}}),
+            ))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let request = app.send_request("openrouter/key/add", Some(json!({
+            "name": "spare", "path": spare_path
+        }))).await?;
+        let added: OpenRouterKeyAddResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(added.key.name.as_str(), "spare");
+        assert!(!added.key.is_default);
+
+        let request = app.send_request("thread/account/select", Some(json!({
+            "threadId": started.thread.id, "provider": "openrouter", "accountId": "spare"
+        }))).await?;
+        let selected: codex_app_server_protocol::ThreadAccountSelectResponse =
+            timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        assert!(selected.conversation_changed);
+        assert!(selected.default_saved);
+        assert!(!selected.pending);
+        let request = app.send_request("thread/account/list", Some(json!({
+            "threadId": started.thread.id
+        }))).await?;
+        let accounts: codex_app_server_protocol::ThreadAccountListResponse =
+            timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        assert_eq!(accounts.selected_openrouter_key.as_ref().map(|name| name.as_str()), Some("spare"));
+        assert_eq!(accounts.openrouter_keys.iter().map(|status| status.key.name.as_str()).collect::<Vec<_>>(),
+            vec!["main", "spare"]);
+
+        let request = app.send_turn_start_request(TurnStartParams {
+            thread_id: started.thread.id,
+            input: vec![UserInput::Text { text: "Continue with the spare key.".into(), text_elements: Vec::new() }],
+            ..Default::default()
+        }).await?;
+        let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
+        let completed: TurnCompletedNotification =
+            timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
+        assert_eq!(completed.turn.status, TurnStatus::Completed);
+        let requests = wire.requests();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[2].header("authorization"), Some("Bearer sk-or-spare".into()));
         Ok(())
     }).await
 }
