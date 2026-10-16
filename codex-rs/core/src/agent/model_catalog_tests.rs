@@ -491,3 +491,58 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
+
+#[test]
+fn selectors_respect_provider_prefixes_before_openrouter_slugs() {
+    let manager = codex_model_provider::create_model_provider(Default::default(), None)
+        .models_manager_without_cache(None);
+    let base: ModelPreset = codex_models_manager::bundled_models_response()
+        .unwrap()
+        .models
+        .remove(0)
+        .into();
+    let catalog = |provider: &str, slugs: &[&str]| ProviderModels {
+        provider_id: provider.into(),
+        manager: manager.clone(),
+        models: slugs
+            .iter()
+            .map(|slug| {
+                let mut model = base.clone();
+                model.model = (*slug).into();
+                model.show_in_picker = true;
+                model.multi_agent_version = None;
+                model
+            })
+            .collect(),
+    };
+    let catalogs = [
+        catalog("openai", &["gpt-5.5"]),
+        catalog("openrouter", &["moonshotai/kimi-k3", "openai/gpt-5.5"]),
+    ];
+    // A slash can belong to a provider selector or to the saved model itself.
+    for (selector, provider, slug) in [
+        (
+            "openrouter/moonshotai/kimi-k3",
+            "openrouter",
+            "moonshotai/kimi-k3",
+        ),
+        ("moonshotai/kimi-k3", "openrouter", "moonshotai/kimi-k3"),
+        ("openai/gpt-5.5", "openai", "gpt-5.5"),
+        ("openrouter/openai/gpt-5.5", "openrouter", "openai/gpt-5.5"),
+    ] {
+        let (resolved, model) = crate::agent::child_config::find_spawn_agent_model(
+            &catalogs,
+            selector,
+            MultiAgentVersion::V2,
+            |id| catalogs.iter().any(|catalog| catalog.provider_id == id),
+        )
+        .unwrap();
+        assert_eq!((resolved.provider_id.as_str(), model), (provider, slug));
+    }
+    let advertised = advertised_agent_models(&catalogs, MultiAgentVersion::V2);
+    assert!(
+        advertised
+            .iter()
+            .any(|model| model.model == "openrouter/openai/gpt-5.5")
+    );
+}

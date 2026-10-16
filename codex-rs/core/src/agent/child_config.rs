@@ -81,7 +81,9 @@ pub(crate) async fn resolve_spawn_agent_model(
         .agent_model_catalogs(config, RefreshStrategy::OnlineIfUncached)
         .await;
     let (catalog, selected_model) =
-        find_spawn_agent_model(&catalogs, requested_model, turn.multi_agent_version)?;
+        find_spawn_agent_model(&catalogs, requested_model, turn.multi_agent_version, |id| {
+            config.model_providers.contains_key(id)
+        })?;
     let mut selected_config = config.clone();
     if catalog.provider_id != selected_config.model_provider_id {
         switch_agent_provider(&mut selected_config, &catalog.provider_id);
@@ -155,6 +157,19 @@ pub(crate) async fn prepare_agent_spawn_config_from_selection(
     .await?;
     if options.model_precedence == SpawnModelPrecedence::RoleOverrides {
         apply_spawn_role_inheritance(session, turn, &mut config, &options).await?;
+    }
+    if config.model_provider.adapter == codex_model_provider_info::ModelProviderAdapter::OpenRouter
+    {
+        let model = config
+            .model
+            .as_deref()
+            .ok_or("OpenRouter child has no selected model")?;
+        let info = session
+            .agent_models_manager(&config)
+            .await?
+            .get_model_info(model, &config.to_models_manager_config())
+            .await;
+        clamp_openrouter_reasoning(&mut config, &info);
     }
     apply_spawn_agent_service_tier(session, &mut config, options.service_tier).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
@@ -334,12 +349,14 @@ async fn apply_requested_spawn_agent_model_overrides(
         }
 
         if let Some(reasoning_effort) = requested_reasoning_effort {
-            validate_spawn_agent_reasoning_effort(
-                &selected_model_name,
-                &selected_model_info.supported_reasoning_levels,
-                &reasoning_effort,
-            )?;
-            config.model_reasoning_effort = Some(reasoning_effort);
+            config.model_reasoning_effort = Some(reasoning_effort.clone());
+            if !clamp_openrouter_reasoning(config, &selected_model_info) {
+                validate_spawn_agent_reasoning_effort(
+                    &selected_model_name,
+                    &selected_model_info.supported_reasoning_levels,
+                    &reasoning_effort,
+                )?;
+            }
         } else {
             config.model_reasoning_effort = selected_model_info.default_reasoning_level;
         }
@@ -349,12 +366,14 @@ async fn apply_requested_spawn_agent_model_overrides(
     }
 
     if let Some(reasoning_effort) = requested_reasoning_effort {
-        validate_spawn_agent_reasoning_effort(
-            &settings.model_info.slug,
-            &settings.model_info.supported_reasoning_levels,
-            &reasoning_effort,
-        )?;
-        config.model_reasoning_effort = Some(reasoning_effort);
+        config.model_reasoning_effort = Some(reasoning_effort.clone());
+        if !clamp_openrouter_reasoning(config, &settings.model_info) {
+            validate_spawn_agent_reasoning_effort(
+                &settings.model_info.slug,
+                &settings.model_info.supported_reasoning_levels,
+                &reasoning_effort,
+            )?;
+        }
     }
 
     Ok(())
@@ -409,7 +428,7 @@ async fn apply_spawn_agent_role(
         .await?
         .get_model_info(&model, &config.to_models_manager_config())
         .await;
-    if model_info.used_fallback_model_metadata {
+    if clamp_openrouter_reasoning(config, &model_info) || model_info.used_fallback_model_metadata {
         return Ok(());
     }
 
@@ -420,19 +439,25 @@ async fn apply_spawn_agent_role(
     )
 }
 
-fn find_spawn_agent_model<'a>(
+pub(super) fn find_spawn_agent_model<'a>(
     catalogs: &'a [ProviderModels],
     requested_model: &str,
     multi_agent_version: MultiAgentVersion,
+    known_provider: impl Fn(&str) -> bool,
 ) -> Result<(&'a ProviderModels, &'a str), String> {
+    // A known provider prefix owns the selector, even when another catalog contains
+    // the entire text as an OpenRouter slug (openai/gpt-5.5).
+    let qualified = requested_model.split_once('/').filter(|(provider, _)| {
+        *provider == codex_model_provider_info::OPENROUTER_PROVIDER_ID || known_provider(provider)
+    });
     let mut matches = catalogs
         .iter()
         .flat_map(|catalog| catalog.models.iter().map(move |model| (catalog, model)))
         .filter(|(catalog, model)| {
-            (model.model == requested_model
-                || requested_model.strip_prefix(&format!("{}/", catalog.provider_id))
-                    == Some(model.model.as_str()))
-                && model_supports_multi_agent_backend(model, multi_agent_version)
+            (match qualified {
+                Some((provider, slug)) => catalog.provider_id == provider && model.model == slug,
+                None => model.model == requested_model,
+            }) && model_supports_multi_agent_backend(model, multi_agent_version)
         });
     match (matches.next(), matches.next()) {
         (Some((catalog, model)), None) => Ok((catalog, model.model.as_str())),
@@ -450,6 +475,26 @@ fn find_spawn_agent_model<'a>(
                 "Unknown model `{requested_model}` for spawn_agent. Available models: {available}"
             ))
         }
+    }
+}
+
+fn clamp_openrouter_reasoning(config: &mut Config, info: &ModelInfo) -> bool {
+    match config.model_provider.adapter {
+        codex_model_provider_info::ModelProviderAdapter::OpenRouter => {
+            // Inherited OpenAI effort preferences cannot invent an OpenRouter model capability.
+            config.model_reasoning_effort = config
+                .model_reasoning_effort
+                .take()
+                .filter(|effort| {
+                    info.supported_reasoning_levels
+                        .iter()
+                        .any(|preset| &preset.effort == effort)
+                })
+                .or_else(|| info.default_reasoning_level.clone());
+            true
+        }
+        codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+        | codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => false,
     }
 }
 

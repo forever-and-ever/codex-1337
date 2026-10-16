@@ -32,7 +32,7 @@ impl LocalAgentControl {
             }
             // The native Messages encoder cannot consume provider-owned ciphertext;
             // history salvage would otherwise omit the task entirely.
-            if recipient_adapter == ModelProviderAdapter::ClaudeSubscription {
+            if recipient_adapter.speaks_anthropic_messages() {
                 return Err(CodexErr::InvalidRequest(
                     "Native Anthropic cannot read encrypted agent messages; retry using plaintext_message".into(),
                 ));
