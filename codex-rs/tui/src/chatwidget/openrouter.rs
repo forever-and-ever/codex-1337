@@ -1,0 +1,564 @@
+use super::*;
+use crate::openrouter::Event;
+use crate::openrouter::ModelMenu;
+use crate::openrouter::Request;
+use crate::openrouter::VIEW;
+use codex_app_server_protocol::OpenRouterKeyState;
+use codex_app_server_protocol::OpenRouterKeyStatus;
+use codex_app_server_protocol::OpenRouterModelEndpointsResponse;
+use codex_protocol::KeyName;
+use codex_protocol::ModelSlug;
+
+mod views;
+
+#[derive(Default)]
+pub(super) struct OpenRouterUi {
+    request: Option<uuid::Uuid>,
+    status_request: Option<uuid::Uuid>,
+    last_refresh: Option<Instant>,
+    status: Option<OpenRouterKeyStatus>,
+}
+
+impl ChatWidget {
+    pub(super) fn partition_reasoning_choices(
+        &self,
+        choices: Vec<ReasoningEffortConfig>,
+    ) -> (Vec<ReasoningEffortConfig>, Vec<ReasoningEffortConfig>) {
+        match self.config.model_provider.adapter {
+            // OpenRouter's max is a wire effort, not the fork's ChatGPT usage mode.
+            codex_model_provider_info::ModelProviderAdapter::OpenRouter => (choices, Vec::new()),
+            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
+            | codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => choices
+                .into_iter()
+                .partition(|effort| !Self::is_advanced_reasoning_effort(effort)),
+        }
+    }
+
+    pub(super) fn open_openrouter_model_menu(&mut self) -> bool {
+        if self.config.model_provider_id != "openrouter" {
+            return false;
+        }
+        self.app_event_tx
+            .send(AppEvent::OpenRouter(Event::Request(Request::Models {
+                menu: ModelMenu::Current,
+                selected: Some(self.current_model().to_owned()),
+            })));
+        true
+    }
+
+    pub(crate) fn start_openrouter_request(&mut self, id: uuid::Uuid, request: &Request) -> bool {
+        if self.openrouter_request_pending() {
+            return false;
+        }
+        self.openrouter_ui.request = Some(id);
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some(crate::openrouter::BUSY_VIEW),
+            title: Some(request.title()),
+            items: vec![SelectionItem {
+                name: "Loading…".into(),
+                is_disabled: true,
+                ..Default::default()
+            }],
+            ..SelectionViewParams::picker()
+        });
+        true
+    }
+
+    pub(crate) fn finish_openrouter_request(&mut self, id: uuid::Uuid) -> bool {
+        if self.openrouter_ui.request != Some(id) {
+            return false;
+        }
+        self.openrouter_ui.request = None;
+        let visible = self.bottom_pane.active_view_id() == Some(crate::openrouter::BUSY_VIEW);
+        self.bottom_pane
+            .dismiss_view_by_id(crate::openrouter::BUSY_VIEW);
+        visible
+    }
+
+    pub(crate) fn show_openrouter_models(
+        &mut self,
+        menu: ModelMenu,
+        listing: crate::model_catalog::ModelListing,
+        selected: Option<String>,
+        error: Option<String>,
+    ) {
+        self.bottom_pane.dismiss_view_by_id(VIEW);
+        self.bottom_pane
+            .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
+        if matches!(menu, ModelMenu::Current) && error.is_none() {
+            let catalog = Arc::make_mut(&mut self.model_catalog);
+            catalog.models = listing.models.clone();
+            catalog.providers = listing.providers.clone();
+            self.refresh_effective_service_tier();
+            self.refresh_model_dependent_surfaces();
+        }
+        let params =
+            self.openrouter_model_params(&menu, &listing.models, selected.as_deref(), error);
+        let view = views::ModelView::new(
+            params,
+            listing.models,
+            menu,
+            self.app_event_tx.clone(),
+            self.bottom_pane.list_keymap(),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+    }
+
+    fn openrouter_model_params(
+        &self,
+        menu: &ModelMenu,
+        models: &[ModelPreset],
+        selected: Option<&str>,
+        error: Option<String>,
+    ) -> SelectionViewParams {
+        let mut items = models
+            .iter()
+            .map(|model| {
+                let action_model = model.clone();
+                let menu = menu.clone();
+                let effort_picker = matches!(menu, ModelMenu::Current)
+                    && model.supported_reasoning_efforts.len() > 1;
+                SelectionItem {
+                    name: model.display_name.clone(),
+                    description: Some(model.description.clone()),
+                    is_current: matches!(menu, ModelMenu::Current)
+                        && self.current_model() == model.model,
+                    search_value: Some(format!("{} {}", model.model, model.display_name)),
+                    actions: vec![Box::new(move |tx| match &menu {
+                        ModelMenu::Current => tx.send(AppEvent::OpenReasoningPopup {
+                            model: action_model.clone(),
+                        }),
+                        ModelMenu::New(provider) => tx.send(AppEvent::OpenProviderReasoning {
+                            provider: provider.clone(),
+                            model: action_model.clone(),
+                        }),
+                    })],
+                    dismiss_on_select: !effort_picker,
+                    dismiss_parent_on_child_accept: effort_picker,
+                    ..Default::default()
+                }
+            })
+            .collect::<Vec<_>>();
+        let add_menu = menu.clone();
+        items.push(SelectionItem {
+            name: "Add model…".into(),
+            search_value: Some("Add model".into()),
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::OpenRouter(Event::AddModel {
+                    menu: add_menu.clone(),
+                }))
+            })],
+            dismiss_on_select: false,
+            ..Default::default()
+        });
+        SelectionViewParams {
+            view_id: Some(VIEW),
+            title: Some(menu.title().into()),
+            subtitle: error,
+            initial_selected_idx: selected
+                .and_then(|selected| models.iter().position(|model| model.model == selected)),
+            items,
+            is_searchable: true,
+            footer_hint: Some(crate::openrouter::MODEL_FOOTER.into()),
+            ..SelectionViewParams::picker()
+        }
+    }
+
+    pub(crate) fn openrouter_model_prompt(
+        &mut self,
+        menu: ModelMenu,
+        initial: String,
+        error: Option<String>,
+    ) {
+        let tx = self.app_event_tx.clone();
+        self.bottom_pane.show_text_prompt(CustomPromptView::new(
+            "Add model…".into(),
+            "moonshotai/kimi-k3 or @preset/name".into(),
+            initial,
+            error,
+            Box::new(move |input| {
+                tx.send(AppEvent::OpenRouter(Event::ModelSubmitted {
+                    menu: menu.clone(),
+                    input,
+                }))
+            }),
+        ));
+    }
+
+    pub(crate) fn show_openrouter_endpoints(
+        &mut self,
+        menu: ModelMenu,
+        slug: ModelSlug,
+        response: OpenRouterModelEndpointsResponse,
+    ) {
+        self.bottom_pane
+            .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
+        self.bottom_pane
+            .show_view(Box::new(views::EndpointsView::new(
+                menu,
+                slug,
+                response,
+                self.app_event_tx.clone(),
+                self.bottom_pane.list_keymap(),
+            )));
+    }
+
+    pub(crate) fn show_openrouter_error(&mut self, error: String) {
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("OpenRouter".into()),
+            subtitle: Some(error),
+            items: vec![SelectionItem {
+                name: "Back".into(),
+                dismiss_on_select: true,
+                ..Default::default()
+            }],
+            ..SelectionViewParams::picker()
+        });
+    }
+
+    pub(crate) fn show_openrouter_failure(&mut self, request: Request, error: String) {
+        match request {
+            Request::Save { menu, slug } => {
+                self.openrouter_model_prompt(menu, slug.to_string(), Some(error))
+            }
+            Request::AddKey {
+                thread_id,
+                name,
+                path,
+            } => self.openrouter_key_path_prompt(
+                thread_id,
+                name.to_string(),
+                path.to_string_lossy().into_owned(),
+                Some(error),
+            ),
+            Request::Models { menu, .. } => self.show_openrouter_models(
+                menu,
+                crate::model_catalog::ModelListing {
+                    models: Vec::new(),
+                    providers: Vec::new(),
+                },
+                None,
+                Some(error),
+            ),
+            request => {
+                let tx_request = request.clone();
+                self.bottom_pane.show_selection_view(SelectionViewParams {
+                    view_id: Some(VIEW),
+                    title: Some(request.title()),
+                    subtitle: Some(error),
+                    items: vec![SelectionItem {
+                        name: "Retry".into(),
+                        actions: vec![Box::new(move |tx| {
+                            tx.send(AppEvent::OpenRouter(Event::Request(tx_request.clone())))
+                        })],
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    }],
+                    ..SelectionViewParams::picker()
+                });
+            }
+        }
+    }
+
+    pub(crate) fn openrouter_key_name_prompt(
+        &mut self,
+        thread_id: ThreadId,
+        initial: String,
+        error: Option<String>,
+    ) {
+        let tx = self.app_event_tx.clone();
+        self.bottom_pane.show_text_prompt(CustomPromptView::new(
+            "Add OpenRouter key…".into(),
+            "Key name".into(),
+            initial,
+            error,
+            Box::new(move |name| {
+                tx.send(AppEvent::OpenRouter(Event::KeyPathPrompt {
+                    thread_id,
+                    name,
+                }))
+            }),
+        ));
+    }
+
+    pub(crate) fn openrouter_key_path_prompt(
+        &mut self,
+        thread_id: ThreadId,
+        name: String,
+        initial: String,
+        error: Option<String>,
+    ) {
+        let name = match name.parse::<KeyName>() {
+            Ok(name) => name,
+            Err(error) => {
+                self.openrouter_key_name_prompt(
+                    thread_id,
+                    if name.starts_with("sk-or-") {
+                        String::new()
+                    } else {
+                        name
+                    },
+                    Some(error),
+                );
+                return;
+            }
+        };
+        let tx = self.app_event_tx.clone();
+        self.bottom_pane.show_text_prompt(CustomPromptView::new(
+            format!("OpenRouter key · {name}"),
+            "Absolute path to the key file".into(),
+            initial,
+            error.or_else(|| {
+                Some(
+                    "The file's contents stay on the app-server host. Never paste the key here."
+                        .into(),
+                )
+            }),
+            Box::new(move |input| {
+                tx.send(AppEvent::OpenRouter(Event::KeyFileSubmitted {
+                    thread_id,
+                    name: name.clone(),
+                    input,
+                }))
+            }),
+        ));
+    }
+
+    pub(crate) fn openrouter_remove_key_confirm(&mut self, thread_id: ThreadId, name: KeyName) {
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some(format!("Remove OpenRouter key · {name}?")),
+            subtitle: Some("Removes the configured key, not its file. Conversations using it will need another key.".into()),
+            items: vec![
+                SelectionItem { name: "Keep key".into(), dismiss_on_select: true, ..Default::default() },
+                SelectionItem {
+                    name: "Remove key".into(),
+                    actions: vec![Box::new(move |tx| tx.send(AppEvent::OpenRouter(Event::Request(Request::RemoveKey { thread_id, name: name.clone() }))))],
+                    dismiss_on_select: true, require_explicit_confirmation: true, ..Default::default()
+                },
+            ], ..SelectionViewParams::confirmation()
+        });
+    }
+
+    pub(crate) fn append_openrouter_accounts(
+        &self,
+        thread_id: ThreadId,
+        response: &codex_app_server_protocol::ThreadAccountListResponse,
+        items: &mut Vec<SelectionItem>,
+    ) {
+        for status in &response.openrouter_keys {
+            let name = status.key.name.clone();
+            let remove_name = name.clone();
+            let pending = response.pending_openrouter_key.as_ref() == Some(&name);
+            let description = match &status.state {
+                OpenRouterKeyState::Read {
+                    label,
+                    balance,
+                    spend,
+                    ..
+                } => {
+                    let last4: String = label
+                        .chars()
+                        .rev()
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    format!(
+                        "key …{last4} · {} this month{}",
+                        spend.monthly,
+                        balance
+                            .map(|amount| format!(" · {amount} balance"))
+                            .unwrap_or_default()
+                    )
+                }
+                OpenRouterKeyState::Failed { error } => format!("Unavailable: {error}"),
+            };
+            items.push(SelectionItem {
+                name: format!("OpenRouter · {name}"),
+                description: Some(format!(
+                    "{description}{}",
+                    if pending { " · switch pending" } else { "" }
+                )),
+                is_current: response.selected_openrouter_key.as_ref() == Some(&name),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::SelectAccount {
+                        thread_id,
+                        account_id: name.to_string(),
+                        provider: codex_app_server_protocol::AccountProvider::OpenRouter,
+                    })
+                })],
+                secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
+                    key: key_hint::ctrl(KeyCode::Char('d')),
+                    footer_hint: "enter select · ctrl+d remove · esc back".into(),
+                    action: Box::new(move |tx| {
+                        tx.send(AppEvent::OpenRouter(Event::RemoveKeyConfirm {
+                            thread_id,
+                            name: remove_name.clone(),
+                        }))
+                    }),
+                }),
+                dismiss_on_select: true,
+                ..Default::default()
+            });
+        }
+        items.push(SelectionItem {
+            name: "Add OpenRouter key…".into(),
+            actions: vec![Box::new(move |tx| {
+                tx.send(AppEvent::OpenRouter(Event::KeyNamePrompt { thread_id }))
+            })],
+            dismiss_on_select: true,
+            ..Default::default()
+        });
+    }
+
+    pub(super) fn reset_openrouter_status(&mut self, thread_changed: bool) {
+        if thread_changed {
+            self.openrouter_ui.request = None;
+        }
+        self.openrouter_ui.status = None;
+        self.openrouter_ui.status_request = None;
+        self.openrouter_ui.last_refresh = None;
+        self.refresh_openrouter_status(false, true);
+    }
+
+    pub(crate) fn refresh_openrouter_status(&mut self, show: bool, force: bool) -> bool {
+        if self.config.model_provider_id != "openrouter" {
+            return false;
+        }
+        let Some(thread_id) = self.thread_id else {
+            return false;
+        };
+        if self.openrouter_ui.status_request.is_some() && !show {
+            return true;
+        }
+        if !force
+            && self
+                .openrouter_ui
+                .last_refresh
+                .is_some_and(|last| last.elapsed() < Duration::from_secs(60))
+        {
+            return true;
+        }
+        let id = uuid::Uuid::new_v4();
+        self.openrouter_ui.status_request = Some(id);
+        self.openrouter_ui.last_refresh = Some(Instant::now());
+        if show {
+            self.add_status_output(false, None);
+        }
+        self.app_event_tx
+            .send(AppEvent::OpenRouter(Event::RefreshStatus {
+                thread_id,
+                id,
+                show,
+            }));
+        true
+    }
+
+    pub(crate) fn finish_openrouter_status(
+        &mut self,
+        thread_id: ThreadId,
+        id: uuid::Uuid,
+        show: bool,
+        result: Result<OpenRouterKeyStatus, String>,
+    ) {
+        if self.thread_id != Some(thread_id) || self.openrouter_ui.status_request != Some(id) {
+            return;
+        }
+        self.openrouter_ui.status_request = None;
+        self.openrouter_ui.status = result.as_ref().ok().cloned();
+        if let Some(status) = &self.openrouter_ui.status {
+            self.active_account_label = Some(format!("OpenRouter · {}", status.key.name));
+        }
+        if show {
+            let spend = self
+                .token_info
+                .as_ref()
+                .and_then(|info| info.total_token_usage.cost);
+            self.add_to_history(history_cell::PlainHistoryCell::new(views::status_lines(
+                result.as_ref().map_err(String::as_str),
+                spend,
+            )));
+        } else {
+            let error = match &result {
+                Err(error) => Some(error),
+                Ok(OpenRouterKeyStatus {
+                    state: OpenRouterKeyState::Failed { error },
+                    ..
+                }) => Some(error),
+                Ok(OpenRouterKeyStatus {
+                    state: OpenRouterKeyState::Read { .. },
+                    ..
+                }) => None,
+            };
+            if let Some(error) = error {
+                self.add_error_message(format!("Cannot refresh OpenRouter key: {error}"));
+            }
+        }
+        self.refresh_status_line();
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_openrouter_account_selection(&mut self, name: &str) {
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some("openrouter-account-selection"),
+            title: Some(format!("OpenRouter · {name}")),
+            items: vec![SelectionItem {
+                name: "Selecting key…".into(),
+                is_disabled: true,
+                ..Default::default()
+            }],
+            ..SelectionViewParams::picker()
+        });
+    }
+
+    pub(crate) fn finish_openrouter_account_selection(
+        &mut self,
+        result: &Result<codex_app_server_protocol::ThreadAccountSelectResponse, String>,
+    ) -> bool {
+        let visible = self.bottom_pane.active_view_id() == Some("openrouter-account-selection");
+        self.bottom_pane
+            .dismiss_view_by_id("openrouter-account-selection");
+        if visible && let Err(error) = result {
+            self.show_openrouter_error(format!("Cannot change OpenRouter key: {error}"));
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn openrouter_request_pending(&mut self) -> bool {
+        if self.openrouter_ui.request.is_some() {
+            self.show_openrouter_error(
+                "An OpenRouter request is still awaiting confirmation.".into(),
+            );
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn openrouter_account_label(&self) -> Option<String> {
+        if self.config.model_provider_id != "openrouter" {
+            return None;
+        }
+        self.openrouter_ui
+            .status
+            .as_ref()
+            .map(|status| format!("OpenRouter · {}", status.key.name))
+    }
+
+    pub(super) fn openrouter_balance_value(&self) -> Option<String> {
+        let status = self.openrouter_ui.status.as_ref()?;
+        match &status.state {
+            OpenRouterKeyState::Read { balance, limit, .. } => {
+                let remaining = match (balance, limit) {
+                    (Some(balance), Some(limit)) => Some((*balance).min(limit.remaining)),
+                    (balance, None) => *balance,
+                    (None, Some(limit)) => Some(limit.remaining),
+                };
+                remaining.map(|amount| format!("{amount} left"))
+            }
+            OpenRouterKeyState::Failed { .. } => None,
+        }
+    }
+}

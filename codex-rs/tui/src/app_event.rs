@@ -1763,6 +1763,7 @@ pub(crate) enum AppEvent {
     LiveWork(crate::app::live_work::Event),
     LocalShellRequest(crate::local_shell::LocalShellRequest),
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
+    OpenRouter(crate::openrouter::Event),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

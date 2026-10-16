@@ -17,6 +17,8 @@ pub struct TokenUsage {
     pub output_tokens: i64,
     pub reasoning_output_tokens: i64,
     pub total_tokens: i64,
+    #[serde(default)]
+    pub cost: Option<codex_protocol::Usd>,
 }
 
 impl From<&TokenUsageBreakdown> for TokenUsage {
@@ -27,6 +29,7 @@ impl From<&TokenUsageBreakdown> for TokenUsage {
             output_tokens: usage.output_tokens,
             reasoning_output_tokens: usage.reasoning_output_tokens,
             total_tokens: usage.total_tokens,
+            cost: usage.cost,
         }
     }
 }

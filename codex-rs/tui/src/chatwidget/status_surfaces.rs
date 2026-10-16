@@ -752,10 +752,17 @@ impl ChatWidget {
             StatusLineItem::UsedTokens => {
                 let usage = self.status_line_total_usage();
                 let total = usage.blended_total();
-                if total <= 0 {
+                if total <= 0 && usage.cost.is_none() {
                     None
                 } else {
-                    Some(format!("{} used", format_tokens_compact(total)))
+                    Some(format!(
+                        "{} used{}",
+                        format_tokens_compact(total),
+                        usage
+                            .cost
+                            .map(|amount| format!(" · {amount}"))
+                            .unwrap_or_default()
+                    ))
                 }
             }
             StatusLineItem::ContextRemaining => self
@@ -764,6 +771,12 @@ impl ChatWidget {
             StatusLineItem::ContextUsed => self
                 .status_line_context_used_percent()
                 .map(|used| format!("Context {used}% used")),
+            StatusLineItem::FiveHourLimit if self.config.model_provider_id == "openrouter" => {
+                self.openrouter_balance_value()
+            }
+            StatusLineItem::WeeklyLimit if self.config.model_provider_id == "openrouter" => {
+                self.openrouter_balance_value()
+            }
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self
                     .rate_limit_snapshots_by_limit_id

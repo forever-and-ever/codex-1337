@@ -136,6 +136,7 @@ impl ChatWidget {
             initial_user_message,
             status_account_display,
             active_account_label: None,
+            openrouter_ui: openrouter::OpenRouterUi::default(),
             remote_connection: None,
             snapshot_local_images: false,
             pending_image_submission: None,

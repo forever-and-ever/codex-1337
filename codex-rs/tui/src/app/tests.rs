@@ -1282,6 +1282,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
     assert_eq!(
         app.chat_widget.token_usage(),
         crate::token_usage::TokenUsage {
+            cost: None,
             input_tokens: 4,
             cached_input_tokens: 1,
             output_tokens: 5,
@@ -1310,6 +1311,7 @@ async fn active_thread_drain_yields_after_frame_deadline_without_dropping_events
     assert_eq!(
         app.chat_widget.token_usage(),
         crate::token_usage::TokenUsage {
+            cost: None,
             input_tokens: 4,
             cached_input_tokens: 1,
             output_tokens: 10,

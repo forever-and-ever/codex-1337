@@ -22,6 +22,9 @@ impl ChatWidget {
             return;
         }
 
+        if self.open_openrouter_model_menu() {
+            return;
+        }
         let presets: Vec<ModelPreset> = match self.model_catalog.try_list_models() {
             Ok(models) => models,
             Err(_) => {
@@ -517,9 +520,7 @@ impl ChatWidget {
         if all_choices.is_empty() {
             all_choices.push(default_effort.clone());
         }
-        let (choices, advanced_choices): (Vec<_>, Vec<_>) = all_choices
-            .into_iter()
-            .partition(|effort| !Self::is_advanced_reasoning_effort(effort));
+        let (choices, advanced_choices) = self.partition_reasoning_choices(all_choices);
 
         if choices.len() == 1 && advanced_choices.is_empty() {
             let selected_effort = choices.first().cloned();

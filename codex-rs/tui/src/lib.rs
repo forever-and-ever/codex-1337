@@ -110,6 +110,7 @@ mod app;
 mod app_backtrack;
 mod app_command;
 mod app_event;
+mod openrouter;
 mod app_event_sender;
 mod app_info;
 mod app_server_approval_conversions;
