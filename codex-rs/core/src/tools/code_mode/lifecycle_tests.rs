@@ -93,6 +93,21 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
         approval.payload().as_ref(),
         EventMsg::ExecApprovalRequest(_)
     ));
+    // Auto-review synthesizes the same command start but identifies the reviewed
+    // invocation separately from the review itself.
+    let assessment = EventMsg::GuardianAssessment(
+        serde_json::from_value(serde_json::json!({
+            "id": "review-wait-1",
+            "target_item_id": "wait-1",
+            "status": "in_progress",
+            "action": {"type": "command", "source": "unified_exec", "command": "true", "cwd": "/workspace"}
+        }))
+        .unwrap(),
+    );
+    let EventMsg::CodeModeOwned(assessment) = service.transcript.wrap(assessment, None) else {
+        panic!("auto-review command start must carry its Code Mode owner");
+    };
+    assert_eq!(assessment.owner, owner);
     // Cancellation releases only its own wait; the tracker owns ordered completion.
     scope.capture_alias("wait-2".into(), &turn);
     let target = CodeModeOwner {

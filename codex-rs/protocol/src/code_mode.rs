@@ -128,6 +128,9 @@ impl crate::protocol::EventMsg {
             EventMsg::McpToolCallBegin(event) => Some(Cow::Borrowed(&event.call_id)),
             EventMsg::McpToolCallEnd(event) => Some(Cow::Borrowed(&event.call_id)),
             EventMsg::ExecApprovalRequest(event) => Some(Cow::Borrowed(&event.call_id)),
+            EventMsg::GuardianAssessment(event) => {
+                event.target_item_id.as_deref().map(Cow::Borrowed)
+            }
             EventMsg::ExecCommandBegin(event) => Some(Cow::Borrowed(&event.call_id)),
             EventMsg::ExecCommandEnd(event) => Some(Cow::Borrowed(&event.call_id)),
             EventMsg::ExecCommandOutputDelta(event) => Some(Cow::Borrowed(&event.call_id)),
