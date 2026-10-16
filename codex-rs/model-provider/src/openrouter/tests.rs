@@ -32,7 +32,7 @@ fn normalization_contract() {
             include_str!("fixtures/openai-model.json"),
             include_str!("fixtures/openai-endpoints.json"),
             "GPT-5.5",
-            "$5.00 in · $30.00 out per M · 1M context",
+            "$5.00 in · $30.00 out per M · 1.05M context",
             ReasoningEffort::Medium,
             true,
             vec!["priority", "flex"],

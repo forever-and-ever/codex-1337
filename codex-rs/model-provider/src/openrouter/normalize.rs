@@ -27,9 +27,10 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
     let mut info = local(slug.as_str());
     if let Some(suffix) = model.id.as_str().strip_prefix("openai/") {
         static BUNDLED: OnceLock<Vec<ModelInfo>> = OnceLock::new();
-        let bundled = BUNDLED.get_or_init(|| match bundled_models_response() {
-            Ok(response) => response.models,
-            Err(error) => panic!("bundled OpenAI metadata is invalid: {error}"),
+        let bundled = BUNDLED.get_or_init(|| {
+            bundled_models_response()
+                .map(|response| response.models)
+                .unwrap_or_default()
         });
         if let Some(shape) = bundled.iter().find(|info| info.slug == suffix) {
             info.model_messages = shape.model_messages.clone();
@@ -142,14 +143,24 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
     info
 }
 
-fn context_label(context: i64) -> String {
-    if context >= 1_000_000 {
-        format!("{}M", compact(context as f64 / 1_048_576.0))
-    } else if context >= 1_000 {
-        format!("{}K", compact(context as f64 / 1_024.0))
-    } else {
-        context.to_string()
-    }
+/// "1M", "256K", "200K": the first of decimal or binary units that divides the size exactly,
+/// otherwise decimal units to two places.
+fn context_label(tokens: i64) -> String {
+    let exact = |base: i64| {
+        let (unit, suffix) = if tokens >= base * base {
+            (base * base, "M")
+        } else {
+            (base, "K")
+        };
+        (tokens >= base && tokens % unit == 0).then(|| format!("{}{suffix}", tokens / unit))
+    };
+    exact(1_000)
+        .or_else(|| exact(1_024))
+        .unwrap_or_else(|| match tokens {
+            1_000_000.. => format!("{}M", compact(tokens as f64 / 1e6)),
+            1_000.. => format!("{}K", compact(tokens as f64 / 1e3)),
+            _ => tokens.to_string(),
+        })
 }
 
 fn compact(value: f64) -> String {

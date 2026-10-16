@@ -62,6 +62,9 @@ impl KeyName {
 impl FromStr for KeyName {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
+        if value.starts_with("sk-or-") {
+            return Err("Name the OpenRouter key; the key itself belongs in its file".into());
+        }
         if !(1..=64).contains(&value.len()) || !value.bytes().all(slug_byte) {
             return Err(
                 "OpenRouter key name must be 1–64 letters, digits, dots, underscores or hyphens"

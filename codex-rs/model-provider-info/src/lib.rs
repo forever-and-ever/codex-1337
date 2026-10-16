@@ -583,6 +583,11 @@ pub fn merge_configured_model_providers(
                 "model_providers.{key}: set adapter = \"openrouter\" for OpenRouter"
             ));
         }
+        if key != OPENROUTER_PROVIDER_ID && provider.adapter == ModelProviderAdapter::OpenRouter {
+            return Err(format!(
+                "model_providers.{key}: adapter = \"openrouter\" belongs to model_providers.openrouter"
+            ));
+        }
         if key == CLAUDE_SUBSCRIPTION_PROVIDER_ID || key == OPENROUTER_PROVIDER_ID {
             model_providers.insert(key, provider);
         } else {
