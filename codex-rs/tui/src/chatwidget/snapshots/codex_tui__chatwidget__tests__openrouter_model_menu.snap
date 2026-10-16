@@ -1,0 +1,13 @@
+---
+source: tui/src/chatwidget/tests/openrouter_tests.rs
+expression: "render_bottom_popup(&chat, 100)"
+---
+  New OpenRouter conversation
+
+
+
+› Kimi K3     $0.30 in · $11.94 out per M · 1M context
+  research    preset for moonshotai/kimi-k3
+  Add model…
+
+  enter select · ctrl+p endpoints · ctrl+d forget · esc back

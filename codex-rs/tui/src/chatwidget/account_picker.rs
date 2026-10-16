@@ -15,6 +15,8 @@ impl ChatWidget {
         thread_id: ThreadId,
         response: codex_app_server_protocol::ThreadAccountListResponse,
     ) {
+        let mut openrouter_items = Vec::new();
+        self.append_openrouter_accounts(thread_id, &response, &mut openrouter_items);
         use codex_app_server_protocol::AccountProvider;
         let mut items: Vec<SelectionItem> = response
             .accounts
@@ -122,6 +124,7 @@ impl ChatWidget {
                 ..Default::default()
             }
         }));
+        items.extend(openrouter_items);
         items.push(SelectionItem {
             name: "Add Claude account".to_owned(),
             description: Some("Sign in with your Claude subscription".to_owned()),
@@ -141,9 +144,10 @@ impl ChatWidget {
         self.bottom_pane.show_selection_view(SelectionViewParams {
             title: Some("Accounts".to_owned()),
             subtitle: Some(match response.conversation_provider {
-                Some(AccountProvider::Openai) => "ChatGPT changes this conversation; Claude sets its new-conversation default.",
-                Some(AccountProvider::ClaudeSubscription) => "Claude changes this conversation; ChatGPT sets its new-conversation default.",
-                Some(AccountProvider::OpenRouter) | None => "Selections set new-conversation defaults; this conversation uses another provider.",
+                Some(AccountProvider::Openai) => "ChatGPT changes this conversation; other accounts set their new-conversation defaults.",
+                Some(AccountProvider::ClaudeSubscription) => "Claude changes this conversation; other accounts set their new-conversation defaults.",
+                Some(AccountProvider::OpenRouter) => "OpenRouter changes this conversation; other accounts set their new-conversation defaults.",
+                None => "Selections set new-conversation defaults; this conversation uses another provider.",
             }.to_owned()),
             items,
             footer_hint: Some(standard_popup_hint_line()),

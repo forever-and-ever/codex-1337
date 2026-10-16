@@ -280,6 +280,7 @@ async fn status_snapshot_includes_reasoning_details() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 1_200,
         cached_input_tokens: 200,
         output_tokens: 900,
@@ -956,6 +957,7 @@ async fn status_snapshot_includes_forked_from() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 800,
         cached_input_tokens: 0,
         output_tokens: 400,
@@ -1010,6 +1012,7 @@ async fn status_snapshot_includes_monthly_limit() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 800,
         cached_input_tokens: 0,
         output_tokens: 400,
@@ -1076,6 +1079,7 @@ async fn status_snapshot_includes_enterprise_monthly_credit_limit() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 800,
         cached_input_tokens: 0,
         output_tokens: 400,
@@ -1154,6 +1158,7 @@ async fn status_snapshot_uses_generic_limit_labels_for_unsupported_windows() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 800,
         cached_input_tokens: 0,
         output_tokens: 400,
@@ -1443,6 +1448,7 @@ async fn status_card_token_usage_excludes_cached_tokens() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 1_200,
         cached_input_tokens: 200,
         output_tokens: 900,
@@ -1545,6 +1551,7 @@ async fn status_snapshot_wraps_in_narrow_terminal() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 1_200,
         cached_input_tokens: 200,
         output_tokens: 900,
@@ -1686,6 +1693,7 @@ async fn status_snapshot_shows_missing_limits_message() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 500,
         cached_input_tokens: 0,
         output_tokens: 250,
@@ -1734,6 +1742,7 @@ async fn status_snapshot_uses_default_reasoning_when_config_empty() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 500,
         cached_input_tokens: 0,
         output_tokens: 250,
@@ -1801,6 +1810,7 @@ async fn status_snapshot_shows_refreshing_limits_notice() {
     set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
 
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 500,
         cached_input_tokens: 0,
         output_tokens: 250,
@@ -1958,6 +1968,7 @@ async fn status_snapshot_includes_credits_and_limits() {
         plan: Some("Pro 200".into()),
     });
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 1_500,
         cached_input_tokens: 100,
         output_tokens: 600,
@@ -2031,6 +2042,7 @@ async fn status_snapshot_shows_unavailable_limits_message() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 500,
         cached_input_tokens: 0,
         output_tokens: 250,
@@ -2091,6 +2103,7 @@ async fn status_snapshot_treats_refreshing_empty_limits_as_unavailable() {
     set_workspace_cwd(&mut config, test_path_buf("/workspace/tests").abs());
 
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 500,
         cached_input_tokens: 0,
         output_tokens: 250,
@@ -2153,6 +2166,7 @@ async fn status_snapshot_shows_stale_limits_message() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 1_200,
         cached_input_tokens: 200,
         output_tokens: 900,
@@ -2223,6 +2237,7 @@ async fn status_snapshot_cached_limits_hide_credits_without_flag() {
 
     let account_display = test_status_account_display();
     let usage = TokenUsage {
+        cost: None,
         input_tokens: 900,
         cached_input_tokens: 200,
         output_tokens: 350,
@@ -2296,6 +2311,7 @@ async fn status_context_window_uses_last_usage() {
 
     let account_display = test_status_account_display();
     let total_usage = TokenUsage {
+        cost: None,
         input_tokens: 12_800,
         cached_input_tokens: 0,
         output_tokens: 879,
@@ -2303,6 +2319,7 @@ async fn status_context_window_uses_last_usage() {
         total_tokens: 102_000,
     };
     let last_usage = TokenUsage {
+        cost: None,
         input_tokens: 12_800,
         cached_input_tokens: 0,
         output_tokens: 879,

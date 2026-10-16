@@ -171,6 +171,7 @@ impl ChatWidget {
             self.request_status_line_branch_refresh();
             self.request_status_line_git_summary_refresh();
             self.refresh_thread_usage_after_turn();
+            self.refresh_openrouter_status(crate::openrouter::StatusRefresh::AfterTurn);
         }
         // Mark task stopped and request redraw now that all content is in history.
         self.clear_context_compaction();
