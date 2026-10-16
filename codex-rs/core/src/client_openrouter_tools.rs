@@ -129,9 +129,11 @@ impl Projection {
                             value["description"] = json!(format!(
                                 "{}\n\n{}",
                                 namespace.description,
-                                value["description"]
-                                    .as_str()
-                                    .expect("function tool description is a string")
+                                value["description"].as_str().ok_or_else(|| {
+                                    CodexErr::Fatal(
+                                        "OpenRouter function tool has no description".into(),
+                                    )
+                                })?
                             ));
                         }
                         projection.push(
