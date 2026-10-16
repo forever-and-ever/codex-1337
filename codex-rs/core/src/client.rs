@@ -1862,7 +1862,10 @@ impl ModelClientSession {
                 prompt.cyber_access_program,
                 self.client.api_key_cyber_access_programs,
             )?;
-            self.client.route_openrouter_request(&mut request).await?;
+            let openrouter_projection = self
+                .client
+                .route_openrouter_request(&mut request, prompt)
+                .await?;
             self.client
                 .prepare_response_items_for_request(&mut request.input);
             if crate::guardian::is_basic_session_source(&self.client.state.session_source) {
@@ -1900,6 +1903,7 @@ impl ModelClientSession {
 
             match stream_result {
                 Ok(stream) => {
+                    let stream = openrouter::project_stream(stream, openrouter_projection);
                     let (stream, _) = map_response_stream(
                         stream,
                         request_session_telemetry,
@@ -1910,11 +1914,12 @@ impl ModelClientSession {
                     return Ok(stream);
                 }
                 Err(ApiError::Transport(unauthorized_transport))
-                    if self
-                        .client
-                        .state
-                        .provider
-                        .is_recoverable_auth_error(&unauthorized_transport) =>
+                    if !self.client.uses_openrouter()
+                        && self
+                            .client
+                            .state
+                            .provider
+                            .is_recoverable_auth_error(&unauthorized_transport) =>
                 {
                     let response_debug_context =
                         extract_response_debug_context(&unauthorized_transport);
