@@ -2707,6 +2707,31 @@ mod tests {
             vec![ConnectionId(1)],
             conversation_id,
         );
+        // The review's ID is not the invocation ID. Losing this lookup makes
+        // its synthetic start unowned while canonical completion remains owned.
+        let assessment = EventMsg::GuardianAssessment(guardian_command_assessment(
+            "cmd-guardian-approved",
+            "turn-guardian-approved",
+            GuardianAssessmentStatus::InProgress,
+        ));
+        assert_eq!(
+            assessment.code_mode_call_id().as_deref(),
+            Some("cmd-guardian-approved"),
+        );
+        let owner = codex_app_server_protocol::CodeModeOwner {
+            thread_id: conversation_id,
+            exec_call_id: "exec".to_owned(),
+            cell_id: Some("cell".to_owned()),
+            started_at_ms: 1,
+        };
+        let outgoing = outgoing.with_code_mode_owner(owner.clone());
+        let command_notification = |notification| {
+            let ServerNotification::CodeModeOwned(owned) = notification else {
+                panic!("review-started commands must share their execution owner");
+            };
+            assert_eq!(owned.owner, owner);
+            *owned.into_parts().1
+        };
         let guardian_context = GuardianAssessmentTestContext {
             conversation_id,
             conversation: conversation.clone(),
@@ -2724,7 +2749,7 @@ mod tests {
             ))
             .await;
         let first = recv_broadcast_notification(&mut rx).await?;
-        match first {
+        match command_notification(first) {
             ServerNotification::ItemStarted(payload) => {
                 assert_eq!(payload.turn_id, "turn-guardian-approved");
                 let ThreadItem::CommandExecution {
@@ -2796,7 +2821,7 @@ mod tests {
             ))
             .await;
         let fourth = recv_broadcast_notification(&mut rx).await?;
-        match fourth {
+        match command_notification(fourth) {
             ServerNotification::ItemStarted(payload) => {
                 assert_eq!(payload.turn_id, "turn-guardian-denied");
                 let ThreadItem::CommandExecution {
@@ -2853,7 +2878,7 @@ mod tests {
             other => bail!("unexpected message: {other:?}"),
         }
         let seventh = recv_broadcast_notification(&mut rx).await?;
-        match seventh {
+        match command_notification(seventh) {
             ServerNotification::ItemCompleted(payload) => {
                 let ThreadItem::CommandExecution {
                     id,

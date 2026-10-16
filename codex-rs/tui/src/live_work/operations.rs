@@ -6,6 +6,8 @@ use super::Key;
 use super::Row;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Source;
+use crate::exec_command::split_command_string;
+use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_cell::code_mode_owner_label;
 use crate::history_cell::insert_code_mode_fact;
 use crate::history_cell::sanitize_user_text;
@@ -81,11 +83,6 @@ impl Revision {
             |work| Self::Pending { source, work },
         );
     }
-
-    fn command(&self) -> bool {
-        matches!(self, Self::Pending { source: Source::Live, work: Pending::Item(item) }
-            if matches!(item.as_ref(), ThreadItem::CommandExecution { .. }))
-    }
 }
 
 #[derive(Debug)]
@@ -153,9 +150,7 @@ impl Operations {
         let mut retired = self
             .executions
             .iter()
-            .filter(|(_, execution)| {
-                execution.finished() && !execution.children.values().any(Revision::command)
-            })
+            .filter(|(_, execution)| execution.finished())
             .map(|(id, execution)| (execution.owner.started_at_ms, id.clone()))
             .collect::<Vec<_>>();
         retired.sort_unstable();
@@ -215,10 +210,7 @@ impl Operations {
             for item in &turn.items {
                 if let ThreadItem::CodeModeOwned(owned) = item {
                     if owned.owner.thread_id == thread_id
-                        && (!finished.contains_key(&owned.owner.exec_call_id)
-                            || self.executions.get(&owned.owner.exec_call_id).is_some_and(
-                                |execution| execution.children.values().any(Revision::command),
-                            ))
+                        && !finished.contains_key(&owned.owner.exec_call_id)
                     {
                         self.owned_item(&owned.owner, owned.payload(), Source::Historical, None);
                     }
@@ -457,11 +449,10 @@ impl Operations {
             if !matches!(fact.event, CodeModeEvent::ToolCall { .. }) {
                 insert_code_mode_fact(&mut execution.facts, fact.clone());
             }
+            // Work follows the invocation; surviving processes have their own inventory.
             if execution.finished() {
                 for revision in execution.children.values_mut() {
-                    if !revision.command() {
-                        *revision = Revision::Terminal(Instant::now());
-                    }
+                    *revision = Revision::Terminal(Instant::now());
                 }
             }
             // The typed execution supersedes the provider call, without deleting its capture.
@@ -689,6 +680,7 @@ fn revision_row(thread: ThreadId, key: Key, id: &str, revision: &Revision) -> Op
         Pending::Item(item) => match item.as_ref() {
             ThreadItem::CommandExecution { command, cwd, .. } => {
                 details.push(line(format!("Directory {cwd}")));
+                let command = strip_bash_lc_and_escape(&split_command_string(command));
                 format!("Command · {}", command.lines().next().unwrap_or_default())
             }
             ThreadItem::McpToolCall { server, tool, .. } => format!("{server}.{tool}"),
