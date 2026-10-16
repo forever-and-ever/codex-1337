@@ -91,6 +91,7 @@ pub use stream_discard::StreamItemsDiscardedEvent;
 
 pub mod openrouter;
 pub use openrouter::EndpointFilter;
+pub use openrouter::EndpointSet;
 pub use openrouter::EndpointSlug;
 pub use openrouter::KeyName;
 pub use openrouter::ModelSlug;

@@ -1,27 +1,25 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "EmptyFilter": {
-      "additionalProperties": false,
-      "type": "object"
-    },
     "EndpointFilter": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EmptyFilter"
+          "$ref": "#/definitions/EndpointFilterAll"
         },
         {
-          "$ref": "#/definitions/OnlyFilter"
+          "$ref": "#/definitions/EndpointFilterOnly"
         },
         {
-          "$ref": "#/definitions/IgnoreFilter"
+          "$ref": "#/definitions/EndpointFilterIgnore"
         }
-      ]
+      ],
+      "description": "Which endpoints may serve a saved model."
     },
-    "EndpointSlug": {
-      "type": "string"
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
     },
-    "IgnoreFilter": {
+    "EndpointFilterIgnore": {
       "additionalProperties": false,
       "properties": {
         "ignore": {
@@ -38,7 +36,7 @@
       ],
       "type": "object"
     },
-    "OnlyFilter": {
+    "EndpointFilterOnly": {
       "additionalProperties": false,
       "properties": {
         "only": {
@@ -54,6 +52,10 @@
         "only"
       ],
       "type": "object"
+    },
+    "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "type": "string"
     },
     "OpenRouterEndpoint": {
       "properties": {

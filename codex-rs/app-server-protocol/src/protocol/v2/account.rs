@@ -734,6 +734,8 @@ pub enum AccountProvider {
     #[default]
     Openai,
     ClaudeSubscription,
+    #[serde(rename = "openrouter")]
+    #[ts(rename = "openrouter")]
     OpenRouter,
 }
 

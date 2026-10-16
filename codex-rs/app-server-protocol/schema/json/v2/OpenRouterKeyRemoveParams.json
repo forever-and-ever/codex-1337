@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "KeyName": {
+      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
       "type": "string"
     }
   },

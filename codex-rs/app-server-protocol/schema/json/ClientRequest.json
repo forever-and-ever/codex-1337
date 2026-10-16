@@ -29,7 +29,7 @@
       "enum": [
         "openai",
         "claudeSubscription",
-        "openRouter"
+        "openrouter"
       ],
       "type": "string"
     },
@@ -960,24 +960,60 @@
         }
       ]
     },
-    "EmptyFilter": {
-      "additionalProperties": false,
-      "type": "object"
-    },
     "EndpointFilter": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EmptyFilter"
+          "$ref": "#/definitions/EndpointFilterAll"
         },
         {
-          "$ref": "#/definitions/OnlyFilter"
+          "$ref": "#/definitions/EndpointFilterOnly"
         },
         {
-          "$ref": "#/definitions/IgnoreFilter"
+          "$ref": "#/definitions/EndpointFilterIgnore"
         }
-      ]
+      ],
+      "description": "Which endpoints may serve a saved model."
+    },
+    "EndpointFilterAll": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "EndpointFilterIgnore": {
+      "additionalProperties": false,
+      "properties": {
+        "ignore": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "ignore"
+      ],
+      "type": "object"
+    },
+    "EndpointFilterOnly": {
+      "additionalProperties": false,
+      "properties": {
+        "only": {
+          "items": {
+            "$ref": "#/definitions/EndpointSlug"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "only"
+      ],
+      "type": "object"
     },
     "EndpointSlug": {
+      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
       "type": "string"
     },
     "EnvironmentSkillsParams": {
@@ -1810,23 +1846,6 @@
       },
       "type": "object"
     },
-    "IgnoreFilter": {
-      "additionalProperties": false,
-      "properties": {
-        "ignore": {
-          "items": {
-            "$ref": "#/definitions/EndpointSlug"
-          },
-          "minItems": 1,
-          "type": "array",
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "ignore"
-      ],
-      "type": "object"
-    },
     "ImageDetail": {
       "enum": [
         "auto",
@@ -2080,6 +2099,7 @@
       "type": "object"
     },
     "KeyName": {
+      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
       "type": "string"
     },
     "LegacyAppPathString": {
@@ -2737,23 +2757,6 @@
           ]
         }
       },
-      "type": "object"
-    },
-    "OnlyFilter": {
-      "additionalProperties": false,
-      "properties": {
-        "only": {
-          "items": {
-            "$ref": "#/definitions/EndpointSlug"
-          },
-          "minItems": 1,
-          "type": "array",
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "only"
-      ],
       "type": "object"
     },
     "OpenRouterKeyAddParams": {

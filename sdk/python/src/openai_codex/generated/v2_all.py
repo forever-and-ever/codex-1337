@@ -44,7 +44,7 @@ class ClaudeSubscriptionAccount(BaseModel):
 class AccountProvider(Enum):
     openai = "openai"
     claude_subscription = "claudeSubscription"
-    open_router = "openRouter"
+    openrouter = "openrouter"
 
 
 class AccountQuotaReadParams(BaseModel):
@@ -1505,7 +1505,7 @@ class DynamicToolSpec(RootModel[FunctionDynamicToolSpec | NamespaceDynamicToolSp
     root: FunctionDynamicToolSpec | NamespaceDynamicToolSpec
 
 
-class EmptyFilter(BaseModel):
+class EndpointFilterAll(BaseModel):
     pass
     model_config = ConfigDict(
         extra="forbid",
@@ -1517,7 +1517,12 @@ class EndpointSlug(RootModel[str]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: str
+    root: Annotated[
+        str,
+        Field(
+            description="An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host."
+        ),
+    ]
 
 
 class EnvironmentConnectionNotification(BaseModel):
@@ -2322,14 +2327,6 @@ class HooksListParams(BaseModel):
     ] = None
 
 
-class IgnoreFilter(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    ignore: Annotated[list[EndpointSlug], Field(min_length=1)]
-
-
 class ImageDetail(Enum):
     auto = "auto"
     low = "low"
@@ -2487,7 +2484,12 @@ class KeyName(RootModel[str]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    root: str
+    root: Annotated[
+        str,
+        Field(
+            description="The name of an OpenRouter key; config maps it to the file holding the secret."
+        ),
+    ]
 
 
 class LegacyAppPathString(RootModel[str]):
@@ -3318,14 +3320,6 @@ class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | 
     root: Annotated[
         GetAccountTokenUsageParams | None, Field(title="Nullable_GetAccountTokenUsageParams")
     ]
-
-
-class OnlyFilter(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=True,
-    )
-    only: Annotated[list[EndpointSlug], Field(min_length=1)]
 
 
 class OpenRouterKey(BaseModel):
@@ -9222,11 +9216,20 @@ class ContentItem(
     )
 
 
-class EndpointFilter(RootModel[EmptyFilter | OnlyFilter | IgnoreFilter]):
+class EndpointFilterIgnore(BaseModel):
     model_config = ConfigDict(
+        extra="forbid",
         populate_by_name=True,
     )
-    root: EmptyFilter | OnlyFilter | IgnoreFilter
+    ignore: Annotated[list[EndpointSlug], Field(min_length=1)]
+
+
+class EndpointFilterOnly(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+    only: Annotated[list[EndpointSlug], Field(min_length=1)]
 
 
 class ExperimentalFeature(BaseModel):
@@ -10212,22 +10215,6 @@ class OpenRouterKeyLimit(BaseModel):
     limit: Usd
     remaining: Usd
     reset: str | None = None
-
-
-class OpenRouterModelEndpointsResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    filter: EndpointFilter
-    hosts: list[OpenRouterHost]
-
-
-class OpenRouterModelRouteParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    filter: EndpointFilter
-    slug: ModelSlug
 
 
 class OpenRouterModelSaveResponse(BaseModel):
@@ -12434,17 +12421,6 @@ class AccountLoginStartRequest(BaseModel):
     params: LoginAccountParams
 
 
-class OpenrouterModelRouteRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["openrouter/model/route"], Field(title="Openrouter/model/routeRequestMethod")
-    ]
-    params: OpenRouterModelRouteParams
-
-
 class AccountRateLimitsReadRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12680,6 +12656,16 @@ class ContextInventory(BaseModel):
         str | None, Field(description="Legacy mixed capture; new records use typed sources.")
     ] = ""
     sources: list[ContextSource] | None = None
+
+
+class EndpointFilter(RootModel[EndpointFilterAll | EndpointFilterOnly | EndpointFilterIgnore]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        EndpointFilterAll | EndpointFilterOnly | EndpointFilterIgnore,
+        Field(description="Which endpoints may serve a saved model."),
+    ]
 
 
 class ErrorNotification(BaseModel):
@@ -12998,6 +12984,22 @@ class OpenRouterKeyStatusResponse(BaseModel):
         populate_by_name=True,
     )
     keys: list[OpenRouterKeyStatus]
+
+
+class OpenRouterModelEndpointsResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    filter: EndpointFilter
+    hosts: list[OpenRouterHost]
+
+
+class OpenRouterModelRouteParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    filter: EndpointFilter
+    slug: ModelSlug
 
 
 class PluginShareContext(BaseModel):
@@ -13675,6 +13677,17 @@ class PluginShareSaveRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["plugin/share/save"], Field(title="Plugin/share/saveRequestMethod")]
     params: PluginShareSaveParams
+
+
+class OpenrouterModelRouteRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["openrouter/model/route"], Field(title="Openrouter/model/routeRequestMethod")
+    ]
+    params: OpenRouterModelRouteParams
 
 
 class AccountRateLimitResetCreditConsumeRequest(BaseModel):
