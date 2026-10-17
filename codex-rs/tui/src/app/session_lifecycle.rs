@@ -776,6 +776,7 @@ impl App {
         if let Some(notice) = started.history_notice {
             self.chat_widget.add_info_message(notice, /*hint*/ None);
         }
+        self.sync_frontend_requests();
         Ok(())
     }
 

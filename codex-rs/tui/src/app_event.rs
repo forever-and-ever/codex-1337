@@ -534,6 +534,16 @@ pub(crate) enum AppEvent {
     ExportTranscript {
         destination: TranscriptExportDestination,
     },
+    OpenTranscriptExportMenu,
+    CancelTranscriptExport,
+    TranscriptExportProgress {
+        id: uuid::Uuid,
+        pages: usize,
+    },
+    FinishTranscriptExport {
+        id: uuid::Uuid,
+        result: Result<crate::app::transcript_export::PreparedExport, String>,
+    },
 
     /// Select a response or block directly in the owned transcript.
     SelectTranscriptCopy {

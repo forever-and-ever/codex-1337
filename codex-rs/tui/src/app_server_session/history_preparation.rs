@@ -213,6 +213,31 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     local_settings: Option<&crate::local_settings::LocalSettings>,
     scope: HistoryHydrationScope<'_>,
 ) -> (Result<()>, HistoryPaginationUpdate) {
+    prepare_history_with_progress(
+        policy,
+        handle,
+        thread,
+        turn_cursor,
+        item_cursor,
+        config,
+        local_settings,
+        scope,
+        &|| {},
+    )
+    .await
+}
+
+pub(in crate::app_server_session) async fn prepare_history_with_progress(
+    policy: RequestPolicy,
+    handle: &codex_app_server_client::AppServerRequestHandle,
+    thread: &mut Thread,
+    turn_cursor: Option<String>,
+    item_cursor: Option<String>,
+    config: Option<&Config>,
+    local_settings: Option<&crate::local_settings::LocalSettings>,
+    scope: HistoryHydrationScope<'_>,
+    progress: &(dyn Fn() + Send + Sync),
+) -> (Result<()>, HistoryPaginationUpdate) {
     let thread_id = match ThreadId::from_string(&thread.id)
         .wrap_err("invalid thread id in bounded history response")
     {
@@ -248,6 +273,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
             INITIAL_HISTORY_TURN_LIMIT,
         )
         .await?;
+        progress();
         thread.turns = page.data.into_iter().rev().collect();
         state.next_turn_cursor = page.next_cursor;
         let (width, height) = crossterm::terminal::size().unwrap_or(/*default*/ (80, 24));
@@ -265,6 +291,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
                 limit,
             )
             .await?;
+            progress();
             let empty_page = page.data.is_empty();
             scanned_items = scanned_items.saturating_add(page.data.len());
             let items = merge_thread_item_page(
@@ -313,6 +340,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
                     HISTORY_ITEM_PAGE_LIMIT,
                 )
                 .await?;
+                progress();
                 merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
             }
         }

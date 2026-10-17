@@ -802,6 +802,7 @@ impl App {
             self.chat_widget.add_info_message(message, /*hint*/ None);
         }
         self.refresh_pending_thread_approvals().await;
+        self.sync_frontend_requests();
         self.finish_selection_after(tui, app_server, after).await?;
 
         Ok(())

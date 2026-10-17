@@ -64,6 +64,9 @@ impl App {
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
                     | AppEvent::FinishPromptRevert { .. }
+                    | AppEvent::TranscriptExportProgress { .. }
+                    | AppEvent::FinishTranscriptExport { .. }
+                    | AppEvent::CancelTranscriptExport
                     | AppEvent::AgentsOverviewPinToggled { .. }
                     | AppEvent::AppendMessageHistoryEntry { .. }
                     | AppEvent::BeginInitialHistoryReplayBuffer
@@ -282,7 +285,11 @@ impl App {
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
-            AppEvent::Submission(event) => self.handle_submission_event(app_server, event).await,
+            AppEvent::Submission(event) => {
+                let retired = matches!(&event, super::turn_submissions::SubmissionEvent::Retire);
+                self.handle_submission_event(app_server, event).await;
+                if retired { self.sync_frontend_requests(); }
+            },
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
                     return Ok(AppRunControl::Continue);
@@ -304,8 +311,18 @@ impl App {
             AppEvent::OpenTranscriptExportFilePrompt => {
                 self.chat_widget.show_transcript_export_file_prompt();
             }
+            AppEvent::OpenTranscriptExportMenu => {
+                if let Some(active) = &self.active_export {
+                    self.chat_widget.show_transcript_export_cancel(active.pages);
+                } else {
+                    self.chat_widget.show_transcript_export_options();
+                }
+            }
+            AppEvent::CancelTranscriptExport => self.cancel_transcript_export(),
+            AppEvent::TranscriptExportProgress { id, pages } => self.transcript_export_progress(id, pages),
+            AppEvent::FinishTranscriptExport { id, result } => self.finish_transcript_export(tui, id, result),
             AppEvent::ExportTranscript { destination } => {
-                if let Err(error) = self.export_transcript(tui, app_server, destination).await {
+                if let Err(error) = self.export_transcript(app_server, destination) {
                     self.chat_widget
                         .add_error_message(format!("Export failed: {error}"));
                 }

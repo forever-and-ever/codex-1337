@@ -299,7 +299,7 @@ mod thread_routing;
 mod thread_session_state;
 mod thread_settings;
 mod thread_title;
-mod transcript_export;
+pub(crate) mod transcript_export;
 mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
@@ -697,6 +697,7 @@ pub(crate) struct App {
     // App fixtures keep their home alive across widget replacement; drop it last.
     #[cfg(test)]
     _test_codex_home: Option<tempfile::TempDir>,
+    active_export: Option<transcript_export::ActiveExport>,
 }
 
 struct PendingMcpLoginStart {

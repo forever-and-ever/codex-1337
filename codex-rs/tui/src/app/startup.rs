@@ -936,6 +936,7 @@ See the Codex keymap documentation for supported actions and examples."
             agent_navigation: AgentNavigationState::default(),
             agents_overview,
             side_threads: HashMap::new(),
+            active_export: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,

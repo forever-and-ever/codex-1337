@@ -122,6 +122,7 @@ impl App {
                 self.repaint_agents_overview();
             }
             AppServerEvent::Disconnected { message } => {
+                self.cancel_transcript_export();
                 if self.begin_reconnect() {
                     return;
                 }

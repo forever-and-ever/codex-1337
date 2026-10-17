@@ -97,6 +97,7 @@ pub(crate) async fn make_test_app() -> App {
         agent_navigation: AgentNavigationState::default(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
+        active_export: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -155,4 +156,38 @@ pub(super) fn app_enabled_in_effective_config(config: &Config, app_id: &str) -> 
         .and_then(TomlValue::as_table)
         .and_then(|app| app.get("enabled"))
         .and_then(TomlValue::as_bool)
+}
+/// Drive the same receipt, notification, and AppEvent boundaries as the foreground loop.
+pub(super) async fn settle_frontend_requests(
+    app: &mut App,
+    tui: &mut crate::tui::Tui,
+    server: &mut AppServerSession,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
+) -> color_eyre::Result<()> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while app.active_export.is_some()
+            || app.pending_thread_switch_resets != 0 || !events.is_empty()
+        {
+            tokio::select! {
+                Some(event) = events.recv() => {
+                    Box::pin(app.handle_event(tui, server, event)).await?;
+                }
+                Some(completion) = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(tui, server, completion).await?;
+                }
+                Some(completion) = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(server, completion).await?;
+                }
+                Some(event) = server.next_event() => app.handle_app_server_event(server, event).await,
+                Some(event) = async {
+                    match app.active_thread_rx.as_mut() {
+                        Some(rx) => rx.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => app.handle_active_thread_event(tui, server, event).await?,
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
+    Ok(())
 }
