@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::task::Poll;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -11,9 +12,7 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use crossterm::event::MouseEventKind;
-use futures::FutureExt;
 use tokio_stream::Stream;
-use tokio_stream::StreamExt;
 
 use super::*;
 
@@ -106,7 +105,10 @@ impl UiSchedule {
         }
     }
 
-    pub(in crate::app) fn drain_ready(
+    /// Polls with the UI task's own waker. Crossterm's reader thread latches the waker that armed
+    /// it and ignores later polls until input arrives, so a noop-waker probe here would leave the
+    /// task asleep while keys queue.
+    pub(in crate::app) async fn drain_ready(
         &mut self,
         stream: &mut Pin<Box<dyn Stream<Item = TuiEvent> + Send>>,
     ) {
@@ -114,16 +116,20 @@ impl UiSchedule {
             return;
         }
         // The snapshot is finite even when key repeat never stops producing input.
-        for _ in 0..INPUT_BATCH {
-            let Some(event) = stream.next().now_or_never() else {
-                break;
-            };
-            let closed = event.is_none();
-            self.receive(event);
-            if closed {
-                break;
+        std::future::poll_fn(|cx| {
+            for _ in 0..INPUT_BATCH {
+                let Poll::Ready(event) = stream.as_mut().poll_next(cx) else {
+                    break;
+                };
+                let closed = event.is_none();
+                self.receive(event);
+                if closed {
+                    break;
+                }
             }
-        }
+            Poll::Ready(())
+        })
+        .await;
     }
 
     pub(in crate::app) fn next_input(

@@ -1169,7 +1169,7 @@ See the Codex keymap documentation for supported actions and examples."
             Ok(exit_reason)
         } else {
             'ui: loop {
-                schedule.drain_ready(tui_events.as_mut().get_mut());
+                schedule.drain_ready(tui_events.as_mut().get_mut()).await;
                 for _ in 0..ui_schedule::INPUT_BATCH {
                     let admitted = ui_schedule::input_admitted(
                         &app,
