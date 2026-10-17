@@ -194,6 +194,29 @@ impl ChatWidget {
             .then_some(Duration::from_secs(/*secs*/ 60))
     }
 
+    pub(super) fn submission_settings_pending(&self) -> bool {
+        self.input_queue.rate_limit_recovery_pending
+            || self.input_queue_frontend.automatic_model_switch_pending
+    }
+
+    pub(crate) fn automatic_model_switch_pending(&self) -> bool {
+        self.input_queue_frontend.automatic_model_switch_pending
+    }
+
+    pub(crate) fn hold_automatic_model_switch(&mut self) -> bool {
+        std::mem::replace(
+            &mut self.input_queue_frontend.automatic_model_switch_pending,
+            true,
+        )
+    }
+
+    pub(crate) fn finish_automatic_model_switch(&mut self) {
+        if std::mem::take(&mut self.input_queue_frontend.automatic_model_switch_pending) {
+            self.submit_initial_user_message_if_pending();
+            self.maybe_send_next_queued_input();
+        }
+    }
+
     pub(crate) fn hold_rate_limit_recovery(&mut self) -> bool {
         std::mem::replace(&mut self.input_queue.rate_limit_recovery_pending, true)
     }

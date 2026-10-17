@@ -49,7 +49,6 @@ use crate::inline_visualization::InlineVisualizationContext;
 use crate::markdown::render_markdown_agent_with_list_spacing;
 use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -956,6 +955,7 @@ mod preview_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::text::Line;
     use crate::terminal_hyperlinks::visible_lines;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;

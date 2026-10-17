@@ -35,12 +35,21 @@ impl App {
             collaboration_mode: Some(mode.clone()),
             ..ThreadSettingsUpdateParams::default()
         };
-        if self.send_thread_settings_update(app_server, params).await {
-            self.chat_widget.set_reasoning_effort(effort.clone());
-            if mode.mode == ModeKind::Plan {
-                self.chat_widget.set_plan_mode_reasoning_effort(effort);
+        self.model_selection_generation.advance();
+        let generation = self.model_selection_generation;
+        self.request_thread_settings_update(app_server, params, move |app, updated| {
+            if updated
+                && app.model_selection_generation == generation
+                && app.active_thread_id == Some(thread_id)
+                && app.chat_widget.thread_id() == Some(thread_id)
+                && app.chat_widget.current_model() == LUNA_RESERVE_MODEL
+            {
+                app.chat_widget.set_reasoning_effort(effort.clone());
+                if mode.mode == ModeKind::Plan {
+                    app.chat_widget.set_plan_mode_reasoning_effort(effort);
+                }
             }
-        }
+        });
     }
 
     pub(super) async fn apply_backend_banner_fallback(
@@ -60,6 +69,12 @@ impl App {
         let Some(switch) = self.chat_widget.backend_banner_fallback() else {
             return;
         };
+        if self.chat_widget.hold_automatic_model_switch() {
+            return;
+        }
+        let generation = self.model_selection_generation;
+        let original_model = self.chat_widget.current_model().to_owned();
+        let original_effort = self.chat_widget.current_reasoning_effort();
         let target = switch.model;
         let entering_reserve = target.model == crate::model_catalog::LUNA_RESERVE_MODEL;
         if entering_reserve && !self.chat_widget.prepare_luna_reserve_return() {
@@ -94,28 +109,42 @@ impl App {
         };
         // Older remote servers can decline this method. Keep the existing recovery UI in that
         // case or on failure, rather than changing local selection before the task accepts it.
-        // Event dispatch awaits this operation; a queued manual model selection runs afterward.
-        if self.send_thread_settings_update(app_server, params).await {
-            self.chat_widget.finish_backend_banner_fallback(mode);
-            self.sync_active_thread_service_tier_to_cached_session()
-                .await;
-            let (prefix, suffix) = match switch.reason {
-                AutomaticModelSwitchReason::UsageLimit => {
-                    ("Automatically switched to", " due to usage limits.")
+        // The operation lane orders the write before later manual selections.
+        let accepted =
+            self.request_thread_settings_update(app_server, params, move |app, updated| {
+                if app.active_thread_id != Some(thread_id)
+                    || app.chat_widget.thread_id() != Some(thread_id)
+                    || app.model_selection_generation != generation
+                {
+                    return;
                 }
-                AutomaticModelSwitchReason::UsageRecovered => (
-                    "Automatically switched back to",
-                    " because ordinary usage is available again.",
-                ),
-            };
-            let mut message = format!("{prefix} {}", model_display_name(&target.model));
-            if let Some(label) = Self::reasoning_label_for(&target.model, Some(&effort)) {
-                message.push(' ');
-                message.push_str(&label);
-            }
-            message.push_str(suffix);
-            self.chat_widget.add_info_message(message, /*hint*/ None);
-        } else if entering_reserve {
+                if updated {
+                    app.chat_widget.finish_backend_banner_fallback(
+                        mode,
+                        original_model,
+                        original_effort,
+                    );
+                    let (prefix, suffix) = match switch.reason {
+                        AutomaticModelSwitchReason::UsageLimit => {
+                            ("Automatically switched to", " due to usage limits.")
+                        }
+                        AutomaticModelSwitchReason::UsageRecovered => (
+                            "Automatically switched back to",
+                            " because ordinary usage is available again.",
+                        ),
+                    };
+                    let mut message = format!("{prefix} {}", model_display_name(&target.model));
+                    if let Some(label) = Self::reasoning_label_for(&target.model, Some(&effort)) {
+                        message.push(' ');
+                        message.push_str(&label);
+                    }
+                    message.push_str(suffix);
+                    app.chat_widget.add_info_message(message, /*hint*/ None);
+                } else if entering_reserve {
+                    app.chat_widget.show_unavailable_reserve_recovery();
+                }
+            });
+        if !accepted && entering_reserve {
             self.chat_widget.show_unavailable_reserve_recovery();
         }
     }

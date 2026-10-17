@@ -72,6 +72,7 @@ impl<T: Send + 'static> Completion<T> {
 }
 
 trait Dispatch: Send + Sync {
+    fn prepare(&self, app: &mut App, server: &AppServerSession);
     fn start(
         &self,
         handle: AppServerRequestHandle,
@@ -84,8 +85,16 @@ trait Dispatch: Send + Sync {
     ) -> Result<()>;
 }
 
+type Prepare<F> = Box<dyn FnOnce(&mut App, &AppServerSession) -> F + Send>;
+
+enum RequestState<F> {
+    Waiting(Prepare<F>),
+    Prepared(F),
+    Sent,
+}
+
 struct TypedRequest<F, T> {
-    request: SyncMutex<Option<F>>,
+    request: SyncMutex<RequestState<F>>,
     completion: Arc<Completion<T>>,
 }
 
@@ -95,16 +104,25 @@ where
     Fut: Future<Output = Result<T, TypedRequestError>> + Send + 'static,
     T: Send + 'static,
 {
+    fn prepare(&self, app: &mut App, server: &AppServerSession) {
+        let mut state = self.request.lock().expect("UI request owner poisoned");
+        let RequestState::Waiting(prepare) = std::mem::replace(&mut *state, RequestState::Sent)
+        else {
+            panic!("UI request prepared twice");
+        };
+        *state = RequestState::Prepared(prepare(app, server));
+    }
+
     fn start(
         &self,
         handle: AppServerRequestHandle,
     ) -> BoxFuture<'static, Result<UiReply, TypedRequestError>> {
-        let request = self
-            .request
-            .lock()
-            .expect("UI request owner poisoned")
-            .take()
-            .expect("UI request dispatched twice");
+        let RequestState::Prepared(request) = std::mem::replace(
+            &mut *self.request.lock().expect("UI request owner poisoned"),
+            RequestState::Sent,
+        ) else {
+            panic!("UI request dispatched without preparation");
+        };
         let completion = Arc::clone(&self.completion);
         Box::pin(async move {
             tokio::select! {
@@ -184,6 +202,10 @@ pub(in crate::app) struct UiRequest {
 }
 
 impl UiRequest {
+    pub(super) fn prepare(&self, app: &mut App, server: &AppServerSession) {
+        self.dispatch.prepare(app, server);
+    }
+
     pub(super) fn label(&self) -> &'static str {
         self.label
     }
@@ -233,6 +255,28 @@ impl App {
             + Send
             + 'static,
     {
+        self.request_server_prepared(server, scope, kind, label, move |_, _| request, apply)
+    }
+
+    /// Captures UI-owned settings only when the ordered ledger entry dispatches.
+    pub(in crate::app) fn request_server_prepared<T, P, F, Fut, A>(
+        &mut self,
+        server: &AppServerSession,
+        scope: UiRequestScope,
+        kind: UiRequestKind,
+        label: &'static str,
+        prepare: P,
+        apply: A,
+    ) -> UiRequestHandle
+    where
+        T: Send + 'static,
+        P: FnOnce(&mut App, &AppServerSession) -> F + Send + 'static,
+        F: FnOnce(AppServerRequestHandle) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T, TypedRequestError>> + Send + 'static,
+        A: FnOnce(&mut App, &mut AppServerSession, Result<T, &SubmissionFailure>) -> Result<()>
+            + Send
+            + 'static,
+    {
         let cancelled = CancellationToken::new();
         let handle = UiRequestHandle(cancelled.clone());
         let request = UiRequest {
@@ -240,7 +284,7 @@ impl App {
             cancelled: cancelled.clone(),
             kind,
             dispatch: Arc::new(TypedRequest {
-                request: SyncMutex::new(Some(request)),
+                request: SyncMutex::new(RequestState::Waiting(Box::new(prepare))),
                 completion: Arc::new(Completion {
                     scope,
                     cancelled,

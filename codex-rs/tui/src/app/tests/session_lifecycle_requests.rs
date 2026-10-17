@@ -3039,6 +3039,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     assert_eq!(effort, Some(ReasoningEffortConfig::High));
     let approval = app.config.permissions.approval_policy.value();
     assert_eq!(approval, AskForApproval::OnRequest.to_core());
+    app.settle_turn_submissions(&mut server).await?;
     let forks = recorded_params(&requests, "thread/fork");
     assert_eq!(forks.len(), 1);
     let params = &forks[0];

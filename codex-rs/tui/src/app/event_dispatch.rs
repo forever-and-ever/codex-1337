@@ -140,6 +140,9 @@ impl App {
             event => (event, None),
         };
         match event {
+            AppEvent::VerifiedServerNotification(verified) => {
+                self.finish_verified_server_notification(app_server, *verified).await;
+            }
             AppEvent::ServerOperationExitReady(reason) => {
                 self.supersede_pending_navigation();
                 self.drain_local_navigation_recovery().await;
@@ -695,19 +698,7 @@ impl App {
                             super::turn_submissions::ControlOperation::StopAndExit { turn_id, goal }));
                 }
             },
-            AppEvent::Logout => match app_server.logout_account(self.current_displayed_thread_id()).await {
-                Ok(()) => {
-                    self.show_shutdown_feedback(tui)?;
-                    return Ok(self
-                        .handle_exit_mode(app_server, ExitMode::ShutdownFirst)
-                        .await);
-                }
-                Err(err) => {
-                    tracing::error!("failed to logout: {err}");
-                    self.chat_widget
-                        .add_error_message(format!("Logout failed: {err}"));
-                }
-            },
+            AppEvent::Logout => self.request_logout(app_server),
             AppEvent::FatalExitRequest(message) => {
                 return Ok(AppRunControl::Exit(ExitReason::Fatal(message)));
             }
@@ -734,12 +725,12 @@ impl App {
                 }
                 if self.active_thread_id == self.chat_widget.thread_id() {
                     if matches!(&op, AppCommand::UserTurn { .. })
-                        && self.chat_widget.defer_pending_turn_for_luna_reserve()
+                        && self.chat_widget.defer_pending_turn_for_model_settings()
                     {
                         return Ok(AppRunControl::Continue);
                     }
                     self.chat_widget
-                        .apply_reserve_fallback_to_pending_turn(&mut op);
+                        .apply_automatic_model_switch_to_pending_turn(&mut op);
                 }
                 let is_user_turn = matches!(&op, AppCommand::UserTurn { .. });
                 let replaces_pending_steer = matches!(
@@ -905,10 +896,7 @@ impl App {
                 branch,
                 cwd: _cwd,
             } => {
-                if let Err(err) = crate::ui_latency::rpc(app_server.thread_metadata_update_branch(thread_id, branch)).await
-                {
-                    tracing::warn!("failed to sync thread git branch from directive: {err}");
-                }
+                self.sync_thread_git_branch(app_server, thread_id, branch);
             }
             AppEvent::LookupMessageHistoryEntry {
                 thread_id,
@@ -1782,6 +1770,7 @@ impl App {
                 }
             }
             AppEvent::UpdateReasoningEffort(effort) => {
+                self.model_selection_generation.advance();
                 self.on_update_reasoning_effort(effort.clone());
                 self.sync_active_thread_reasoning_setting(app_server, effort)
                     .await;
@@ -1798,7 +1787,9 @@ impl App {
                 {
                     return Ok(AppRunControl::Continue);
                 }
-                let model_changed = self.chat_widget.current_model() != model
+                self.model_selection_generation.advance();
+                let model_changed = self.chat_widget.automatic_model_switch_pending()
+                    || self.chat_widget.current_model() != model
                     || self.chat_widget.current_collaboration_mode().model() != model;
                 if model_changed {
                     self.chat_widget.set_model(&model);
@@ -1939,7 +1930,9 @@ impl App {
                 {
                     return Ok(AppRunControl::Continue);
                 }
-                let model_changed = self.chat_widget.current_model() != model
+                self.model_selection_generation.advance();
+                let model_changed = self.chat_widget.automatic_model_switch_pending()
+                    || self.chat_widget.current_model() != model
                     || self.chat_widget.current_collaboration_mode().model() != model;
                 let default_effort =
                     self.on_apply_advanced_reasoning(model.as_str(), effort.clone());
@@ -2577,22 +2570,8 @@ impl App {
                     ThreadTitleDestination::Automatic => {
                         if let Ok(response) = result
                             && let Some(title) = super::thread_title::parse_thread_title(&response)
-                            && let Ok(thread) = crate::ui_latency::rpc(app_server.thread_read(thread_id, /*include_turns*/ false)).await
-                            && thread.name.is_none()
                         {
-                            match crate::ui_latency::rpc(app_server.thread_allocate_name(codex_app_server_protocol::ThreadSetNameParams {
-                                thread_id: thread_id.to_string(),
-                                name: title,
-                                naming_mode: Some(codex_app_server_protocol::ThreadNameMode::Generated),
-                                conflict_thread_ids: None,
-                            })).await {
-                                Ok(title) => self
-                                    .chat_widget
-                                    .on_thread_name_updated(thread_id, Some(title)),
-                                Err(error) => {
-                                    tracing::debug!(%error, "failed to apply generated thread title");
-                                }
-                            }
+                            self.apply_generated_thread_title(app_server, thread_id, title);
                         }
                     }
                     ThreadTitleDestination::RenameSuggestion { request_id } => {

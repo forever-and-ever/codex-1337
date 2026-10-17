@@ -81,6 +81,7 @@ async fn choose_model(
             }
         }
     }
+    app.settle_turn_submissions(server).await?;
     assert!(!app.chat_widget.has_active_view());
     Ok(sparkle_offers)
 }
@@ -554,6 +555,7 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
                 app.handle_event(&mut tui, &mut server, event).await?;
             }
         }
+        app.settle_turn_submissions(&mut server).await?;
         assert!(!app.chat_widget.has_active_view(), "{picker}");
         assert_eq!(app.chat_widget.current_model(), "gpt-6-astra", "{picker}");
         assert_eq!(visible(&app.chat_widget), switches_away, "{picker}");

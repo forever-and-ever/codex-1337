@@ -10,7 +10,7 @@ impl ChatWidget {
             && self.external_editor_state == ExternalEditorState::Closed
             && self.pending_image_submission.is_none()
             && self.input_queue.pending_steer.replacement().is_none()
-            && !self.input_queue.rate_limit_recovery_pending
+            && !self.submission_settings_pending()
             && self.input_queue_frontend.startup_submission.is_none()
             && !self.input_queue.turn.is_pending()
             && self.input_queue.pending_steer.interrupt()

@@ -314,50 +314,104 @@ impl App {
             approvals_reviewer: selection.approvals_reviewer.map(Into::into),
             ..Default::default()
         };
-        match app_server.thread_settings_update(params).await {
-            Ok(true) => {
-                // Omission preserves the active value on update, but uses defaults on start.
-                // Retain effective intent across consecutive requests before confirmation.
-                let previous = self
-                    .agents_overview
-                    .requested_permission_profiles
-                    .get(&thread_id);
-                selection.approval_policy = selection
-                    .approval_policy
-                    .or_else(|| previous.and_then(|profile| profile.approval_policy))
-                    .or(Some(config.permissions.approval_policy.value().into()));
-                selection.approvals_reviewer = selection
-                    .approvals_reviewer
-                    .or_else(|| previous.and_then(|profile| profile.approvals_reviewer))
-                    .or(Some(config.approvals_reviewer));
-                self.agents_overview
-                    .selected_permission_profiles
-                    .insert(thread_id, selection.profile_id.clone());
-                self.agents_overview
-                    .requested_permission_profiles
-                    .insert(thread_id, selection.clone());
-                self.chat_widget.add_info_message(
-                    format!(
-                        "Permission selection requested: {}",
-                        selection.display_label
-                    ),
-                    /*hint*/ None,
-                );
-                self.chat_widget.submit_initial_user_message_if_pending();
-            }
-            Ok(false) => {
-                self.chat_widget
-                    .retain_input_after_failed_permission_selection();
-                self.chat_widget
-                    .add_error_message("Permission selection requires a newer app server.".into());
-            }
-            Err(error) => {
-                self.chat_widget
-                    .retain_input_after_failed_permission_selection();
-                self.chat_widget
-                    .add_error_message(format!("Failed to select permissions: {error:#}"));
-            }
-        }
+        let fallback_policy = config.permissions.approval_policy.value().into();
+        let fallback_reviewer = config.approvals_reviewer;
+        self.request_server(
+            app_server,
+            super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
+            super::turn_submissions::ui_requests::UiRequestKind::Mutation,
+            "Selecting permissions",
+            move |handle| async move {
+                let result = handle
+                    .request_typed::<codex_app_server_protocol::ThreadSettingsUpdateResponse>(
+                        codex_app_server_protocol::ClientRequest::ThreadSettingsUpdate {
+                            request_id: codex_app_server_protocol::RequestId::String(
+                                uuid::Uuid::new_v4().to_string(),
+                            ),
+                            params,
+                        },
+                    )
+                    .await;
+                match result {
+                    Ok(_) => Ok(true),
+                    Err(codex_app_server_client::TypedRequestError::Server {
+                        ref source, ..
+                    }) if crate::app_server_session::is_thread_settings_update_unsupported(
+                        source,
+                    ) =>
+                    {
+                        Ok(false)
+                    }
+                    Err(error) => Err(error),
+                }
+            },
+            move |app, server, result| {
+                let displayed = app.chat_widget.thread_id() == Some(thread_id);
+                match result {
+                    Ok(true) => {
+                        // Omission preserves the preceding accepted value, including an
+                        // earlier request whose notification has not reached the UI yet.
+                        let previous = app
+                            .agents_overview
+                            .requested_permission_profiles
+                            .get(&thread_id);
+                        let (policy, reviewer) = if displayed {
+                            let config = app.chat_widget.config_ref();
+                            (
+                                config.permissions.approval_policy.value().into(),
+                                config.approvals_reviewer,
+                            )
+                        } else {
+                            (fallback_policy, fallback_reviewer)
+                        };
+                        selection.approval_policy = selection
+                            .approval_policy
+                            .or_else(|| previous.and_then(|profile| profile.approval_policy))
+                            .or(Some(policy));
+                        selection.approvals_reviewer = selection
+                            .approvals_reviewer
+                            .or_else(|| previous.and_then(|profile| profile.approvals_reviewer))
+                            .or(Some(reviewer));
+                        app.agents_overview
+                            .selected_permission_profiles
+                            .insert(thread_id, selection.profile_id.clone());
+                        app.agents_overview
+                            .requested_permission_profiles
+                            .insert(thread_id, selection.clone());
+                        if displayed {
+                            app.chat_widget.add_info_message(
+                                format!(
+                                    "Permission selection requested: {}",
+                                    selection.display_label
+                                ),
+                                None,
+                            );
+                            app.chat_widget.submit_initial_user_message_if_pending();
+                        }
+                    }
+                    Ok(false) => {
+                        server.note_operation_settings_unsupported();
+                        if displayed {
+                            app.chat_widget
+                                .retain_input_after_failed_permission_selection();
+                            app.chat_widget.add_error_message(
+                                "Permission selection requires a newer app server.".into(),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        if displayed {
+                            app.chat_widget
+                                .retain_input_after_failed_permission_selection();
+                            app.chat_widget.add_error_message(format!(
+                                "Failed to select permissions: {error}"
+                            ));
+                        }
+                    }
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) fn reject_pending_permission_change(&mut self) -> bool {

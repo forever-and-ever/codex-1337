@@ -58,7 +58,7 @@ impl ThreadInputState {
 impl ChatWidget {
     pub(crate) fn submit_jira_triage(&mut self, text: String) -> bool {
         if !self.is_session_configured()
-            || self.input_queue.rate_limit_recovery_pending
+            || self.submission_settings_pending()
             || self.pending_image_submission.is_some()
             || self.active_side_conversation
         {

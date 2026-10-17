@@ -4,9 +4,6 @@
 //! request/response plumbing out of `App` and `ChatWidget`.
 
 mod account;
-mod comms;
-mod context_inventory;
-mod context_role;
 mod external_agent_config;
 pub(crate) mod fork_preparation;
 pub(crate) mod fs;
@@ -24,7 +21,6 @@ mod startup_launch;
 mod thread_list;
 mod turn_submissions;
 pub(crate) use turn_submissions::turn_start_params;
-mod warming;
 
 mod operation_capabilities;
 mod web_search;
@@ -68,7 +64,6 @@ use codex_app_server_protocol::GetAccountParams;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
-use codex_app_server_protocol::LogoutAccountResponse;
 use codex_app_server_protocol::Model as ApiModel;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -90,9 +85,6 @@ use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
-use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
-use codex_app_server_protocol::ThreadMetadataUpdateParams;
-use codex_app_server_protocol::ThreadMetadataUpdateResponse;
 use codex_app_server_protocol::ThreadNameMode;
 
 use codex_app_server_protocol::ThreadResumeParams;
@@ -977,31 +969,6 @@ impl AppServerSession {
         Ok(response.thread)
     }
 
-    pub(crate) async fn thread_metadata_update_branch(
-        &mut self,
-        thread_id: ThreadId,
-        branch: String,
-    ) -> Result<ThreadMetadataUpdateResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadMetadataUpdate {
-                request_id,
-                params: ThreadMetadataUpdateParams {
-                    thread_id: thread_id.to_string(),
-                    project_id: None,
-                    daybreak_enabled: None,
-                    comms: None,
-                    git_info: Some(ThreadMetadataGitInfoUpdateParams {
-                        sha: None,
-                        branch: Some(Some(branch)),
-                        origin_url: None,
-                    }),
-                },
-            })
-            .await
-            .wrap_err("thread/metadata/update failed while syncing git branch")
-    }
-
     pub(crate) async fn thread_settings_update(
         &mut self,
         params: ThreadSettingsUpdateParams,
@@ -1159,21 +1126,6 @@ impl AppServerSession {
             )),
             None => Ok(requested_name),
         }
-    }
-
-    pub(crate) async fn logout_account(&mut self, thread_id: Option<ThreadId>) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: LogoutAccountResponse = self
-            .client
-            .request_typed(ClientRequest::LogoutAccount {
-                request_id,
-                params: thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
-                    thread_id: Some(id.to_string()),
-                }),
-            })
-            .await
-            .wrap_err("account/logout failed in TUI")?;
-        Ok(())
     }
 
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {

@@ -301,6 +301,8 @@ pub(crate) mod thread_name;
 mod thread_routing;
 mod thread_session_state;
 mod thread_settings;
+mod thread_metadata;
+pub(crate) use app_server_thread_ownership::VerifiedServerNotification;
 mod thread_title;
 pub(crate) mod transcript_export;
 mod user_verification;
@@ -702,6 +704,7 @@ pub(crate) struct App {
     _test_codex_home: Option<tempfile::TempDir>,
     active_export: Option<transcript_export::ActiveExport>,
     pending_revert: Option<prompt_revert::PendingRevert>,
+    model_selection_generation: thread_settings::ModelSelectionGeneration,
 }
 
 struct PendingMcpLoginStart {

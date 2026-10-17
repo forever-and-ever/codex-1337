@@ -1,6 +1,7 @@
 use super::*;
 use crate::terminal_hyperlinks::visible_lines;
 use pretty_assertions::assert_eq;
+use ratatui::text::Line;
 
 #[test]
 fn followup_preview_hides_prompts_until_complete() {

@@ -345,7 +345,11 @@ async fn backend_banner_fallback_candidates_and_notice_follow_selected_model() {
     chat.requires_openai_auth = true;
     let mut mode = chat.effective_collaboration_mode();
     mode.settings.model = "test-model-c".into();
-    chat.finish_backend_banner_fallback(mode);
+    chat.finish_backend_banner_fallback(
+        mode,
+        chat.current_model().to_owned(),
+        chat.current_reasoning_effort(),
+    );
     let before = render_bottom_popup(&chat, /*width*/ 70);
     assert!(before.contains("Selected model usage exhausted"));
     chat.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));

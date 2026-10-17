@@ -41,6 +41,7 @@ async fn session_model_selection_preserves_defaults_and_updates_active_thread() 
                 },
             ))
             .await?;
+            app.settle_turn_submissions(&mut server).await?;
             let settings = next_thread_settings_updated(&mut server, thread_id).await;
             assert_eq!(
                 (

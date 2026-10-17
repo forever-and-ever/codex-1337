@@ -128,12 +128,16 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     );
     let successor_applied = Arc::clone(&applied);
-    app.request_server(
+    let prepared_after = Arc::clone(&applied);
+    app.request_server_prepared(
         &server,
         UiRequestScope::Connection,
         UiRequestKind::ReadOnly,
         "successor UI request",
-        |_| async { Ok(3_u32) },
+        move |_, _| {
+            assert_eq!(*prepared_after.lock().unwrap(), vec![1, 2]);
+            |_| async { Ok(3_u32) }
+        },
         move |_, _, value| {
             successor_applied.lock().unwrap().push(value.unwrap());
             Ok(())
