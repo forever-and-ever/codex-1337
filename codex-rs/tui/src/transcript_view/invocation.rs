@@ -120,10 +120,6 @@ fn line_bytes(line: &Line<'_>) -> usize {
             .sum::<usize>()
 }
 
-#[expect(
-    clippy::ptr_arg,
-    reason = "vector capacity is part of the retained allocation charge"
-)]
 fn retained_lines_bytes(lines: &Vec<HyperlinkLine>) -> usize {
     // Copy metadata owns arbitrarily nested Markdown; do not retain it in this cache.
     if lines.iter().any(|line| {
@@ -153,6 +149,8 @@ fn retained_lines_bytes(lines: &Vec<HyperlinkLine>) -> usize {
             .sum::<usize>()
 }
 
+type CachedOutput = (u16, OutputMode, Vec<HyperlinkLine>, usize);
+
 pub(super) struct PreparedInvocation {
     source: Option<SourceRevision>,
     id: String,
@@ -162,7 +160,7 @@ pub(super) struct PreparedInvocation {
     work: Cell<[usize; 4]>,
     raw: RefCell<Option<Vec<HyperlinkLine>>>,
     formatted_output: RefCell<Vec<(u16, bool)>>,
-    outputs: RefCell<Vec<(u16, OutputMode, Vec<HyperlinkLine>, usize)>>,
+    outputs: RefCell<Vec<CachedOutput>>,
 }
 
 impl PreparedInvocation {

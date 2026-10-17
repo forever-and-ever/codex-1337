@@ -32,7 +32,6 @@ use tokio::sync::watch;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::WatchStream;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use super::TuiEvent;
 use super::size_monitor::SizeMonitor;
@@ -262,22 +261,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
 
     /// Poll the draw broadcast stream for the next draw event. Draw events are used to trigger a redraw of the TUI.
     pub fn poll_draw_event(&mut self, cx: &mut Context<'_>) -> Poll<Option<TuiEvent>> {
-        loop {
-            match Pin::new(&mut self.draw_stream).poll_next(cx) {
-                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => continue,
-                Poll::Ready(Some(Ok(()))) => {
-                    let event = self
-                        .broker
-                        .size_monitor
-                        .as_ref()
-                        .and_then(SizeMonitor::take_resize)
-                        .map_or(TuiEvent::Draw, TuiEvent::Resize);
-                    return Poll::Ready(Some(event));
-                }
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Pending,
-            }
-        }
+        self.poll_prepared_draw(cx)
     }
 
     /// Map a crossterm event to a [`TuiEvent`], preserving mouse coordinates and modifiers.
@@ -341,13 +325,7 @@ impl<S: EventSource + Default + Unpin> Stream for TuiEventStream<S> {
             }
         };
         if let Poll::Ready(Some(event)) = &next {
-            // Nested screens also receive finite input batches, never a full paint per key.
-            self.input_events_since_draw = if matches!(event, TuiEvent::Draw) {
-                0
-            } else {
-                self.input_events_since_draw.saturating_add(1)
-            };
-            self.poll_draw_first = self.input_events_since_draw >= MAX_INPUT_EVENTS_BETWEEN_DRAWS;
+            self.record_prepared_input(event);
         }
         next
     }
@@ -709,3 +687,5 @@ mod tests {
         }
     }
 }
+
+mod preparation;

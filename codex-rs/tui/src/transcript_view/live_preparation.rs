@@ -214,6 +214,10 @@ impl OwnedLiveTail {
 }
 
 impl TranscriptView {
+    #[expect(
+        clippy::expect_used,
+        reason = "A completed task still owns its pending revision, and the requested live snapshot was installed before use."
+    )]
     pub(crate) fn sync_owned_live_tail(
         &mut self,
         width: u16,

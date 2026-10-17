@@ -6,16 +6,6 @@
 //! - `chunking` computes adaptive drain plans from queue pressure.
 //! - `commit_tick` binds policy decisions to concrete controller drains.
 //!
-//! The live UI prepares source on a pinned lane of the bounded transcript pool and publishes
-//! immutable stable rows. Open inline syntax, unresolved references, tables and transformable
-//! fences stay on the worker. Two deliberate baseline exceptions can revise already streamed
-//! plain prose: a directly following setext underline (===/---), and a late pipe that makes
-//! the current line table-eligible. A pipe freezes that line until its structure is known.
-//! Canonical replacement resolves both, rather than delaying every paragraph until a blank line.
-//! Safe complete words on an unterminated prose line wrap with the final renderer's FirstFit:
-//! completed rows never roll; only the last row grows. Source parsing and unresolved-block
-//! rendering run on the worker, never in the delta handler or paint path.
-//!
 //! The key invariant is queue ordering. All drains pop from the front, and enqueue records an
 //! arrival timestamp so policy code can reason about oldest queued age without peeking into text.
 

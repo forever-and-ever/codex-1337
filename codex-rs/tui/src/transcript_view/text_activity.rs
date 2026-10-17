@@ -290,8 +290,7 @@ impl TextLayout {
         controls: Vec<HeaderControl>,
     ) -> Self {
         let mut decorations = Vec::new();
-        for index in 0..lines.len() {
-            let original = &mut lines[index];
+        for (index, original) in lines.iter_mut().enumerate() {
             let Some(source) = &original.source else {
                 continue;
             };

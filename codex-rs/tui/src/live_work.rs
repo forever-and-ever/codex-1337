@@ -849,7 +849,11 @@ mod tests {
         );
         view.render(area, &mut buf);
         assert!(!view.hits.iter().any(|(_, focus)| *focus == target));
-        let display: String = buf.content.iter().map(|cell| cell.symbol()).collect();
+        let display: String = buf
+            .content
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
         assert!(display.contains("No longer active"));
         assert_eq!(
             view.handle_mouse(mouse(MouseEventKind::Moved, area.right(), area.bottom())),

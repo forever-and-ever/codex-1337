@@ -4,6 +4,8 @@ use super::*;
 use crate::custom_terminal::output;
 use crate::custom_terminal::output::FrameId;
 
+pub(super) type Cells = Arc<[Arc<dyn HistoryCell>]>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum LayoutSource {
     Current,
@@ -63,7 +65,7 @@ impl TranscriptView {
             area: self.area,
             visible: self.visible.clone(),
             tail_visible: self.tail_visible,
-            suppressed_header: self.suppressed_prompt_header.clone(),
+            suppressed_header: self.suppressed_prompt_header,
             cells: self.presented_cells.clone(),
             follow_area: self.follow_control.area,
             composer_tip: self.composer_tip.clone(),
@@ -96,7 +98,7 @@ impl TranscriptView {
             self.area = frame.area;
             self.visible = frame.visible.clone();
             self.tail_visible = frame.tail_visible;
-            self.suppressed_prompt_header = frame.suppressed_header.clone();
+            self.suppressed_prompt_header = frame.suppressed_header;
             self.presented_cells = frame.cells.clone();
             self.follow_control.area = frame.follow_area;
             self.composer_tip = frame.composer_tip.clone();
@@ -223,6 +225,10 @@ impl TranscriptView {
         self.cache.waiting |= waiting;
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A ready frame installs its retained cells before publishing the presented revision."
+    )]
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         if self.cache.frames.is_none() {
             self.render_prepared(area, buf, cells);
@@ -277,7 +283,7 @@ impl TranscriptView {
                 area: self.area,
                 visible: self.visible.clone(),
                 tail_visible: self.tail_visible,
-                suppressed_header: self.suppressed_prompt_header.clone(),
+                suppressed_header: self.suppressed_prompt_header,
             });
         }
         if self.cache.waiting || self.live_preparation.is_pending() {
@@ -303,7 +309,7 @@ impl TranscriptView {
                 .collect();
             self.presented_cells = Some(Arc::clone(&presented.cells));
             self.tail_visible = presented.tail_visible;
-            self.suppressed_prompt_header = presented.suppressed_header.clone();
+            self.suppressed_prompt_header = presented.suppressed_header;
         } else {
             self.visible.clear();
             self.presented_cells = None;
@@ -312,6 +318,10 @@ impl TranscriptView {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A visible first row guarantees that the same immutable slice has a last row."
+    )]
     fn prefetch(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         let Some(first) = self.visible.first().map(|row| row.index) else {
             return;
@@ -323,5 +333,87 @@ impl TranscriptView {
         for index in last + 1..=(last + 2).min(cells.len().saturating_sub(1)) {
             self.current_layout(cells, index);
         }
+    }
+}
+
+impl TranscriptView {
+    pub(crate) fn presented_cells(&self) -> Option<Arc<[Arc<dyn HistoryCell>]>> {
+        self.presented_cells.clone()
+    }
+
+    pub(super) fn rewrap_presented_snapshot(&mut self, width: u16) {
+        let Some(snapshot) = self.snapshot() else {
+            return;
+        };
+        let pinned: Vec<_> = snapshot
+            .pinned
+            .iter()
+            .map(|(key, layout)| (*key, Arc::clone(layout)))
+            .collect();
+        let live = snapshot.search_live.clone();
+        for (key, layout) in pinned {
+            if let Some(layout) = self.cache.rewrap(&layout, width, false)
+                && let Some(snapshot) = self.snapshot_mut()
+            {
+                snapshot.pinned.insert(key, layout);
+            }
+        }
+        if let Some(live) = live
+            && let Some(layout) = self.cache.rewrap(&live, width, false)
+            && let Some(snapshot) = self.snapshot_mut()
+        {
+            snapshot.search_live = Some(layout);
+        }
+    }
+}
+
+impl TranscriptView {
+    pub(super) fn retain_synchronous_cells(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        // Synchronous rendering presents at once; background presentation commits in presented.rs.
+        if self.cache.frames.is_none()
+            && self.presented_cells.as_ref().is_none_or(|presented| {
+                presented.len() != cells.len()
+                    || presented
+                        .iter()
+                        .zip(cells)
+                        .any(|(previous, current)| !Arc::ptr_eq(previous, current))
+            })
+        {
+            self.presented_cells = Some(Arc::from(cells));
+        }
+    }
+
+    pub(super) fn selection_prepared(&self) -> bool {
+        !self.cache.waiting && !self.live_preparation.is_pending()
+    }
+}
+
+impl TranscriptView {
+    pub(super) fn presented_activity_ids(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+    ) -> Vec<String> {
+        if self.layout_source == LayoutSource::Presented {
+            if self.presented_cells.is_none() {
+                return Vec::new();
+            }
+            let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
+            if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
+                return visible.activity_ids.to_vec();
+            }
+        }
+        let Some(cell) = cells.get(index) else {
+            return self.disclosure.live_ids.clone();
+        };
+        let ids = cell.activity_ids();
+        // A Feed Item's header over a cell without identities is focused through its fold.
+        if ids.is_empty()
+            && self.indexed_seat(cells, index).header.is_some()
+            && let Some(fold) = self.feed.fold_of(index)
+        {
+            return vec![fold.to_string()];
+        }
+        ids
     }
 }

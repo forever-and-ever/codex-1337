@@ -292,7 +292,7 @@ fn serve(client: &mut UnixStream, shared: &Shared, metadata: &[u8; METADATA]) ->
     response[..METADATA].copy_from_slice(metadata);
     for (word, bytes) in words
         .into_iter()
-        .zip(response[METADATA..].chunks_exact_mut(8))
+        .zip(response[METADATA..].as_chunks_mut::<8>().0)
     {
         bytes.copy_from_slice(&word.to_le_bytes());
     }
@@ -440,8 +440,11 @@ async fn query_path(path: &Path, pid: u32, start: u64, reset: bool) -> io::Resul
         return Err(io::Error::other("UI worker identity changed"));
     }
     let mut words = [0; WORDS];
-    for (word, bytes) in words.iter_mut().zip(response[METADATA..].chunks_exact(8)) {
-        *word = u64::from_le_bytes(bytes.try_into().map_err(io::Error::other)?);
+    for (word, bytes) in words
+        .iter_mut()
+        .zip(response[METADATA..].as_chunks::<8>().0)
+    {
+        *word = u64::from_le_bytes(*bytes);
     }
     decode(identity, &words)
 }

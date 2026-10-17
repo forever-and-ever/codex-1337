@@ -20,65 +20,6 @@ use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
 use pretty_assertions::assert_eq;
 
-async fn select_transcript(
-    app: &mut App,
-    tui: &mut tui::Tui,
-    app_server: &mut AppServerSession,
-    detailed: bool,
-) -> Result<()> {
-    app.transcript_view = Default::default();
-    app.transcript_view
-        .set_presentation(detailed, HistoryRenderMode::Rich);
-    app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(vec![
-        "select this transcript".into(),
-    ]))];
-    app.render_owned_transcript(tui, Size::new(/*width*/ 80, /*height*/ 12))?;
-    let presented =
-        crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
-    // An unpresented revision must not replace the cells behind the retained hit areas.
-    let presented_cells = std::mem::replace(
-        &mut app.transcript_cells,
-        vec![Arc::new(PlainHistoryCell::new(vec![
-            "unpresented replacement".into(),
-        ]))],
-    );
-    app.handle_tui_event(
-        tui,
-        app_server,
-        TuiEvent::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
-    )
-    .await?;
-    assert!(
-        crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal)
-            .content()
-            .iter()
-            .map(ratatui::buffer::Cell::symbol)
-            .collect::<String>()
-            .contains("select this transcript")
-    );
-    for _ in 0..6 {
-        app.handle_tui_event(
-            tui,
-            app_server,
-            TuiEvent::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
-        )
-        .await?;
-    }
-    // Key routing changes interaction state, not the already presented frame.
-    assert_eq!(
-        crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
-        &presented,
-    );
-    assert_eq!(
-        app.transcript_view
-            .selected_text(&app.transcript_cells)
-            .as_deref(),
-        Some("select")
-    );
-    app.transcript_cells = presented_cells;
-    Ok(())
-}
-
 #[tokio::test]
 async fn configured_ctrl_space_submit_wins_over_transcript_selection() -> Result<()> {
     for running in [false, true] {
@@ -866,3 +807,7 @@ async fn modified_arrows_and_editor_chords_resume_composer_movement() -> Result<
     tui.set_owned_screen(/*owned*/ false)?;
     Ok(())
 }
+
+#[path = "owned_transcript_input_preparation.rs"]
+mod preparation;
+use preparation::select_transcript;
