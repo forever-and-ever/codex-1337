@@ -1,7 +1,7 @@
 //! Configuration request tails, background refreshes, and accepted-state projection.
 
 use super::*;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 
 pub(super) async fn build_config_on_runtime_worker_continuation(
     builder: ConfigBuilder,

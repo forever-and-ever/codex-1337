@@ -1,4 +1,4 @@
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 use super::*;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;

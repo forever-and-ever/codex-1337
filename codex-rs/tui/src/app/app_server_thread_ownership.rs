@@ -7,7 +7,7 @@ use super::App;
 use crate::app_server_session::AppServerSession;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;

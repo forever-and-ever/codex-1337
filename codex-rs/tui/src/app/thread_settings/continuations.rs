@@ -1,7 +1,7 @@
 //! Deferred settings updates and model-selection generations.
 
 use super::*;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 
 impl App {
     pub(in crate::app) fn request_thread_settings_update<A>(

@@ -3,7 +3,7 @@
 use super::super::turn_submissions::ui_requests::UiRequestKind;
 use super::super::turn_submissions::ui_requests::UiRequestScope;
 use super::*;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::RequestId;

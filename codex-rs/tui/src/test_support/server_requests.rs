@@ -1,6 +1,6 @@
 //! Test-only session requests outside the upstream support module.
 
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 
 pub(crate) async fn thread_goal_get(
     server: &crate::app_server_session::AppServerSession,

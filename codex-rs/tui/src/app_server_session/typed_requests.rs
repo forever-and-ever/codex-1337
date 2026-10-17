@@ -9,7 +9,7 @@ use std::future::Future;
 
 macro_rules! typed_requests {
     ($($(#[$attribute:meta])* $method:ident($params:ty) -> $response:ty = $variant:ident;)*) => {
-        pub(crate) trait AppServerRequestHandleExt {
+        pub(crate) trait SessionRpc {
             $($(#[$attribute])* fn $method(&self, request_id: api::RequestId, params: $params)
                 -> impl Future<Output = Result<$response, TypedRequestError>> + Send;)*
 
@@ -20,7 +20,7 @@ macro_rules! typed_requests {
                 -> impl Future<Output = Result<api::ThreadMetadataUpdateResponse, TypedRequestError>> + Send;
         }
 
-        impl AppServerRequestHandleExt for AppServerRequestHandle {
+        impl SessionRpc for AppServerRequestHandle {
             $($(#[$attribute])* async fn $method(&self, request_id: api::RequestId, params: $params)
                 -> Result<$response, TypedRequestError> {
                 self.request_typed(api::ClientRequest::$variant { request_id, params }).await

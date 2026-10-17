@@ -1,7 +1,7 @@
 //! Generated-title allocation after a background name check.
 
 use super::*;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 
 impl App {
     pub(in crate::app) fn apply_generated_thread_title(

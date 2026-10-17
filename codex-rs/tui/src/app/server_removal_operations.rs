@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::app_event::AgentsOverviewAction;
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_app_server_protocol::SessionSource;

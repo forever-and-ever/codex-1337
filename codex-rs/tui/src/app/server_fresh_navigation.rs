@@ -5,7 +5,7 @@ use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::app_server_session::session_preparation::{
     PreparedSession, StartPreparation, SubscriptionCustody, ThreadStartChoice,
 };
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
+use crate::app_server_session::typed_requests::SessionRpc;
 use crate::local_settings::LocalSettings;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
