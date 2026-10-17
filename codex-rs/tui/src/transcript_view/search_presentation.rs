@@ -94,7 +94,8 @@ impl TranscriptView {
         if let Some((key, layout)) = &self.search.scanning_layout
             && *key == anchor.key
         {
-            return Some(Arc::clone(layout));
+            let layout = Arc::clone(layout);
+            return self.cache.rewrap(&layout, self.area.width, false);
         }
         let layout = if let Some(layout) = self.search.match_layout(anchor.key) {
             layout
@@ -105,7 +106,7 @@ impl TranscriptView {
                 .or_else(|| self.search.live.clone());
             match live {
                 Some(live) if !cells.is_empty() && !self.live_continuation => {
-                    Arc::new(live.rewrap(self.area.width).with_leading_separator())
+                    self.cache.rewrap(&live, self.area.width, true)?
                 }
                 Some(live) => live,
                 None => self.layout(cells, anchor.index)?,

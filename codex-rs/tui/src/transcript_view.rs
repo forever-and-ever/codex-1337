@@ -17,8 +17,12 @@ mod footer;
 mod input;
 mod invocation;
 mod layout;
+mod live_preparation;
+pub(crate) use live_preparation::OwnedLiveTail;
 mod mutations;
+mod preparation;
 mod presentation;
+mod presented;
 mod prompt_header;
 mod search;
 mod selection;
@@ -85,6 +89,7 @@ enum Position {
     Reading(Anchor),
 }
 
+#[derive(Clone)]
 struct VisibleRow {
     index: usize,
     row: usize,
@@ -105,6 +110,18 @@ pub(crate) struct TranscriptView {
     composer_tip: Option<(Rect, HyperlinkLine)>,
     turn_tip_key: Option<EntryKey>,
     cache: LayoutCache,
+    presented: Option<presented::Presented>,
+    presented_cells: Option<Arc<[Arc<dyn HistoryCell>]>>,
+    inflight_cells: Option<(u16, Arc<[Arc<dyn HistoryCell>]>)>,
+    deferred_scroll: Option<presented::Scroll>,
+    deferred_focus: Option<crossterm::event::KeyEvent>,
+    layout_source: presented::LayoutSource,
+    deferred_folds: std::collections::VecDeque<(
+        Arc<[Arc<dyn HistoryCell>]>,
+        usize,
+        crate::keymap::ListAction,
+    )>,
+    live_preparation: live_preparation::LivePreparation,
     live: Option<Arc<TextLayout>>,
     live_separated: Option<Arc<TextLayout>>,
     live_key: Option<(u16, ActiveCellTranscriptKey)>,
@@ -146,6 +163,14 @@ impl Default for TranscriptView {
             composer_tip: None,
             turn_tip_key: None,
             cache: LayoutCache::default(),
+            presented: None,
+            presented_cells: None,
+            inflight_cells: None,
+            deferred_scroll: None,
+            deferred_focus: None,
+            layout_source: presented::LayoutSource::Current,
+            deferred_folds: Default::default(),
+            live_preparation: Default::default(),
             live: None,
             live_separated: None,
             live_key: None,
@@ -190,7 +215,7 @@ impl TranscriptView {
         }
     }
 
-    pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
+    fn render_prepared(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         self.composer_tip = None;
         self.cache.begin_frame();
         self.sync_history_tail(cells);
@@ -297,11 +322,13 @@ impl TranscriptView {
             });
             row += 1;
         }
-        if let Some(pointer) = self
-            .selection
-            .as_ref()
-            .filter(|selection| selection.dragging && selection.moved)
-            .and_then(|selection| selection.pointer)
+        if !self.cache.waiting
+            && !self.live_preparation.is_pending()
+            && let Some(pointer) = self
+                .selection
+                .as_ref()
+                .filter(|selection| selection.dragging && selection.moved)
+                .and_then(|selection| selection.pointer)
         {
             self.extend_selection(pointer.x, pointer.y);
         }
@@ -473,7 +500,7 @@ impl TranscriptView {
         self.disclosure.focused = None;
     }
 
-    pub(crate) fn scroll(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
+    fn scroll_prepared(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
         if rows != 0 {
             self.last_click = None;
             self.cancel_beginning();
@@ -655,9 +682,10 @@ impl TranscriptView {
             while remaining > row && index > 0 {
                 remaining -= row;
                 index -= 1;
-                row = self
-                    .layout(cells, index)
-                    .map_or(/*default*/ 0, |l| l.row_count());
+                let Some(layout) = self.layout(cells, index) else {
+                    return (index, 0);
+                };
+                row = layout.row_count();
             }
             // At the beginning, hidden entries are not preceding content. Keep the first
             // visible entry at the same position whether it is live or committed.
