@@ -20,7 +20,7 @@ mod layout;
 mod live_preparation;
 pub(crate) use live_preparation::OwnedLiveTail;
 mod mutations;
-mod preparation;
+pub(crate) mod preparation;
 mod presentation;
 mod presented;
 mod prompt_header;

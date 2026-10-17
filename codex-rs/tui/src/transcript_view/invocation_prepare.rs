@@ -5,6 +5,7 @@ use crate::tui::FrameRequester;
 
 impl TranscriptView {
     pub(crate) fn enable_background_preparation(&mut self, frames: FrameRequester) {
+        frames.enable_background_preparation();
         self.cache.frames = Some(frames);
     }
 

@@ -73,6 +73,11 @@ use super::table_holdback::table_holdback_state;
 // StreamCore — shared bookkeeping for both stream controllers
 // ---------------------------------------------------------------------------
 
+#[path = "background.rs"]
+mod background;
+#[path = "immutable_rows.rs"]
+mod immutable_rows;
+
 /// Shared state and logic for the two-region streaming model.
 ///
 /// Both [`StreamController`] (agent messages) and [`PlanStreamController`]
@@ -538,7 +543,7 @@ impl StreamCore {
         self.render.lines.len().saturating_sub(stable_prefix_len)
     }
 
-    /// Render the stable prefix before `source_start` and return its line count.
+    /// Count the prefix before `source_start`, retaining completed blocks rather than rendering them again.
     ///
     /// This value is cached because dense table streams can call into this path
     /// for every committed line while the header/delimiter/body are still
@@ -559,14 +564,25 @@ impl StreamCore {
 
         let render_start = Instant::now();
         let source = self.state.collector.committed_source();
+        let source_start = source_start.min(source.len());
+        let (base_source, base_lines) = if source_start >= self.render.stable_source_len {
+            (
+                self.render.stable_source_len,
+                self.render.stable_rendered_len,
+            )
+        } else {
+            (0, 0)
+        };
         let stable_prefix_render = render_markdown_agent_with_list_spacing(
-            &source[..source_start.min(source.len())],
+            &source[base_source..source_start],
             self.width,
             Some(self.cwd.as_path()),
             self.inline_visualization_context.as_ref(),
             self.render.list_spacing,
         );
-        let stable_prefix_len = stable_prefix_render.len();
+        let stable_prefix_len = base_lines
+            + usize::from(base_lines > 0 && !stable_prefix_render.is_empty())
+            + stable_prefix_render.len();
         tracing::trace!(
             source_start,
             width = ?self.width,
@@ -587,7 +603,7 @@ impl StreamCore {
 ///
 /// Wraps [`StreamCore`] and adds `AgentMessageCell` emission styling.
 pub(crate) struct StreamController {
-    core: StreamCore,
+    core: background::Core,
     header_emitted: bool,
     pub(crate) timestamp: Option<history_cell::HistoryTimestamp>,
     pub(crate) item_id: Option<String>,
@@ -596,7 +612,7 @@ pub(crate) struct StreamController {
 impl StreamController {
     /// Select spacing before the first delta; final source-backed cells choose their own layout.
     pub(crate) fn with_list_spacing(mut self, list_spacing: ListSpacing) -> Self {
-        self.core.render.list_spacing = list_spacing;
+        self.core.set_list_spacing(list_spacing);
         self
     }
 
@@ -622,7 +638,7 @@ impl StreamController {
         inline_visualization_context: Option<InlineVisualizationContext>,
     ) -> Self {
         Self {
-            core: StreamCore::new(width, cwd, render_mode, inline_visualization_context),
+            core: StreamCore::new(width, cwd, render_mode, inline_visualization_context).into(),
             header_emitted: false,
             timestamp: None,
             item_id: None,
@@ -679,7 +695,7 @@ impl StreamController {
 
     #[inline]
     pub(crate) fn tail_starts_stream(&self) -> bool {
-        !self.header_emitted && self.core.enqueued_stable_len == 0
+        !self.header_emitted && self.core.enqueued_lines() == 0
     }
 
     #[inline]
@@ -689,18 +705,21 @@ impl StreamController {
 
     /// Completion must repair emitted rows when reference definitions can change earlier blocks.
     pub(crate) fn needs_scrollback_reflow(&self) -> bool {
-        if self.has_live_tail() || self.core.render.has_reference_link_definition {
+        let Some(core) = self.core.inline() else {
+            return true;
+        };
+        if self.has_live_tail() || core.render.has_reference_link_definition {
             return true;
         }
-        if self.core.render_mode == HistoryRenderMode::Raw
-            || self.core.state.collector.pending_source().is_empty()
+        if core.render_mode == HistoryRenderMode::Raw
+            || core.state.collector.pending_source().is_empty()
         {
             return false;
         }
         let source = format!(
             "{}{}",
-            self.core.state.collector.committed_source(),
-            self.core.state.collector.pending_source(),
+            core.state.collector.committed_source(),
+            core.state.collector.pending_source()
         );
         pulldown_cmark::Parser::new(&source)
             .reference_definitions()
@@ -710,8 +729,7 @@ impl StreamController {
     }
 
     pub(crate) fn clear_queue(&mut self) {
-        self.core.state.clear_queue();
-        self.core.enqueued_stable_len = self.core.emitted_stable_len;
+        self.core.clear_queue();
     }
 
     pub(crate) fn set_width(&mut self, width: Option<usize>) {
@@ -726,6 +744,7 @@ impl StreamController {
         if lines.is_empty() {
             return None;
         }
+        self.header_emitted |= self.core.has_rewrap_rows();
         let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, {
             let header_emitted = self.header_emitted;
             self.header_emitted = true;
@@ -733,7 +752,10 @@ impl StreamController {
         });
         cell.timestamp = self.timestamp;
         cell.item_id = self.item_id.clone();
-        Some(Box::new(cell))
+        Some(
+            self.core
+                .wrap(Box::new(cell), history_cell::agent_prefix(true).width()),
+        )
     }
 }
 // ---------------------------------------------------------------------------
@@ -745,7 +767,7 @@ impl StreamController {
 /// Wraps [`StreamCore`] and adds plan-specific header, indentation, and
 /// background styling.
 pub(crate) struct PlanStreamController {
-    core: StreamCore,
+    core: background::Core,
     header_emitted: bool,
     top_padding_emitted: bool,
     pub(crate) item_id: Option<String>,
@@ -754,7 +776,7 @@ pub(crate) struct PlanStreamController {
 impl PlanStreamController {
     /// Select spacing before the first delta; no list-specific holdback is needed.
     pub(crate) fn with_list_spacing(mut self, list_spacing: ListSpacing) -> Self {
-        self.core.render.list_spacing = list_spacing;
+        self.core.set_list_spacing(list_spacing);
         self
     }
 
@@ -770,7 +792,8 @@ impl PlanStreamController {
                 cwd,
                 render_mode,
                 /*inline_visualization_context*/ None,
-            ),
+            )
+            .into(),
             header_emitted: false,
             top_padding_emitted: false,
             item_id: None,
@@ -831,7 +854,7 @@ impl PlanStreamController {
 
     #[inline]
     pub(crate) fn tail_starts_stream(&self) -> bool {
-        !self.header_emitted && self.core.enqueued_stable_len == 0
+        !self.header_emitted && self.core.enqueued_lines() == 0
     }
 
     pub(crate) fn current_tail_display_lines(&self) -> Vec<HyperlinkLine> {
@@ -847,8 +870,7 @@ impl PlanStreamController {
     }
 
     pub(crate) fn clear_queue(&mut self) {
-        self.core.state.clear_queue();
-        self.core.enqueued_stable_len = self.core.emitted_stable_len;
+        self.core.clear_queue();
     }
 
     pub(crate) fn set_width(&mut self, width: Option<usize>) {
@@ -857,6 +879,13 @@ impl PlanStreamController {
 
     pub(crate) fn set_render_mode(&mut self, render_mode: HistoryRenderMode) {
         self.core.set_render_mode(render_mode);
+    }
+
+    pub(crate) fn emit_prepared(
+        &mut self,
+        lines: Vec<HyperlinkLine>,
+    ) -> Option<Box<dyn HistoryCell>> {
+        self.emit(lines, false)
     }
 
     fn emit(
@@ -868,6 +897,8 @@ impl PlanStreamController {
             return None;
         }
 
+        self.header_emitted |= self.core.has_rewrap_rows();
+        self.top_padding_emitted |= self.core.has_rewrap_rows();
         let is_stream_continuation = self.header_emitted;
         let out_lines = self.render_display_lines(lines, include_bottom_padding);
         self.header_emitted = true;
@@ -875,7 +906,7 @@ impl PlanStreamController {
 
         let mut cell = history_cell::new_proposed_plan_stream(out_lines, is_stream_continuation);
         cell.item_id = self.item_id.clone();
-        Some(Box::new(cell))
+        Some(self.core.wrap(Box::new(cell), 4))
     }
 
     fn render_display_lines(
@@ -1082,11 +1113,15 @@ mod tests {
         let mut ctrl = stream_controller(Some(80));
         assert!(!ctrl.has_live_tail());
 
-        ctrl.core.render.lines = vec![Line::from("tail line").into()];
-        ctrl.core.enqueued_stable_len = 0;
+        if let background::Core::Inline(core) = &mut ctrl.core {
+            core.render.lines = vec![Line::from("tail line").into()];
+            core.enqueued_stable_len = 0;
+        }
         assert!(ctrl.has_live_tail());
 
-        ctrl.core.enqueued_stable_len = 1;
+        if let background::Core::Inline(core) = &mut ctrl.core {
+            core.enqueued_stable_len = 1;
+        }
         assert!(!ctrl.has_live_tail());
     }
 
@@ -1095,11 +1130,15 @@ mod tests {
         let mut ctrl = plan_stream_controller(Some(80));
         assert!(!ctrl.has_live_tail());
 
-        ctrl.core.render.lines = vec![Line::from("tail line").into()];
-        ctrl.core.enqueued_stable_len = 0;
+        if let background::Core::Inline(core) = &mut ctrl.core {
+            core.render.lines = vec![Line::from("tail line").into()];
+            core.enqueued_stable_len = 0;
+        }
         assert!(ctrl.has_live_tail());
 
-        ctrl.core.enqueued_stable_len = 1;
+        if let background::Core::Inline(core) = &mut ctrl.core {
+            core.enqueued_stable_len = 1;
+        }
         assert!(!ctrl.has_live_tail());
     }
 
@@ -1132,7 +1171,12 @@ mod tests {
 
             let mut expected = Vec::new();
             crate::markdown::append_markdown_agent(
-                ctrl.core.state.collector.committed_source(),
+                ctrl.core
+                    .inline()
+                    .unwrap()
+                    .state
+                    .collector
+                    .committed_source(),
                 Some(width),
                 &mut expected,
             );
@@ -1824,11 +1868,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn controller_live_view_matches_render_during_interleaved_table_streaming() {
+    #[tokio::test]
+    async fn controller_live_view_matches_render_during_interleaved_table_streaming() {
         let source = "Project updates are easier to scan when narrative and structured data alternate.\n\n| Focus Area | Owner | Priority | Status |\n|---|---|---|---|\n| Authentication cleanup | Maya | High | 80% |\n| CLI error messages | Jordan | Medium | 55% |\n| Docs refresh | Lee | Low | 30% |\n\nThe first checkpoint shows progress, but we still have open risks.\n\n| Task | Command / Artifact | Due | State |\n|---|---|---|---|\n| Run unit tests | `cargo test -p codex-core` | Today | ✅ |\n| Snapshot review | `cargo insta pending-snapshots -p codex-tui` | Today | ⏳ |\n| Changelog draft | Release template (https://replacechangelog.com/) | Tomorrow | 📝 |\n\nFinal sign-off criteria are summarized below.\n";
         let width = Some(72usize);
         let mut ctrl = stream_controller(width);
+        let (revisions, mut ready_revisions) = tokio::sync::mpsc::unbounded_channel();
+        let mut background = stream_controller(width)
+            .with_background(crate::tui::FrameRequester::test_dummy())
+            .with_rewraps(std::sync::Arc::new(move |rows, width, mode| {
+                revisions.send((rows, width, mode)).unwrap();
+            }));
+        let mut prepared = Vec::new();
         let mut emitted_lines: Vec<Line<'static>> = Vec::new();
 
         for delta in source.split_inclusive('\n') {
@@ -1851,13 +1902,36 @@ mod tests {
                 }
             }
 
+            background.push(delta);
+            background.core.settle().await;
+            let (cell, idle) = background.on_commit_tick_batch(usize::MAX);
+            assert!(idle);
+            if let Some(cell) = cell {
+                prepared.extend(cell.transcript_lines(u16::MAX).into_iter().map(|line| {
+                    let plain: String = line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect();
+                    Line::from(plain.chars().skip(2).collect::<String>())
+                }));
+            }
+            assert_eq!(
+                prepared, emitted_lines,
+                "worker must publish every baseline stable row after {delta:?}"
+            );
             let mut visible = emitted_lines.clone();
             visible.extend(visible_lines(ctrl.current_tail_lines()));
             let visible_plain = lines_to_plain_strings(&visible);
 
             let mut expected = Vec::new();
             crate::markdown::append_markdown_agent(
-                ctrl.core.state.collector.committed_source(),
+                ctrl.core
+                    .inline()
+                    .unwrap()
+                    .state
+                    .collector
+                    .committed_source(),
                 /*width*/ width,
                 &mut expected,
             );
@@ -1867,6 +1941,207 @@ mod tests {
                 visible_plain, expected_plain,
                 "live view diverged after delta: {delta:?}"
             );
+        }
+        background.set_width(Some(48));
+        background.core.settle().await;
+        let (rows, width, mode) = ready_revisions.recv().await.unwrap();
+        assert_eq!(width, Some(48));
+        assert_eq!(mode, HistoryRenderMode::Rich);
+        let expected = crate::markdown::render_markdown_agent_with_list_spacing(
+            source,
+            width,
+            Some(&test_cwd()),
+            None,
+            ListSpacing::AfterMultiline,
+        );
+        assert_eq!(
+            hyperlink_lines_to_plain_strings(&rows),
+            hyperlink_lines_to_plain_strings(&expected)
+        );
+        assert!(background.on_commit_tick_batch(usize::MAX).0.is_none());
+        let emphasis = "\n**open emphasis\n";
+        background.push(emphasis);
+        background.core.settle().await;
+        let (held, _) = background.on_commit_tick_batch(usize::MAX);
+        assert!(held.is_none(), "open emphasis cannot become immutable rows");
+        let closed = "closed**\n\n";
+        background.push(closed);
+        background.core.settle().await;
+        let (released, _) = background.on_commit_tick_batch(usize::MAX);
+        let released = released.expect("closed emphasis streams without waiting for finalization");
+        assert!(
+            released.is_stream_continuation(),
+            "rewrap already emitted the first-row header"
+        );
+        let reference = "[unresolved][id]\n\nfollowing block\n";
+        background.push(reference);
+        background.core.settle().await;
+        let (held, _) = background.on_commit_tick_batch(usize::MAX);
+        assert!(
+            held.is_none(),
+            "an unresolved reference holds subsequent blocks too"
+        );
+        let definition = "\n[id]: https://example.com\n\n";
+        background.push(definition);
+        background.core.settle().await;
+        assert!(background.on_commit_tick_batch(usize::MAX).0.is_some());
+        let ui = std::thread::current().id();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        assert!(
+            background
+                .finish_background(move |source| {
+                    let _ = tx.send((source, std::thread::current().id()));
+                })
+                .is_ok()
+        );
+        let (final_source, worker) = rx.await.unwrap();
+        assert_eq!(
+            final_source,
+            format!("{source}{emphasis}{closed}{reference}{definition}")
+        );
+        assert_ne!(worker, ui);
+        for (paragraph, mode) in [
+            "A long unterminated paragraph streams complete words line by line without rolling or repainting earlier rows, even with **closed strong words** and a [stable link](https://example.com) followed by more ordinary prose that wraps repeatedly.",
+            "- A long list item streams complete words line by line without rolling or repainting earlier rows, even with **closed strong words** followed by more ordinary prose that wraps repeatedly.",
+        ].into_iter().flat_map(|paragraph| {
+            [HistoryRenderMode::Rich, HistoryRenderMode::Raw].map(|mode| (paragraph, mode))
+        }) {
+            let mut words = stream_controller(Some(32));
+            words.set_render_mode(mode);
+            let mut words = words.with_background(crate::tui::FrameRequester::test_dummy());
+            let render = |source: &str| match mode {
+                HistoryRenderMode::Rich => crate::markdown::render_markdown_agent_with_list_spacing(
+                    source, Some(32), Some(&test_cwd()), None, ListSpacing::AfterMultiline,
+                ),
+                HistoryRenderMode::Raw => crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
+                    &crate::history_cell::raw_lines_from_source(source).into_iter().map(HyperlinkLine::new).collect::<Vec<_>>(),
+                    crate::wrapping::RtOptions::new(32),
+                ),
+            };
+            let canonical = render(paragraph);
+            let mut immutable = Vec::new();
+            let mut arrived = String::new();
+            for word in paragraph.split_inclusive(' ') {
+                arrived.push_str(word);
+                words.push(word);
+                words.core.settle().await;
+                immutable.extend(words.core.tick_batch(usize::MAX));
+                let tail = words.current_tail_lines();
+                assert!(tail.len() <= 1, "only the growing last row remains live");
+                for (actual, expected) in immutable.iter().zip(&canonical) {
+                    assert_eq!(
+                        actual.line, expected.line,
+                        "stable prefix after {arrived:?}"
+                    );
+                    assert_eq!(actual.hyperlinks, expected.hyperlinks);
+                }
+                assert!(immutable.len() < canonical.len());
+                if let Some(tail) = tail.first() {
+                    let actual: String = tail
+                        .line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect();
+                    let expected: String = canonical[immutable.len()]
+                        .line
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect();
+                    assert!(
+                        expected.starts_with(actual.trim_end()),
+                        "tail {actual:?} is not a prefix of {expected:?}"
+                    );
+                }
+            }
+            assert!(
+                immutable.len() >= 3,
+                "unterminated long lines stream before finalization"
+            );
+            words.push("\n");
+            words.core.settle().await;
+            immutable.extend(words.core.tick_batch(usize::MAX));
+            assert_eq!(immutable.len(), canonical.len());
+            for (published, final_row) in immutable.iter().zip(&canonical) {
+                assert_eq!(published.line, final_row.line);
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            assert!(
+                words
+                    .finish_background(move |source| {
+                        let _ = tx.send(source);
+                    })
+                    .is_ok()
+            );
+            let finalized = rx.await.unwrap();
+            assert_eq!(finalized, format!("{paragraph}\n"));
+            let final_rows = render(&finalized);
+            for (published, finalized) in immutable.iter().zip(final_rows) {
+                assert_eq!(
+                    published.line, finalized.line,
+                    "finalization must preserve published rows"
+                );
+                assert_eq!(published.hyperlinks, finalized.hyperlinks);
+            }
+        }
+        for suffix in [
+            "| Value\n|---|---|\n| item | data |\n\nFollowing block.\n",
+            "\n---\n\n",
+        ] {
+            let prefix = "A long initially plain paragraph publishes stable rows before its structure changes ";
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut revised = stream_controller(Some(32))
+                .with_background(crate::tui::FrameRequester::test_dummy())
+                .with_rewraps(std::sync::Arc::new(move |rows, _, _| {
+                    tx.send(rows).unwrap();
+                }));
+            revised.push(prefix);
+            revised.core.settle().await;
+            assert!(!revised.core.tick_batch(usize::MAX).is_empty());
+            revised.set_width(Some(24));
+            revised.core.settle().await;
+            let mut resized = rx.recv().await.unwrap();
+            resized.extend(revised.current_tail_lines());
+            let canonical = crate::markdown::render_markdown_agent_with_list_spacing(
+                prefix,
+                Some(24),
+                Some(&test_cwd()),
+                None,
+                ListSpacing::AfterMultiline,
+            );
+            assert_eq!(
+                hyperlink_lines_to_plain_strings(&resized),
+                hyperlink_lines_to_plain_strings(&canonical)
+            );
+            if suffix.starts_with('|') {
+                let held = revised.current_tail_lines();
+                revised.push("|");
+                revised.core.settle().await;
+                assert!(revised.core.tick_batch(usize::MAX).is_empty());
+                assert_eq!(
+                    revised.current_tail_lines(),
+                    held,
+                    "late pipe freezes the line"
+                );
+                revised.push(&suffix[1..]);
+            } else {
+                revised.push(suffix);
+            }
+            revised.core.settle().await;
+            let replacement = rx.recv().await.unwrap();
+            let canonical = crate::markdown::render_markdown_agent_with_list_spacing(
+                &format!("{prefix}{suffix}"),
+                Some(24),
+                Some(&test_cwd()),
+                None,
+                ListSpacing::AfterMultiline,
+            );
+            assert_eq!(
+                hyperlink_lines_to_plain_strings(&replacement),
+                hyperlink_lines_to_plain_strings(&canonical)
+            );
+            assert!(revised.core.tick_batch(usize::MAX).is_empty());
         }
         assert!(
             !ctrl.has_live_tail(),

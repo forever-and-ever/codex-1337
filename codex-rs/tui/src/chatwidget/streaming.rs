@@ -66,7 +66,9 @@ impl ChatWidget {
     /// Preserve received answer and plan source before ordinary turn termination.
     pub(super) fn flush_answer_and_plan_streams(&mut self) {
         self.flush_answer_stream_with_separator();
-        if let Some(mut controller) = self.plan_stream_controller.take() {
+        if let Some(controller) = self.plan_stream_controller.take()
+            && let Some(mut controller) = self.prepare_plan_stream(controller, None)
+        {
             self.clear_active_stream_tail();
             let (cell, source) = controller.finalize();
             if let Some(cell) = cell {
@@ -90,7 +92,9 @@ impl ChatWidget {
 
     fn flush_answer_stream(&mut self, completed_message: Option<&str>) {
         let had_stream_controller = self.stream_controller.is_some();
-        if let Some(mut controller) = self.stream_controller.take() {
+        if let Some(controller) = self.stream_controller.take()
+            && let Some(mut controller) = self.prepare_answer_stream(controller, completed_message)
+        {
             let needs_scrollback_reflow = controller.needs_scrollback_reflow();
             self.clear_active_stream_tail();
             let (cell, streamed_source) = controller.finalize();
@@ -236,20 +240,24 @@ impl ChatWidget {
             // Before starting a plan stream, flush any active exec cell group.
             self.flush_unified_exec_wait_streak();
             self.flush_active_cell();
-            self.plan_stream_controller = Some(
-                PlanStreamController::new(
-                    self.current_stream_width(/*reserved_cols*/ 4),
-                    &self.config.cwd,
-                    self.history_render_mode(),
-                )
-                .with_list_spacing(
-                    if self.local_settings.transcript_mode.is_owned() {
-                        ListSpacing::Compact
-                    } else {
-                        ListSpacing::AfterMultiline
-                    },
-                ),
-            );
+            let mut controller = PlanStreamController::new(
+                self.current_stream_width(/*reserved_cols*/ 4),
+                &self.config.cwd,
+                self.history_render_mode(),
+            )
+            .with_list_spacing(if self.local_settings.transcript_mode.is_owned() {
+                ListSpacing::Compact
+            } else {
+                ListSpacing::AfterMultiline
+            });
+            controller.item_id = self.transcript.streaming_plan_item.clone();
+            if self.background_stream_enabled(&controller.item_id) {
+                self.add_to_history(history_cell::StreamAnchorCell {
+                    item_id: controller.item_id.clone().expect("stream item"),
+                });
+                controller = self.enable_plan_preparation(controller);
+            }
+            self.plan_stream_controller = Some(controller);
         }
         if let Some(controller) = self.plan_stream_controller.as_mut() {
             controller.item_id = self.transcript.streaming_plan_item.clone();
@@ -277,8 +285,14 @@ impl ChatWidget {
             (text.clone(), text)
         };
         if !plan_text.trim().is_empty() {
-            self.transcript
-                .record_agent_markdown(plan_text.clone(), source);
+            if !self
+                .plan_stream_controller
+                .as_ref()
+                .is_some_and(PlanStreamController::is_background)
+            {
+                self.transcript
+                    .record_agent_markdown(plan_text.clone(), source);
+            }
             self.transcript.latest_proposed_plan_markdown = Some(plan_text.clone());
         }
         // Plan commit ticks can hide the status row; remember whether we streamed plan output so
@@ -288,7 +302,18 @@ impl ChatWidget {
         self.transcript.plan_item_active = false;
         self.transcript.saw_plan_item_this_turn = true;
         let (finalized_streamed_cell, consolidated_plan_source) =
-            if let Some(mut controller) = self.plan_stream_controller.take() {
+            if let Some(controller) = self.plan_stream_controller.take() {
+                let Some(mut controller) =
+                    self.prepare_plan_stream(controller, Some(plan_text.clone()))
+                else {
+                    self.status_state.pending_status_indicator_restore = true;
+                    self.maybe_restore_status_indicator_after_stream_idle();
+                    self.request_pending_usage_output_insertion_after_stream_shutdown();
+                    if self.stream_controllers_idle() {
+                        self.app_event_tx.send(AppEvent::StopCommitAnimation);
+                    }
+                    return;
+                };
                 let source_only = controller.has_live_tail() && controller.tail_starts_stream();
                 self.clear_active_stream_tail();
                 let (cell, source) = controller.finalize();
@@ -418,6 +443,26 @@ impl ChatWidget {
         for content in &item.content {
             match content {
                 AgentMessageContent::Text { text } => message.push_str(text),
+            }
+        }
+        if !from_replay && self.background_stream_enabled(&Some(item.id.clone())) {
+            if self.stream_controller.is_none() {
+                self.handle_streaming_delta(String::new());
+            }
+            if self
+                .stream_controller
+                .as_ref()
+                .is_some_and(StreamController::is_background)
+            {
+                self.finalize_completed_assistant_message(Some(&message));
+                self.transcript.agent_timestamp = None;
+                self.status_state.pending_status_indicator_restore = item.questions.is_some()
+                    || match item.phase {
+                        Some(MessagePhase::FinalAnswer) => self.input_queue.pending_steer.is_some(),
+                        Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) | None => true,
+                    };
+                self.maybe_restore_status_indicator_after_stream_idle();
+                return;
             }
         }
         let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
@@ -606,6 +651,12 @@ impl ChatWidget {
             });
             controller.timestamp = timestamp;
             controller.item_id = self.transcript.streaming_agent_item.clone();
+            if self.background_stream_enabled(&controller.item_id) {
+                self.add_to_history(history_cell::StreamAnchorCell {
+                    item_id: controller.item_id.clone().expect("stream item"),
+                });
+                controller = self.enable_answer_preparation(controller);
+            }
             self.stream_controller = Some(controller);
         }
         if let Some(controller) = self.stream_controller.as_mut() {
