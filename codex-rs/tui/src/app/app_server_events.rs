@@ -402,31 +402,6 @@ impl App {
                 }
                 return;
             }
-            ServerNotification::ExternalAgentConfigImportCompleted(notification) => {
-                let should_report_completion = app_server_client
-                    .consume_external_agent_config_import_completion(&notification.import_id);
-                let notification = notification.clone();
-                if app_server_client.uses_remote_workspace() {
-                    self.finish_external_config_import(
-                        app_server_client,
-                        notification,
-                        should_report_completion,
-                    );
-                } else {
-                    self.queue_config_refresh(
-                        "external agent config import",
-                        move |app, server, _result| {
-                            app.finish_external_config_import(
-                                server,
-                                notification,
-                                should_report_completion,
-                            );
-                            Ok(())
-                        },
-                    );
-                }
-                return;
-            }
             ServerNotification::AppListUpdated(notification) => {
                 if self.current_displayed_thread_id().is_some() {
                     self.chat_widget

@@ -50,8 +50,6 @@ mod experimental_api;
 mod experimental_feature_list;
 #[path = "extension_lease.rs"]
 mod extension_lease;
-mod external_agent_config;
-mod external_agent_import_sync;
 mod feedback;
 mod fs;
 #[path = "gateway_oauth_tests.rs"]

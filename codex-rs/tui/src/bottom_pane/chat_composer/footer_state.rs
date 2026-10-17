@@ -83,7 +83,6 @@ pub(crate) struct ComposerRenderOptions<'a> {
     pub(crate) composer_gap: Option<&'a crate::bottom_pane::ComposerGap>,
     pub(crate) working_tip: Option<&'a crate::turn_tip::TurnTip>,
     pub(crate) warning_count: usize,
-    pub(crate) textarea_right_reserve: u16,
     pub(crate) prompt_cache: super::PromptCacheGlyphs,
     pub(crate) alarms: &'a [codex_app_server_protocol::AlarmSummary],
     /// Keep configured status below the composer, separate from hints.
@@ -380,7 +379,6 @@ pub(super) struct FooterState {
     pub(super) context_window_pending: bool,
     pub(super) collaboration_mode_indicator: Option<CollaborationModeIndicator>,
     pub(super) goal_status_indicator: Option<GoalStatusIndicator>,
-    pub(super) ide_context_active: bool,
     pub(super) status_line_value: Option<Line<'static>>,
     pub(super) status_line_hyperlink_url: Option<String>,
     pub(super) status_line_enabled: bool,

@@ -5,6 +5,7 @@
 //! merge/remap behavior, display projection, and the small compare key used to
 //! suppress duplicate rows for pending steers.
 
+use crate::prompt_request::extract_prompt_request_with_offset;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -760,8 +761,7 @@ impl ChatWidget {
             .map(|reply| reply.question_item_id)
             .collect();
         let reply_text = crate::async_question_reply::display_text(&message);
-        let (message, prompt_request_offset) =
-            crate::ide_context::extract_prompt_request_with_offset(&message);
+        let (message, prompt_request_offset) = extract_prompt_request_with_offset(&message);
         if let Some(message) =
             reply_text.or_else(|| crate::async_question_reply::display_text(message))
         {

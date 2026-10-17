@@ -9,13 +9,11 @@ fn rows(
     composer: &ChatComposer,
     width: u16,
     prompt_cache: PromptCacheGlyphs,
-    reserve: u16,
     alarms: &[codex_app_server_protocol::AlarmSummary],
 ) -> String {
     let options = composer.resolve_render_options(ComposerRenderOptions {
         prompt_cache,
         alarms,
-        textarea_right_reserve: reserve,
         ..Default::default()
     });
     let area = Rect::new(
@@ -38,8 +36,7 @@ fn rows(
         .join("\n")
 }
 
-// The radiator and its deadline precede the snowflake in the bottom padding row, and both
-// step left of the ambient pet's reserve.
+// The radiator and its deadline precede the snowflake in the bottom padding row.
 #[test]
 fn warming_and_cold_glyphs_share_the_bottom_padding_row() {
     let (tx, _rx) = unbounded_channel();
@@ -82,29 +79,13 @@ fn warming_and_cold_glyphs_share_the_bottom_padding_row() {
         },
     ];
     insta::assert_snapshot!(format!(
-        "{}\n---\n{}\n---\n{}\n---\n{}",
-        rows(
-            &composer,
-            /*width*/ 48,
-            glyphs,
-            /*reserve*/ 0,
-            &[]
-        ),
-        rows(
-            &composer,
-            /*width*/ 48,
-            glyphs,
-            /*reserve*/ 8,
-            &[]
-        ),
-        rows(
-            &composer, /*width*/ 68, glyphs, /*reserve*/ 8, &alarms
-        ),
+        "{}\n---\n{}\n---\n{}",
+        rows(&composer, /*width*/ 48, glyphs, &[]),
+        rows(&composer, /*width*/ 68, glyphs, &alarms),
         rows(
             &composer,
             /*width*/ 48,
             PromptCacheGlyphs::default(),
-            /*reserve*/ 0,
             &alarms[1..]
         )
     ));

@@ -447,7 +447,7 @@ impl App {
             continue_to_start = previous_state == TranscriptHistoryState::LoadingBeginning
                 && self.scrollback_has_older_history;
         } else {
-            let wrap_width = self.chat_widget.history_wrap_width(width);
+            let wrap_width = width.max(1);
             let rendered_rows = self
                 .render_transcript_lines_for_reflow(wrap_width)
                 .lines
