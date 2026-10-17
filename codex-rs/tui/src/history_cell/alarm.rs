@@ -106,9 +106,7 @@ impl HistoryCell for AlarmSoundingCell {
         };
         prefix_lines(
             adaptive_wrap_lines(
-                std::iter::once(self.heading())
-                    .chain(self.body(tail))
-                    .collect::<Vec<_>>(),
+                std::iter::once(self.heading()).chain(self.body(tail)),
                 RtOptions::new(width.saturating_sub(2).max(1) as usize),
             ),
             "◷ ".into(),

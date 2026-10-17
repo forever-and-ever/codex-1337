@@ -259,6 +259,10 @@ impl McpToolCallCell {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "The MCP marker retains its established distinct foreground within the fork invocation header."
+    )]
     fn render_hyperlink_lines(
         &self,
         width: u16,

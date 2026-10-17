@@ -23,6 +23,10 @@ struct Pool {
 }
 
 impl Pool {
+    #[expect(
+        clippy::expect_used,
+        reason = "The shared preparation pool cannot initialize without its mandatory worker threads."
+    )]
     fn get() -> &'static Self {
         static POOL: OnceLock<Pool> = OnceLock::new();
         POOL.get_or_init(|| {
@@ -148,6 +152,10 @@ impl<T: Send + 'static> Pending<T> {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The live task retains its cancellation owner until its worker returns a result."
+    )]
     pub(crate) async fn wait(mut self) -> T {
         if let Some(job) = self.queued.take() {
             self.requests

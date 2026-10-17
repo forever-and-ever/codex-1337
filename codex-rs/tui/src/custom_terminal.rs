@@ -446,17 +446,7 @@ where
         let cursor_position = frame.cursor_position;
         let cursor_style = frame.cursor_style;
 
-        let invalidate = self.output_invalidation.take();
-        if output::capture_frame(
-            self.current_buffer(),
-            invalidate,
-            screen_size,
-            cursor_position,
-            cursor_style,
-        ) {
-            self.last_known_cursor_pos = cursor_position.unwrap_or(self.last_known_cursor_pos);
-            self.hidden_cursor = cursor_position.is_none();
-            self.swap_buffers();
+        if self.capture_output_frame(screen_size, cursor_position, cursor_style) {
             return Ok(());
         }
 
@@ -522,13 +512,7 @@ where
     /// This is the position of the cursor after the last draw call.
     #[allow(dead_code)]
     pub fn get_cursor_position(&mut self) -> io::Result<Position> {
-        if output::is_active() {
-            return crate::terminal_probe::cursor_position(crate::terminal_probe::DEFAULT_TIMEOUT)?
-                .ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::TimedOut, "terminal cursor query timed out")
-                });
-        }
-        self.backend.get_cursor_position()
+        self.output_cursor_position()
     }
 
     /// Sets the cursor position.
@@ -737,7 +721,7 @@ fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
 
     for (x, y, cell) in cell_updates {
         let row = usize::from(y - a.area.y);
-        if x - a.area.x <= last_nonblank_columns[row] {
+        if output::is_painted_column(x, a.area.x, last_nonblank_columns[row]) {
             updates.push(DrawCommand::Put {
                 x,
                 y,

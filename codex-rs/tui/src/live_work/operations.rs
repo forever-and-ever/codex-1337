@@ -80,10 +80,10 @@ impl Revision {
         if matches!(slot, Self::Terminal(_)) {
             return;
         }
-        if work.is_none() {
+        let Some(work) = work else {
             *slot = Self::Terminal(Instant::now());
             return;
-        }
+        };
         if let Self::Pending {
             custody: previous, ..
         } = slot
@@ -109,7 +109,7 @@ impl Revision {
         } = slot
         {
             *previous_source = source;
-            *previous_work = work.expect("pending revision");
+            *previous_work = work;
         }
     }
 }

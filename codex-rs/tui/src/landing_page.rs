@@ -10,6 +10,10 @@ use ratatui::widgets::Widget;
 use crate::style::accent_style;
 use crate::style::secondary_text_style;
 
+#[expect(
+    clippy::expect_used,
+    reason = "The fixed landing-page labels and row count fit within terminal u16 dimensions."
+)]
 pub(crate) fn render(available: Rect, buffer: &mut Buffer) {
     let area = available.intersection(buffer.area);
     if area.width < 7 || area.height < 4 {
