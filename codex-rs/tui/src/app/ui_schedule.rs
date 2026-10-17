@@ -55,7 +55,7 @@ impl FrameDemand {
 }
 
 pub(in crate::app) struct UiSchedule {
-    input: VecDeque<TuiEvent>,
+    input: VecDeque<(Option<crate::ui_latency::InputStamp>, TuiEvent)>,
     frame: FrameDemand,
     last_frame: Option<FrameTiming>,
     events_started: Instant,
@@ -91,16 +91,16 @@ impl UiSchedule {
                 };
             }
             Some(event) => {
-                crate::ui_latency::input_consumed(&event);
+                let stamp = crate::ui_latency::input_consumed(&event);
                 if matches!(event, TuiEvent::Resume) {
                     self.frame = FrameDemand::Awaiting(Urgency::Resume);
                 }
                 if matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Moved)
-                    && matches!(self.input.back(), Some(TuiEvent::Mouse(mouse)) if mouse.kind == MouseEventKind::Moved)
+                    && matches!(self.input.back(), Some((_, TuiEvent::Mouse(mouse))) if mouse.kind == MouseEventKind::Moved)
                 {
                     self.input.pop_back();
                 }
-                self.input.push_back(event);
+                self.input.push_back((stamp, event));
             }
             None => self.stream_closed = true,
         }
@@ -126,11 +126,14 @@ impl UiSchedule {
         }
     }
 
-    pub(in crate::app) fn next_input(&mut self, admitted: bool) -> Option<TuiEvent> {
+    pub(in crate::app) fn next_input(
+        &mut self,
+        admitted: bool,
+    ) -> Option<(Option<crate::ui_latency::InputStamp>, TuiEvent)> {
         if let Some(index) = self
             .input
             .iter()
-            .position(|event| matches!(event, TuiEvent::Resume))
+            .position(|(_, event)| matches!(event, TuiEvent::Resume))
         {
             return self.input.remove(index);
         }
@@ -138,18 +141,18 @@ impl UiSchedule {
             self.input.pop_front()
         } else {
             // An interrupt cannot be trapped behind replay or a thread-switch reset.
-            let index = self.input.iter().position(|event| {
+            let index = self.input.iter().position(|(_, event)| {
                 matches!(event, TuiEvent::Key(key)
                         if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
                             && key.modifiers.contains(KeyModifiers::CONTROL)
                             && matches!(key.code, KeyCode::Char('c' | 'C')))
             })?;
-            if matches!(self.input.get(index), Some(TuiEvent::Key(_)))
+            if matches!(self.input.get(index), Some((_, TuiEvent::Key(_))))
                 && self
                     .input
                     .iter()
                     .take(index)
-                    .any(|event| matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_)))
+                    .any(|(_, event)| matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_)))
             {
                 // Ctrl+C first clears typeahead; it must not leapfrog it into an interrupt.
                 self.input.drain(..=index);

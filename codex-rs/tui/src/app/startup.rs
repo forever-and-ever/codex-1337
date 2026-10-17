@@ -1174,7 +1174,7 @@ See the Codex keymap documentation for supported actions and examples."
                         waiting_for_initial_session_configured,
                         waiting_for_initial_session_header,
                     );
-                    let Some(event) = schedule.next_input(admitted) else {
+                    let Some((stamp, event)) = schedule.next_input(admitted) else {
                         break;
                     };
                     let _handler_stage = enter(Stage::TerminalEvent);
@@ -1192,6 +1192,9 @@ See the Codex keymap documentation for supported actions and examples."
                             &app_event_rx,
                         )
                         .await;
+                    if let Some(stamp) = stamp {
+                        crate::ui_latency::input_handled(stamp);
+                    }
                     if interactive {
                         schedule.input_handled();
                     }

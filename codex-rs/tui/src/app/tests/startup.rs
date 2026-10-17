@@ -475,14 +475,17 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         schedule.receive(Some(TuiEvent::Paste("after Ctrl+C".into())));
         assert!(schedule.next_input(false).is_none());
         assert!(
-            matches!(schedule.next_input(true), Some(TuiEvent::Paste(text)) if text == "after Ctrl+C"),
+            matches!(schedule.next_input(true), Some((_, TuiEvent::Paste(text))) if text == "after Ctrl+C"),
             "Ctrl+C clears earlier typing without discarding later input"
         );
         schedule.receive(Some(TuiEvent::Paste("survives suspend".into())));
         schedule.receive(Some(TuiEvent::Resume));
-        assert!(matches!(schedule.next_input(false), Some(TuiEvent::Resume)));
+        assert!(matches!(
+            schedule.next_input(false),
+            Some((_, TuiEvent::Resume))
+        ));
         assert!(
-            matches!(schedule.next_input(true), Some(TuiEvent::Paste(text)) if text == "survives suspend")
+            matches!(schedule.next_input(true), Some((_, TuiEvent::Paste(text))) if text == "survives suspend")
         );
 
         app.startup_protected_input_boundary = false;
