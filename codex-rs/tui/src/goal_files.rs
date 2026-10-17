@@ -123,12 +123,7 @@ pub(crate) async fn materialize_goal_draft(
             let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
                 .await?
                 .join(GOAL_FILE_NAME);
-            let reference = match objective_file_reference(&path) {
-                Ok(reference) => reference,
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            let reference = objective_file_reference(&path)?;
             write_goal_file(app_server, path.clone(), objective.as_bytes().to_vec()).await?;
             objective = reference;
         }

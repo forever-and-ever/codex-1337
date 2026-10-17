@@ -30,8 +30,12 @@ impl App {
             ));
         }
 
-        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
-        self.request_server(app_server, UiRequestScope::Connection, UiRequestKind::Mutation,
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        self.request_server(
+            app_server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
             "Save feature for new threads",
             move |handle| crate::config_update::write_config_batch_typed(handle, edits),
             move |app, _, result| {
@@ -45,12 +49,13 @@ impl App {
                     },
                     Err(error) => {
                         app.app_event_tx.send(AppEvent::FollowTranscript);
-                        Box::new(history_cell::new_error_event(format!("Failed to save {label} setting: {}", super::model_defaults::request_failure_message(error))))
+                        Box::new(history_cell::new_error_event(format!("Failed to save {label} setting: {}", error)))
                     },
                 };
                 app.app_event_tx.send(AppEvent::InsertHistoryCell(notice));
                 Ok(())
-            });
+            },
+        );
     }
 
     pub(super) fn fetch_experimental_features(

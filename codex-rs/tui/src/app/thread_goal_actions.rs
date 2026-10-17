@@ -15,13 +15,19 @@ use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus;
 use codex_protocol::ThreadId;
 
-use super::model_defaults::request_failure_message;
-use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
-use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
-use codex_app_server_protocol::{
-    ClientRequest, RequestId, ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalGetParams,
-    ThreadGoalGetResponse, ThreadGoalMutationOrigin, ThreadGoalSetParams, ThreadGoalSetResponse,
-};
+use super::turn_submissions::ui_requests::UiRequestKind;
+use super::turn_submissions::ui_requests::UiRequestScope;
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::TypedRequestError;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadGoalClearParams;
+use codex_app_server_protocol::ThreadGoalClearResponse;
+use codex_app_server_protocol::ThreadGoalGetParams;
+use codex_app_server_protocol::ThreadGoalGetResponse;
+use codex_app_server_protocol::ThreadGoalMutationOrigin;
+use codex_app_server_protocol::ThreadGoalSetParams;
+use codex_app_server_protocol::ThreadGoalSetResponse;
 use uuid::Uuid;
 
 const EPHEMERAL_THREAD_GOAL_ERROR_MESSAGE: &str = concat!(
@@ -89,10 +95,9 @@ impl App {
                                 .show_resume_paused_goal_prompt(thread_id, goal.objective);
                         }
                     }
-                    Err(error) => tracing::warn!(
-                        "failed to read thread goal after resume: {}",
-                        request_failure_message(error)
-                    ),
+                    Err(error) => {
+                        tracing::warn!("failed to read thread goal after resume: {}", error)
+                    }
                 }
                 Ok(())
             },
@@ -429,10 +434,7 @@ async fn set_goal(
 }
 
 fn goal_request_error(action: &str, error: &super::turn_submissions::SubmissionFailure) -> String {
-    thread_goal_error_message(
-        action,
-        &color_eyre::eyre::eyre!(request_failure_message(error)),
-    )
+    thread_goal_error_message(action, &color_eyre::eyre::eyre!(error.to_string()))
 }
 
 fn thread_goal_error_message(action: &str, err: &color_eyre::Report) -> String {

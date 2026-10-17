@@ -3531,6 +3531,10 @@ fn update_memory_settings_updates_current_thread_memory_mode() -> Result<()> {
             /*generate_memories*/ false,
         ))
         .await;
+        // Navigating after acceptance cannot cancel the source conversation's mutation.
+        let replacement = app_server.start_thread(&app.config).await?;
+        app.active_thread_id = Some(replacement.session.thread_id);
+        let replacement_generate_memories = app.chat_widget.config_ref().memories.generate_memories;
         let mut settle_tui = crate::tui::test_support::make_test_tui()?;
         app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
             .await?;
@@ -3546,6 +3550,10 @@ fn update_memory_settings_updates_current_thread_memory_mode() -> Result<()> {
             .await
             .expect("thread memory mode should be readable");
         assert_eq!(memory_mode.as_deref(), Some("disabled"));
+        assert_eq!(
+            app.chat_widget.config_ref().memories.generate_memories,
+            replacement_generate_memories
+        );
 
         app_server.shutdown().await?;
         Ok(())

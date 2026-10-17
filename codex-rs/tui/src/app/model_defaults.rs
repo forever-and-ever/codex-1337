@@ -82,8 +82,13 @@ impl App {
             + Send
             + 'static,
     {
-        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
-        self.request_server(server, UiRequestScope::Connection, UiRequestKind::Mutation, setting,
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        self.request_server(
+            server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            setting,
             move |handle| crate::config_update::write_config_batch_typed(handle, edits),
             move |app, server, result| {
                 let result = result.map(|response| {
@@ -92,17 +97,7 @@ impl App {
                     }
                 });
                 apply(app, server, result)
-            });
-    }
-}
-
-pub(super) fn request_failure_message(
-    failure: &super::turn_submissions::SubmissionFailure,
-) -> String {
-    use super::turn_submissions::SubmissionFailure;
-    match failure {
-        SubmissionFailure::Rejected(error) => error.to_string(),
-        SubmissionFailure::Uncertain(error) => format!("outcome unknown: {error}. No retry was sent; the server may still complete the operation."),
-        SubmissionFailure::TimedOut | SubmissionFailure::Cancelled => "acknowledgement timed out; outcome unknown. No retry was sent; the server may still complete the operation.".to_string(),
+            },
+        );
     }
 }
