@@ -6,6 +6,8 @@
 use super::rate_limit_refresh::RateLimitReadStatus;
 use super::rate_limit_refresh::RateLimitRefreshOutcome;
 use super::resize_reflow::trailing_run_start;
+mod continuations;
+
 use super::*;
 use crate::app_event::AgentsOverviewAction;
 use crate::app_event::RecapTrigger;
@@ -297,13 +299,8 @@ impl App {
             }
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
-            AppEvent::Submission(event) => {
-                let retired = matches!(&event, super::turn_submissions::SubmissionEvent::Retire);
-                self.handle_submission_event(app_server, event).await;
-                if retired {
-                    self.sync_frontend_requests();
-                }
-            }
+            AppEvent::Submission(event) => self.dispatch_submission_event(app_server, event).await,
+
             AppEvent::LocalUiReply(reply) => reply.apply(self, app_server)?,
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
@@ -326,13 +323,8 @@ impl App {
             AppEvent::OpenTranscriptExportFilePrompt => {
                 self.chat_widget.show_transcript_export_file_prompt();
             }
-            AppEvent::OpenTranscriptExportMenu => {
-                if let Some(active) = &self.active_export {
-                    self.chat_widget.show_transcript_export_cancel(active.pages);
-                } else {
-                    self.chat_widget.show_transcript_export_options();
-                }
-            }
+            AppEvent::OpenTranscriptExportMenu => self.open_transcript_export_menu(),
+
             AppEvent::CancelTranscriptExport => self.cancel_transcript_export(),
             AppEvent::TranscriptExportProgress { id, pages } => self.transcript_export_progress(id, pages),
             AppEvent::FinishTranscriptExport { id, result } => self.finish_transcript_export(tui, id, result),
@@ -486,26 +478,11 @@ impl App {
                 self.start_prompt_revert(app_server, thread_id, selected_cell, prompt).await;
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::FinishPromptRevert { thread_id, selected_cell } => {
-                self.pending_thread_switch_resets -= 1;
-                if self.chat_widget.thread_id() == Some(thread_id) {
-                    if let Some(index) = self.transcript_cells.iter().position(|cell| Arc::ptr_eq(cell, &selected_cell)) {
-                        self.transcript_cells.truncate(index);
-                        self.code_mode_transcript.retain(&self.transcript_cells);
-                self.native_history.retain(&self.transcript_cells);
-                    }
-                    self.transcript_view.reset();
-                    self.scrollback_has_older_history = app_server.has_older_history(thread_id);
-                    self.deferred_history_lines.clear();
-                    self.last_rendered_history_tail = None;
-                    self.last_thread_usage_status_cell = None;
-                    self.pending_thread_usage_history_refresh = false;
-                    self.backtrack_render_pending = !tui.is_owned_screen();
-                    self.chat_widget.set_queue_autosend_suppressed(/*suppressed*/ false);
-                    self.chat_widget.emit_prompt_edit_thread_event();
-                    tui.frame_requester().schedule_frame();
-                }
-            }
+            AppEvent::FinishPromptRevert {
+                thread_id,
+                selected_cell,
+            } => self.finish_prompt_revert_projection(tui, app_server, thread_id, selected_cell),
+
             AppEvent::BeginInitialHistoryReplayBuffer => {
                 self.begin_initial_history_replay_buffer();
             }
@@ -1795,9 +1772,7 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 self.model_selection_generation.advance();
-                let model_changed = self.chat_widget.automatic_model_switch_pending()
-                    || self.chat_widget.current_model() != model
-                    || self.chat_widget.current_collaboration_mode().model() != model;
+                let model_changed = self.model_selection_changes_current_model(&model);
                 if model_changed {
                     self.chat_widget.set_model(&model);
                     self.sync_active_thread_model_setting(app_server, model, /*effort*/ None)
@@ -1938,9 +1913,7 @@ impl App {
                     return Ok(AppRunControl::Continue);
                 }
                 self.model_selection_generation.advance();
-                let model_changed = self.chat_widget.automatic_model_switch_pending()
-                    || self.chat_widget.current_model() != model
-                    || self.chat_widget.current_collaboration_mode().model() != model;
+                let model_changed = self.model_selection_changes_current_model(&model);
                 let default_effort =
                     self.on_apply_advanced_reasoning(model.as_str(), effort.clone());
                 if model_changed {
@@ -1960,30 +1933,7 @@ impl App {
                 self.sync_active_thread_service_tier_to_cached_session()
                     .await;
 
-                let message = format!("Model changed to {model} {effort} for this conversation");
-                if let Some(default_effort) = default_effort.as_ref() {
-                    let edits = crate::config_update::build_model_selection_edits(
-                        &self.chat_widget.config_ref().model_provider_id,
-                        model.as_str(),
-                        Some(default_effort),
-                    );
-                    self.queue_model_defaults(
-                        app_server,
-                        edits,
-                        "default model and reasoning effort",
-                        move |app, _, result| {
-                            match result {
-                                Ok(()) => app.chat_widget.add_info_message(message, None),
-                                Err(error) => app.chat_widget.add_error_message(format!(
-                                    "Failed to save default model: {error}"
-                                )),
-                            }
-                            Ok(())
-                        },
-                    );
-                } else {
-                    self.chat_widget.add_info_message(message, None);
-                }
+                self.persist_conversation_model_selection(app_server, model, effort, default_effort);
             }
             AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
                 self.chat_widget
@@ -2161,35 +2111,8 @@ impl App {
                     let _ = (preset, mode, profile_selection);
                 }
             }
-            AppEvent::PersistModelSelection { model, effort } => {
-                self.app_event_tx.send(AppEvent::FollowTranscript);
-                let edits = crate::config_update::build_model_selection_edits(
-                    &self.chat_widget.config_ref().model_provider_id,
-                    model.as_str(),
-                    effort.as_ref(),
-                );
-                self.queue_model_defaults(
-                    app_server,
-                    edits,
-                    "default model and reasoning effort",
-                    move |app, _, result| {
-                        match result {
-                            Ok(()) => {
-                                let mut message = format!("Model changed to {model}");
-                                if let Some(label) = Self::reasoning_label_for(&model, effort.as_ref()) {
-                                    message.push(' ');
-                                    message.push_str(&label);
-                                }
-                                app.chat_widget.add_info_message(message, None);
-                            }
-                            Err(error) => app.chat_widget.add_error_message(format!(
-                                "Failed to save default model: config/batchWrite failed in TUI: {error}"
-                            )),
-                        }
-                        Ok(())
-                    },
-                );
-            }
+            AppEvent::PersistModelSelection { model, effort } => self.persist_selected_model(app_server, model, effort),
+
             AppEvent::PersistDaybreakSelection { thread_id, enabled } => {
                 self.persist_daybreak_selection(app_server, thread_id, enabled).await;
             }
@@ -2254,33 +2177,8 @@ impl App {
             AppEvent::PersistRealtimeVoiceSelection { voice } => {
                 self.persist_realtime_voice(app_server, voice);
             }
-            AppEvent::PersistServiceTierSelection { service_tier } => {
-                self.refresh_status_line();
-                self.config.service_tier = service_tier.clone();
-                self.sync_active_thread_service_tier_to_cached_session().await;
-                let edits = crate::config_update::build_service_tier_selection_edits(service_tier.as_deref());
-                self.queue_model_defaults(
-                    app_server,
-                    edits,
-                    "default service tier",
-                    move |app, _, result| {
-                        match result {
-                            Ok(()) => app.chat_widget.add_info_message(
-                                service_tier.map_or_else(
-                                    || "Service tier cleared".to_string(),
-                                    |tier| format!("Service tier set to {tier}"),
-                                ),
-                                None,
-                            ),
-                            Err(error) => app.chat_widget.add_error_message(format!(
-                                "Failed to save default service tier: config/batchWrite failed in TUI: {error}\n\
-                                 You can continue this task. To save the default, resolve the error above, then switch to a different tier and back to the desired tier."
-                            )),
-                        }
-                        Ok(())
-                    },
-                );
-            }
+            AppEvent::PersistServiceTierSelection { service_tier } => self.persist_selected_service_tier(app_server, service_tier).await,
+
             AppEvent::UpdateAskForApprovalPolicy(policy) => {
                 if self.reject_pending_permission_change() {
                     return Ok(AppRunControl::Continue);
@@ -2424,29 +2322,8 @@ impl App {
                     ));
                 }
             }
-            AppEvent::PersistPlanModeReasoningEffort(effort) => {
-                self.app_event_tx.send(AppEvent::FollowTranscript);
-                let edit = effort.map_or_else(
-                    || crate::config_update::clear_config_value("plan_mode_reasoning_effort"),
-                    |effort| crate::config_update::replace_config_value(
-                        "plan_mode_reasoning_effort",
-                        serde_json::json!(effort.to_string()),
-                    ),
-                );
-                self.queue_model_defaults(
-                    app_server,
-                    vec![edit],
-                    "Plan mode reasoning effort",
-                    |app, _, result| {
-                        if let Err(error) = result {
-                            app.chat_widget.add_error_message(format!(
-                                "Failed to save Plan mode reasoning effort: {error}"
-                            ));
-                        }
-                        Ok(())
-                    },
-                );
-            }
+            AppEvent::PersistPlanModeReasoningEffort(effort) => self.persist_plan_reasoning_effort(app_server, effort),
+
             AppEvent::PersistModelMigrationPromptAcknowledged {
                 from_model,
                 to_model,

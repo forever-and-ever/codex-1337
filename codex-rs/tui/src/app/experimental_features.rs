@@ -1,6 +1,8 @@
 //! Server-backed feature persistence. Configured readback never replaces task state,
 //! and an accepted save finishes even if its popup closes or the user navigates.
 
+mod continuations;
+
 use super::config_persistence::overridden_write_message;
 use super::*;
 use crate::experimental_features::FeatureWriteResult;
@@ -9,7 +11,7 @@ use tokio::sync::oneshot;
 impl App {
     pub(super) async fn enable_feature_for_new_threads(
         &mut self,
-        _tui: &mut tui::Tui,
+        tui: &mut tui::Tui,
         app_server: &AppServerSession,
         feature: Feature,
     ) {
@@ -29,33 +31,7 @@ impl App {
                 /*enabled*/ true,
             ));
         }
-
-        use super::turn_submissions::ui_requests::UiRequestKind;
-        use super::turn_submissions::ui_requests::UiRequestScope;
-        self.request_server(
-            app_server,
-            UiRequestScope::Connection,
-            UiRequestKind::Mutation,
-            "Save feature for new threads",
-            move |handle| crate::config_update::write_config_batch_typed(handle, edits),
-            move |app, _, result| {
-                let notice: Box<dyn HistoryCell> = match result {
-                    Ok(response) if response.status == WriteStatus::Ok => Box::new(history_cell::new_warning_event(format!(
-                        "{label} setting saved on the server for new threads. This thread is unchanged. Project or task settings may override it."
-                    ))),
-                    Ok(response) => {
-                        app.app_event_tx.send(AppEvent::FollowTranscript);
-                        Box::new(history_cell::new_error_event(format!("{label} setting was saved but is overridden: {}", overridden_write_message(&response))))
-                    },
-                    Err(error) => {
-                        app.app_event_tx.send(AppEvent::FollowTranscript);
-                        Box::new(history_cell::new_error_event(format!("Failed to save {label} setting: {}", error)))
-                    },
-                };
-                app.app_event_tx.send(AppEvent::InsertHistoryCell(notice));
-                Ok(())
-            },
-        );
+        self.enable_feature_for_new_threads_continuation(tui, app_server, label, edits).await
     }
 
     pub(super) fn fetch_experimental_features(

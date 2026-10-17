@@ -1,5 +1,6 @@
 //! Destructive task actions retain the connection barrier through reconciliation and presentation.
 
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use crate::app_event::AgentsOverviewAction;
 use codex_app_server_client::AppServerRequestHandle;
@@ -116,14 +117,10 @@ async fn belongs_to(
     if thread_id == root {
         return Ok(true);
     }
-    let response: api::ThreadReadResponse = handle
-        .request_typed(api::ClientRequest::ThreadRead {
-            request_id: api::RequestId::String(format!("tui-removal-{id}-read-{thread_id}")),
-            params: api::ThreadReadParams {
+    let response: api::ThreadReadResponse = handle.thread_read(api::RequestId::String(format!("tui-removal-{id}-read-{thread_id}")), api::ThreadReadParams {
                 thread_id: thread_id.to_string(),
                 include_turns: false,
-            },
-        })
+            })
         .await?;
     Ok(response.thread.session_id == root.to_string())
 }
@@ -198,14 +195,10 @@ pub(super) async fn send(
                 .expect("reconciliation has an affected primary");
             let mut cursor = None;
             let loaded = loop {
-                let page: api::ThreadLoadedListResponse = handle
-                    .request_typed(api::ClientRequest::ThreadLoadedList {
-                        request_id: api::RequestId::String(format!("tui-removal-{id}-loaded")),
-                        params: api::ThreadLoadedListParams {
+                let page: api::ThreadLoadedListResponse = handle.thread_loaded_list(api::RequestId::String(format!("tui-removal-{id}-loaded")), api::ThreadLoadedListParams {
                             cursor,
                             limit: None,
-                        },
-                    })
+                        })
                     .await?;
                 if page.data.contains(&primary.to_string()) {
                     break true;

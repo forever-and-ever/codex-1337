@@ -1,5 +1,7 @@
 //! Directory transitions preserve conversation history and revalidate destination permissions.
 
+mod admission;
+
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
 use crate::history_cell::McpInventoryLoadingCell as LoadingCell;
@@ -61,38 +63,10 @@ impl App {
         app_server: &mut AppServerSession,
         cwd: AbsolutePathBuf,
     ) {
-        if !self.server_operations.is_empty() {
-            let Some(thread_id) = self.chat_widget.thread_id() else {
-                return;
-            };
-            self.supersede_pending_navigation();
-            let generation = self.navigation_generation();
-            self.request_server_prepared(
-                app_server,
-                super::turn_submissions::ui_requests::UiRequestScope::Connection,
-                super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
-                "Waiting for directory-change settings",
-                move |app, _| {
-                    let current = app.current_displayed_thread_id() == Some(thread_id)
-                        && app.navigation_generation() == generation;
-                    move |_| async move { Ok(current) }
-                },
-                move |app, _, ready| {
-                    if matches!(ready, Ok(true))
-                        && app.current_displayed_thread_id() == Some(thread_id)
-                        && app.navigation_generation() == generation
-                    {
-                        app.app_event_tx.send(AppEvent::DirectoryChangeAdmitted {
-                            thread_id,
-                            cwd,
-                            generation,
-                        });
-                    }
-                    Ok(())
-                },
-            );
+        let std::ops::ControlFlow::Continue(cwd) = self.admit_directory_change(app_server, cwd)
+        else {
             return;
-        }
+        };
         if self.config.ephemeral || !cwd.as_path().is_dir() {
             return self.working_directory_error("This task cannot be safely replaced.");
         }

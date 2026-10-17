@@ -1,3 +1,4 @@
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
@@ -33,19 +34,13 @@ impl App {
             UiRequestKind::Mutation,
             "Logging out",
             move |handle| async move {
-                handle
-                    .request_typed::<codex_app_server_protocol::LogoutAccountResponse>(
-                        ClientRequest::LogoutAccount {
-                            request_id: codex_app_server_protocol::RequestId::String(
+                handle.logout_account(codex_app_server_protocol::RequestId::String(
                                 uuid::Uuid::new_v4().to_string(),
-                            ),
-                            params: thread_id.map(|id| {
+                            ), thread_id.map(|id| {
                                 codex_app_server_protocol::AccountScopeParams {
                                     thread_id: Some(id.to_string()),
                                 }
-                            }),
-                        },
-                    )
+                            }))
                     .await
             },
             |app, _, result| {

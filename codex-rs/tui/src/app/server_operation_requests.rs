@@ -1,5 +1,6 @@
 //! Typed requests and receipts for the non-turn branches of the ordered operation ledger.
 
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -282,8 +283,7 @@ pub(super) async fn send(
             }
             ThreadMutation::Rename(params) => {
                 let name = params.name.clone();
-                let response: api::ThreadSetNameResponse = handle
-                    .request_typed(api::ClientRequest::ThreadSetName { request_id, params })
+                let response: api::ThreadSetNameResponse = handle.thread_set_name(request_id, params)
                     .await?;
                 Ok(OperationReceipt::Renamed(
                     response.thread_name.unwrap_or(name),
@@ -341,20 +341,9 @@ pub(super) async fn send(
                 Ok(OperationReceipt::ServerShellFinished)
             }
             ThreadMutation::Settings(params) => {
-                let result = handle
-                    .request_typed::<api::ThreadSettingsUpdateResponse>(
-                        api::ClientRequest::ThreadSettingsUpdate { request_id, params },
-                    )
-                    .await;
-                match result {
-                    Ok(_) => Ok(OperationReceipt::SettingsUpdated),
-                    Err(TypedRequestError::Server { ref source, .. })
-                        if crate::app_server_session::is_thread_settings_update_unsupported(
-                            source,
-                        ) =>
-                    {
-                        Ok(OperationReceipt::SettingsUnsupported)
-                    }
+                match handle.thread_settings_update(request_id, params).await {
+                    Ok(true) => Ok(OperationReceipt::SettingsUpdated),
+                    Ok(false) => Ok(OperationReceipt::SettingsUnsupported),
                     Err(error) => Err(error),
                 }
             }

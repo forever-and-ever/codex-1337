@@ -1,5 +1,6 @@
 //! Fresh acquisition retains the unsent initial draft independently of subscription custody.
 
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::app_server_session::session_preparation::{
@@ -240,19 +241,14 @@ impl App {
                     FreshEffect::Name { thread_id, name } => {
                         let result = tokio::time::timeout(
                             ACK_TIMEOUT,
-                            handle.request_typed::<api::ThreadSetNameResponse>(
-                                api::ClientRequest::ThreadSetName {
-                                    request_id: api::RequestId::String(format!(
+                            handle.thread_allocate_name(api::RequestId::String(format!(
                                         "tui-operation-{id}-name"
-                                    )),
-                                    params: api::ThreadSetNameParams {
+                                    )), api::ThreadSetNameParams {
                                         thread_id: thread_id.to_string(),
                                         name: name.clone(),
                                         naming_mode: Some(api::ThreadNameMode::Explicit),
                                         conflict_thread_ids: None,
-                                    },
-                                },
-                            ),
+                                    }),
                         )
                         .await
                         .map_err(|_| {

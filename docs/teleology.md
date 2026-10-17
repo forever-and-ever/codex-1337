@@ -476,6 +476,12 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 Upstream files, where merge conflicts arise:
 
+- `codex-rs/tui/src/app/transcript_export.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_settings.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/app_server_events.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/app_server_thread_ownership.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/backend_banners.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/transcript_export.rs`: fast-ui-thread
 - `codex-rs/features/src/lib.rs`: append-only-tool-declarations
 - `codex-rs/core/src/session/step_context.rs`: append-only-tool-declarations
 - `codex-rs/core/src/session/world_state.rs`: append-only-tool-declarations, standing-context-trims
@@ -575,6 +581,31 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling
 
 Fork-owned files, absent upstream:
+
+- `codex-rs/tui/src/app/working_directory/admission.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/agents_overview_new/admission.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/backend_banner_fallback/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/app_server_thread_ownership/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/config_persistence/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/daybreak/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/event_dispatch/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/experimental_features/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/model_defaults/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/test_support/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/tests/resume_shutdown_tests/verification.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_goal_actions/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_settings/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_title/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/transcript_export/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app_server_session/typed_requests.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/backend_banners/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/rate_limits/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/session_flow/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/transcript_export/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/config_update/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/goal_files/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/test_support/server_requests.rs`: fast-ui-thread
 
 - `codex-rs/tui/src/transcript_view/invocation.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/invocation.rs`: fast-ui-thread

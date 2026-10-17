@@ -1,5 +1,6 @@
 //! Subscription detachment is not runtime shutdown. A plan retains each local store it owns.
 
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -99,10 +100,7 @@ pub(super) async fn send(
             if let DetachKind::Side { turn_id, replay_only } = &target.kind {
                 let mut turn_id = turn_id.clone();
                 for attempt in 0..2 {
-                    let interrupt = handle.request_typed::<api::TurnInterruptResponse>(api::ClientRequest::TurnInterrupt {
-                        request_id: api::RequestId::String(format!("tui-operation-{id}-{thread_id}-side-interrupt-{attempt}")),
-                        params: api::TurnInterruptParams { thread_id: thread_id.to_string(), turn_id: turn_id.clone() },
-                    }).await;
+                    let interrupt = handle.turn_interrupt(api::RequestId::String(format!("tui-operation-{id}-{thread_id}-side-interrupt-{attempt}")), api::TurnInterruptParams { thread_id: thread_id.to_string(), turn_id: turn_id.clone() }).await;
                     match interrupt {
                         Ok(_) => break,
                         Err(error) => {
