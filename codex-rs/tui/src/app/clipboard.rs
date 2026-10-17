@@ -47,6 +47,7 @@ impl App {
             tui.cancel_mouse_selection();
         }
         if let Some(completion) = tui.clipboard.poll() {
+            self.live_work.finish_copy(completion, current);
             if let Some(characters) = self.chat_widget.finish_clipboard(completion, current) {
                 self.transcript_view
                     .show_copy_feedback(&completion.1, characters);
@@ -63,6 +64,7 @@ impl App {
         }
         if !current || matches!(event, TuiEvent::FocusLost | TuiEvent::Resume) {
             self.transcript_view.cancel_primary();
+            self.live_work.cancel_primary();
         }
     }
 }

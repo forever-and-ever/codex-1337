@@ -74,6 +74,14 @@ impl App {
         key_event: KeyEvent,
     ) -> Option<KeyEvent> {
         self.transcript_view.set_keymap_bindings(&self.keymap);
+        if tui.is_owned_screen()
+            && self.overlay.is_none()
+            && self.chat_widget.no_modal_or_popup_active()
+            && self.live_work.owns_selection_key(key_event)
+        {
+            self.cancel_pending_key_chord();
+            return Some(key_event);
+        }
         if let Some(Overlay::Transcript(overlay)) = &mut self.overlay {
             overlay.set_keymap_bindings(&self.keymap);
         }
