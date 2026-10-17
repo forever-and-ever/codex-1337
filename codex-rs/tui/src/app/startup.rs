@@ -1131,6 +1131,8 @@ See the Codex keymap documentation for supported actions and examples."
         }
 
         let mut schedule = ui_schedule::UiSchedule::new();
+        app.transcript_view
+            .enable_background_preparation(tui.frame_requester());
         let mut listen_for_app_server_events = true;
         #[cfg(target_os = "linux")]
         let mut ui_host_ready = !crate::reload::worker::is_hosted();

@@ -560,7 +560,8 @@ pub struct ConfigToml {
     /// Defaults to `true`.
     pub check_for_update_on_startup: Option<bool>,
 
-    /// Legacy fallback for `tui.disable_paste_burst`. Prefer the setting under `[tui]`.
+    /// Legacy fallback for `tui.disable_paste_burst`. True disables burst detection; false or
+    /// absent selects terminal auto detection. Prefer the setting under `[tui]`.
     pub disable_paste_burst: Option<bool>,
 
     /// When `false`, disables analytics across Codex product surfaces in this machine.

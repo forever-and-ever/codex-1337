@@ -199,7 +199,12 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
                     feed: 0,
                     detailed: false,
                 },
-                || TextLayout::new(history.transcript_hyperlink_lines(width), width),
+                || {
+                    let history = Arc::clone(&history);
+                    Box::new(move || {
+                        TextLayout::new(history.transcript_hyperlink_lines(width), width)
+                    })
+                },
             )
         };
         cache.begin_frame();
@@ -210,16 +215,16 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
         get(&mut cache, /*width*/ 20);
         assert_eq!(
             cell.renders.load(Ordering::Relaxed),
-            1 + usize::from(mutable)
+            if mutable { 2 } else { 1 }
         );
         cell.tick.store(/*val*/ 2, Ordering::Relaxed);
         cache.begin_frame();
         let next = get(&mut cache, /*width*/ 20);
-        assert_eq!(next.text(), "tick 2");
+        assert_eq!(next.unwrap().text(), "tick 2");
         get(&mut cache, /*width*/ 10);
         assert_eq!(
             cell.renders.load(Ordering::Relaxed),
-            3 + usize::from(mutable)
+            if mutable { 4 } else { 3 }
         );
         crate::terminal_palette::with_test_default_colors(
             crate::terminal_probe::DefaultColors {
@@ -231,7 +236,7 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
                 get(&mut cache, /*width*/ 10);
                 assert_eq!(
                     cell.renders.load(Ordering::Relaxed),
-                    4 + usize::from(mutable)
+                    if mutable { 5 } else { 4 }
                 );
             },
         );
@@ -258,7 +263,7 @@ fn layouts_refresh_for_width_animation_and_mutable_frames() {
 }
 
 #[test]
-fn recent_entries_are_reused_and_old_entries_are_evicted() {
+fn small_entries_are_retained_beyond_the_old_count_limit() {
     let cells: Vec<_> = (0..100).map(|_| Arc::new(Cell::default())).collect();
     let mut cache = LayoutCache::default();
     cache.begin_frame();
@@ -277,10 +282,13 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 detailed: false,
             },
             || {
-                TextLayout::new(
-                    history.transcript_hyperlink_lines(/*width*/ 20),
-                    /*width*/ 20,
-                )
+                let history = Arc::clone(&history);
+                Box::new(move || {
+                    TextLayout::new(
+                        history.transcript_hyperlink_lines(/*width*/ 20),
+                        /*width*/ 20,
+                    )
+                })
             },
         );
     }
@@ -299,15 +307,18 @@ fn recent_entries_are_reused_and_old_entries_are_evicted() {
                 detailed: false,
             },
             || {
-                TextLayout::new(
-                    history.transcript_hyperlink_lines(/*width*/ 20),
-                    /*width*/ 20,
-                )
+                let history = Arc::clone(&history);
+                Box::new(move || {
+                    TextLayout::new(
+                        history.transcript_hyperlink_lines(/*width*/ 20),
+                        /*width*/ 20,
+                    )
+                })
             },
         );
     }
     assert_eq!(
         [99, 98, 0].map(|index| cells[index].renders.load(Ordering::Relaxed)),
-        [1, 1, 2]
+        [1, 1, 1]
     );
 }

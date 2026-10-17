@@ -184,6 +184,7 @@ pub(crate) fn cached_terminal_probe() -> Option<crate::terminal_probe::StartupPr
     terminal_hints().map(|hints| crate::terminal_probe::StartupProbe {
         cursor_position: Some(ratatui::layout::Position::new(/*x*/ 0, /*y*/ 0)),
         default_colors: hints.colors,
+        bracketed_paste: hints.bracketed_paste,
         keyboard_enhancement_supported: hints.enhanced_keys,
         terminal_app_over_ssh: hints.terminal_app_over_ssh,
     })
@@ -193,6 +194,7 @@ pub(crate) fn note_terminal_probe(probe: &crate::terminal_probe::StartupProbe) {
     if is_hosted() {
         let _ = TERMINAL.set(super::retained::TerminalHints {
             colors: probe.default_colors,
+            bracketed_paste: probe.bracketed_paste,
             enhanced_keys: probe.keyboard_enhancement_supported,
             terminal_app_over_ssh: probe.terminal_app_over_ssh,
         });

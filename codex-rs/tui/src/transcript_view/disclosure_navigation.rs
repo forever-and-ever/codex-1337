@@ -7,6 +7,60 @@ impl TranscriptView {
     pub(super) fn navigate_folds(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        action: ListAction,
+    ) {
+        if !self.deferred_folds.is_empty() {
+            self.deferred_folds
+                .push_back((Arc::from(cells), index, action));
+            return;
+        }
+        let focus = self.disclosure.focused.clone();
+        let position = self.position;
+        let waiting = std::mem::replace(&mut self.cache.waiting, false);
+        self.navigate_folds_prepared(cells, index, action);
+        if self.cache.waiting {
+            self.disclosure.focused = focus;
+            self.position = position;
+            self.deferred_folds
+                .push_back((Arc::from(cells), index, action));
+        }
+        self.cache.waiting |= waiting;
+    }
+
+    pub(super) fn resume_fold_navigation(&mut self) {
+        let source = std::mem::replace(
+            &mut self.layout_source,
+            super::presented::LayoutSource::Presented,
+        );
+        for _ in 0..8 {
+            let Some((cells, index, action)) = self.deferred_folds.pop_front() else {
+                break;
+            };
+            let focus = self.disclosure.focused.clone();
+            let index = focus
+                .as_ref()
+                .and_then(|focus| self.canonical_fold_index(&cells, &focus.ids, &focus.target))
+                .unwrap_or(index);
+            let focus = self.disclosure.focused.clone();
+            let position = self.position;
+            let waiting = std::mem::replace(&mut self.cache.waiting, false);
+            self.navigate_folds_prepared(&cells, index, action);
+            if self.cache.waiting {
+                self.disclosure.focused = focus;
+                self.position = position;
+                self.deferred_folds.push_front((cells, index, action));
+                self.cache.waiting |= waiting;
+                break;
+            }
+            self.cache.waiting |= waiting;
+        }
+        self.layout_source = source;
+    }
+
+    fn navigate_folds_prepared(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
         mut index: usize,
         action: ListAction,
     ) {
@@ -32,10 +86,10 @@ impl TranscriptView {
             index = if backwards { cells.len() } else { 0 };
         }
         for step in 0..steps {
-            let controls = self
-                .current_layout(cells, index)
-                .map(|layout| layout.fold_targets())
-                .unwrap_or_default();
+            let Some(layout) = self.current_layout(cells, index) else {
+                return;
+            };
+            let controls = layout.fold_targets();
             let current = controls
                 .iter()
                 .position(|candidate| candidate.same_control(&target));
@@ -72,10 +126,10 @@ impl TranscriptView {
                     return;
                 };
                 candidate = next;
-                let controls = self
-                    .current_layout(cells, candidate)
-                    .map(|layout| layout.fold_targets())
-                    .unwrap_or_default();
+                let Some(layout) = self.current_layout(cells, candidate) else {
+                    return;
+                };
+                let controls = layout.fold_targets();
                 if let Some(next) = if backwards {
                     controls.last()
                 } else {

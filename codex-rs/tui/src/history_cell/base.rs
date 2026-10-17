@@ -3,7 +3,7 @@
 
 use super::*;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct PlainHistoryCell {
     pub(super) lines: Vec<Line<'static>>,
     pub(crate) timestamp: Option<HistoryTimestamp>,

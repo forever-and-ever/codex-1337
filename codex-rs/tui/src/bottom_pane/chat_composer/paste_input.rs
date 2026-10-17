@@ -53,7 +53,8 @@ impl ChatComposer {
         self.apply_paste(pasted)
     }
 
-    /// Enable or disable paste-burst handling.
+    /// Apply the preference: true disables detection, false uses terminal auto detection.
+    /// Startup confirmation of bracketed paste always bypasses the heuristic.
     ///
     /// `disable_paste_burst` is an escape hatch for terminals/platforms where the burst heuristic
     /// is unwanted or has already been handled elsewhere.
@@ -72,6 +73,7 @@ impl ChatComposer {
     /// without emitting any buffered text, which can leave a non-empty buffer unable to flush
     /// later (because `flush_if_due()` relies on `last_plain_char_time` to time out).
     pub(crate) fn set_disable_paste_burst(&mut self, disabled: bool) {
+        let disabled = crate::terminal_probe::disable_paste_burst(disabled);
         let was_disabled = self.draft.disable_paste_burst;
         self.draft.disable_paste_burst = disabled;
         if disabled && !was_disabled {

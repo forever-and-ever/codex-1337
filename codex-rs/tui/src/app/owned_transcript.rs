@@ -62,6 +62,13 @@ impl App {
         let tool_output_tokens = view.activity_output_tokens(&active_ids);
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
+        if let Some(changed) =
+            view.sync_owned_live_tail(transcript_width, active_key, expanded, || {
+                chat_widget.active_transcript_snapshot(transcript_width)
+            })
+        {
+            return changed;
+        }
         let search_changed = chat_widget
             .active_invocation_cell()
             .and_then(|cell| {
@@ -116,8 +123,6 @@ impl App {
     ) -> Result<Rect> {
         let preparation_stage =
             crate::ui_latency::enter(crate::ui_latency::Stage::FramePreparation);
-        self.transcript_view
-            .enable_background_preparation(tui.frame_requester());
         self.prepare_live_work();
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(
