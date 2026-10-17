@@ -1072,3 +1072,64 @@ mod tests {
         Ok(())
     }
 }
+
+impl<B> super::Terminal<B>
+where
+    B: ratatui::backend::Backend<Error = io::Error> + Write,
+{
+    pub(super) fn capture_output_frame(
+        &mut self,
+        screen_size: Size,
+        cursor_position: Option<Position>,
+        cursor_style: SetCursorStyle,
+    ) -> bool {
+        let invalidate = self.output_invalidation.take();
+        if capture_frame(
+            self.current_buffer(),
+            invalidate,
+            screen_size,
+            cursor_position,
+            cursor_style,
+        ) {
+            self.last_known_cursor_pos = cursor_position.unwrap_or(self.last_known_cursor_pos);
+            self.hidden_cursor = cursor_position.is_none();
+            self.swap_buffers();
+            return true;
+        }
+
+        false
+    }
+
+    pub(super) fn output_cursor_position(&mut self) -> io::Result<Position> {
+        if is_active() {
+            return crate::terminal_probe::cursor_position(crate::terminal_probe::DEFAULT_TIMEOUT)?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::TimedOut, "terminal cursor query timed out")
+                });
+        }
+        self.backend.get_cursor_position()
+    }
+}
+
+pub(super) fn is_painted_column(x: u16, left: u16, last_nonblank: u16) -> bool {
+    x - left <= last_nonblank
+}
+
+pub(crate) fn begin_restoration(restore: impl FnOnce() -> io::Result<()>) -> Option<io::Error> {
+    let mut first_error = restoration_barrier().err();
+    if let Err(error) = restore() {
+        first_error.get_or_insert(error);
+    }
+    first_error
+}
+
+pub(crate) fn finish_restoration(first_error: &mut Option<io::Error>) {
+    if let Err(error) = restoration_barrier() {
+        first_error.get_or_insert(error);
+    }
+}
+
+pub(crate) fn panic_barrier() {
+    prepare_panic();
+    let _ = barrier();
+}

@@ -325,3 +325,85 @@ impl TranscriptView {
         }
     }
 }
+
+impl TranscriptView {
+    pub(crate) fn presented_cells(&self) -> Option<Arc<[Arc<dyn HistoryCell>]>> {
+        self.presented_cells.clone()
+    }
+
+    pub(super) fn rewrap_presented_snapshot(&mut self, width: u16) {
+        let Some(snapshot) = self.snapshot() else {
+            return;
+        };
+        let pinned: Vec<_> = snapshot
+            .pinned
+            .iter()
+            .map(|(key, layout)| (*key, Arc::clone(layout)))
+            .collect();
+        let live = snapshot.search_live.clone();
+        for (key, layout) in pinned {
+            if let Some(layout) = self.cache.rewrap(&layout, width, false)
+                && let Some(snapshot) = self.snapshot_mut()
+            {
+                snapshot.pinned.insert(key, layout);
+            }
+        }
+        if let Some(live) = live
+            && let Some(layout) = self.cache.rewrap(&live, width, false)
+            && let Some(snapshot) = self.snapshot_mut()
+        {
+            snapshot.search_live = Some(layout);
+        }
+    }
+}
+
+impl TranscriptView {
+    pub(super) fn retain_synchronous_cells(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        // Synchronous rendering presents at once; background presentation commits in presented.rs.
+        if self.cache.frames.is_none()
+            && self.presented_cells.as_ref().is_none_or(|presented| {
+                presented.len() != cells.len()
+                    || presented
+                        .iter()
+                        .zip(cells)
+                        .any(|(previous, current)| !Arc::ptr_eq(previous, current))
+            })
+        {
+            self.presented_cells = Some(Arc::from(cells));
+        }
+    }
+
+    pub(super) fn selection_prepared(&self) -> bool {
+        !self.cache.waiting && !self.live_preparation.is_pending()
+    }
+}
+
+impl TranscriptView {
+    pub(super) fn presented_activity_ids(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+    ) -> Vec<String> {
+        if self.layout_source == LayoutSource::Presented {
+            if self.presented_cells.is_none() {
+                return Vec::new();
+            }
+            let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
+            if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
+                return visible.activity_ids.to_vec();
+            }
+        }
+        let Some(cell) = cells.get(index) else {
+            return self.disclosure.live_ids.clone();
+        };
+        let ids = cell.activity_ids();
+        // A Feed Item's header over a cell without identities is focused through its fold.
+        if ids.is_empty()
+            && self.indexed_seat(cells, index).header.is_some()
+            && let Some(fold) = self.feed.fold_of(index)
+        {
+            return vec![fold.to_string()];
+        }
+        ids
+    }
+}

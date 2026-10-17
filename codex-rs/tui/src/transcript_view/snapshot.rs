@@ -34,10 +34,6 @@ impl TranscriptView {
         self.snapshot().map(|snapshot| Arc::clone(&snapshot.cells))
     }
 
-    pub(crate) fn presented_cells(&self) -> Option<Arc<[Arc<dyn HistoryCell>]>> {
-        self.presented_cells.clone()
-    }
-
     pub(super) fn capture_snapshot(&mut self, cells: &[Arc<dyn HistoryCell>]) -> ViewSnapshot {
         // Input paths pass presented cells; model transitions capture current revisions.
         let cells = self.snapshot_cells().unwrap_or_else(|| Arc::from(cells));
@@ -138,27 +134,6 @@ impl TranscriptView {
     }
 
     pub(super) fn rewrap_snapshot(&mut self, width: u16) {
-        let Some(snapshot) = self.snapshot() else {
-            return;
-        };
-        let pinned: Vec<_> = snapshot
-            .pinned
-            .iter()
-            .map(|(key, layout)| (*key, Arc::clone(layout)))
-            .collect();
-        let live = snapshot.search_live.clone();
-        for (key, layout) in pinned {
-            if let Some(layout) = self.cache.rewrap(&layout, width, false)
-                && let Some(snapshot) = self.snapshot_mut()
-            {
-                snapshot.pinned.insert(key, layout);
+        self.rewrap_presented_snapshot(width);
             }
         }
-        if let Some(live) = live
-            && let Some(layout) = self.cache.rewrap(&live, width, false)
-            && let Some(snapshot) = self.snapshot_mut()
-        {
-            snapshot.search_live = Some(layout);
-        }
-    }
-}

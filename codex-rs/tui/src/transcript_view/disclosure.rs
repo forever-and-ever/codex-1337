@@ -102,27 +102,7 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
-        if self.layout_source == super::presented::LayoutSource::Presented {
-            if self.presented_cells.is_none() {
-                return Vec::new();
-            }
-            let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
-            if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
-                return visible.activity_ids.to_vec();
-            }
-        }
-        let Some(cell) = cells.get(index) else {
-            return self.disclosure.live_ids.clone();
-        };
-        let ids = cell.activity_ids();
-        // A Feed Item's header over a cell without identities is focused through its fold.
-        if ids.is_empty()
-            && self.indexed_seat(cells, index).header.is_some()
-            && let Some(fold) = self.feed.fold_of(index)
-        {
-            return vec![fold.to_string()];
-        }
-        ids
+        self.presented_activity_ids(cells, index)
     }
 
     /// Retired live entries and replaced groups keep the identities of their displayed revision.

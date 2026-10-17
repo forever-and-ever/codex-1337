@@ -574,7 +574,38 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/bottom_pane/chat_composer.rs`: client-only-shell
 - `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling
 
+- `codex-rs/tui/src/chatwidget/streaming.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view.rs`: fast-ui-thread
+- `codex-rs/tui/src/terminal_probe.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui/event_stream.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/layout_tests.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/input.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/disclosure.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/snapshot.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/search.rs`: fast-ui-thread
+- `codex-rs/tui/src/startup_draft.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/base.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/messages.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/session.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/mcp.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/plans.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/notices.rs`: fast-ui-thread
+
 Fork-owned files, absent upstream:
+- `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui/frame_rate_limiter/completion.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui/event_stream/preparation.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/text/preparation.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/layout_preparation_tests.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/layout_preparation.rs`: fast-ui-thread
+- `codex-rs/tui/src/terminal_probe/imp/tests/bracketed_paste_tests.rs`: fast-ui-thread
+- `codex-rs/tui/src/streaming/controller/tests/background_tests.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/session/snapshot.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/messages/snapshot.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/activity_presentation/live_snapshot.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/owned_transcript_preparation_tests.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/owned_transcript_input_preparation.rs`: fast-ui-thread
 
 - `codex-rs/tui/src/transcript_view/invocation.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/invocation.rs`: fast-ui-thread
@@ -737,3 +768,19 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/server_fork_navigation.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_navigation_permissions.rs`: durable-approvals-and-queues
 - `codex-rs/core/src/agent/control/farm_reservation.rs`: server-hosted-agents
+
+- `codex-rs/tui/src/streaming/immutable_rows.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/streaming/completion.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/chatwidget/stream_preparation.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/transcript_view/layout_rewrap.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/transcript_view/live_preparation.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/transcript_view/preparation.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/tui/background_preparation.rs`: fast-ui-thread
+
+- `codex-rs/tui/src/terminal_probe/bracketed_paste.rs`: fast-ui-thread

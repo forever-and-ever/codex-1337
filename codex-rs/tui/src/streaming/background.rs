@@ -2,19 +2,38 @@
 //! Setext underlines and late table pipes are the two deliberate baseline exceptions:
 //! they may restyle a previously plain paragraph when canonical rows replace the stream.
 
+//! The live UI prepares source on a pinned lane of the bounded transcript pool and publishes
+//! immutable stable rows. Open inline syntax, unresolved references, tables and transformable
+//! fences stay on the worker. Two deliberate baseline exceptions can revise already streamed
+//! plain prose: a directly following setext underline (===/---), and a late pipe that makes
+//! the current line table-eligible. A pipe freezes that line until its structure is known.
+//! Canonical replacement resolves both, rather than delaying every paragraph until a blank line.
+//! Safe complete words on an unterminated prose line wrap with the final renderer's FirstFit:
+//! completed rows never roll; only the last row grows. Source parsing and unresolved-block
+//! rendering run on the worker, never in the delta handler or paint path.
+//!
+
+use super::HistoryCell;
+use super::StablePrefixLenCache;
 use super::StreamCore;
+use super::history_cell;
 use crate::history_cell::HistoryRenderMode;
+use crate::markdown::render_markdown_agent_with_list_spacing;
 use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::transcript_view::preparation::{Lane, Pending};
+use crate::transcript_view::preparation::Lane;
+use crate::transcript_view::preparation::Pending;
 use crate::tui::FrameRequester;
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 pub(crate) type Rewrap =
     Arc<dyn Fn(Vec<HyperlinkLine>, Option<usize>, HistoryRenderMode) + Send + Sync>;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 pub(super) enum Rows {
     Inline(Vec<HyperlinkLine>),
@@ -557,3 +576,129 @@ macro_rules! controllers {
 }
 
 controllers!(StreamController, PlanStreamController);
+
+impl super::StreamController {
+    pub(super) fn emit_rows(&mut self, lines: impl Into<Rows>) -> Option<Box<dyn HistoryCell>> {
+        let lines = lines.into();
+        if lines.is_empty() {
+            return None;
+        }
+        self.header_emitted |= self.core.has_rewrap_rows();
+        let first = !self.header_emitted;
+        self.header_emitted = true;
+        Some(match lines {
+            Rows::Inline(lines) => {
+                let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, first);
+                cell.timestamp = self.timestamp;
+                cell.item_id = self.item_id.clone();
+                Box::new(cell)
+            }
+            Rows::Shared(rows) => self.core.wrap_rows(
+                rows,
+                history_cell::RowProjection::Agent {
+                    first,
+                    timestamp: self.timestamp,
+                },
+                self.item_id.clone(),
+                history_cell::agent_prefix(true).width(),
+            ),
+        })
+    }
+}
+
+impl super::PlanStreamController {
+    pub(super) fn emit_rows(
+        &mut self,
+        lines: impl Into<Rows>,
+        include_bottom_padding: bool,
+    ) -> Option<Box<dyn HistoryCell>> {
+        let lines = lines.into();
+        if lines.is_empty() && !include_bottom_padding {
+            return None;
+        }
+        self.header_emitted |= self.core.has_rewrap_rows();
+        self.top_padding_emitted |= self.core.has_rewrap_rows();
+        let first = !self.header_emitted;
+        let top = !self.top_padding_emitted;
+        let cell = match lines {
+            Rows::Inline(lines) => {
+                let out = self.render_display_lines(lines, include_bottom_padding);
+                let mut cell = history_cell::new_proposed_plan_stream(out, !first);
+                cell.item_id = self.item_id.clone();
+                Box::new(cell) as Box<dyn HistoryCell>
+            }
+            Rows::Shared(rows) => self.core.wrap_rows(
+                rows,
+                history_cell::RowProjection::Plan {
+                    first,
+                    top,
+                    bottom: include_bottom_padding,
+                },
+                self.item_id.clone(),
+                4,
+            ),
+        };
+        self.header_emitted = true;
+        self.top_padding_emitted = true;
+        Some(cell)
+    }
+
+    pub(crate) fn emit_prepared(
+        &mut self,
+        lines: Vec<HyperlinkLine>,
+    ) -> Option<Box<dyn HistoryCell>> {
+        self.emit(lines, false)
+    }
+}
+
+impl StreamCore {
+    pub(super) fn prepared_prefix_len(&mut self, source_start: usize) -> usize {
+        if let Some(cache) = &self.stable_prefix_len_cache
+            && cache.source_start == source_start
+            && cache.width == self.width
+        {
+            tracing::trace!(
+                source_start,
+                width = ?self.width,
+                stable_prefix_len = cache.stable_prefix_len,
+                "table holdback stable-prefix cache hit",
+            );
+            return cache.stable_prefix_len;
+        }
+
+        let render_start = Instant::now();
+        let source = self.state.collector.committed_source();
+        let source_start = source_start.min(source.len());
+        let (base_source, base_lines) = if source_start >= self.render.stable_source_len {
+            (
+                self.render.stable_source_len,
+                self.render.stable_rendered_len,
+            )
+        } else {
+            (0, 0)
+        };
+        let stable_prefix_render = render_markdown_agent_with_list_spacing(
+            &source[base_source..source_start],
+            self.width,
+            Some(self.cwd.as_path()),
+            self.inline_visualization_context.as_ref(),
+            self.render.list_spacing,
+        );
+        let stable_prefix_len = base_lines
+            + usize::from(base_lines > 0 && !stable_prefix_render.is_empty())
+            + stable_prefix_render.len();
+        tracing::trace!(
+            source_start,
+            width = ?self.width,
+            stable_prefix_len,
+            elapsed_us = render_start.elapsed().as_micros(),
+            "table holdback stable-prefix render",
+        );
+        self.stable_prefix_len_cache = Some(StablePrefixLenCache {
+            source_start,
+            width: self.width,
+            stable_prefix_len,
+        });
+        stable_prefix_len
+    }
+}

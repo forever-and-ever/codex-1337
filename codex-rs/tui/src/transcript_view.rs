@@ -228,18 +228,7 @@ impl TranscriptView {
         let resized = self.area.width != area.width || self.area.bottom() != area.bottom();
         self.prepare_width(area.width);
         self.area = area;
-        // Synchronous rendering presents at once; background presentation commits in presented.rs.
-        if self.cache.frames.is_none()
-            && self.presented_cells.as_ref().is_none_or(|presented| {
-                presented.len() != cells.len()
-                    || presented
-                        .iter()
-                        .zip(cells)
-                        .any(|(previous, current)| !Arc::ptr_eq(previous, current))
-            })
-        {
-            self.presented_cells = Some(Arc::from(cells));
-        }
+        self.retain_synchronous_cells(cells);
         self.normalize_selection(cells);
         if resized {
             self.reveal_copy_context(cells);
@@ -335,13 +324,12 @@ impl TranscriptView {
             });
             row += 1;
         }
-        if !self.cache.waiting
-            && !self.live_preparation.is_pending()
+        if self.selection_prepared()
             && let Some(pointer) = self
-                .selection
-                .as_ref()
-                .filter(|selection| selection.dragging && selection.moved)
-                .and_then(|selection| selection.pointer)
+            .selection
+            .as_ref()
+            .filter(|selection| selection.dragging && selection.moved)
+            .and_then(|selection| selection.pointer)
         {
             self.extend_selection(pointer.x, pointer.y);
         }

@@ -142,10 +142,14 @@ mod messages;
 mod stream_anchor;
 mod stream_rows;
 pub(crate) use failed_turn::FailedTurnCell;
-pub(crate) use stream_anchor::{StreamAnchorCell, streaming_item_id};
-pub(crate) use stream_rows::{
-    RowChunk, RowProjection, SharedRows, StreamRowContent, StreamRowsCell, render_plan_rows,
-};
+pub(crate) use stream_anchor::StreamAnchorCell;
+pub(crate) use stream_anchor::streaming_item_id;
+pub(crate) use stream_rows::RowChunk;
+pub(crate) use stream_rows::RowProjection;
+pub(crate) use stream_rows::SharedRows;
+pub(crate) use stream_rows::StreamRowContent;
+pub(crate) use stream_rows::StreamRowsCell;
+pub(crate) use stream_rows::render_plan_rows;
 
 mod image_generation;
 mod notices;
