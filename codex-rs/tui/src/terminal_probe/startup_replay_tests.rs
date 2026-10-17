@@ -33,8 +33,8 @@ fn startup_replay_preserves_osc_looking_bracketed_paste() {
 
 #[test]
 fn startup_replay_omits_terminal_color_replies_interleaved_with_bracketed_paste() {
-    let input = b"prefix\x1b[200~hello\x1b]10;rgb:eeee/eeee/eeee\x07 \
-        \x1b]11;rgb:1111/1111/1111\x1b\\world\x1b[201~suffix";
+    let input = b"prefix\x1b[?2004;1$y\x1b[200~hello\x1b]10;rgb:eeee/eeee/eeee\x07 \
+        \x1b[?2004;3$y\x1b]11;rgb:1111/1111/1111\x1b\\world\x1b[201~suffix";
 
     assert_eq!(
         startup_replay_input(input),

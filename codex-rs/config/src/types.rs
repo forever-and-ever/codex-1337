@@ -865,7 +865,9 @@ pub struct Tui {
     /// When true, disables burst-paste detection for typed input entirely.
     /// All characters are inserted as they are received, and no buffering
     /// or placeholder replacement will occur for fast keypress bursts.
-    /// Overrides the legacy top-level `disable_paste_burst` setting. Defaults to `false`.
+    /// False or absent selects automatic detection: a terminal that confirms bracketed paste
+    /// bypasses burst detection. There is no forced-hold override for keystroke-injected text
+    /// on a confirming terminal. Overrides the legacy top-level `disable_paste_burst` setting.
     pub disable_paste_burst: Option<bool>,
 
     /// Start the composer in Vim mode (`Normal`) by default.
