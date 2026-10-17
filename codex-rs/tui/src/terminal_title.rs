@@ -20,10 +20,9 @@
 //! Screen, the entire finished title must therefore use printable ASCII. This
 //! conversion happens here so shared in-TUI status rendering keeps its Unicode.
 
+use crate::custom_terminal::output::stdout;
 use std::fmt;
 use std::io;
-use std::io::IsTerminal;
-use std::io::stdout;
 
 use crossterm::Command;
 use ratatui::crossterm::execute;

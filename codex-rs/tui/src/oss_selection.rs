@@ -327,7 +327,7 @@ pub(crate) async fn select_oss_provider(
     let mut widget = OssSelectionWidget::new(lmstudio_status, ollama_status);
 
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
+    let mut stdout = crate::custom_terminal::output::stdout();
     execute!(stdout, EnterAlternateScreen)?;
 
     let backend = CrosstermBackend::new(stdout);

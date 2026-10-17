@@ -1,5 +1,5 @@
+use crate::custom_terminal::output::stdout;
 use std::io;
-use std::io::stdout;
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Position;

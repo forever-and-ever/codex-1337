@@ -1,7 +1,8 @@
 //! Restore terminal modes and screen placement across suspend/resume.
 
+use crate::custom_terminal::output;
+use crate::custom_terminal::output::stdout;
 use std::io::Result;
-use std::io::stdout;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
@@ -69,6 +70,7 @@ impl SuspendContext {
         }
         let y = self.suspend_cursor_y.load(Ordering::Relaxed);
         let _ = execute!(stdout(), MoveTo(0, y), Show);
+        output::barrier()?;
         suspend_process()?;
         super::reapply_raw_mode_after_resume()?;
 

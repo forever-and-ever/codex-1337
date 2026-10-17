@@ -1,6 +1,6 @@
+use crate::custom_terminal::output::stdout;
 use std::fmt;
 use std::io;
-use std::io::stdout;
 
 use codex_terminal_detection::Multiplexer;
 use codex_terminal_detection::terminal_info;

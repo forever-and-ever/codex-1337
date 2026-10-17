@@ -70,7 +70,6 @@ use codex_utils_home_dir::find_codex_home;
 use codex_utils_oss::ensure_oss_provider_ready;
 use codex_utils_oss::get_default_model_for_oss_provider;
 use color_eyre::eyre::WrapErr;
-use crossterm::SynchronizedUpdate;
 use cwd_prompt::CwdPromptAction;
 pub use daemon_startup::uses_wsl_drvfs;
 pub use idle_restart::IDLE_RESTART_PROTOCOL;
@@ -1888,7 +1887,7 @@ async fn run_ratatui_app(
     let use_alt_screen = true;
     let mode = crate::transcript_mode::TranscriptMode::Owned;
     if use_alt_screen != tui.is_alt_screen_enabled() || mode.is_owned() != tui.is_owned_screen() {
-        std::io::stdout().sync_update(|_| {
+        custom_terminal::output::stdout().sync_update(|_| {
             tui.set_alt_screen_enabled(use_alt_screen);
             tui.set_owned_screen(mode.is_owned())?;
             startup_draft.redraw_if_visible(&mut tui)
