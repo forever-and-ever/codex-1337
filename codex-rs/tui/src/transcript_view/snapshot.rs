@@ -135,5 +135,5 @@ impl TranscriptView {
 
     pub(super) fn rewrap_snapshot(&mut self, width: u16) {
         self.rewrap_presented_snapshot(width);
-            }
-        }
+    }
+}

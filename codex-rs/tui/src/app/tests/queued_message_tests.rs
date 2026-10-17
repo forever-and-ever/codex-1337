@@ -101,7 +101,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     while events.try_recv().is_ok() {}
     // A stalled typed request must not hold the UI task. Its synchronous
     // continuation stays ahead of an already-queued connection barrier.
-    use super::super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+    use super::super::turn_submissions::ui_requests::UiRequestKind;
+    use super::super::turn_submissions::ui_requests::UiRequestScope;
     let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (release, stalled) = tokio::sync::oneshot::channel();
     let first_applied = Arc::clone(&applied);

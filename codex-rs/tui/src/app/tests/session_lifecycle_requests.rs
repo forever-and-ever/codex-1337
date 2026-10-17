@@ -1572,7 +1572,7 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
         &mut tui,
         &mut app_server,
         AppEvent::ExportTranscript {
-        destination: TranscriptExportDestination::File(export_path.clone()),
+            destination: TranscriptExportDestination::File(export_path.clone()),
         },
     ))
     .await?;

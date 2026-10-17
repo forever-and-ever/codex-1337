@@ -269,8 +269,8 @@ impl ChatWidget {
                 .as_ref()
                 .is_some_and(PlanStreamController::is_background)
             {
-            self.transcript
-                .record_agent_markdown(plan_text.clone(), source);
+                self.transcript
+                    .record_agent_markdown(plan_text.clone(), source);
             }
             self.transcript.latest_proposed_plan_markdown = Some(plan_text.clone());
         }

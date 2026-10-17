@@ -1,5 +1,5 @@
-use crate::app_server_session::typed_requests::SessionRpc;
 use super::*;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
 use codex_app_server_protocol::AccountProvider;
@@ -26,7 +26,8 @@ pub(super) struct AccountUi {
 
 impl App {
     pub(super) fn request_logout(&mut self, server: &AppServerSession) {
-        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
         let thread_id = self.current_displayed_thread_id();
         self.request_server(
             server,
@@ -34,13 +35,15 @@ impl App {
             UiRequestKind::Mutation,
             "Logging out",
             move |handle| async move {
-                handle.logout_account(codex_app_server_protocol::RequestId::String(
-                                uuid::Uuid::new_v4().to_string(),
-                            ), thread_id.map(|id| {
-                                codex_app_server_protocol::AccountScopeParams {
-                                    thread_id: Some(id.to_string()),
-                                }
-                            }))
+                handle
+                    .logout_account(
+                        codex_app_server_protocol::RequestId::String(
+                            uuid::Uuid::new_v4().to_string(),
+                        ),
+                        thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
+                            thread_id: Some(id.to_string()),
+                        }),
+                    )
                     .await
             },
             |app, _, result| {

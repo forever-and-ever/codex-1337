@@ -323,10 +323,10 @@ impl TranscriptView {
         }
         if self.selection_prepared()
             && let Some(pointer) = self
-            .selection
-            .as_ref()
-            .filter(|selection| selection.dragging && selection.moved)
-            .and_then(|selection| selection.pointer)
+                .selection
+                .as_ref()
+                .filter(|selection| selection.dragging && selection.moved)
+                .and_then(|selection| selection.pointer)
         {
             self.extend_selection(pointer.x, pointer.y);
         }

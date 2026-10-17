@@ -979,7 +979,9 @@ fn find_expands_only_the_match_and_preserves_manual_disclosures() {
     );
     let mut view = TranscriptView::default();
     use crate::history_cell::activity_parts::FoldTarget;
-    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::invocation::Action;
+    use crate::history_cell::invocation::Panel;
+    use crate::history_cell::invocation::Port;
     use crate::history_cell::output_provenance::OutputMode;
     let input = |id: &str| FoldTarget::Invocation {
         call_id: id.into(),

@@ -2,21 +2,24 @@ use super::trust::ResumeTrustConsent;
 use super::*;
 use crate::app::resume_config::ResumeCwdBasis;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
-use crate::app_server_session::session_preparation::{
-    self as preparation, PreparedSession, PreparedView, RequestPolicy, ResumePreparation,
-    SubscriptionCustody, ViewPreparation,
-};
+use crate::app_server_session::session_preparation::PreparedSession;
+use crate::app_server_session::session_preparation::PreparedView;
+use crate::app_server_session::session_preparation::RequestPolicy;
+use crate::app_server_session::session_preparation::ResumePreparation;
+use crate::app_server_session::session_preparation::SubscriptionCustody;
+use crate::app_server_session::session_preparation::ViewPreparation;
+use crate::app_server_session::session_preparation::{self as preparation};
 use crate::chatwidget::ThreadInputStateRestoreMode;
-use crate::config_update::{
-    ProjectTrustHost, RemoteProjectTrust, read_remote_project_trust_with_policy,
-};
+use crate::config_update::ProjectTrustHost;
+use crate::config_update::RemoteProjectTrust;
+use crate::config_update::read_remote_project_trust_with_policy;
 use crate::local_settings::LocalSettings;
 use crate::onboarding::onboarding_screen::DirectoryTrustDecision;
 use crate::onboarding::onboarding_screen::DirectoryTrustPreparation;
+use crate::startup_hooks_review::HooksReviewDecision;
+use crate::startup_hooks_review::choose_startup_hooks_review;
+use crate::startup_hooks_review::hook_trust_updates;
 use crate::startup_hooks_review::load_startup_hooks_review_entry;
-use crate::startup_hooks_review::{
-    HooksReviewDecision, choose_startup_hooks_review, hook_trust_updates,
-};
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_config::types::ResumeCwdMode;

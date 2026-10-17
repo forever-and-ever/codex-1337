@@ -769,13 +769,15 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
 }
 
 async fn assert_prompt_arrival_ordering() {
-    use codex_app_server_protocol::{
-        ArrivalItem, ItemCompletedNotification, ServerNotification, UserInput,
-    };
+    use codex_app_server_protocol::ArrivalItem;
+    use codex_app_server_protocol::ItemCompletedNotification;
+    use codex_app_server_protocol::ServerNotification;
+    use codex_app_server_protocol::UserInput;
     use codex_protocol::ResponseItemId;
-    use codex_protocol::step_admission::{
-        ArrivalKind, ArrivalPlacement, ArrivalSide, ArrivalSource,
-    };
+    use codex_protocol::step_admission::ArrivalKind;
+    use codex_protocol::step_admission::ArrivalPlacement;
+    use codex_protocol::step_admission::ArrivalSide;
+    use codex_protocol::step_admission::ArrivalSource;
 
     let (mut app, mut rx, _op_rx) = crate::app::tests::make_test_app_with_channels().await;
     let thread = ThreadId::new();
@@ -1870,8 +1872,10 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
 
     // Exact call ownership must survive both transport direction and every page split,
     // while the capture has its own output-item identity and initially closed disclosure.
-    use codex_app_server_protocol::{CollabAgentTool, CollabAgentToolCallStatus};
-    use codex_protocol::agent_wait::{AgentWaitCompletion, AgentWaitOutcome};
+    use codex_app_server_protocol::CollabAgentTool;
+    use codex_app_server_protocol::CollabAgentToolCallStatus;
+    use codex_protocol::agent_wait::AgentWaitCompletion;
+    use codex_protocol::agent_wait::AgentWaitOutcome;
     let wait = |status| ThreadItem::CollabAgentToolCall {
         id: "wait-p".into(),
         tool: CollabAgentTool::Wait,

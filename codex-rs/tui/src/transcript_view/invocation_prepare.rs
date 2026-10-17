@@ -25,7 +25,8 @@ mod tests {
     use crate::history_cell::invocation::Port;
     use crate::history_cell::output_provenance::OutputMode;
     use crate::transcript_view::TranscriptView;
-    use crate::transcript_view::tests::{render, text};
+    use crate::transcript_view::tests::render;
+    use crate::transcript_view::tests::text;
     use crate::tui::FrameRequester;
     use codex_protocol::ToolName;
     use codex_protocol::tool_input::ToolInput;

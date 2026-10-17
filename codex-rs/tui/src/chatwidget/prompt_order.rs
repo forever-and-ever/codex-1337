@@ -1,5 +1,8 @@
+use super::ChatWidget;
+use super::UserMessage;
+use super::UserMessageDisplay;
+use super::UserMessageHistoryRecord;
 use super::user_messages::user_message_display_for_history;
-use super::{ChatWidget, UserMessage, UserMessageDisplay, UserMessageHistoryRecord};
 use crate::app_event::AppEvent;
 use crate::history_cell;
 use crate::prompt_order::UserPromptIdentity;

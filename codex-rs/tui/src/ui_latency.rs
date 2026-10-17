@@ -6,7 +6,9 @@ mod tests;
 use std::cell::RefCell;
 use std::future::Future;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering, fence};
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::atomic::fence;
 use std::time::Instant;
 
 use crossterm::event::MouseEventKind;

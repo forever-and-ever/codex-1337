@@ -1,5 +1,7 @@
-use clap::{Args, Subcommand};
-use codex_tui::ui_latency::{self, Report};
+use clap::Args;
+use clap::Subcommand;
+use codex_tui::ui_latency::Report;
+use codex_tui::ui_latency::{self};
 
 #[derive(Debug, Args)]
 pub(crate) struct Command {

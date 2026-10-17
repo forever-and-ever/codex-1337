@@ -1,19 +1,23 @@
 //! Directory replacement keeps the source selected until exact authority and detachment commit.
 
 use super::*;
-use crate::app::working_directory::{DirectoryAttachment, background_terminals_blocker};
+use crate::app::working_directory::DirectoryAttachment;
+use crate::app::working_directory::background_terminals_blocker;
 use crate::app_server_session::fork_preparation::ForkPreparation;
-use crate::app_server_session::session_preparation::{
-    self as preparation, PreparedSession, RequestPolicy, StartPreparation, SubscriptionCustody,
-    ThreadStartChoice,
-};
-use crate::config_update::{
-    EffectiveConfig, read_effective_config_if_supported, read_remote_project_trust_with_policy,
-};
+use crate::app_server_session::session_preparation::PreparedSession;
+use crate::app_server_session::session_preparation::RequestPolicy;
+use crate::app_server_session::session_preparation::StartPreparation;
+use crate::app_server_session::session_preparation::SubscriptionCustody;
+use crate::app_server_session::session_preparation::ThreadStartChoice;
+use crate::app_server_session::session_preparation::{self as preparation};
+use crate::config_update::EffectiveConfig;
+use crate::config_update::read_effective_config_if_supported;
+use crate::config_update::read_remote_project_trust_with_policy;
 use crate::local_settings::LocalSettings;
-use crate::onboarding::onboarding_screen::{
-    DirectoryTrustConsent, DirectoryTrustDecision, DirectoryTrustPreparation, OnboardingResult,
-};
+use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
+use crate::onboarding::onboarding_screen::DirectoryTrustDecision;
+use crate::onboarding::onboarding_screen::DirectoryTrustPreparation;
+use crate::onboarding::onboarding_screen::OnboardingResult;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 

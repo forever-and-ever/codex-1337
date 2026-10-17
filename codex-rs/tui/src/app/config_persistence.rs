@@ -412,7 +412,6 @@ impl App {
         self.adopt_server_permissions();
     }
 
-
     pub(super) fn read_effective_config_after_overridden_write<A>(
         &mut self,
         server: &AppServerSession,

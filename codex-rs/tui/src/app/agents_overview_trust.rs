@@ -2,15 +2,18 @@
 
 use super::*;
 use crate::config_update::read_remote_project_trust;
-use crate::hooks_rpc::{HookTrustUpdate, write_hook_trusts_typed};
-use crate::onboarding::onboarding_screen::{
-    DirectoryTrustConsent, DirectoryTrustDecision, DirectoryTrustPreparation, OnboardingResult,
-};
-use crate::startup_hooks_review::{
-    HooksReviewDecision, choose_startup_hooks_review, hook_trust_updates,
-    load_startup_hooks_review_entry,
-};
-use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
+use crate::hooks_rpc::HookTrustUpdate;
+use crate::hooks_rpc::write_hook_trusts_typed;
+use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
+use crate::onboarding::onboarding_screen::DirectoryTrustDecision;
+use crate::onboarding::onboarding_screen::DirectoryTrustPreparation;
+use crate::onboarding::onboarding_screen::OnboardingResult;
+use crate::startup_hooks_review::HooksReviewDecision;
+use crate::startup_hooks_review::choose_startup_hooks_review;
+use crate::startup_hooks_review::hook_trust_updates;
+use crate::startup_hooks_review::load_startup_hooks_review_entry;
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::TypedRequestError;
 
 #[derive(Clone)]
 pub(in crate::app) struct DashboardPreparation {

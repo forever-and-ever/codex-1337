@@ -19,9 +19,12 @@ use std::path::PathBuf;
 #[test]
 fn file_disclosures_are_independent_and_not_copied() {
     use crate::history_cell::activity_parts::FoldTarget;
-    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::invocation::Action;
+    use crate::history_cell::invocation::Panel;
+    use crate::history_cell::invocation::Port;
     use crate::history_cell::output_provenance::OutputMode;
-    use codex_protocol::tool_input::{ToolInput, ToolInputPayload};
+    use codex_protocol::tool_input::ToolInput;
+    use codex_protocol::tool_input::ToolInputPayload;
     let source = "*** Begin Patch\n*** Add File: alpha.rs\n+alpha body\n*** Add File: beta.rs\n+beta body\n*** End Patch";
     let returned = ThreadItem::FunctionCallOutput {
         id: "batch".into(),

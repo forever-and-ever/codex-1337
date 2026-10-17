@@ -7,9 +7,9 @@ use codex_core::StartIfIdleSubmission;
 
 #[path = "thread_accounts.rs"]
 mod accounts;
+mod farm;
 #[path = "openrouter.rs"]
 pub(super) mod openrouter;
-mod farm;
 use codex_agent_extension::AgentInvocation;
 use codex_agent_extension::AgentRun;
 use codex_agent_extension::AgentRunner;

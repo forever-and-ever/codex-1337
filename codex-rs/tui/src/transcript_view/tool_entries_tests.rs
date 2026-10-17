@@ -109,7 +109,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
     let mut view = TranscriptView::default();
-    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::invocation::Action;
+    use crate::history_cell::invocation::Panel;
+    use crate::history_cell::invocation::Port;
     view.record_tool_output_tokens("tool-output-tokens:mode".into(), "mode".into(), Some(123));
     view.invocations.apply(
         "mode",
@@ -279,7 +281,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     // Context inspectors and replay use the same evidence boundary as tool output.
     // Submitted definitions are model-bound, but their client JSON is not a provider prompt.
     // Preserve that evidence distinction through replay, formatting and selection.
-    use codex_protocol::step_admission::{ArrivalItem, ArrivalKind, ArrivalSource};
+    use codex_protocol::step_admission::ArrivalItem;
+    use codex_protocol::step_admission::ArrivalKind;
+    use codex_protocol::step_admission::ArrivalSource;
     for (source, kind, expected) in [
         (
             ArrivalSource::Captured {
@@ -368,7 +372,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             bg: (20, 20, 20),
         },
         || {
-            use crate::history_cell::output_provenance::{ContextAuthor, captured_lines};
+            use crate::history_cell::output_provenance::ContextAuthor;
+            use crate::history_cell::output_provenance::captured_lines;
             let mut backgrounds = Vec::new();
             for author in [
                 ContextAuthor::User,
@@ -1256,7 +1261,8 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         }
     }
     insta::assert_snapshot!("agent_wait_lifecycle", stages.join("\n\n"));
-    use codex_protocol::agent_wait::{AgentWaitCompletion, AgentWaitOutcome};
+    use codex_protocol::agent_wait::AgentWaitCompletion;
+    use codex_protocol::agent_wait::AgentWaitOutcome;
     // A tool activity owns its exact capture across interleaving; a later autonomous
     // completion of that same agent is not the tool's completion or result owner.
     let capture = r#"{"previous_status":"running"}"#;

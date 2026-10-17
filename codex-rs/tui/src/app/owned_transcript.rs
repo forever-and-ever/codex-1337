@@ -549,7 +549,7 @@ impl App {
             }
         }
         if self.handle_live_work_key_event(tui, event) {
-                return Ok(true);
+            return Ok(true);
         }
         if matches!(event, TuiEvent::Key(_))
             || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(_)))

@@ -6797,7 +6797,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
-        model_selection_generation: Default::default(),
+            model_selection_generation: Default::default(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             pending_server_profiles: HashMap::new(),
@@ -9890,7 +9890,9 @@ async fn selecting_cyber_model_defaults_active_thread_to_auto_review() {
         .await
         .expect("model selection should succeed");
 
-        app.settle_turn_submissions(&mut app_server).await.expect("settings receipt");
+        app.settle_turn_submissions(&mut app_server)
+            .await
+            .expect("settings receipt");
         assert!(app.pending_server_profiles.contains_key(&thread_id));
         assert!(
             !app.agents_overview
@@ -10022,7 +10024,9 @@ async fn changing_cyber_model_reasoning_preserves_selected_permissions() {
                 .expect("reasoning selection should succeed");
             }
 
-            app.settle_turn_submissions(&mut app_server).await.expect("settings receipt");
+            app.settle_turn_submissions(&mut app_server)
+                .await
+                .expect("settings receipt");
             let settings = next_thread_settings_updated(&mut app_server, thread_id)
                 .await
                 .thread_settings;

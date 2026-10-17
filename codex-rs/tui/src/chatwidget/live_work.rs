@@ -1,7 +1,9 @@
 //! Adapters for the existing alarm, question and agent-name owners.
 
 use super::*;
-use crate::live_work::{Action, Key, Row};
+use crate::live_work::Action;
+use crate::live_work::Key;
+use crate::live_work::Row;
 
 impl ChatWidget {
     pub(crate) fn open_processes(&mut self) {

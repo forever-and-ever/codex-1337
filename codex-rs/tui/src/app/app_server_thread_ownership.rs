@@ -5,9 +5,9 @@ pub(crate) use continuations::VerifiedServerNotification;
 
 use super::App;
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
-use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
@@ -16,12 +16,6 @@ use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
 use std::sync::Arc;
 use std::time::Duration;
-
-
-
-
-
-
 
 async fn read_mcp_subagent_parent_thread_id(
     handle: AppServerRequestHandle,
@@ -65,8 +59,6 @@ fn subagent_parent(source: &SessionSource) -> Option<ThreadId> {
         _ => None,
     }
 }
-
-
 
 impl App {
     pub(super) fn owns_thread_for_routing(&self, thread_id: ThreadId) -> bool {

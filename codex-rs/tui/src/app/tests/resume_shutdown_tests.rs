@@ -12,8 +12,6 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tokio::net::TcpListener;
 
-
-
 #[tokio::test]
 async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<()> {
     let (mut app, mut events, _commands) = make_test_app_with_channels().await;

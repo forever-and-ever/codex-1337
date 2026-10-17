@@ -1,9 +1,10 @@
 //! Selection prepares metadata and subscriptions without transferring the visible receiver.
 
 use super::*;
-use crate::app_server_session::session_preparation::{
-    PreparedHistory, PreparedSession, ResumePreparation, SubscriptionCustody,
-};
+use crate::app_server_session::session_preparation::PreparedHistory;
+use crate::app_server_session::session_preparation::PreparedSession;
+use crate::app_server_session::session_preparation::ResumePreparation;
+use crate::app_server_session::session_preparation::SubscriptionCustody;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 

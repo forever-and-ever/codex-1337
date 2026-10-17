@@ -4,7 +4,11 @@ use super::StreamCore;
 use crate::history_cell::HistoryRenderMode;
 use crate::markdown::render_markdown_agent_with_list_spacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::Event;
+use pulldown_cmark::Options;
+use pulldown_cmark::Parser;
+use pulldown_cmark::Tag;
+use pulldown_cmark::TagEnd;
 
 #[derive(Default)]
 pub(super) struct Publication {

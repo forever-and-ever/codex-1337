@@ -1,7 +1,9 @@
 use super::*;
-use crate::hooks_rpc::{HookTrustUpdate, write_hook_trusts_typed};
+use crate::hooks_rpc::HookTrustUpdate;
+use crate::hooks_rpc::write_hook_trusts_typed;
 use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
-use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::TypedRequestError;
 
 enum TrustConsent {
     Resume(Box<ResumeTrustConsent>),

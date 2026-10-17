@@ -1,6 +1,9 @@
 //! Run only inside a ready Slurm allocation. Build with the installed local profile.
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
+use std::alloc::System;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 struct Counted;

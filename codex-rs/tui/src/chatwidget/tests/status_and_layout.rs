@@ -2593,7 +2593,6 @@ async fn ui_small_heights_hide_running_state() {
     }
 }
 
-
 // Snapshot test: status widget + approval modal active together
 // The modal takes precedence visually; this captures the layout with a running
 // task (status indicator active) while an approval request is shown.

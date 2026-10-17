@@ -2175,7 +2175,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.conformance_cli is None:
-        print("error: --conformance-cli is required to run conformance", file=sys.stderr)
+        print(
+            "error: --conformance-cli is required to run conformance", file=sys.stderr
+        )
         return 2
 
     conformance_cli = args.conformance_cli.expanduser().resolve()

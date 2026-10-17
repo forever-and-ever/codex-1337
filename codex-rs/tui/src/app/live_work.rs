@@ -3,8 +3,14 @@
 //! populate another conversation. Opening this view never loads an agent.
 
 use super::*;
-use crate::app_server_session::session_preparation::{self as preparation, RequestPolicy};
-use crate::live_work::{Action, Group, Interaction, Key, LiveWorkView, Row};
+use crate::app_server_session::session_preparation::RequestPolicy;
+use crate::app_server_session::session_preparation::{self as preparation};
+use crate::live_work::Action;
+use crate::live_work::Group;
+use crate::live_work::Interaction;
+use crate::live_work::Key;
+use crate::live_work::LiveWorkView;
+use crate::live_work::Row;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use crossterm::event::MouseEventKind;

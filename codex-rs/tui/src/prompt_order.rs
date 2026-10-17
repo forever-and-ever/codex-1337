@@ -1,5 +1,7 @@
 //! Human-only source aliases and prompt-relative context placement.
-use crate::history_cell::{ArrivalCell, HistoryCell, UserHistoryCell};
+use crate::history_cell::ArrivalCell;
+use crate::history_cell::HistoryCell;
+use crate::history_cell::UserHistoryCell;
 use codex_protocol::step_admission::ArrivalSide;
 use std::collections::BTreeMap;
 use std::sync::Arc;

@@ -586,7 +586,7 @@ impl ChatWidget {
                 submitted_message,
                 &history_record,
                 (!render_before_submit).then_some(client_user_message_id.as_str()),
-                );
+            );
         }
 
         if render_in_history {

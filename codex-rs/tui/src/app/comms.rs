@@ -1,5 +1,6 @@
 use super::App;
-use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+use super::turn_submissions::ui_requests::UiRequestKind;
+use super::turn_submissions::ui_requests::UiRequestScope;
 use crate::app_server_session::AppServerSession;
 use codex_app_server_protocol as api;
 use codex_protocol::ThreadId;

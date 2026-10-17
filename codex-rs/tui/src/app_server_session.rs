@@ -3,7 +3,6 @@
 //! This module owns the typed JSON-RPC calls needed by the TUI and keeps
 //! request/response plumbing out of `App` and `ChatWidget`.
 
-pub(crate) mod typed_requests;
 mod account;
 pub(crate) mod fork_preparation;
 pub(crate) mod fs;
@@ -20,6 +19,7 @@ pub(crate) mod session_preparation;
 mod startup_launch;
 mod thread_list;
 mod turn_submissions;
+pub(crate) mod typed_requests;
 pub(crate) use turn_submissions::turn_start_params;
 
 mod operation_capabilities;

@@ -1,14 +1,22 @@
 use super::*;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::Read;
+use std::io::Write;
+use std::io::{self};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
-use std::thread::{self, JoinHandle};
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::path::PathBuf;
+use std::thread::JoinHandle;
+use std::thread::{self};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 const DEADLINE: Duration = Duration::from_millis(200);
 const METADATA: usize = 512;
@@ -407,7 +415,8 @@ pub async fn query(pid: u32, reset: bool) -> io::Result<Report> {
     query_path(&path, pid, start, reset).await
 }
 async fn query_path(path: &Path, pid: u32, start: u64, reset: bool) -> io::Result<Report> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
     let metadata = fs::symlink_metadata(path)?;
     // SAFETY: geteuid has no preconditions.
     if !metadata.file_type().is_socket()

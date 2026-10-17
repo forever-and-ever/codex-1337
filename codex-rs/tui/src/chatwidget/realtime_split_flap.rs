@@ -50,8 +50,7 @@ pub(super) struct SplitFlapTranscriptCell {
     frame_requester: FrameRequester,
 }
 
-impl SplitFlapTranscriptCell {
-}
+impl SplitFlapTranscriptCell {}
 
 impl SplitFlapTranscriptCell {
     pub(super) fn new(

@@ -1,7 +1,10 @@
+use super::App;
 use super::transcript_splice::TranscriptSplice;
-use super::{App, tui};
-use crate::history_cell::{HistoryCell, UserHistoryCell};
-use crate::prompt_order::{self, UserPromptIdentity};
+use super::tui;
+use crate::history_cell::HistoryCell;
+use crate::history_cell::UserHistoryCell;
+use crate::prompt_order::UserPromptIdentity;
+use crate::prompt_order::{self};
 use std::sync::Arc;
 
 impl App {

@@ -4,11 +4,16 @@ use crate::tui::FrameRequester;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::Weak;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::time::Duration;
-use tokio::sync::mpsc::{self, Sender, error::TrySendError};
-use tokio::sync::oneshot::{self, Receiver, error::TryRecvError};
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::mpsc::{self};
+use tokio::sync::oneshot::Receiver;
+use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::oneshot::{self};
 
 struct Job {
     owner: Option<Weak<()>>,

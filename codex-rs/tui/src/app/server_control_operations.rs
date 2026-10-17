@@ -1,7 +1,7 @@
 //! Urgent control bypasses admission barriers without abandoning request ownership.
 
-use crate::app_server_session::typed_requests::SessionRpc;
 use super::*;
+use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 
@@ -69,22 +69,28 @@ pub(super) async fn send(
             let turn_id = match cached {
                 Some(turn_id) => Some(turn_id),
                 None => {
-                    let thread: api::ThreadReadResponse = handle.thread_read(api::RequestId::String(format!("tui-operation-{id}-read")), api::ThreadReadParams {
+                    let thread: api::ThreadReadResponse = handle
+                        .thread_read(
+                            api::RequestId::String(format!("tui-operation-{id}-read")),
+                            api::ThreadReadParams {
                                 thread_id: thread_id.to_string(),
                                 include_turns: false,
-                            })
+                            },
+                        )
                         .await?;
                     let history = if thread.thread.history_mode == api::ThreadHistoryMode::Paginated
                         && paginated_history
                     {
                         None
                     } else {
-                        match handle.thread_read(api::RequestId::String(format!(
-                                        "tui-operation-{id}-history"
-                                    )), api::ThreadReadParams {
-                                        thread_id: thread_id.to_string(),
-                                        include_turns: true,
-                                    })
+                        match handle
+                            .thread_read(
+                                api::RequestId::String(format!("tui-operation-{id}-history")),
+                                api::ThreadReadParams {
+                                    thread_id: thread_id.to_string(),
+                                    include_turns: true,
+                                },
+                            )
                             .await
                         {
                             Ok(history) => Some(history.thread.turns),
@@ -131,13 +137,17 @@ pub(super) async fn send(
         }
         ControlOperation::StopAndExit { turn_id, goal } => {
             if matches!(goal, GoalStop::Pause) {
-                let _: api::ThreadGoalSetResponse = handle.thread_goal_set(api::RequestId::String(format!("tui-operation-{id}-pause")), api::ThreadGoalSetParams {
+                let _: api::ThreadGoalSetResponse = handle
+                    .thread_goal_set(
+                        api::RequestId::String(format!("tui-operation-{id}-pause")),
+                        api::ThreadGoalSetParams {
                             thread_id: thread_id.to_string(),
                             origin: Some(api::ThreadGoalMutationOrigin::User),
                             objective: None,
                             status: Some(api::ThreadGoalStatus::Paused),
                             token_budget: None,
-                        })
+                        },
+                    )
                     .await?;
             }
             (turn_id, true)
@@ -145,12 +155,14 @@ pub(super) async fn send(
     };
     if let Some(mut turn_id) = turn_id {
         for attempt in 0..2 {
-            let result = handle.turn_interrupt(api::RequestId::String(format!(
-                        "tui-operation-{id}-interrupt-{attempt}"
-                    )), api::TurnInterruptParams {
+            let result = handle
+                .turn_interrupt(
+                    api::RequestId::String(format!("tui-operation-{id}-interrupt-{attempt}")),
+                    api::TurnInterruptParams {
                         thread_id: thread_id.to_string(),
                         turn_id: turn_id.clone(),
-                    })
+                    },
+                )
                 .await;
             match result {
                 Ok(_) => break,

@@ -45,23 +45,32 @@ pub(crate) async fn thread_goal_set(
 }
 
 use crate::app_event::PermissionProfileSelection;
+use crate::app_server_session::AppServerSession;
+use crate::app_server_session::AppServerStartedThread;
+use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ForkName;
+use crate::app_server_session::is_thread_settings_update_unsupported;
 use crate::app_server_session::session_preparation::RequestPolicy;
-use crate::app_server_session::{
-    AppServerSession, AppServerStartedThread, ForkGoalContinuation, ForkName,
-    is_thread_settings_update_unsupported,
-};
 use crate::legacy_core::config::Config;
 use crate::local_settings::LocalSettings;
 use codex_app_server_client::TypedRequestError;
-use codex_app_server_protocol::{
-    ClientRequest, RequestId, ThreadInjectItemsParams, ThreadInjectItemsResponse,
-    ThreadLoadedListParams, ThreadLoadedListResponse, ThreadNameMode, ThreadSetNameParams,
-    ThreadSetNameResponse, ThreadSettingsUpdateParams, ThreadSettingsUpdateResponse,
-    TurnInterruptParams, TurnInterruptResponse,
-};
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ThreadInjectItemsParams;
+use codex_app_server_protocol::ThreadInjectItemsResponse;
+use codex_app_server_protocol::ThreadLoadedListParams;
+use codex_app_server_protocol::ThreadLoadedListResponse;
+use codex_app_server_protocol::ThreadNameMode;
+use codex_app_server_protocol::ThreadSetNameParams;
+use codex_app_server_protocol::ThreadSetNameResponse;
+use codex_app_server_protocol::ThreadSettingsUpdateParams;
+use codex_app_server_protocol::ThreadSettingsUpdateResponse;
+use codex_app_server_protocol::TurnInterruptParams;
+use codex_app_server_protocol::TurnInterruptResponse;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ResponseItem;
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::Result;
+use color_eyre::eyre::WrapErr;
 
 impl AppServerSession {
     #[expect(

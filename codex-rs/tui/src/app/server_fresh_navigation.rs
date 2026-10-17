@@ -2,9 +2,10 @@
 
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
-use crate::app_server_session::session_preparation::{
-    PreparedSession, StartPreparation, SubscriptionCustody, ThreadStartChoice,
-};
+use crate::app_server_session::session_preparation::PreparedSession;
+use crate::app_server_session::session_preparation::StartPreparation;
+use crate::app_server_session::session_preparation::SubscriptionCustody;
+use crate::app_server_session::session_preparation::ThreadStartChoice;
 use crate::app_server_session::typed_requests::SessionRpc;
 use crate::local_settings::LocalSettings;
 use codex_app_server_client::AppServerRequestHandle;

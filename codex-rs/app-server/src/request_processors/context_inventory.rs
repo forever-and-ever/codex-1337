@@ -1,5 +1,6 @@
 use super::*;
-use codex_app_server_protocol::{ThreadContextInventoryParams, ThreadContextInventoryResponse};
+use codex_app_server_protocol::ThreadContextInventoryParams;
+use codex_app_server_protocol::ThreadContextInventoryResponse;
 impl ThreadRequestProcessor {
     pub(crate) async fn thread_context_inventory(
         &self,

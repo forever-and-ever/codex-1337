@@ -1,13 +1,18 @@
 //! Read-only accounting uses the captured prefix, never recaptures capabilities.
 use super::Session;
 use super::preamble::InjectedText;
-use super::preamble::{PreambleTools, census};
+use super::preamble::PreambleTools;
+use super::preamble::census;
 use crate::context::BaseInstructionsFragment;
 use crate::context::is_contextual_user_fragment;
-use crate::context::world_state::{PreviousSectionState, SectionTransition, WorldStateSection};
+use crate::context::world_state::PreviousSectionState;
+use crate::context::world_state::SectionTransition;
+use crate::context::world_state::WorldStateSection;
 use codex_protocol::ContextInventory;
-use codex_protocol::models::{ContentItem, ResponseItem};
-use serde::{Deserialize, Serialize};
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use std::borrow::Cow;
 

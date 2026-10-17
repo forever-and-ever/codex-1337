@@ -91,7 +91,10 @@ async fn copy_export_picker_custom_keys_preserve_payloads_and_composer_draft() {
     assert_eq!(chat.bottom_pane.composer_text(), "Keep this draft");
 
     chat.show_transcript_export_popup();
-    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu)));
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu))
+    );
     chat.show_transcript_export_options();
     chat.handle_key_event(KeyEvent::from(KeyCode::F(/*n*/ 2)));
     assert!(
@@ -101,7 +104,10 @@ async fn copy_export_picker_custom_keys_preserve_payloads_and_composer_draft() {
         ))
     );
     chat.show_transcript_export_popup();
-    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu)));
+    assert!(
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu))
+    );
     chat.show_transcript_export_options();
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::F(/*n*/ 3)));

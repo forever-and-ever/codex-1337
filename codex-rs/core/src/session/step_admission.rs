@@ -370,7 +370,8 @@ fn arrival_placement(
     items: &[ResponseItem],
     prompt_index: usize,
 ) -> Option<codex_protocol::step_admission::ArrivalPlacement> {
-    use codex_protocol::step_admission::{ArrivalPlacement, ArrivalSide};
+    use codex_protocol::step_admission::ArrivalPlacement;
+    use codex_protocol::step_admission::ArrivalSide;
     let user_id = |item: &ResponseItem| match item {
         ResponseItem::Message {
             id, role, content, ..

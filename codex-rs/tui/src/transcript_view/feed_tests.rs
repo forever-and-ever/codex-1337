@@ -575,7 +575,9 @@ fn steps_fold_under_one_header_with_their_figures() {
     insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
     // Source formatting cannot depend on nested tool members: a source-only call must
     // paint its settled highlighted input immediately, live and after admission.
-    use crate::history_cell::invocation::{Action, Panel, Port};
+    use crate::history_cell::invocation::Action;
+    use crate::history_cell::invocation::Panel;
+    use crate::history_cell::invocation::Port;
     use crate::history_cell::output_provenance::OutputMode;
     let exec = "source-only";
     let mut cells = vec![script_block(

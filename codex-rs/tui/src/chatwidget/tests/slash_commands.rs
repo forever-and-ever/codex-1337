@@ -2355,7 +2355,11 @@ async fn slash_export_opens_destination_picker() {
     queue_composer_text_with_tab(&mut chat, "/export");
     complete_turn_with_message(&mut chat, "turn-1", /*message*/ None);
     let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-    assert!(events.iter().any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu)));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu))
+    );
     for event in events {
         if !matches!(&event, AppEvent::OpenTranscriptExportMenu) {
             chat.app_event_tx.send(event);

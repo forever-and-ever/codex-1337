@@ -1174,8 +1174,8 @@ See the Codex keymap documentation for supported actions and examples."
                 &mut app_server,
                 &mut app_event_rx,
                 tui_events.as_mut().get_mut(),
-                                &mut pending_startup_draft,
-                                &mut pending_startup_submission,
+                &mut pending_startup_draft,
+                &mut pending_startup_submission,
                 &mut schedule,
                 &mut output_completions,
                 #[cfg(target_os = "linux")]
@@ -1184,7 +1184,7 @@ See the Codex keymap documentation for supported actions and examples."
                 ui_host_ready,
                 &mut idle_restart,
                 waiting_for_initial_session_configured,
-                        #[cfg(windows)]
+                #[cfg(windows)]
                 terminal_color_probe_pending,
             )
             .await?
