@@ -17,7 +17,6 @@ use crossterm::cursor::SetCursorStyle;
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
-use ratatui::buffer::CellDiffOption;
 use ratatui::layout::Position;
 use ratatui::layout::Size;
 
@@ -28,6 +27,19 @@ use crate::ui_latency::FrameStamp;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct FrameId(u64);
+
+/// UI-side clears survive until their next captured frame, including frame replacement.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(super) struct Invalidation(bool);
+
+impl Invalidation {
+    pub(super) fn mark(&mut self) {
+        self.0 = true;
+    }
+    pub(super) fn take(&mut self) -> bool {
+        std::mem::take(&mut self.0)
+    }
+}
 
 struct Snapshot {
     buffer: Buffer,
@@ -415,7 +427,7 @@ impl Drop for CaptureGuard {
 
 pub(super) fn capture_frame(
     buffer: &Buffer,
-    previous: &Buffer,
+    invalidate: bool,
     size: Size,
     cursor: Option<Position>,
     style: SetCursorStyle,
@@ -429,10 +441,7 @@ pub(super) fn capture_frame(
             size,
             cursor,
             style,
-            invalidate: previous
-                .content
-                .iter()
-                .any(|cell| cell.diff_option == CellDiffOption::AlwaysUpdate),
+            invalidate,
         }));
         true
     })
@@ -610,10 +619,14 @@ fn write_snapshot<B: Backend<Error = io::Error> + Write>(
     terminal: &mut Terminal<B>,
     snapshot: Snapshot,
 ) -> io::Result<[(Instant, Instant); 3]> {
+    // Buffer::resize preserves flat cell indexes, not rows. Neither a moved
+    // viewport nor a changed screen has a meaningful previous diff buffer.
+    let geometry_changed = terminal.viewport_area != snapshot.buffer.area
+        || terminal.last_known_screen_size != snapshot.size;
     terminal.resize(snapshot.size)?;
     terminal.set_viewport_area(snapshot.buffer.area);
     *terminal.current_buffer_mut() = snapshot.buffer;
-    if snapshot.invalidate {
+    if snapshot.invalidate || geometry_changed {
         terminal.invalidate_viewport();
     }
     // Control batches can change cursor state independently of the buffer.
@@ -813,7 +826,7 @@ mod tests {
                 buffer.set_string(0, 0, text, ratatui::style::Style::default());
                 assert!(capture_frame(
                     &buffer,
-                    &Buffer::empty(buffer.area),
+                    false,
                     size,
                     None,
                     SetCursorStyle::DefaultUserShape
@@ -939,6 +952,123 @@ mod tests {
             "diff against written abc, not skipped xbc"
         );
         drop(owner);
+
+        // The writer and UI own distinct diff buffers, even when a UI clear has
+        // already erased the physical screen. Buffer::resize must not turn a
+        // 120-column rule into only the 24 columns whose flat indexes differ.
+        use crate::test_backend::VT100Backend;
+        use ratatui::layout::Rect;
+        use ratatui::style::Style;
+
+        fn capture(
+            ui: &mut Terminal<VT100Backend>,
+            buffer: Buffer,
+            size: Size,
+        ) -> io::Result<Snapshot> {
+            ui.set_viewport_area(buffer.area);
+            CAPTURE.with_borrow_mut(|capture| {
+                *capture = Some(Capture {
+                    id: FrameId(0),
+                    operations: Vec::new(),
+                });
+            });
+            ui.try_draw_with_size(size, |frame| {
+                *frame.buffer_mut() = buffer;
+                Ok::<_, io::Error>(())
+            })?;
+            let capture = CAPTURE
+                .with_borrow_mut(Option::take)
+                .expect("captured draw");
+            let mut frames =
+                capture
+                    .operations
+                    .into_iter()
+                    .filter_map(|operation| match operation {
+                        Operation::Frame(frame) => Some(frame),
+                        Operation::Bytes(_) => None,
+                    });
+            let snapshot = frames.next().expect("one frame");
+            assert!(frames.next().is_none());
+            Ok(snapshot)
+        }
+
+        fn rule(area: Rect) -> Buffer {
+            let mut buffer = Buffer::empty(area);
+            buffer.set_string(
+                area.x,
+                area.y + 1,
+                "─".repeat(usize::from(area.width)),
+                Style::default(),
+            );
+            buffer
+        }
+
+        fn assert_rule(writer: &Terminal<VT100Backend>, area: Rect) {
+            let contents = writer.backend().vt100().screen().contents();
+            let row: String = contents
+                .lines()
+                .nth(usize::from(area.y + 1))
+                .unwrap_or("")
+                .chars()
+                .skip(usize::from(area.x))
+                .take(usize::from(area.width))
+                .collect();
+            assert_eq!(row, "─".repeat(usize::from(area.width)));
+            assert!(
+                contents.lines().nth(2).unwrap_or("").trim().is_empty(),
+                "resize paints blank, never clipped old-width content"
+            );
+        }
+
+        let screen = Size::new(120, 4);
+        let mut ui = Terminal::with_options(VT100Backend::new(120, 4))?;
+        let mut writer = Terminal::with_options(VT100Backend::new(120, 4))?;
+        let mut initial = rule(Rect::new(0, 0, 120, 4));
+        initial.set_string(0, 2, "old-width transcript rows", Style::default());
+        write_snapshot(&mut writer, capture(&mut ui, initial, screen)?)?;
+
+        // Each geometry axis independently makes a diff invalid: width, viewport
+        // origin, and screen size with an otherwise identical viewport.
+        let area = Rect::new(1, 0, 95, 4);
+        for (viewport, size) in [
+            (Rect::new(0, 0, 96, 4), Size::new(96, 4)),
+            (area, Size::new(96, 4)),
+            (area, screen),
+        ] {
+            writer
+                .backend_mut()
+                .clear_region(ratatui::backend::ClearType::All)?;
+            let snapshot = capture(&mut ui, rule(viewport), size)?;
+            assert!(
+                !snapshot.invalidate,
+                "geometry is checked by the writer itself"
+            );
+            write_snapshot(&mut writer, snapshot)?;
+            assert_rule(&writer, viewport);
+        }
+
+        for clear in 0..4 {
+            match clear {
+                0 => ui.clear_after_position(Position::ORIGIN)?,
+                1 => ui.clear_visible_screen()?,
+                2 => ui.clear_scrollback_and_visible_screen_ansi()?,
+                _ => ui.invalidate_viewport(),
+            }
+            // Raw clear bytes reach the physical terminal, not its writer-side
+            // diff buffer. The next frame must carry the clear explicitly.
+            writer
+                .backend_mut()
+                .clear_region(ratatui::backend::ClearType::All)?;
+            let snapshot = capture(&mut ui, rule(area), screen)?;
+            assert!(snapshot.invalidate, "clear must survive capture");
+            write_snapshot(&mut writer, snapshot)?;
+            assert_rule(&writer, area);
+            assert!(
+                !capture(&mut ui, rule(area), screen)?.invalidate,
+                "clear is consumed once"
+            );
+        }
+
         Ok(())
     }
 }
