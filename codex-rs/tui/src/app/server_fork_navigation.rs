@@ -3,13 +3,17 @@
 use super::*;
 use crate::app::safety_buffering::safety_retry_fork_point;
 use crate::app::thread_name::ThreadNameRequest;
+use crate::app_server_session::ForkGoalContinuation;
+use crate::app_server_session::ForkName;
 use crate::app_server_session::fork_preparation::ForkPreparation;
-use crate::app_server_session::session_preparation::{
-    self as preparation, PreparedSafetyHistory, PreparedSession, RequestPolicy,
-    SafetyHistoryPreparation, SubscriptionCustody,
-};
-use crate::app_server_session::{ForkGoalContinuation, ForkName};
-use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
+use crate::app_server_session::session_preparation::PreparedSafetyHistory;
+use crate::app_server_session::session_preparation::PreparedSession;
+use crate::app_server_session::session_preparation::RequestPolicy;
+use crate::app_server_session::session_preparation::SafetyHistoryPreparation;
+use crate::app_server_session::session_preparation::SubscriptionCustody;
+use crate::app_server_session::session_preparation::{self as preparation};
+use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol as api;
 
 pub(super) struct ForkInput {
@@ -23,14 +27,15 @@ impl ForkInput {
         self.origin.thread_id().expect("fork has a source thread")
     }
     fn take_draft(&mut self) -> Option<LocalDraftRecovery> {
-        if let ForkPurpose::Safety(retry) = &mut self.purpose {
-            retry.prompt.take().map(|message| LocalDraftRecovery {
-                origin: self.origin.clone(),
-                message,
-            })
-        } else {
-            None
-        }
+        let prompt = match &mut self.purpose {
+            ForkPurpose::Safety(retry) => &mut retry.prompt,
+            ForkPurpose::Side { prompt } => prompt,
+            ForkPurpose::Ordinary { .. } => return None,
+        };
+        prompt.take().map(|message| LocalDraftRecovery {
+            origin: self.origin.clone(),
+            message,
+        })
     }
 }
 
@@ -42,6 +47,9 @@ enum ForkPurpose {
         source_turn_running: bool,
     },
     Safety(SafetyContinuation),
+    Side {
+        prompt: Option<crate::chatwidget::UserMessage>,
+    },
 }
 
 struct SafetyContinuation {
@@ -99,6 +107,7 @@ impl ForkStage {
 }
 
 enum ForkEffect {
+    Refresh(Box<super::navigation_config::ConfigRebuild>),
     Begin,
     Interrupt {
         thread_id: ThreadId,
@@ -109,6 +118,7 @@ enum ForkEffect {
     Detach(detach::DetachPlan),
 }
 enum ForkOutcome {
+    Refreshed(Result<Box<(Config, crate::local_settings::LocalSettings)>>),
     Begin,
     Interrupted(std::result::Result<(), TypedRequestError>),
     History(PreparedSafetyHistory),
@@ -130,6 +140,30 @@ impl ForkReceipt {
 }
 
 impl App {
+    pub(in crate::app) fn enqueue_side_fork(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        prompt: Option<crate::chatwidget::UserMessage>,
+    ) {
+        let input = ForkInput {
+            origin: OperationOrigin::Thread {
+                thread_id,
+                store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
+            },
+            permissions: PermissionAuthority::capture(
+                self.chat_widget.config_ref(),
+                self.selected_server_profile(thread_id),
+            ),
+            purpose: ForkPurpose::Side { prompt },
+        };
+        self.enqueue_navigation(
+            server,
+            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+        );
+        self.chat_widget.fork_in_progress = true;
+    }
+
     pub(in crate::app) async fn enqueue_ordinary_fork(
         &mut self,
         server: &AppServerSession,
@@ -140,30 +174,61 @@ impl App {
         let Some(thread_id) = self.chat_widget.thread_id() else {
             return;
         };
-        let input = ForkInput {
-            origin: OperationOrigin::Thread {
-                thread_id,
-                store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
-            },
-            permissions: PermissionAuthority::capture(
-                self.chat_widget.config_ref(),
-                self.selected_server_profile(thread_id),
-            ),
-            purpose: ForkPurpose::Ordinary {
-                name: name.map(|name| ForkName {
-                    name,
-                    conflict_thread_ids,
-                }),
-                from_locked_thread: self.chat_widget.is_external_writer_view(),
-                from_agents_overview,
-                source_turn_running: self.chat_widget.is_agent_turn_running(),
-            },
+        self.supersede_pending_navigation();
+        let generation = self.server_operations.navigation.generation();
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
+        let purpose = ForkPurpose::Ordinary {
+            name: name.map(|name| ForkName {
+                name,
+                conflict_thread_ids,
+            }),
+            from_locked_thread: self.chat_widget.is_external_writer_view(),
+            from_agents_overview,
+            source_turn_running: self.chat_widget.is_agent_turn_running(),
         };
-        self.enqueue_navigation(
+        self.request_server_prepared(
             server,
-            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+            super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
+            super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+            "Preparing fork settings",
+            move |app, _| {
+                let current = app.current_displayed_thread_id() == Some(thread_id)
+                    && app.chat_widget.thread_id() == Some(thread_id)
+                    && app.server_operations.navigation.generation() == generation
+                    && app
+                        .thread_event_channels
+                        .get(&thread_id)
+                        .is_some_and(|channel| Arc::ptr_eq(&channel.store, &store));
+                let input = current.then(|| ForkInput {
+                    origin: OperationOrigin::Thread { thread_id, store },
+                    permissions: PermissionAuthority::capture(
+                        app.chat_widget.config_ref(),
+                        app.selected_server_profile(thread_id),
+                    ),
+                    purpose,
+                });
+                move |_| async move { Ok(input) }
+            },
+            move |app, server, result| {
+                if app.server_operations.navigation.generation() != generation {
+                    return Ok(());
+                }
+                match result {
+                    Ok(Some(input)) if app.current_displayed_thread_id() == Some(thread_id) => {
+                        app.enqueue_navigation(
+                            server,
+                            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+                        );
+                        app.chat_widget.fork_in_progress = true;
+                    }
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(format!("Failed to prepare fork settings: {error}")),
+                    _ => {}
+                }
+                Ok(())
+            },
         );
-        self.chat_widget.fork_in_progress = true;
     }
 
     pub(in crate::app) async fn enqueue_safety_fork(
@@ -211,8 +276,15 @@ impl App {
         else {
             unreachable!("fork dispatch requires admission");
         };
+        let effect = if matches!(input.purpose, ForkPurpose::Safety(_)) {
+            ForkEffect::Begin
+        } else {
+            ForkEffect::Refresh(
+                self.capture_config_rebuild(self.chat_widget.config_ref().cwd.to_path_buf(), None),
+            )
+        };
         operation.intent = NavigationIntent::Fork(ForkStage::Config(input));
-        self.spawn_fork_effect(operation, server.request_handle(), ForkEffect::Begin);
+        self.spawn_fork_effect(operation, server.request_handle(), effect);
     }
 
     fn spawn_fork_effect(
@@ -232,6 +304,7 @@ impl App {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match effect {
                     ForkEffect::Begin => ForkOutcome::Begin,
+                    ForkEffect::Refresh(plan) => ForkOutcome::Refreshed(plan.run().await),
                     ForkEffect::Interrupt { thread_id, turn_id } => ForkOutcome::Interrupted(
                         preparation::request::<api::TurnInterruptResponse>(
                             RequestPolicy::Interactive,
@@ -333,6 +406,9 @@ impl App {
         if matching {
             self.cancel_fork_projection(input.thread_id());
             let text = match input.purpose {
+                ForkPurpose::Side { .. } => {
+                    App::side_start_error_message(&color_eyre::eyre::eyre!("{error}"))
+                }
                 ForkPurpose::Safety(_) => format!("Failed to retry with a faster model: {error}"),
                 ForkPurpose::Ordinary { .. } => {
                     format!("Failed to fork current session through the app server: {error}")
@@ -348,6 +424,23 @@ impl App {
         operation: PendingNavigation,
         context: Box<ForkContext>,
     ) {
+        if matches!(context.input.purpose, ForkPurpose::Side { .. }) {
+            let plan = server.prepare_side_thread(
+                RequestPolicy::Interactive,
+                &self.local_settings,
+                context.config.clone(),
+                context.input.thread_id(),
+                context.input.permissions.selection(),
+                vec![App::side_boundary_prompt_item()],
+            );
+            self.server_operations.navigation.current = Some(self.continue_fork_effect(
+                operation,
+                server.request_handle(),
+                ForkStage::Acquiring(context),
+                ForkEffect::Acquire(plan),
+            ));
+            return;
+        }
         let (before_turn_id, goal_continuation, name) = match &context.input.purpose {
             ForkPurpose::Ordinary {
                 name,
@@ -362,6 +455,7 @@ impl App {
                 },
                 name.clone(),
             ),
+            ForkPurpose::Side { .. } => unreachable!("side fork prepared separately"),
             ForkPurpose::Safety(retry) => (
                 Some(retry.turn_id.clone()),
                 ForkGoalContinuation::DeferUntilNextTurn,
@@ -439,7 +533,10 @@ impl App {
             );
             return;
         }
-        if matches!(ready.context.input.purpose, ForkPurpose::Ordinary { .. }) {
+        if matches!(
+            ready.context.input.purpose,
+            ForkPurpose::Ordinary { .. } | ForkPurpose::Side { .. }
+        ) {
             self.retain_fork_origin(ready.context.input.thread_id())
                 .await;
         }
@@ -473,6 +570,52 @@ impl App {
             self.restore_submission_drafts(source, store, drafts, DraftDisposition::Edit)
                 .await;
         }
+        if matches!(ready.context.input.purpose, ForkPurpose::Side { .. }) {
+            let parent = ready.context.input.origin.thread().0;
+            let channel = self.ensure_thread_channel(target);
+            {
+                let mut store = channel.store.lock().await;
+                App::install_side_thread_snapshot(
+                    &mut store,
+                    ready.started.session,
+                    ready.started.turns,
+                );
+            }
+            self.side_threads
+                .insert(target, crate::app::side::SideThreadState::new(parent));
+            self.upsert_agent_picker_thread(target, None, None, false);
+            if let Some(profile) = ready.context.input.permissions.selection() {
+                self.agents_overview
+                    .selected_permission_profiles
+                    .insert(target, profile.profile_id.clone());
+            }
+            let result = self
+                .select_tracked_side_locally(tui, server, target, SelectionAfter::SelectOnly)
+                .await;
+            if let Err(error) = result {
+                self.fork_failure(&mut ready.context.input, error, true);
+                self.start_navigation_cleanup(
+                    operation,
+                    handle,
+                    target,
+                    Vec::new(),
+                    CleanupContinuation::Done,
+                    false,
+                );
+            } else {
+                if ready.context.input.permissions.selection().is_some() {
+                    self.adopt_inherited_server_selection();
+                }
+                if let ForkPurpose::Side { prompt } = &mut ready.context.input.purpose
+                    && let Some(message) = prompt.take()
+                {
+                    let _ = self
+                        .chat_widget
+                        .submit_user_message_as_plain_user_turn(message);
+                }
+            }
+            return Ok(());
+        }
         let retained_input = match &ready.context.input.purpose {
             ForkPurpose::Ordinary {
                 from_locked_thread: true,
@@ -480,7 +623,7 @@ impl App {
                 ..
             }
             | ForkPurpose::Safety(_) => self.chat_widget.capture_thread_input_state(),
-            ForkPurpose::Ordinary { .. } => None,
+            ForkPurpose::Ordinary { .. } | ForkPurpose::Side { .. } => None,
         };
         if let Some(profile) = ready.context.input.permissions.selection() {
             self.agents_overview
@@ -541,6 +684,7 @@ impl App {
                     tui.schedule_screen_size_recheck(Duration::ZERO);
                 }
             }
+            ForkPurpose::Side { .. } => unreachable!("side committed separately"),
             ForkPurpose::Safety(mut retry) => {
                 let Some(prompt) = retry.prompt.take() else {
                     unreachable!("matching retry consumed its prompt before installation");
@@ -596,7 +740,10 @@ impl App {
         };
         let ForkReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
-            (ForkStage::Config(mut input), ForkOutcome::Begin) if matching => {
+            (
+                ForkStage::Config(mut input),
+                outcome @ (ForkOutcome::Begin | ForkOutcome::Refreshed(_)),
+            ) if matching => {
                 if !self.fork_authority_matches(&input).await {
                     self.fork_failure(
                         &mut input,
@@ -605,10 +752,11 @@ impl App {
                     );
                     return Ok(());
                 }
+                if let ForkOutcome::Refreshed(result) = outcome {
+                    self.apply_navigation_config_refresh(result, "forking the thread");
+                }
                 let config = match input.purpose {
                     ForkPurpose::Ordinary { .. } => {
-                        self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
-                            .await;
                         let mut config = if self.chat_widget.is_parent_owned_thread() {
                             let mut config = self.chat_widget.config_ref().clone();
                             config.service_tier =
@@ -630,6 +778,7 @@ impl App {
                         config.daybreak_enabled = self.chat_widget.daybreak_enabled;
                         config
                     }
+                    ForkPurpose::Side { .. } => self.side_fork_config(),
                     ForkPurpose::Safety(_) => self.chat_widget.config_ref().clone(),
                 };
                 let context = Box::new(ForkContext {

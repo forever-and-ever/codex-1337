@@ -241,12 +241,16 @@ mod link_hover;
 mod loaded_threads;
 mod misalignment_policy;
 mod model_defaults;
+mod local_ui_requests;
+pub(crate) use turn_submissions::ui_requests::UiReply;
 mod new_session;
+mod navigation_config;
 mod turn_tips;
 mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
 mod clipboard;
 mod native_history;
+mod openrouter;
 mod owned_transcript;
 mod pending_interactive_replay;
 mod permission_shortcuts;
@@ -256,7 +260,6 @@ mod plugin_mentions;
 mod presentation;
 mod prompt_order;
 mod provider_models;
-mod openrouter;
 mod transcript_splice;
 pub(crate) use provider_models::ProviderModelChoice;
 pub(crate) use provider_models::ProviderModelEvent;
@@ -270,6 +273,7 @@ mod context_inventory;
 mod context_role;
 pub(crate) mod live_work;
 mod mouse_paste;
+pub(crate) mod prompt_revert;
 mod realtime_delivery;
 mod realtime_settings;
 mod reasoning_replay;
@@ -298,8 +302,10 @@ pub(crate) mod thread_name;
 mod thread_routing;
 mod thread_session_state;
 mod thread_settings;
+mod thread_metadata;
+pub(crate) use app_server_thread_ownership::VerifiedServerNotification;
 mod thread_title;
-mod transcript_export;
+pub(crate) mod transcript_export;
 mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
@@ -697,6 +703,9 @@ pub(crate) struct App {
     // App fixtures keep their home alive across widget replacement; drop it last.
     #[cfg(test)]
     _test_codex_home: Option<tempfile::TempDir>,
+    active_export: Option<transcript_export::ActiveExport>,
+    pending_revert: Option<prompt_revert::PendingRevert>,
+    model_selection_generation: thread_settings::ModelSelectionGeneration,
 }
 
 struct PendingMcpLoginStart {
@@ -1173,6 +1182,9 @@ impl App {
                         tui.clipboard.advance(tui.frame_requester());
                         return Ok(AppRunControl::Continue);
                     }
+                    if Self::defer_input_frame(tui, &event, screen_size) {
+                        return Ok(AppRunControl::Continue);
+                    }
                     let rendered_area = self.render_chat_widget_frame(tui, screen_size)?;
                     if tui.is_owned_screen()
                         && self.transcript_view.history
@@ -1180,7 +1192,7 @@ impl App {
                     {
                         self.request_owned_history(tui, app_server);
                     }
-                    if !had_active_modal
+                    if (!had_active_modal || self.startup_pending_protected_request)
                         && self.chat_widget.has_active_modal()
                         && self.startup_protected_input_boundary
                     {

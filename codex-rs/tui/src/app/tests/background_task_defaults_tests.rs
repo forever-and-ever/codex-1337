@@ -16,6 +16,7 @@ async fn confirm_permission_selection(
     server: &mut AppServerSession,
     thread_id: ThreadId,
 ) -> Result<()> {
+    app.settle_turn_submissions(server).await?;
     for _ in 0..20 {
         let settings = next_thread_settings_updated(server, thread_id).await;
         app.enqueue_thread_notification(
@@ -658,7 +659,7 @@ async fn command_center_new_preserves_permissions_across_sessions() -> Result<()
 
 #[tokio::test]
 async fn command_center_new_preserves_only_selected_server_profiles() -> Result<()> {
-    let mut app = make_test_app_with_channels().await.0;
+    let (mut app, mut events, _) = make_test_app_with_channels().await;
     trust_launch_folder(&mut app);
     let home = tempdir()?;
     std::fs::write(
@@ -717,6 +718,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
     tui.pause_events();
     app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
         .await?;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         app.chat_widget
             .config_ref()
@@ -743,6 +745,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
         },
     )
     .await;
+    app.settle_turn_submissions(&mut server).await?;
     // Drain without applying it: confirmation is still pending in the TUI, but
     // the server cannot coalesce both updates into one latest snapshot.
     let _ = next_thread_settings_updated(&mut server, thread_id).await;
@@ -755,10 +758,19 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
         },
     )
     .await;
+    // Starting immediately must capture permissions only after the queued
+    // settings mutation settles, not copy the old snapshot at admission.
     let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
     app.chat_widget.show_bottom_pane_view(Box::new(view));
     app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
         .await?;
+    assert_eq!(app.chat_widget.thread_id(), Some(thread_id));
+    app.settle_turn_submissions(&mut server).await?;
+    let deferred = std::iter::from_fn(|| events.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::NewAgentsOverviewSession { .. }))
+        .expect("new session resumes behind the settings barrier");
+    app.handle_event(&mut tui, &mut server, deferred).await?;
+    app.settle_turn_submissions(&mut server).await?;
     assert_ne!(app.chat_widget.thread_id(), Some(thread_id));
     assert_eq!(
         app.chat_widget
@@ -804,6 +816,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
         let previous_thread_id = app.chat_widget.thread_id();
         app.new_agents_overview_session(&mut tui, &mut server, /*cwd*/ None)
             .await?;
+        app.settle_turn_submissions(&mut server).await?;
         assert_ne!(app.chat_widget.thread_id(), previous_thread_id);
         let config = app.chat_widget.config_ref();
         assert_eq!(
@@ -827,6 +840,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
                 .remove(&app.chat_widget.thread_id().unwrap());
             app.select_permission_profile(&mut server, selection.clone())
                 .await;
+            app.settle_turn_submissions(&mut server).await?;
             assert!(!app.reject_pending_permission_change());
         }
     }

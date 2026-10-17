@@ -99,6 +99,148 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     )
     .await?;
     while events.try_recv().is_ok() {}
+    // A stalled typed request must not hold the UI task. Its synchronous
+    // continuation stays ahead of an already-queued connection barrier.
+    use super::super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+    let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (release, stalled) = tokio::sync::oneshot::channel();
+    let first_applied = Arc::clone(&applied);
+    app.request_server(
+        &server,
+        UiRequestScope::Connection,
+        UiRequestKind::ReadOnly,
+        "stalled UI request",
+        move |_| async move { Ok(stalled.await.expect("release stalled UI request")) },
+        move |app, server, value| {
+            first_applied.lock().unwrap().push(value.unwrap());
+            app.request_server(
+                server,
+                UiRequestScope::Connection,
+                UiRequestKind::ReadOnly,
+                "dependent UI request",
+                |_| async { Ok(2_u32) },
+                move |_, _, value| {
+                    first_applied.lock().unwrap().push(value.unwrap());
+                    Ok(())
+                },
+            );
+            Ok(())
+        },
+    );
+    let successor_applied = Arc::clone(&applied);
+    let prepared_after = Arc::clone(&applied);
+    app.request_server_prepared(
+        &server,
+        UiRequestScope::Connection,
+        UiRequestKind::ReadOnly,
+        "successor UI request",
+        move |_, _| {
+            assert_eq!(*prepared_after.lock().unwrap(), vec![1, 2]);
+            |_| async { Ok(3_u32) }
+        },
+        move |_, _, value| {
+            successor_applied.lock().unwrap().push(value.unwrap());
+            Ok(())
+        },
+    );
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    )
+    .await;
+    assert_eq!(app.chat_widget.composer_text_with_pending(), "x");
+    app.handle_key_event(
+        &mut tui,
+        &mut server,
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    )
+    .await;
+    assert!(applied.lock().unwrap().is_empty());
+    release.send(1_u32).unwrap();
+    for _ in 0..3 {
+        let completion = tokio::time::timeout(
+            Duration::from_secs(5),
+            app.server_operations.control_rx.recv(),
+        )
+        .await?
+        .expect("UI request completion");
+        app.handle_server_completion(&mut tui, &mut server, completion)
+            .await?;
+    }
+    assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
+
+    // Cancellation stops a blocked read and suppresses a result that was
+    // already delivered but has not yet been applied by the UI task.
+    for already_delivered in [false, true] {
+        let (release, blocked) = tokio::sync::oneshot::channel::<u32>();
+        let cancelled_applied = Arc::clone(&applied);
+        let handle = app.request_server(
+            &server,
+            UiRequestScope::Connection,
+            UiRequestKind::ReadOnly,
+            "cancelled UI read",
+            move |_| async move { Ok(blocked.await.expect("read released")) },
+            move |_, _, value| {
+                cancelled_applied.lock().unwrap().push(value.unwrap());
+                Ok(())
+            },
+        );
+        let completion = if already_delivered {
+            release.send(9).unwrap();
+            let completion = tokio::time::timeout(
+                Duration::from_secs(5),
+                app.server_operations.control_rx.recv(),
+            )
+            .await?
+            .expect("completed read");
+            handle.cancel();
+            completion
+        } else {
+            handle.cancel();
+            let completion = tokio::time::timeout(
+                Duration::from_secs(5),
+                app.server_operations.control_rx.recv(),
+            )
+            .await?
+            .expect("cancelled read");
+            assert!(release.is_closed(), "cancelled read future was not dropped");
+            completion
+        };
+        app.handle_server_completion(&mut tui, &mut server, completion)
+            .await?;
+        assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
+    }
+
+    // Retiring the connection invalidates a completed request even when its
+    // result has already reached the completion channel.
+    let stale_applied = Arc::clone(&applied);
+    app.request_server(
+        &server,
+        UiRequestScope::Connection,
+        UiRequestKind::ReadOnly,
+        "stale UI request",
+        |_| async { Ok(4_u32) },
+        move |_, _, value| {
+            stale_applied.lock().unwrap().push(value.unwrap());
+            Ok(())
+        },
+    );
+    let stale = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.server_operations.control_rx.recv(),
+    )
+    .await?
+    .expect("stale UI request completion");
+    app.handle_submission_event(
+        &server,
+        super::super::turn_submissions::SubmissionEvent::Retire,
+    )
+    .await;
+    app.handle_server_completion(&mut tui, &mut server, stale)
+        .await?;
+    assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
+    while events.try_recv().is_ok() {}
     let rich_inputs = |text: &str| {
         vec![
             codex_app_server_protocol::UserInput::Text {
@@ -1035,6 +1177,9 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     tokio::time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "thread/fork").len() == forks_before {
             tokio::select! {
+                completion = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(&mut server, completion.expect("fork settings snapshot receipt")).await?;
+                }
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation")).await?;
                 }

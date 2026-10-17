@@ -41,6 +41,7 @@ async fn session_model_selection_preserves_defaults_and_updates_active_thread() 
                 },
             ))
             .await?;
+            app.settle_turn_submissions(&mut server).await?;
             let settings = next_thread_settings_updated(&mut server, thread_id).await;
             assert_eq!(
                 (
@@ -163,6 +164,15 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
             },
         ] {
             Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+            // Config acknowledgement is not an input boundary: editing continues before apply.
+            assert!(!app.server_operations.is_empty());
+            app.chat_widget.insert_str("still responsive");
+            assert_eq!(
+                app.chat_widget.composer_text_with_pending(),
+                "still responsive"
+            );
+            app.chat_widget.apply_external_edit(String::new());
+            app.settle_server_ui_requests(&mut tui, &mut server).await?;
         }
         let mut service_tier_error = None;
         let messages = std::iter::from_fn(|| events.try_recv().ok())

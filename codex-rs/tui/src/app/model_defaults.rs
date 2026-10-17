@@ -5,7 +5,6 @@
 
 use super::App;
 use crate::app_server_session::AppServerSession;
-use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::ConfigEdit;
 use codex_app_server_protocol::WriteStatus;
 use codex_protocol::config_types::ModeKind;
@@ -19,7 +18,8 @@ impl App {
         model: String,
         effort: Option<ReasoningEffort>,
     ) {
-        let model_changed = self.chat_widget.current_model() != model
+        let model_changed = self.chat_widget.automatic_model_switch_pending()
+            || self.chat_widget.current_model() != model
             || self.chat_widget.current_collaboration_mode().model() != model;
         if model_changed
             && self
@@ -29,6 +29,7 @@ impl App {
         {
             return;
         }
+        self.model_selection_generation.advance();
         let in_plan_mode = self.chat_widget.effective_collaboration_mode().mode == ModeKind::Plan;
         let ultra = effort == Some(ReasoningEffort::Ultra);
         let clear_default_ultra = self
@@ -68,18 +69,37 @@ impl App {
         self.chat_widget.add_info_message(message, /*hint*/ None);
     }
 
-    pub(super) async fn persist_model_defaults(
+    pub(super) fn queue_model_defaults<A>(
         &mut self,
-        request_handle: AppServerRequestHandle,
+        server: &AppServerSession,
         edits: Vec<ConfigEdit>,
-        setting: &str,
-    ) -> Result<()> {
-        let response = crate::config_update::write_config_batch(request_handle, edits).await?;
-        if response.status == WriteStatus::OkOverridden {
-            self.chat_widget.add_warning_message(format!(
-                "Saved {setting}, but a higher-priority configuration layer overrides the saved value."
-            ));
-        }
-        Ok(())
+        setting: &'static str,
+        apply: A,
+    ) where
+        A: FnOnce(
+                &mut App,
+                &mut AppServerSession,
+                std::result::Result<(), &super::turn_submissions::SubmissionFailure>,
+            ) -> Result<()>
+            + Send
+            + 'static,
+    {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        self.request_server(
+            server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            setting,
+            move |handle| crate::config_update::write_config_batch_typed(handle, edits),
+            move |app, server, result| {
+                let result = result.map(|response| {
+                    if response.status == WriteStatus::OkOverridden {
+                        app.chat_widget.add_warning_message(format!("Saved {setting}, but a higher-priority configuration layer overrides the saved value."));
+                    }
+                });
+                apply(app, server, result)
+            },
+        );
     }
 }

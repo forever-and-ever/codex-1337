@@ -14,7 +14,6 @@ use codex_protocol::models::local_image_label_text;
 use super::App;
 use crate::app_event::TranscriptExportDestination;
 use crate::app_server_session::AppServerSession;
-use crate::app_server_session::HistoryHydrationScope;
 use crate::app_server_session::is_history_pagination_unsupported;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::HistoryCell;
@@ -28,99 +27,220 @@ use crate::legacy_core::config::Config;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::thread_items_to_transcript_cells;
 
+pub(super) struct ActiveExport {
+    id: uuid::Uuid,
+    thread_id: ThreadId,
+    epoch: u64,
+    pub(super) pages: usize,
+    handle: super::turn_submissions::ui_requests::UiRequestHandle,
+}
+#[derive(Debug)]
+pub(crate) enum PreparedExport {
+    Clipboard(String),
+    File {
+        file: tempfile::NamedTempFile,
+        path: PathBuf,
+    },
+}
+#[cfg(test)]
+fn write_transcript(cwd: &Path, requested_path: &Path, markdown: &str) -> Result<PathBuf, String> {
+    let (file, path) = prepare_transcript(cwd, requested_path, markdown)?;
+    file.persist_noclobber(&path)
+        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
+    Ok(path)
+}
+
 impl App {
-    pub(super) async fn export_transcript(
+    pub(super) fn export_transcript(
         &mut self,
-        tui: &mut crate::tui::Tui,
-        app_server: &mut AppServerSession,
+        server: &AppServerSession,
         destination: TranscriptExportDestination,
     ) -> Result<(), String> {
-        let thread_id = self
-            .chat_widget
-            .thread_id()
-            .ok_or_else(|| "No active conversation to export.".to_string())?;
-        let visibility = if self.config.show_raw_agent_reasoning {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        let thread_id = self.current_displayed_thread_id()
+            .ok_or("No active conversation to export.")?;
+        if self.active_export.is_some() {
+            return Err("An export is already in progress; /export can cancel it.".into());
+        }
+        let id = uuid::Uuid::new_v4();
+        let config = self.config.clone();
+        let visibility = if config.show_raw_agent_reasoning {
             RawReasoningVisibility::Visible
         } else {
             RawReasoningVisibility::Hidden
         };
-        let cells = load_export_transcript(
-            app_server,
+        let cells = self.transcript_cells.clone();
+        let metadata = self
+            .agent_navigation
+            .tracked_thread_ids()
+            .into_iter()
+            .chain(self.thread_event_channels.keys().copied())
+            .map(|id| (id, self.chat_widget.collab_agent_metadata(id)))
+            .collect::<std::collections::HashMap<_, _>>();
+        let cwd = if self.app_server_target.uses_remote_workspace() {
+            self.launch_cwd.clone()
+        } else {
+            self.chat_widget.config_ref().cwd.to_path_buf()
+        };
+        let tx = self.app_event_tx.clone();
+        self.chat_widget.show_transcript_export_progress(0);
+        let handle = self.request_server(
+            server,
+            UiRequestScope::Thread(thread_id),
+            UiRequestKind::ReadOnly,
+            "export conversation",
+            move |handle| async move {
+                let pages = std::sync::atomic::AtomicUsize::new(0);
+                let progress = || {
+                    let pages = pages.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    tx.send(crate::app_event::AppEvent::TranscriptExportProgress { id, pages });
+                };
+                let metadata = |id| metadata.get(&id).cloned().unwrap_or_default();
+                let cells = load_export_transcript(
+                    &handle,
+                    thread_id,
+                    visibility,
+                    Some(&config),
+                    cells,
+                    &metadata,
+                    &progress,
+                )
+                .await;
+                Ok(cells
+                    .and_then(|cells| render_markdown_transcript(&cells))
+                    .and_then(|markdown| match destination {
+                        TranscriptExportDestination::Clipboard => {
+                            Ok(PreparedExport::Clipboard(markdown))
+                        }
+                        TranscriptExportDestination::File(path) => {
+                            prepare_transcript(&cwd, &path, &markdown)
+                                .map(|(file, path)| PreparedExport::File { file, path })
+                        }
+                    }))
+            },
+            move |app, _, result| {
+                let result = result
+                    .map_err(ToString::to_string)
+                    .and_then(|result| result);
+                app.app_event_tx
+                    .send(crate::app_event::AppEvent::FinishTranscriptExport { id, result });
+                Ok(())
+            },
+        );
+        self.active_export = Some(ActiveExport {
+            id,
             thread_id,
-            visibility,
-            Some(&self.config),
-            self.transcript_cells.clone(),
-            &|thread| self.chat_widget.collab_agent_metadata(thread),
-        )
-        .await?;
-        let markdown = render_markdown_transcript(&cells)?;
-        match destination {
-            TranscriptExportDestination::Clipboard => {
+            epoch: self.server_operations.epoch(),
+            pages: 0,
+            handle,
+        });
+        Ok(())
+    }
+
+    pub(super) fn sync_frontend_requests(&mut self) {
+        if self.active_export.as_ref().is_some_and(|active| {
+            self.current_displayed_thread_id() != Some(active.thread_id)
+                || self.server_operations.epoch() != active.epoch
+        }) {
+            self.cancel_transcript_export();
+        }
+        self.sync_prompt_revert();
+    }
+
+    pub(super) fn cancel_transcript_export(&mut self) {
+        if let Some(active) = self.active_export.take() {
+            active.handle.cancel();
+            if self.chat_widget.thread_id() == Some(active.thread_id) {
+                self.chat_widget.clear_transcript_export_progress();
+                self.chat_widget
+                    .add_info_message("Export canceled.".into(), None);
+            }
+        }
+    }
+
+    pub(super) fn transcript_export_progress(&mut self, id: uuid::Uuid, pages: usize) {
+        let current = self.current_displayed_thread_id();
+        let Some(active) = self.active_export.as_mut().filter(|active| active.id == id) else {
+            return;
+        };
+        if current != Some(active.thread_id)
+            || self.server_operations.epoch() != active.epoch
+        {
+            self.cancel_transcript_export();
+            return;
+        }
+        active.pages = pages;
+        self.chat_widget.show_transcript_export_progress(pages);
+    }
+
+    pub(super) fn finish_transcript_export(
+        &mut self,
+        tui: &mut crate::tui::Tui,
+        id: uuid::Uuid,
+        result: Result<PreparedExport, String>,
+    ) {
+        let Some(active) = self.active_export.as_ref().filter(|active| active.id == id) else {
+            return;
+        };
+        if self.current_displayed_thread_id() != Some(active.thread_id)
+            || self.server_operations.epoch() != active.epoch
+        {
+            self.cancel_transcript_export();
+            return;
+        }
+        self.active_export = None;
+        self.chat_widget.clear_transcript_export_progress();
+        let result = result.and_then(|output| match output {
+            PreparedExport::Clipboard(markdown) => {
                 let result = tui.copy_transcript_selection(
                     &markdown,
                     crate::clipboard_copy::CopyFormat::PlainText,
                 );
                 self.chat_widget.show_copy_result("conversation", result);
+                Ok(())
             }
-            TranscriptExportDestination::File(path) => {
-                let cwd = if self.app_server_target.uses_remote_workspace() {
-                    self.launch_cwd.as_path()
-                } else {
-                    self.chat_widget.config_ref().cwd.as_path()
-                };
-                let path = write_transcript(cwd, &path, &markdown)?;
-                self.chat_widget.add_info_message(
-                    format!("Saved conversation to {}", path.display()),
-                    /*hint*/ None,
-                );
+            PreparedExport::File { file, path } => {
+                file.persist_noclobber(&path)
+                    .map_err(|error| format!("could not create {}: {error}", path.display()))?;
+                self.chat_widget
+                    .add_info_message(format!("Saved conversation to {}", path.display()), None);
+                Ok(())
             }
+        });
+        if let Err(error) = result {
+            self.chat_widget
+                .add_error_message(format!("Export failed: {error}"));
         }
-        Ok(())
     }
 }
 
 pub(super) async fn load_export_transcript(
-    app_server: &mut AppServerSession,
+    handle: &codex_app_server_client::AppServerRequestHandle,
     thread_id: ThreadId,
     visibility: RawReasoningVisibility,
     config: Option<&Config>,
     visible_transcript: Vec<Arc<dyn HistoryCell>>,
-    metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
+    metadata: &(dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata + Sync),
+    progress: &(dyn Fn() + Send + Sync),
 ) -> Result<Vec<Arc<dyn HistoryCell>>, String> {
-    let mut thread = app_server
-        .thread_read(thread_id, /*include_turns*/ false)
-        .await
-        .map_err(|error| format!("could not load conversation: {error}"))?;
-    if thread.ephemeral {
-        return Ok(visible_transcript);
-    }
-    if let Err(error) = app_server
-        .hydrate_initial_thread_history(
-            &mut thread,
-            /*turn_cursor*/ None,
-            /*item_cursor*/ None,
-            /*config*/ None,
-            /*local_settings*/ None,
-            HistoryHydrationScope::Complete,
-        )
-        .await
-    {
-        if matches!(
-            error.downcast_ref::<TypedRequestError>(),
-            Some(TypedRequestError::Server { source, .. })
-                if is_history_pagination_unsupported(source)
-        ) {
-            match app_server
-                .thread_read(thread_id, /*include_turns*/ true)
-                .await
+    let prepared =
+        crate::app_server_session::history_job::load(handle, thread_id, None, None, progress).await;
+    let thread = match prepared.result {
+        Ok(thread) if thread.ephemeral => return Ok(visible_transcript),
+        Ok(thread) => thread,
+        Err(error) => {
+            if matches!(error.downcast_ref::<TypedRequestError>(), Some(TypedRequestError::Server { source, .. }) if is_history_pagination_unsupported(source))
             {
-                Ok(legacy) if !legacy.turns.is_empty() => thread = legacy,
-                _ => return Ok(visible_transcript),
+                match crate::app_server_session::history_job::legacy(handle, thread_id).await {
+                    Ok(legacy) if !legacy.turns.is_empty() => legacy,
+                    _ => return Ok(visible_transcript),
+                }
+            } else {
+                return Err(format!("could not load conversation history: {error}"));
             }
-        } else {
-            return Err(format!("could not load conversation history: {error}"));
         }
-    }
+    };
     let mut cells: Vec<Arc<dyn HistoryCell>> = Vec::new();
     for item in visible_export_items(thread.turns) {
         if let Some(cell) = export_activity_cell(&item) {
@@ -311,6 +431,7 @@ fn render_markdown_transcript(cells: &[Arc<dyn HistoryCell>]) -> Result<String, 
                         "• Saved conversation to ",
                         "• Copied conversation to clipboard",
                         "• Copy unconfirmed; /export saves chat",
+                        "• Export canceled.",
                         "■ Export failed: ",
                         "■ Copy failed: ",
                     ]
@@ -349,7 +470,11 @@ fn render_markdown_transcript(cells: &[Arc<dyn HistoryCell>]) -> Result<String, 
     }
 }
 
-fn write_transcript(cwd: &Path, requested_path: &Path, markdown: &str) -> Result<PathBuf, String> {
+fn prepare_transcript(
+    cwd: &Path,
+    requested_path: &Path,
+    markdown: &str,
+) -> Result<(tempfile::NamedTempFile, PathBuf), String> {
     let path = if let Ok(relative) = requested_path.strip_prefix("~") {
         dirs::home_dir()
             .ok_or_else(|| "could not determine the home directory".to_string())?
@@ -363,9 +488,7 @@ fn write_transcript(cwd: &Path, requested_path: &Path, markdown: &str) -> Result
         .map_err(|error| format!("could not create {}: {error}", path.display()))?;
     file.write_all(markdown.as_bytes())
         .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    file.persist_noclobber(&path)
-        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
-    Ok(path)
+    Ok((file, path))
 }
 
 #[cfg(test)]

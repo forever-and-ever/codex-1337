@@ -337,7 +337,7 @@ pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     PlainHistoryCell::new(lines)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ThreadRecapLoadingCell {
     start_time: Instant,
     animations_enabled: bool,

@@ -34,7 +34,12 @@ impl TranscriptView {
         self.snapshot().map(|snapshot| Arc::clone(&snapshot.cells))
     }
 
+    pub(crate) fn presented_cells(&self) -> Option<Arc<[Arc<dyn HistoryCell>]>> {
+        self.presented_cells.clone()
+    }
+
     pub(super) fn capture_snapshot(&mut self, cells: &[Arc<dyn HistoryCell>]) -> ViewSnapshot {
+        // Input paths pass presented cells; model transitions capture current revisions.
         let cells = self.snapshot_cells().unwrap_or_else(|| Arc::from(cells));
         let mut pinned = self
             .snapshot()
@@ -54,7 +59,9 @@ impl TranscriptView {
                 .iter()
                 .map(|visible| (visible.key, Arc::clone(&visible.activity_ids))),
         );
-        if let Some(live) = self.base_layout(&cells, cells.len()) {
+        if !pinned.contains_key(&EntryKey::Live)
+            && let Some(live) = self.base_layout(&cells, cells.len())
+        {
             pinned.insert(EntryKey::Live, live);
             activities.insert(
                 EntryKey::Live,
@@ -131,13 +138,27 @@ impl TranscriptView {
     }
 
     pub(super) fn rewrap_snapshot(&mut self, width: u16) {
-        if let Some(snapshot) = self.snapshot_mut() {
-            for layout in snapshot.pinned.values_mut() {
-                *layout = Arc::new(layout.rewrap(width));
+        let Some(snapshot) = self.snapshot() else {
+            return;
+        };
+        let pinned: Vec<_> = snapshot
+            .pinned
+            .iter()
+            .map(|(key, layout)| (*key, Arc::clone(layout)))
+            .collect();
+        let live = snapshot.search_live.clone();
+        for (key, layout) in pinned {
+            if let Some(layout) = self.cache.rewrap(&layout, width, false)
+                && let Some(snapshot) = self.snapshot_mut()
+            {
+                snapshot.pinned.insert(key, layout);
             }
-            if let Some(layout) = &mut snapshot.search_live {
-                *layout = Arc::new(layout.rewrap(width));
-            }
+        }
+        if let Some(live) = live
+            && let Some(layout) = self.cache.rewrap(&live, width, false)
+            && let Some(snapshot) = self.snapshot_mut()
+        {
+            snapshot.search_live = Some(layout);
         }
     }
 }

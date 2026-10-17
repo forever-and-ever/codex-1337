@@ -146,6 +146,7 @@ impl App {
         let view = self.agents_overview_view(threads, selected_thread_id);
         self.agents_overview.visible_thread_ids = view.thread_ids();
         self.chat_widget.show_bottom_pane_view(Box::new(view));
+        self.sync_frontend_requests();
         if self.reconnect.offline {
             self.reconnect.presentation = reconnect::ReconnectPresentation::Overview;
             let mut state = self
@@ -429,7 +430,6 @@ impl App {
         app_server: &mut AppServerSession,
         root_thread_id: ThreadId,
         started: (Config, crate::app_server_session::AppServerStartedThread),
-        startup_draft: &mut StartupDraftPump,
     ) -> color_eyre::Result<AppRunControl> {
         if self.windows_sandbox_blocks_thread_switch() {
             return Ok(AppRunControl::Continue);
@@ -512,12 +512,7 @@ impl App {
             let presentation = ThreadAttachPresentation::FreshWithDraft;
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
-                    let discarded = startup_draft
-                        .run_until(tui, self.discard_side_thread(app_server, side_thread_id))
-                        .await?;
-                    if !discarded {
-                        return Ok(AppRunControl::Continue);
-                    }
+                    self.discard_side_thread(app_server, side_thread_id).await;
                 }
             }
             for (thread_id, requests) in previous_pending_requests {
@@ -537,16 +532,28 @@ impl App {
                     }
                 }
             }
-            if previous_running_thread_ids.is_empty()
-                && !previous_displayed_thread_id
+            if previous_running_thread_ids.is_empty() {
+                let mut detach = Vec::new();
+                if !previous_displayed_thread_id
                     .is_some_and(|id| self.agents_overview.blank_sessions.contains_key(&id))
-            {
-                startup_draft
-                    .run_until(
-                        tui,
-                        self.detach_current_thread_for_navigation(app_server, Some(root_thread_id)),
-                    )
-                    .await?;
+                {
+                    self.shutdown_side_threads(app_server).await;
+                    detach.extend(self.thread_event_channels.keys().copied().filter(|id| {
+                        *id != root_thread_id
+                            && self.voice_owner_thread_id() != Some(*id)
+                            && !self.side_threads.contains_key(id)
+                            && !self.agents_overview.dispatched_requests.contains_key(id)
+                            && !self.agents_overview.blank_sessions.contains_key(id)
+                    }));
+                }
+                detach.extend(previous_thread_ids.iter().copied().filter(|id| {
+                    *id != root_thread_id
+                        && self.voice_owner_thread_id() != Some(*id)
+                        && Some(*id) != previous_displayed_thread_id
+                        && !self.side_threads.contains_key(id)
+                        && !self.agents_overview.blank_sessions.contains_key(id)
+                }));
+                self.unsubscribe_overview_threads(app_server, detach);
             }
             self.runtime_approval_policy_override = self
                 .runtime_approval_policy_override
@@ -611,23 +618,6 @@ impl App {
 
             // A new session has no descendants. Scanning every loaded thread here
             // adds a serial round trip per agent before the composer can render.
-
-            for thread_id in previous_thread_ids {
-                if previous_running_thread_ids.is_empty()
-                    && thread_id != root_thread_id
-                    && self.voice_owner_thread_id() != Some(thread_id)
-                    && Some(thread_id) != previous_displayed_thread_id
-                    && !self.agents_overview.blank_sessions.contains_key(&thread_id)
-                    && let Err(error) = StartupDraftPump::run_with_optional_draft(
-                        Some(&mut *startup_draft),
-                        tui,
-                        app_server.thread_unsubscribe(thread_id),
-                    )
-                    .await
-                {
-                    tracing::warn!(%thread_id, %error, "failed to unsubscribe previous agent thread");
-                }
-            }
         }
 
         if self.current_displayed_thread_id() != Some(root_thread_id)

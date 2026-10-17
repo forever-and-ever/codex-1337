@@ -16,6 +16,9 @@ use crate::session_start::cancel_session_start;
 use crate::session_start::complete_session_start;
 use crate::unarchive_prompt::run_unarchive_prompt;
 
+#[path = "ui_schedule.rs"]
+pub(super) mod ui_schedule;
+
 pub(super) fn spawn_startup_thread_start(
     app_server: &AppServerSession,
     local_settings: crate::local_settings::LocalSettings,
@@ -929,10 +932,13 @@ See the Codex keymap documentation for supported actions and examples."
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
+            model_selection_generation: Default::default(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             agents_overview,
             side_threads: HashMap::new(),
+            active_export: None,
+            pending_revert: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -1096,6 +1102,8 @@ See the Codex keymap documentation for supported actions and examples."
             return shutdown_on_startup_error(app_server, err).await;
         }
         let tui_events = tui.event_stream();
+        let mut output_completions = crate::custom_terminal::output::completion_events();
+        app.complete_terminal_output();
         tokio::pin!(tui_events);
         #[cfg(target_os = "linux")]
         let mut desktop_attention = tui.desktop_attention_receiver();
@@ -1127,6 +1135,9 @@ See the Codex keymap documentation for supported actions and examples."
             );
         }
 
+        let mut schedule = ui_schedule::UiSchedule::new();
+        app.transcript_view
+            .enable_background_preparation(tui.frame_requester());
         let mut listen_for_app_server_events = true;
         #[cfg(target_os = "linux")]
         let mut ui_host_ready = !crate::reload::worker::is_hosted();
@@ -1160,7 +1171,84 @@ See the Codex keymap documentation for supported actions and examples."
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
         } else {
-            loop {
+            'ui: loop {
+                schedule.drain_ready(tui_events.as_mut().get_mut()).await;
+                for _ in 0..ui_schedule::INPUT_BATCH {
+                    let admitted = ui_schedule::input_admitted(
+                        &app,
+                        !app_event_rx.is_empty(),
+                        pending_startup_draft.is_some(),
+                        waiting_for_initial_session_configured,
+                        waiting_for_initial_session_header,
+                    );
+                    let Some((stamp, event)) = schedule.next_input(admitted) else {
+                        break;
+                    };
+                    let _handler_stage = enter(Stage::TerminalEvent);
+                    if !matches!(event, TuiEvent::FocusLost) {
+                        idle_restart.postpone();
+                    }
+                    let interactive = ui_schedule::is_interactive(&event);
+                    let result = app
+                        .apply_scheduled_input(
+                            tui,
+                            &mut app_server,
+                            event,
+                            pending_startup_draft.is_some(),
+                            waiting_for_initial_session_configured,
+                            &app_event_rx,
+                        )
+                        .await;
+                    if let Some(stamp) = stamp {
+                        crate::ui_latency::input_handled(stamp);
+                    }
+                    if interactive {
+                        schedule.input_handled();
+                    }
+                    match result {
+                        Ok(AppRunControl::Continue) => {}
+                        Ok(AppRunControl::Exit(reason)) => break 'ui Ok(reason),
+                        Err(err) if app.recover_transport_error(&err) => {}
+                        Err(err) => break 'ui Err(err),
+                    }
+                }
+                if schedule.input_finished() {
+                    tracing::warn!("terminal input stream closed; shutting down active thread");
+                    break Ok(
+                        match app
+                            .handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst)
+                            .await
+                        {
+                            AppRunControl::Exit(reason) => reason,
+                            AppRunControl::Continue => continue,
+                        },
+                    );
+                }
+                let paint_due = schedule.frame_due();
+                if paint_due || schedule.take_maintenance() {
+                    let _handler_stage = enter(Stage::TerminalEvent);
+                    let protected = app.startup_pending_protected_request;
+                    let started_at = paint_due.then(|| schedule.frame_started());
+                    let requester = tui.frame_requester();
+                    requester.set_paint_admitted(paint_due);
+                    let result = app
+                        .handle_tui_event(tui, &mut app_server, TuiEvent::Draw)
+                        .await;
+                    requester.set_paint_admitted(true);
+                    if let Some(started_at) = started_at {
+                        schedule.frame_finished(started_at);
+                    }
+                    if protected && !app.startup_pending_protected_request {
+                        schedule.quarantine();
+                    }
+                    match result {
+                        Ok(AppRunControl::Continue) => {}
+                        Ok(AppRunControl::Exit(reason)) => break Ok(reason),
+                        Err(err) if app.recover_transport_error(&err) => {}
+                        Err(err) => break Err(err),
+                    }
+                    tokio::task::yield_now().await;
+                }
                 let maintenance_stage = enter(Stage::Maintenance);
                 app.drive_server_operations(&app_server);
                 app.retry_pending_thread_delivery().await;
@@ -1231,7 +1319,7 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     #[cfg(target_os = "linux")]
                     if !ui_host_ready && !waiting_for_initial_session_configured {
-                        app.render_startup_frame(tui, &app_event_rx)?;
+                        tui.frame_requester().schedule_interactive_frame();
                         crate::reload::worker::ready().await?;
                         app.chat_widget
                             .set_queue_autosend_suppressed(/*suppressed*/ false);
@@ -1241,18 +1329,13 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 idle_restart
                     .set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());
-                let initial_session_header_pending = waiting_for_initial_session_header
-                    && app.primary_session_configured.is_some()
-                    && has_pending_app_events;
-                let block_terminal_input_for_pending_startup_events =
-                    (!matches!(app.app_server_target, AppServerTarget::Embedded)
-                        && has_pending_app_events)
-                        || initial_session_header_pending
-                        || (pending_startup_draft.is_some()
-                            || app.startup_protected_input_boundary)
-                            && has_pending_app_events
-                        || (!waiting_for_initial_session_configured
-                            && app.has_queued_startup_protected_request());
+                let block_terminal_input_for_pending_startup_events = !ui_schedule::input_admitted(
+                    &app,
+                    has_pending_app_events,
+                    pending_startup_draft.is_some(),
+                    waiting_for_initial_session_configured,
+                    waiting_for_initial_session_header,
+                );
                 let rate_limit_poll_deadline = app
                     .chat_widget
                     .rate_limit_refresh_interval()
@@ -1277,7 +1360,23 @@ See the Codex keymap documentation for supported actions and examples."
                 );
                 drop(maintenance_stage);
                 let select_stage = enter(Stage::IdleSelect);
+                let frame_wake = schedule.wake_at();
                 let control = select! {
+                    () = crate::custom_terminal::output::next_completion(&mut output_completions) => {
+                        drop(select_stage);
+                        app.complete_terminal_output();
+                        AppRunControl::Continue
+                    }
+                    () = async {
+                        match frame_wake {
+                            Some(at) => tokio::time::sleep_until(at.into()).await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        drop(select_stage);
+                        schedule.frame_woken();
+                        AppRunControl::Continue
+                    }
                     result = async {
                         #[cfg(target_os = "linux")]
                         {
@@ -1324,11 +1423,8 @@ See the Codex keymap documentation for supported actions and examples."
                                 if is_initial_session_header {
                                     waiting_for_initial_session_header = false;
                                 }
-                                if !had_active_modal
-                                    && app.chat_widget.has_active_modal()
-                                    && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
-                                {
-                                    break Err(err);
+                                if !had_active_modal && app.chat_widget.has_active_modal() {
+                                    app.request_modal_frame(tui.frame_requester());
                                 }
                                 AppRunControl::Continue
                             }
@@ -1358,45 +1454,11 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                         AppRunControl::Continue
                     }
-                    event = tui_events.next(), if app.pending_thread_switch_resets == 0
-                        && (app.reconnect.offline || app.thread_delivery.primary_replay_thread.is_none())
-                        && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
+                    event = tui_events.next(), if !schedule.stream_closed() => {
                         drop(select_stage);
                         let _handler_stage = enter(Stage::TerminalEvent);
-                        if let Some(event) = event {
-                            crate::ui_latency::input_consumed(&event);
-                            if !matches!(event, TuiEvent::Draw | TuiEvent::FocusLost) {
-                                idle_restart.postpone();
-                            }
-                            if (matches!(
-                                &event,
-                                TuiEvent::Key(key)
-                                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                            ) || matches!(&event, TuiEvent::Paste(_)))
-                                && !app.reconnect.offline
-                                && pending_startup_draft.is_none()
-                                && !waiting_for_initial_session_configured
-                                && app_event_rx.is_empty()
-                                && !app.startup_pending_protected_request
-                                && app
-                                    .active_thread_rx
-                                    .as_ref()
-                                    .is_none_or(tokio::sync::mpsc::Receiver::is_empty)
-                                && !app.pending_primary_events.iter().any(|event| {
-                                    matches!(event, ThreadBufferedEvent::Request(_))
-                                })
-                            {
-                                app.startup_protected_input_boundary = false;
-                            }
-                            match app.handle_tui_event(tui, &mut app_server, event).await {
-                                Ok(control) => control,
-                                Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
-                            Err(err) => break Err(err),
-                            }
-                        } else {
-                            tracing::warn!("terminal input stream closed; shutting down active thread");
-                            app.handle_exit_mode(&mut app_server, ExitMode::ShutdownFirst).await
-                        }
+                        schedule.receive(event);
+                        AppRunControl::Continue
                     }
                     Some(completion) = app.server_operations.control_rx.recv() => {
                         drop(select_stage);
@@ -1511,6 +1573,7 @@ See the Codex keymap documentation for supported actions and examples."
                         AppRunControl::Continue
                     }
                 };
+                schedule.event_applied();
                 let _maintenance_stage = enter(Stage::Maintenance);
                 if App::should_stop_waiting_for_initial_session(
                     waiting_for_initial_session_configured,
@@ -1521,11 +1584,8 @@ See the Codex keymap documentation for supported actions and examples."
                     if let Err(err) = app.drain_active_thread_events(tui).await {
                         break Err(err);
                     }
-                    if !had_active_modal
-                        && app.chat_widget.has_active_modal()
-                        && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
-                    {
-                        break Err(err);
+                    if !had_active_modal && app.chat_widget.has_active_modal() {
+                        app.request_modal_frame(tui.frame_requester());
                     }
                 }
                 match control {

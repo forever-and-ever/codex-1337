@@ -292,9 +292,20 @@ impl App {
         if key == OperationLane::Exit && self.server_operations.lanes.contains_key(&key) {
             return;
         }
-        let order = self.server_operations.next_order;
-        self.server_operations.next_order =
-            order.checked_add(1).expect("operation sequence exhausted");
+        let order = if let Some(SubmissionLane {
+            active,
+            state: LaneState::Applying { .. },
+            ..
+        }) = self.server_operations.lanes.get(&key)
+        {
+            // A dependent request retains its parent's barrier position.
+            active.order
+        } else {
+            let order = self.server_operations.next_order;
+            self.server_operations.next_order =
+                order.checked_add(1).expect("operation sequence exhausted");
+            order
+        };
         let entry = PendingSubmission {
             id: Uuid::new_v4(),
             order,
@@ -304,7 +315,12 @@ impl App {
             buffering: None,
         };
         if let Some(lane) = self.server_operations.lanes.get_mut(&key) {
-            lane.waiting.push_back(entry);
+            if let LaneState::Applying { followups } = &mut lane.state {
+                lane.waiting.insert(*followups, entry);
+                *followups += 1;
+            } else {
+                lane.waiting.push_back(entry);
+            }
         } else {
             self.server_operations.lanes.insert(
                 key,
@@ -410,6 +426,11 @@ impl App {
         }
         let id = active.id;
         let epoch = active.epoch;
+        if let SubmissionRequest::Operation(operation) = &active.request
+            && let Some(request) = operation.ui_request()
+        {
+            request.prepare(self, server);
+        }
         let request = active.worker_request();
         let handle = server.request_handle();
         let origin = active.origin.clone();
@@ -695,10 +716,11 @@ impl App {
         scope: impl Into<OperationScope>,
         id: Uuid,
         epoch: u64,
-        outcome: SubmissionOutcome,
+        mut outcome: SubmissionOutcome,
     ) -> Result<()> {
         let scope = scope.into();
         if epoch != self.server_operations.epoch {
+            tracing::debug!(%id, epoch, "dropping server completion from a retired connection epoch");
             return Ok(());
         }
         if self.reconnect.offline {
@@ -711,6 +733,57 @@ impl App {
         }) else {
             return Ok(());
         };
+        let ui_request =
+            self.server_operations
+                .lanes
+                .get(&key)
+                .and_then(|lane| match &lane.active.request {
+                    SubmissionRequest::Operation(operation) => operation.ui_request().cloned(),
+                    _ => None,
+                });
+        let mut apply_result = Ok(());
+        if let Some(request) = ui_request {
+            let lane = self
+                .server_operations
+                .lanes
+                .get_mut(&key)
+                .expect("UI continuation lane disappeared");
+            let origin = lane.active.origin.clone();
+            lane.state = LaneState::Applying { followups: 0 };
+            if request.is_cancelled() {
+                outcome = SubmissionOutcome::Operation(Err(SubmissionFailure::Cancelled));
+                tracing::debug!(%id, "dropping cancelled UI request completion");
+            }
+            let applicable = !request.is_cancelled()
+                && match &origin {
+                    OperationOrigin::Connection => true,
+                    OperationOrigin::Thread { thread_id, store } => self
+                        .thread_event_channels
+                        .get(thread_id)
+                        .is_some_and(|channel| Arc::ptr_eq(&channel.store, store)),
+                };
+            if !applicable {
+                tracing::debug!(%id, "dropping UI continuation for a replaced thread store");
+            }
+            match &mut outcome {
+                SubmissionOutcome::Operation(Ok(receipt)) => {
+                    let OperationReceipt::UiRequest(reply) =
+                        std::mem::replace(receipt, OperationReceipt::UiRequestApplied)
+                    else {
+                        unreachable!("UI request received a non-continuation receipt")
+                    };
+                    if applicable {
+                        apply_result = reply.apply(self, server);
+                    }
+                }
+                SubmissionOutcome::Operation(Err(failure)) => {
+                    if applicable {
+                        apply_result = request.rejected(self, server, failure);
+                    }
+                }
+                _ => unreachable!("UI request received a turn receipt"),
+            }
+        }
         let entry = match self.server_operations.lanes.entry(key) {
             std::collections::hash_map::Entry::Occupied(entry) => entry,
             std::collections::hash_map::Entry::Vacant(_) => {
@@ -846,7 +919,9 @@ impl App {
                             .await;
                     }
                     if applicable {
-                        self.reject_server_operation(&origin, operation, &failure);
+                        if operation.ui_request().is_none() {
+                            self.reject_server_operation(&origin, operation, &failure);
+                        }
                         if matches!(
                             &**operation,
                             ServerOperation::Control(
@@ -855,10 +930,13 @@ impl App {
                         ) {
                             self.refresh_agents_overview_threads(server);
                         }
-                    } else {
+                    } else if operation.ui_request().is_none() {
                         self.chat_widget.add_error_message(format!("Earlier {:?}: {} did not receive a usable acknowledgement; no retry was sent.", scope, operation.label()));
                     }
                     if !matches!(failure, SubmissionFailure::Rejected(_))
+                        && !operation
+                            .ui_request()
+                            .is_some_and(ui_requests::UiRequest::is_read_only)
                         && !matches!(&**operation, ServerOperation::Realtime(operation) if operation.is_preparation())
                         && !matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Voice(preference)) if preference.is_read_only())
                         && !matches!(&**operation, ServerOperation::Connection(ConnectionMutation::Removal(removal)) if removal.is_read_only())
@@ -895,6 +973,7 @@ impl App {
                             },
                         );
                         self.refresh_submission_preview();
+                        apply_result?;
                         return Ok(());
                     }
                 }
@@ -911,6 +990,7 @@ impl App {
             }
             self.drive_server_operations(server);
             self.refresh_submission_preview();
+            apply_result?;
             return Ok(());
         }
         let thread_id = origin.thread().0;
@@ -998,6 +1078,7 @@ impl App {
                         transport_failed = matches!(error, TypedRequestError::Transport { .. });
                         Some(RecoveryNotice::Warning(format!("{error}. The original may still be delivered; check before resending.")))
                     }
+                    Err(SubmissionFailure::Cancelled) => unreachable!("only UI requests can be cancelled"),
                     Err(SubmissionFailure::TimedOut) => Some(RecoveryNotice::Warning("Submission acknowledgement timed out. The original may still be delivered; check before resending.".into())),
                 }
             }
@@ -1158,6 +1239,11 @@ impl App {
                 .lanes
                 .get(&OperationLane::Connection)
                 .is_some_and(|lane| matches!(lane.state, LaneState::Running(_)))
+                || self.server_operations.lanes.values().any(|lane| {
+                    matches!(lane.state, LaneState::Running(_))
+                        && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                            if operation.ui_request().is_some())
+                })
                 || self.server_operations.navigation.has_running()
                 || !self.server_operations.control_rx.is_empty()
             {

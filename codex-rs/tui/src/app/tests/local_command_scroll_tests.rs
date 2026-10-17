@@ -172,6 +172,7 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
         } else {
             app.handle_event(&mut tui, &mut server, event).await?;
         }
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
         while let Ok(event) = events.try_recv() {
             app.handle_event(&mut tui, &mut server, event).await?;
         }
@@ -269,6 +270,7 @@ async fn settings_confirmations_reveal_their_history_output() -> Result<()> {
         }
         let previous_cells = app.transcript_cells.len();
         app.handle_event(&mut tui, &mut server, event).await?;
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
         while let Ok(event) = events.try_recv() {
             app.handle_event(&mut tui, &mut server, event).await?;
         }

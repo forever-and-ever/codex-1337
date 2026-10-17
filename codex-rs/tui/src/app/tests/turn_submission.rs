@@ -247,14 +247,14 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
     let session = started.session.clone();
     app.enqueue_primary_thread_session(started.session, started.turns)
         .await?;
-    app_server
-        .thread_goal_set(
-            thread_id,
-            Some("Do not restart this stopped goal".to_string()),
-            Some(ThreadGoalStatus::Blocked),
-            /*token_budget*/ None,
-        )
-        .await?;
+    crate::test_support::thread_goal_set(
+        &app_server,
+        thread_id,
+        Some("Do not restart this stopped goal".to_string()),
+        Some(ThreadGoalStatus::Blocked),
+        /*token_budget*/ None,
+    )
+    .await?;
     app.chat_widget
         .restore_user_message_to_composer("queued before terminal failure".into());
     app.chat_widget
@@ -318,8 +318,7 @@ async fn misalignment_policy_blocks_queued_turns_and_goal_resumption() -> Result
         precaution
     );
     assert_eq!(
-        app_server
-            .thread_goal_get(thread_id)
+        crate::test_support::thread_goal_get(&app_server, thread_id)
             .await?
             .goal
             .unwrap()

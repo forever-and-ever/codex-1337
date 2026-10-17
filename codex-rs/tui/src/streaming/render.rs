@@ -29,9 +29,9 @@ pub(super) struct StreamingRender {
     /// Source boundary before the final top-level block, including after full re-renders.
     pub(super) completed_source_len: usize,
     /// Source prefix containing only completed top-level markdown blocks.
-    stable_source_len: usize,
+    pub(super) stable_source_len: usize,
     /// Rendered-line boundary corresponding to `stable_source_len`.
-    stable_rendered_len: usize,
+    pub(super) stable_rendered_len: usize,
     /// Reference-style link definitions can affect any earlier or later markdown block.
     pub(super) has_reference_link_definition: bool,
     /// Inline visualization directives require source-wide rewriting once one is committed.

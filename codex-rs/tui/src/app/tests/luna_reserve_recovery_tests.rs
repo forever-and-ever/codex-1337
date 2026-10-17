@@ -67,6 +67,7 @@ async fn luna_reserve_recovery_survives_task_reconstruction() -> Result<()> {
         .set_reasoning_effort(Some(ReasoningEffortConfig::High));
     app.chat_widget.update_backend_banner(&reserve_response());
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     let mut resumed = app.primary_session_configured.clone().unwrap();
     resumed.model = "gpt-reserve".into();
     resumed.collaboration_mode = Some(Box::new(app.chat_widget.effective_collaboration_mode()));
@@ -87,6 +88,7 @@ async fn luna_reserve_recovery_survives_task_reconstruction() -> Result<()> {
     recovered.rate_limit_upsell = None;
     app.chat_widget.update_backend_banner(&recovered);
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
     assert_eq!(
         app.chat_widget.current_reasoning_effort(),
@@ -149,7 +151,9 @@ async fn luna_reserve_entry_dispatches_an_already_queued_turn_with_accepted_sett
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut server).await?;
         app.handle_event(&mut tui, &mut server, pending).await?;
+        app.settle_turn_submissions(&mut server).await?;
         app.settle_turn_submissions(&mut server).await?;
         let sent = requests.lock().unwrap().clone();
         let methods: Vec<_> = sent.iter().map(|request| request.method.as_str()).collect();
@@ -210,6 +214,7 @@ async fn luna_reserve_recovery_restores_task_and_pending_turn_after_fresh_backen
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), "gpt-reserve");
 
         // A prompt composed before the next accepted read must use the recovered model, once.
@@ -253,6 +258,7 @@ async fn luna_reserve_recovery_restores_task_and_pending_turn_after_fresh_backen
                 },
             )
             .await?;
+            app.settle_turn_submissions(&mut server).await?;
             assert_eq!(app.chat_widget.current_model(), expected);
         }
         assert_eq!(
@@ -261,7 +267,7 @@ async fn luna_reserve_recovery_restores_task_and_pending_turn_after_fresh_backen
         );
         assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 100).contains("Luna Reserve"));
         app.chat_widget
-            .apply_reserve_fallback_to_pending_turn(&mut pending);
+            .apply_automatic_model_switch_to_pending_turn(&mut pending);
         assert_matches!(pending, AppCommand::UserTurn { model, effort, collaboration_mode, .. }
         if model == "gpt-5.5" && effort == original_mode.reasoning_effort()
             && collaboration_mode == Some(original_mode.clone()));
@@ -313,6 +319,7 @@ async fn luna_reserve_recovery_requires_permission_and_no_remaining_blocker() ->
     configure_reserve_catalog(&mut app);
     app.chat_widget.update_backend_banner(&reserve_response());
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     requests.lock().unwrap().clear();
     let mut recovered = reserve_response();
     recovered.rate_limit_upsell = None;
@@ -322,6 +329,7 @@ async fn luna_reserve_recovery_requires_permission_and_no_remaining_blocker() ->
         recovered.ordinary_usage_allowed = allowed;
         app.chat_widget.update_backend_banner(&recovered);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), "gpt-reserve");
     }
     recovered.ordinary_usage_allowed = Some(true);
@@ -338,12 +346,14 @@ async fn luna_reserve_recovery_requires_permission_and_no_remaining_blocker() ->
         app.chat_widget
             .update_backend_banner(&serde_json::from_value(raw)?);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), "gpt-reserve");
     }
     // Reset redemption clears presentation before the authoritative follow-up read.
     app.chat_widget.clear_backend_banner();
     app.chat_widget.update_backend_banner(&recovered);
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
     assert_eq!(requests.lock().unwrap().len(), 1);
     server.shutdown().await?;
@@ -360,6 +370,7 @@ async fn luna_reserve_recovery_does_not_override_manual_choice_or_account_change
         configure_reserve_catalog(&mut app);
         app.chat_widget.update_backend_banner(&reserve_response());
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         requests.lock().unwrap().clear();
         let mut recovered = reserve_response();
         recovered.ordinary_usage_allowed = Some(true);
@@ -373,9 +384,11 @@ async fn luna_reserve_recovery_does_not_override_manual_choice_or_account_change
         };
         app.chat_widget.update_backend_banner(&recovered);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         recovered.account_id = Some("workspace-a".into());
         app.chat_widget.update_backend_banner(&recovered);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), expected);
         assert!(requests.lock().unwrap().is_empty());
         server.shutdown().await?;

@@ -20,8 +20,10 @@ use std::sync::Weak;
 
 use super::*;
 
-const MAX_CACHED_ENTRIES: usize = 64;
-const MAX_CACHED_TEXT_BYTES: usize = 8 * 1024 * 1024;
+#[path = "layout_rewrap.rs"]
+mod rewrap;
+
+const MAX_CACHED_TEXT_BYTES: usize = 32 * 1024 * 1024;
 /// The columns a clipped first row keeps before tokens that trail it give way.
 const LEGIBLE_ROW: usize = 16;
 
@@ -161,12 +163,20 @@ fn yield_head(lines: &mut ActivityTranscriptLines) {
 
 #[derive(Default)]
 pub(super) struct LayoutCache {
-    entries: Vec<CachedLayout>,
+    entries: std::collections::HashMap<CacheKey, CachedLayout>,
+    frame_keys: std::collections::HashMap<RevisionKey, CacheKey>,
+    recency: std::collections::BTreeMap<u64, CacheKey>,
+    access: u64,
+    bytes: usize,
     frame: u64,
     render_state: Option<RenderState>,
+    pub(super) frames: Option<crate::tui::FrameRequester>,
+    pending: Vec<PendingLayout>,
+    pub(super) waiting: bool,
+    rewraps: Vec<rewrap::Rewrap>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct RenderState {
     theme: u64,
     foreground: Option<(u8, u8, u8)>,
@@ -185,16 +195,37 @@ impl RenderState {
     }
 }
 
-struct CachedLayout {
-    source: Weak<dyn HistoryCell>,
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct RevisionKey {
+    identity: usize,
     width: u16,
     presentation: CellPresentation,
-    layout: Arc<TextLayout>,
-    rendered_frame: u64,
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct CacheKey {
+    revision: RevisionKey,
     animation_tick: Option<u64>,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct CachedLayout {
+    source: Weak<dyn HistoryCell>,
+    access: u64,
+    layout: Arc<TextLayout>,
+    rendered_frame: u64,
+    refreshed_at: std::time::Instant,
+}
+
+struct PendingLayout {
+    source: Weak<dyn HistoryCell>,
+    requested_frame: u64,
+    width: u16,
+    presentation: CellPresentation,
+    animation_tick: Option<u64>,
+    task: super::preparation::Pending<Arc<TextLayout>>,
+}
+
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub(super) struct CellPresentation {
     separated: bool,
     turn_tip_space: bool,
@@ -242,7 +273,7 @@ impl TranscriptView {
         }
         let key = self.entry_key(cells, index);
         if let Some(layout) = self.search.match_layout(key) {
-            return Some(layout);
+            return self.cache.rewrap(&layout, self.area.width, false);
         }
         self.base_layout(cells, index)
     }
@@ -259,7 +290,8 @@ impl TranscriptView {
             .snapshot()
             .and_then(|snapshot| snapshot.pinned.get(&key))
         {
-            return Some(Arc::clone(layout));
+            let layout = Arc::clone(layout);
+            return self.cache.rewrap(&layout, self.area.width, false);
         }
         if index == cells.len() && self.snapshot().is_some() {
             return None;
@@ -273,6 +305,15 @@ impl TranscriptView {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
     ) -> Option<Arc<TextLayout>> {
+        if self.layout_source == super::presented::LayoutSource::Presented {
+            if self.presented_cells.is_none() {
+                return None;
+            }
+            let key = self.entry_key(cells, index);
+            if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
+                return Some(Arc::clone(&visible.layout));
+            }
+        }
         self.entry_layout(cells, index, self.detailed)
     }
 
@@ -319,6 +360,19 @@ impl TranscriptView {
         };
         // Session information belongs before all history, including pages not loaded yet.
         // Pinned displayed revisions above remain visible; hidden headers never enter the cache.
+        if let Some(rows) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::StreamRowsCell>()
+        {
+            let content = crate::transcript_geometry::content_width(width, self.mode) as usize;
+            let expected = crate::width::usable_content_width(content, rows.reserved).unwrap_or(1);
+            if rows.mode != self.mode || rows.width.is_some_and(|prepared| prepared != expected) {
+                return None;
+            }
+        }
+        if cell.as_any().is::<crate::history_cell::StreamAnchorCell>() {
+            return Some(Arc::new(TextLayout::new(Vec::new(), width)));
+        }
         if self.history.has_unloaded_history()
             && cell.as_any().is::<crate::history_cell::SessionInfoCell>()
         {
@@ -375,241 +429,243 @@ impl TranscriptView {
         let invocations = &self.invocations;
         let output_tokens = &self.tool_output_tokens;
         let input_open = self.feed.input_open(cells, index);
-        Some(self.cache.get(cell, width, presentation, || {
-            if mode == HistoryRenderMode::Rich && !detailed && seat.content != Content::Hidden {
-                if let Some(prepared) = invocations.defer(
-                    cell.as_ref(),
-                    super::invocation::PreparationSource::Retained(cell),
-                    || Some(Arc::clone(cell)),
-                    Vec::new(),
-                    width,
-                    presentation,
-                    input_open,
-                    seat.content,
-                    full_content,
-                    output_tokens,
-                    expanded_parts,
-                    || {
-                        seat.header.as_ref().map(|header| {
-                            feed.header_rows(
-                                cells,
-                                header,
-                                bills,
-                                output_tokens,
-                                expanded_parts,
-                                output_mode,
-                                invocations,
-                                full_content,
-                                width,
-                            )
-                        })
-                    },
-                ) {
-                    return prepared;
-                }
-            }
-            let content_width = crate::transcript_geometry::content_width(width, mode);
-            // A member's clock is its item's header's.
-            let timestamp = if loose {
-                cell.transcript_timestamp()
-            } else {
-                None
-            };
-            // The activity's rows, compact or expanded, and what controls them.
-            let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
-                let mut lines = if !full_content
-                    && let Some(parts) = cell.output_parts(
-                        content_width,
-                        /*reserve*/ 0,
-                        expanded_parts,
-                        output_mode,
-                    ) {
-                    ActivityTranscriptLines {
-                        output_mode: ((expanded
-                            || cell.activity_disclosure(content_width).is_none())
-                            && cell.has_formatted_output())
-                        .then_some(output_mode),
-                        is_tool_entry: cell.is_tool_entry(),
-
-                        activity: crate::transcript_geometry::clock_lines(parts.lines, timestamp),
-                        header: parts.header,
-                        auxiliary: Vec::new(),
-                        header_tokens,
-                        disclosure: parts.output,
-                        controls: parts.controls,
-                    }
+        let background = self.cache.frames.is_some();
+        self.cache.get(cell, width, presentation, || {
+            let cell = Arc::clone(cell);
+            let header = seat
+                .header
+                .as_ref()
+                .map(|header| feed.prepare_header(cells, header, bills));
+            let snapshot = background.then(|| {
+                invocations.snapshot(
+                    std::iter::once(cell.as_ref())
+                        .chain(header.iter().flat_map(feed::HeaderPreparation::sources)),
+                )
+            });
+            let token_ids: Vec<_> = cell
+                .activity_ids()
+                .into_iter()
+                .chain(
+                    header
+                        .iter()
+                        .flat_map(feed::HeaderPreparation::sources)
+                        .flat_map(HistoryCell::activity_ids),
+                )
+                .collect();
+            let output_tokens = output_tokens.subset(&token_ids);
+            let expanded_parts = expanded_parts.clone();
+            let render = move |invocations: &super::invocation::Invocations| {
+                let content_width = crate::transcript_geometry::content_width(width, mode);
+                // A member's clock is its item's header's.
+                let timestamp = if loose {
+                    cell.transcript_timestamp()
                 } else {
-                    let activity = if expanded {
-                        cell.expanded_output_lines(content_width, output_mode)
-                    } else {
-                        cell.compact_hyperlink_lines(content_width)
-                    };
-                    ActivityTranscriptLines {
-                        output_mode: ((expanded
-                            || cell.activity_disclosure(content_width).is_none())
-                            && cell.has_formatted_output())
-                        .then_some(output_mode),
-                        is_tool_entry: cell.is_tool_entry(),
-
-                        activity: crate::transcript_geometry::clock_lines(activity, timestamp),
-                        header: if expanded {
-                            cell.expanded_activity_header()
-                        } else {
-                            cell.activity_header()
-                        },
-                        auxiliary: Vec::new(),
-                        header_tokens,
-                        disclosure: cell.activity_disclosure(content_width),
-                        controls: Vec::new(),
-                    }
+                    None
                 };
-                if continued_edit {
-                    yield_head(&mut lines);
-                }
-                lines
-            };
-            let invocation =
-                (mode == HistoryRenderMode::Rich && !detailed && seat.content != Content::Hidden)
+                // The activity's rows, compact or expanded, and what controls them.
+                let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
+                    let mut lines = if !full_content
+                        && let Some(parts) = cell.output_parts(
+                            content_width,
+                            /*reserve*/ 0,
+                            expanded_parts,
+                            output_mode,
+                        ) {
+                        ActivityTranscriptLines {
+                            output_mode: ((expanded
+                                || cell.activity_disclosure(content_width).is_none())
+                                && cell.has_formatted_output())
+                            .then_some(output_mode),
+                            is_tool_entry: cell.is_tool_entry(),
+
+                            activity: crate::transcript_geometry::clock_lines(
+                                parts.lines,
+                                timestamp,
+                            ),
+                            header: parts.header,
+                            auxiliary: Vec::new(),
+                            header_tokens,
+                            disclosure: parts.output,
+                            controls: parts.controls,
+                        }
+                    } else {
+                        let activity = if expanded {
+                            cell.expanded_output_lines(content_width, output_mode)
+                        } else {
+                            cell.compact_hyperlink_lines(content_width)
+                        };
+                        ActivityTranscriptLines {
+                            output_mode: ((expanded
+                                || cell.activity_disclosure(content_width).is_none())
+                                && cell.has_formatted_output())
+                            .then_some(output_mode),
+                            is_tool_entry: cell.is_tool_entry(),
+
+                            activity: crate::transcript_geometry::clock_lines(activity, timestamp),
+                            header: if expanded {
+                                cell.expanded_activity_header()
+                            } else {
+                                cell.activity_header()
+                            },
+                            auxiliary: Vec::new(),
+                            header_tokens,
+                            disclosure: cell.activity_disclosure(content_width),
+                            controls: Vec::new(),
+                        }
+                    };
+                    if continued_edit {
+                        yield_head(&mut lines);
+                    }
+                    lines
+                };
+                let invocation = (mode == HistoryRenderMode::Rich
+                    && !detailed
+                    && seat.content != Content::Hidden)
                     .then(|| {
                         invocations.layout(
                             cell.as_ref(),
-                            super::invocation::PreparationSource::Retained(cell),
+                            super::invocation::PreparationSource::Retained(&cell),
                             width,
                             input_open,
                             seat.content,
                             full_content,
-                            output_tokens,
-                            expanded_parts,
+                            &output_tokens,
+                            &expanded_parts,
                             Vec::new(),
                         )
                     })
                     .flatten();
-            let mut layout = if let Some(layout) = invocation {
-                layout
-            } else {
-                match seat.content {
-                    Content::Hidden => TextLayout::new(Vec::new(), width),
-                    Content::Body => {
-                        let parts = feed::entry_body(
-                            cell.as_ref(),
-                            content_width,
-                            expanded_parts,
-                            output_mode,
-                        )
-                        .expect("feed body requires a feed entry");
-                        let mut layout = TextLayout::new(
-                            crate::transcript_geometry::rich_lines(parts.lines),
-                            width,
-                        );
-                        if cell.has_formatted_output()
-                            && parts.controls.last().is_none_or(|control| control.expanded)
-                        {
-                            let offset = parts
-                                .controls
-                                .last()
-                                .map_or(0, |control| layout.line_offset(control.line))
-                                + parts.header.map_or(0, |header| header.source_offset);
-                            layout = layout.with_output_controls(offset, output_mode);
-                        }
-                        for control in parts.controls {
-                            layout = layout.with_part_control(control);
-                        }
-                        layout
-                    }
-                    // Detailed content and markerless cards share the gutter without acquiring
-                    // synthetic markers, disclosure identities, or expansion controls.
-                    _ if !disclosure => {
-                        let columns = if seat.content == Content::Beheaded {
-                            crate::transcript_geometry::NESTED_COLUMNS
-                        } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
-                            crate::transcript_geometry::TITLE_COLUMN
-                                - crate::transcript_geometry::MARKER_COLUMNS
-                        } else {
-                            crate::transcript_geometry::GUTTER_COLUMNS
-                        };
-                        let content_width = if mode == HistoryRenderMode::Rich
-                            && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
-                        {
-                            width.saturating_sub(columns).max(/*other*/ 1)
-                        } else {
-                            content_width
-                        };
-                        let mut lines = crate::history_cell::fullscreen_session_lines(
-                            cell.as_ref(),
-                            content_width,
-                            detailed,
-                            mode,
-                        );
-                        if mode == HistoryRenderMode::Rich {
-                            if seat.content == Content::Beheaded {
-                                feed::behead(&mut lines);
-                            }
-                            TextLayout::new(
-                                crate::transcript_geometry::gutter_lines(
-                                    crate::transcript_geometry::clock_lines(lines, timestamp),
-                                    columns,
-                                ),
+                let mut layout = if let Some(layout) = invocation {
+                    layout
+                } else {
+                    match seat.content {
+                        Content::Hidden => TextLayout::new(Vec::new(), width),
+                        Content::Body => {
+                            let parts = feed::entry_body(
+                                cell.as_ref(),
+                                content_width,
+                                &expanded_parts,
+                                output_mode,
+                            )
+                            .expect("feed body requires a feed entry");
+                            let mut layout = TextLayout::new(
+                                crate::transcript_geometry::rich_lines(parts.lines),
                                 width,
-                            )
-                            .with_header_tokens(
-                                header_tokens,
-                                if detailed {
-                                    TokenSeat::Gutter
-                                } else {
-                                    TokenSeat::Trailing
-                                },
-                            )
-                        } else {
-                            TextLayout::new(lines, width)
+                            );
+                            if cell.has_formatted_output()
+                                && parts.controls.last().is_none_or(|control| control.expanded)
+                            {
+                                let offset = parts
+                                    .controls
+                                    .last()
+                                    .map_or(0, |control| layout.line_offset(control.line))
+                                    + parts.header.map_or(0, |header| header.source_offset);
+                                layout = layout.with_output_controls(offset, output_mode);
+                            }
+                            for control in parts.controls {
+                                layout = layout.with_part_control(control);
+                            }
+                            layout
                         }
-                    }
-                    Content::Beheaded => {
-                        let mut lines = activity(expanded, expanded_parts);
-                        yield_head(&mut lines);
-                        // Its header was all it showed: the first row of its details that can hold
-                        // a control stands in, holding the one that shows the rest.
-                        if lines.activity.is_empty() && lines.disclosure.is_some() {
-                            let mut details = expanded_parts.clone();
-                            details.extend(ids.iter().cloned());
-                            let mut unfolded = activity(/*expanded*/ true, &details);
-                            yield_head(&mut unfolded);
-                            lines.activity = unfolded
-                                .activity
-                                .into_iter()
-                                .find(holds_control)
-                                .into_iter()
-                                .collect();
+                        // Detailed content and markerless cards share the gutter without acquiring
+                        // synthetic markers, disclosure identities, or expansion controls.
+                        _ if !disclosure => {
+                            let columns = if seat.content == Content::Beheaded {
+                                crate::transcript_geometry::NESTED_COLUMNS
+                            } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
+                                crate::transcript_geometry::TITLE_COLUMN
+                                    - crate::transcript_geometry::MARKER_COLUMNS
+                            } else {
+                                crate::transcript_geometry::GUTTER_COLUMNS
+                            };
+                            let content_width = if mode == HistoryRenderMode::Rich
+                                && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
+                            {
+                                width.saturating_sub(columns).max(/*other*/ 1)
+                            } else {
+                                content_width
+                            };
+                            let mut lines = crate::history_cell::fullscreen_session_lines(
+                                cell.as_ref(),
+                                content_width,
+                                detailed,
+                                mode,
+                            );
+                            if mode == HistoryRenderMode::Rich {
+                                if seat.content == Content::Beheaded {
+                                    feed::behead(&mut lines);
+                                }
+                                TextLayout::new(
+                                    crate::transcript_geometry::gutter_lines(
+                                        crate::transcript_geometry::clock_lines(lines, timestamp),
+                                        columns,
+                                    ),
+                                    width,
+                                )
+                                .with_header_tokens(
+                                    header_tokens,
+                                    if detailed {
+                                        TokenSeat::Gutter
+                                    } else {
+                                        TokenSeat::Trailing
+                                    },
+                                )
+                            } else {
+                                TextLayout::new(lines, width)
+                            }
                         }
-                        activity_layout(
-                            lines,
-                            crate::transcript_geometry::NESTED_COLUMNS,
+                        Content::Beheaded => {
+                            let mut lines = activity(expanded, &expanded_parts);
+                            yield_head(&mut lines);
+                            // Its header was all it showed: the first row of its details that can hold
+                            // a control stands in, holding the one that shows the rest.
+                            if lines.activity.is_empty() && lines.disclosure.is_some() {
+                                let mut details = expanded_parts.clone();
+                                details.extend(ids.iter().cloned());
+                                let mut unfolded = activity(/*expanded*/ true, &details);
+                                yield_head(&mut unfolded);
+                                lines.activity = unfolded
+                                    .activity
+                                    .into_iter()
+                                    .find(holds_control)
+                                    .into_iter()
+                                    .collect();
+                            }
+                            activity_layout(
+                                lines,
+                                crate::transcript_geometry::NESTED_COLUMNS,
+                                width,
+                                expanded,
+                            )
+                        }
+                        Content::Own | Content::Loose => activity_layout(
+                            activity(expanded, &expanded_parts),
+                            crate::transcript_geometry::GUTTER_COLUMNS,
                             width,
                             expanded,
-                        )
+                        ),
                     }
-                    Content::Own | Content::Loose => activity_layout(
-                        activity(expanded, expanded_parts),
-                        crate::transcript_geometry::GUTTER_COLUMNS,
+                };
+
+                if let Some(header) = header {
+                    layout = layout.with_fold_header(header.render(
+                        &output_tokens,
+                        &expanded_parts,
+                        output_mode,
+                        &invocations,
+                        full_content,
                         width,
-                        expanded,
-                    ),
+                    ));
                 }
+                layout
             };
-            if let Some(header) = &seat.header {
-                layout = layout.with_fold_header(feed.header_rows(
-                    cells,
-                    header,
-                    bills,
-                    output_tokens,
-                    expanded_parts,
-                    output_mode,
-                    invocations,
-                    full_content,
-                    width,
-                ));
+            if let Some(snapshot) = snapshot {
+                Box::new(move || render(&snapshot.restore()))
+            } else {
+                let layout = render(invocations);
+                Box::new(move || layout)
             }
-            super::invocation::PreparedLayout::Ready(layout)
-        }))
+        })
     }
 
     /// The nearest earlier entry that draws anything.
@@ -623,7 +679,10 @@ impl TranscriptView {
                     .as_any()
                     .downcast_ref::<ReasoningSummaryCell>()
                     .is_some_and(ReasoningSummaryCell::is_transcript_only);
-            if self.elides_cell(cells, previous)
+            if cells[previous]
+                .as_any()
+                .is::<crate::history_cell::StreamAnchorCell>()
+                || self.elides_cell(cells, previous)
                 || transcript_only
                 || !self.feed_seat(cells, previous).is_visible()
             {
@@ -652,81 +711,204 @@ impl LayoutCache {
 
     pub(super) fn begin_frame(&mut self) {
         self.frame = self.frame.wrapping_add(/*rhs*/ 1);
+        self.waiting = false;
+        self.frame_keys.clear();
+        self.pending
+            .retain(|pending| pending.requested_frame + 2 >= self.frame);
         let state = RenderState::current();
         if self.render_state.as_ref() != Some(&state) {
-            self.entries.clear();
+            self.clear();
             self.render_state = Some(state);
         }
     }
 
-    pub(super) fn get<R: Into<super::invocation::PreparedLayout>>(
+    pub(super) fn get(
         &mut self,
         cell: &Arc<dyn HistoryCell>,
         width: u16,
         presentation: CellPresentation,
-        render: impl FnOnce() -> R,
-    ) -> Arc<TextLayout> {
+        prepare: impl FnOnce() -> Box<dyn FnOnce() -> TextLayout + Send>,
+    ) -> Option<Arc<TextLayout>> {
         let source = Arc::downgrade(cell);
-        let animation_tick = cell.transcript_animation_tick();
-        if let Some(index) = self.entries.iter().position(|entry| {
-            entry.width == width
-                && entry.presentation == presentation
-                && entry.source.ptr_eq(&source)
-                && (entry.rendered_frame == self.frame
-                    || (cell.has_stable_transcript_height()
-                        && entry.animation_tick == animation_tick))
-        }) {
-            let layout = Arc::clone(&self.entries[index].layout);
-            if index + 1 != self.entries.len() {
-                let entry = self.entries.remove(index);
-                self.entries.push(entry);
-            }
-            return layout;
-        }
-        let layout = match render().into() {
-            super::invocation::PreparedLayout::Ready(layout) => layout,
-            super::invocation::PreparedLayout::Cached(layout)
-            | super::invocation::PreparedLayout::Pending(layout) => return layout,
-        };
-        let layout = Arc::new(presentation.decorate(layout));
-        self.entries.retain(|entry| !entry.source.ptr_eq(&source));
-        self.entries.push(CachedLayout {
-            source,
+        let revision = RevisionKey {
+            identity: Arc::as_ptr(cell).cast::<()>() as usize,
             width,
             presentation,
-            layout: Arc::clone(&layout),
-            rendered_frame: self.frame,
-            animation_tick,
+        };
+        let key = *self.frame_keys.entry(revision).or_insert_with(|| {
+            let animation_tick = self
+                .pending
+                .iter()
+                .find(|pending| {
+                    pending.source.ptr_eq(&source)
+                        && pending.width == width
+                        && pending.presentation == presentation
+                })
+                .map_or_else(
+                    || cell.transcript_animation_tick(),
+                    |pending| pending.animation_tick,
+                );
+            CacheKey {
+                revision,
+                animation_tick,
+            }
         });
+        let animation_tick = key.animation_tick;
+        if let Some(mut entry) = self.take(&key).filter(|entry| {
+            self.frames.is_some()
+                || cell.has_stable_transcript_height()
+                || entry.rendered_frame == self.frame
+        }) {
+            if let Some(frames) = &self.frames
+                && !cell.has_stable_transcript_height()
+                && animation_tick.is_none()
+            {
+                if entry.refreshed_at.elapsed() >= std::time::Duration::from_secs(1) {
+                    let pending = self.pending.iter().position(|pending| {
+                        pending.source.ptr_eq(&source)
+                            && pending.width == width
+                            && pending.presentation == presentation
+                    });
+                    let pending = pending.unwrap_or_else(|| {
+                        self.pending.push(PendingLayout {
+                            source: source.clone(),
+                            requested_frame: self.frame,
+                            width,
+                            presentation,
+                            animation_tick,
+                            task: {
+                                let render = prepare();
+                                let previous = Arc::clone(&entry.layout);
+                                super::preparation::Pending::new(frames.clone(), move || {
+                                    let layout = presentation.decorate(render());
+                                    if layout.same_presentation(&previous) {
+                                        previous
+                                    } else {
+                                        Arc::new(layout)
+                                    }
+                                })
+                            },
+                        });
+                        self.pending.len() - 1
+                    });
+                    self.pending[pending].requested_frame = self.frame;
+                    if let Some(layout) = self.pending[pending].task.poll() {
+                        self.pending.remove(pending);
+                        entry.layout = layout;
+                        entry.refreshed_at = std::time::Instant::now();
+                    }
+                }
+                if entry.rendered_frame != self.frame {
+                    frames.schedule_content_in(std::time::Duration::from_secs(1));
+                }
+            }
+            entry.rendered_frame = self.frame;
+            let layout = Arc::clone(&entry.layout);
+            self.insert(key, entry);
+            return Some(layout);
+        }
+        let layout = if let Some(frames) = &self.frames {
+            self.pending
+                .retain(|entry| entry.source.strong_count() != 0 && entry.width == width);
+            let index = self.pending.iter().position(|entry| {
+                entry.source.ptr_eq(&source)
+                    && entry.width == width
+                    && entry.presentation == presentation
+                    && entry.animation_tick == animation_tick
+            });
+            let index = index.unwrap_or_else(|| {
+                self.pending.push(PendingLayout {
+                    source: source.clone(),
+                    requested_frame: self.frame,
+                    width,
+                    presentation,
+                    animation_tick,
+                    task: {
+                        let render = prepare();
+                        super::preparation::Pending::new(frames.clone(), move || {
+                            Arc::new(presentation.decorate(render()))
+                        })
+                    },
+                });
+                self.pending.len() - 1
+            });
+            self.pending[index].requested_frame = self.frame;
+            let Some(layout) = self.pending[index].task.poll() else {
+                self.waiting = true;
+                return None;
+            };
+            self.pending.remove(index);
+            layout
+        } else {
+            Arc::new(presentation.decorate(prepare()()))
+        };
+        self.insert(
+            key,
+            CachedLayout {
+                access: 0,
+                source,
+                layout: Arc::clone(&layout),
+                rendered_frame: self.frame,
+                refreshed_at: std::time::Instant::now(),
+            },
+        );
         self.evict();
-        layout
+        Some(layout)
     }
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
+        self.recency.clear();
+        self.frame_keys.clear();
+        self.bytes = 0;
+        self.pending.clear();
+        self.rewraps.clear();
     }
 
     pub(super) fn invalidate_call(&mut self, call_id: &str) {
-        self.entries.retain(|entry| {
-            entry.source.upgrade().is_some_and(|cell| {
-                !crate::history_cell::invocation::collect(cell.as_ref())
-                    .iter()
-                    .any(|call| call.id == call_id)
+        self.pending.clear();
+        let keys: Vec<_> = self
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                let retained = entry.source.upgrade().is_some_and(|cell| {
+                    !crate::history_cell::invocation::collect(cell.as_ref())
+                        .iter()
+                        .any(|call| call.id == call_id)
+                });
+                (!retained).then_some(*key)
             })
-        });
+            .collect();
+        for key in keys {
+            self.take(&key);
+        }
+    }
+
+    fn take(&mut self, key: &CacheKey) -> Option<CachedLayout> {
+        let entry = self.entries.remove(key)?;
+        self.recency.remove(&entry.access);
+        self.bytes -= entry.layout.retained_bytes();
+        Some(entry)
+    }
+
+    fn insert(&mut self, key: CacheKey, mut entry: CachedLayout) {
+        self.access += 1;
+        entry.access = self.access;
+        self.bytes += entry.layout.retained_bytes();
+        self.recency.insert(entry.access, key);
+        self.entries.insert(key, entry);
     }
 
     fn evict(&mut self) {
-        let mut bytes = self
-            .entries
-            .iter()
-            .map(|entry| entry.layout.text().len())
-            .sum::<usize>();
-        // Retain a single oversized entry rather than repeatedly laying it out while visible.
-        while self.entries.len() > 1
-            && (self.entries.len() > MAX_CACHED_ENTRIES || bytes > MAX_CACHED_TEXT_BYTES)
-        {
-            bytes -= self.entries.remove(/*index*/ 0).layout.text().len();
+        while self.entries.len() > 1 && self.bytes > MAX_CACHED_TEXT_BYTES {
+            let Some((_, key)) = self.recency.first_key_value() else {
+                break;
+            };
+            let key = *key;
+            if self.entries[&key].rendered_frame + 1 >= self.frame {
+                break;
+            }
+            self.take(&key);
         }
     }
 }

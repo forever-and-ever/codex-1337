@@ -401,19 +401,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
         recorded_params(&requests, "thread/realtime/stop"),
         vec![serde_json::json!({"threadId": source.to_string()})]
     );
-    // Resuming the ended owner must keep its newly attached subscription.
-    app.detach_current_thread_for_navigation(&mut app_server, Some(source))
-        .await;
-    assert_eq!(
-        recorded_params(&requests, "thread/unsubscribe"),
-        vec![serde_json::json!({"threadId": target.to_string()})]
-    );
-    app.detach_current_thread_for_navigation(&mut app_server, Some(ThreadId::new()))
-        .await;
-    assert!(
-        recorded_params(&requests, "thread/unsubscribe")
-            .contains(&serde_json::json!({"threadId": source.to_string()}))
-    );
+    // Resuming the ended owner uses the real navigation subscription custody.
     Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, source)).await?;
     assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
         matches!(event, AppEvent::InsertHistoryCell(cell) if cell.display_lines(/*width*/ 80)
@@ -1347,7 +1335,11 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
     app.replace_chat_widget(side_widget);
     app.chat_widget
         .handle_thread_session_quiet(test_thread_session(side, app.config.cwd.to_path_buf()));
-    app.stop_realtime_conversation(&mut app_server).await;
+    app.control_voice(crate::app_event::VoiceControl::Stop);
+    let stop = ops.try_recv().expect("owner stop operation");
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(stop))).await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     app.enqueue_thread_notification(
         original,
         ServerNotification::ThreadRealtimeClosed(
@@ -1363,7 +1355,6 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
     let (replacement_tx, _replacement_rx) = tokio::sync::mpsc::unbounded_channel();
     app.app_event_tx = crate::app_event_sender::AppEventSender::new(replacement_tx);
 
-    let mut tui = crate::tui::test_support::make_test_tui()?;
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CodexOp(speech))).await?;
     app.settle_turn_submissions(&mut app_server).await?;
     assert!(recorded_params(&requests, "thread/realtime/appendSpeech").is_empty());

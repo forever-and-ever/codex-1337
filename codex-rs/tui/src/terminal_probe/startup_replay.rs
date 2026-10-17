@@ -13,6 +13,10 @@ pub(super) fn startup_replay_input(input: &[u8]) -> Vec<u8> {
     let mut cursor = 0;
     let mut inside_paste = false;
     while cursor < input.len() {
+        if super::bracketed_paste::reply(&input[cursor..]).is_some() {
+            cursor += super::bracketed_paste::REPLY_LEN;
+            continue;
+        }
         if inside_paste {
             if input[cursor..].starts_with(PASTE_END) {
                 replay.extend_from_slice(PASTE_END);

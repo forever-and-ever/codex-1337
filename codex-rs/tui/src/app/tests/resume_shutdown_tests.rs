@@ -8,6 +8,41 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tokio::net::TcpListener;
 
+async fn finish_close_verification(
+    app: &mut App,
+    tui: &mut crate::tui::Tui,
+    server: &mut AppServerSession,
+    events: &mut mpsc::UnboundedReceiver<AppEvent>,
+) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !app.server_operations.is_empty() {
+            tokio::select! {
+                completion = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(server, completion.expect("thread completion")).await?;
+                }
+                completion = app.server_operations.control_rx.recv() => {
+                    app.handle_server_completion(tui, server, completion.expect("server completion")).await?;
+                }
+            }
+        }
+        Ok::<_, color_eyre::Report>(())
+    }).await??;
+    let mut remaining = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        match event {
+            AppEvent::VerifiedServerNotification(verified) => {
+                app.finish_verified_server_notification(server, *verified)
+                    .await
+            }
+            other => remaining.push(other),
+        }
+    }
+    for event in remaining {
+        app.app_event_tx.send(event);
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<()> {
     let (mut app, mut events, _commands) = make_test_app_with_channels().await;
@@ -26,6 +61,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
         AppServerEvent::ServerNotification(Box::new(thread_closed_notification(thread_id))),
     )
     .await;
+    finish_close_verification(&mut app, &mut tui, &mut server, &mut events).await?;
     app.drain_active_thread_events(&mut tui).await?;
     assert!(
         !std::iter::from_fn(|| events.try_recv().ok())
@@ -48,6 +84,7 @@ async fn thread_close_exits_only_when_displayed_thread_is_unloaded() -> Result<(
     })
     .await?;
     app.handle_app_server_event(&server, closed).await;
+    finish_close_verification(&mut app, &mut tui, &mut server, &mut events).await?;
     app.drain_active_thread_events(&mut tui).await?;
     assert!(
         std::iter::from_fn(|| events.try_recv().ok())
@@ -116,7 +153,7 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
             )
             .await
         });
-        let session = AppServerSession::new(
+        let mut session = AppServerSession::new(
             crate::connect_remote_app_server(endpoint).await?,
             ThreadParamsMode::Remote,
         );
@@ -129,6 +166,7 @@ async fn failed_close_status_read_reconnects_remote_or_closes_embedded() -> Resu
         )
         .await?;
         let mut tui = crate::tui::test_support::make_test_tui()?;
+        finish_close_verification(&mut app, &mut tui, &mut session, &mut events).await?;
         app.drain_active_thread_events(&mut tui).await?;
         assert_eq!(
             (reads.load(Ordering::SeqCst), app.reconnect.offline),

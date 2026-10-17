@@ -3,15 +3,15 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 // This is a control-plane failure witness, not a counter accessor test: the UI
-// thread is first synchronously blocked, then suspended in an unfinished RPC.
+// task is first synchronously blocked, then suspended awaiting its next event.
 #[tokio::test(flavor = "current_thread")]
-async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
+async fn independent_dump_survives_blocked_and_suspended_dispatcher() {
     let shared = Arc::new(Shared::new());
     let endpoint = endpoint::Endpoint::start(Arc::clone(&shared)).expect("listener");
     let pid = std::process::id();
     let (entered, observer) = mpsc::channel();
     let (resume, resumed) = mpsc::channel();
-    let (rpc_done, rpc_pending) = tokio::sync::oneshot::channel();
+    let (idle_done, idle_pending) = tokio::sync::oneshot::channel();
     let reader = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -31,14 +31,14 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
         resume.send(()).expect("resume UI");
         observer
             .recv_timeout(Duration::from_secs(5))
-            .expect("RPC stage entered");
+            .expect("idle stage entered");
         runtime.block_on(async {
-            let report = query(pid, false).await.expect("pending RPC dump");
-            assert_eq!(report.current.expect("current").stage, Some("RpcWait"));
+            let report = query(pid, false).await.expect("pending idle dump");
+            assert_eq!(report.current.expect("current").stage, Some("IdleSelect"));
             assert!(!report.reset_pending);
             assert!(report.stages.iter().all(|stage| stage.stage != "AppEvent"));
         });
-        rpc_done.send(()).expect("finish RPC");
+        idle_done.send(()).expect("finish idle");
     });
     WRITER
         .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
@@ -53,9 +53,9 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
                 let _not_ui = enter(Stage::FramePaint);
             });
             {
-                let _rpc = enter(Stage::RpcWait);
-                entered.send(()).expect("notify RPC observer");
-                rpc_pending.await.expect("RPC release");
+                let _idle = enter(Stage::IdleSelect);
+                entered.send(()).expect("notify idle observer");
+                idle_pending.await.expect("idle release");
             }
             unrelated.await.expect("background task");
         })
@@ -72,8 +72,8 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
         report
             .stages
             .iter()
-            .find(|stage| stage.stage == "RpcWait")
-            .expect("RPC completion")
+            .find(|stage| stage.stage == "IdleSelect")
+            .expect("idle completion")
             .count,
         1
     );
@@ -155,6 +155,90 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
+        WRITER
+            .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
+                let input = crate::tui::TuiEvent::Paste(String::new());
+                let old = input_consumed(&input).expect("consumed input");
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                input_handled(old);
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "reset discards an input still waiting for its frame"
+                );
+
+                let mut first = input_consumed(&input).expect("first input");
+                // Synthetic starts expose replacing the oldest input without
+                // sleeping or relying on scheduler timing.
+                first.0.start = 0;
+                let first_start = first.0.start;
+                let second = input_consumed(&input).expect("second input");
+                assert!(second.0.start > first_start);
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "pre-key paint cannot acknowledge an unfinished input handler"
+                );
+                // Handling order need not equal consumption order: the slot
+                // still keeps the oldest consumed input.
+                input_handled(second);
+                input_handled(first);
+                tokio::spawn(async {
+                    assert!(input_consumed(&crate::tui::TuiEvent::Paste(String::new())).is_none());
+                    drop(enter(Stage::TerminalFlush));
+                })
+                .await
+                .expect("non-UI task");
+                assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                let committed = shared.committed.read().expect("reaction publication");
+                assert_eq!(committed[2], Stage::ReactionLatency as u64 + 1);
+                assert_eq!(committed[3], committed[1] - first_start);
+                drop(enter(Stage::TerminalFlush));
+                WRITER.with(|writer| {
+                    let writer = writer.borrow();
+                    let stats = writer.stats[Stage::ReactionLatency as usize];
+                    assert_eq!(
+                        stats[1], 1,
+                        "one reaction per frame, not per input or flush"
+                    );
+                    assert_eq!(stats[4..].iter().sum::<u64>(), 1);
+                    assert!(writer.ready_input.is_none());
+                });
+
+                input_handled(input_consumed(&input).expect("submitted input"));
+                drop(enter(Stage::FramePaint));
+                let submitted = frame_submitted();
+                let flush_end = Instant::now();
+                // Input handled after submission belongs to a later frame, even if the
+                // writer's completion is delivered to the UI after that handler.
+                input_handled(input_consumed(&input).expect("later input"));
+                let phases = [(flush_end, flush_end); 3];
+                frame_completed(submitted, phases, flush_end);
+                let completed = shared.committed.read().expect("delayed completion");
+                let completed_at = flush_end.duration_since(shared.origin).as_nanos() as u64;
+                assert_eq!(completed[1], completed_at);
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    2
+                );
+                assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
+                drop(enter(Stage::FramePaint));
+                let stale = frame_submitted();
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                frame_completed(stale, phases, flush_end);
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "reset rejects delayed writer completions"
+                );
+            })
+            .await;
         let future = WRITER.scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
             let _handler = enter(Stage::AppEvent);
             std::future::pending::<()>().await;

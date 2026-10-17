@@ -298,6 +298,7 @@ impl App {
         let restoring_draft = self.chat_widget.session_draft.is_some();
         self.handle_submission_event(app_server, super::turn_submissions::SubmissionEvent::Retire)
             .await;
+        self.sync_frontend_requests();
         let queued_edits = self.queued_messages.retire();
         self.chat_widget.project_server_queue_mutation(false);
         for (thread_id, item) in queued_edits {

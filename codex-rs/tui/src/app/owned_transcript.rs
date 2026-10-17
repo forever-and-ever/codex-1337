@@ -62,6 +62,13 @@ impl App {
         let tool_output_tokens = view.activity_output_tokens(&active_ids);
         let expanded = view.sync_live_activity(&self.transcript_cells, active_ids)
             && chat_widget.history_render_mode() == HistoryRenderMode::Rich;
+        if let Some(changed) =
+            view.sync_owned_live_tail(transcript_width, active_key, expanded, || {
+                chat_widget.active_transcript_snapshot(transcript_width)
+            })
+        {
+            return changed;
+        }
         let search_changed = chat_widget
             .active_invocation_cell()
             .and_then(|cell| {
@@ -116,8 +123,6 @@ impl App {
     ) -> Result<Rect> {
         let preparation_stage =
             crate::ui_latency::enter(crate::ui_latency::Stage::FramePreparation);
-        self.transcript_view
-            .enable_background_preparation(tui.frame_requester());
         self.prepare_live_work();
         self.chat_widget.sync_warnings(&self.transcript_cells);
         let motion = MotionMode::from_animations_enabled(
@@ -378,6 +383,8 @@ impl App {
                 frame.set_cursor_style(cursor_style);
                 frame.set_cursor_position(position);
             }
+            view.capture_painted_frame();
+            live_work.capture_painted_frame(composer_gap.is_some());
         })?;
         if let Some((surface, tip)) = &turn_tip
             && tip.rendered.get()
@@ -415,6 +422,7 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        self.transcript_view.promote_presented_frame();
         let _routing_stage = matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_))
             .then(|| crate::ui_latency::enter(crate::ui_latency::Stage::KeyRouting));
         let has_modal = self.chat_widget.has_active_modal();
@@ -457,6 +465,10 @@ impl App {
         if !tui.is_owned_screen() || self.overlay.is_some() {
             return Ok(false);
         }
+        let cells = self
+            .transcript_view
+            .presented_cells()
+            .unwrap_or_else(|| Arc::from(self.transcript_cells.as_slice()));
         if matches!(event, TuiEvent::FocusLost) {
             self.chat_widget
                 .empty_state_animation
@@ -473,7 +485,7 @@ impl App {
             };
         }
         if matches!(event, TuiEvent::Draw) {
-            if self.transcript_view.tick_selection(&self.transcript_cells) {
+            if self.transcript_view.tick_selection(&cells) {
                 tui.frame_requester()
                     .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
             }
@@ -481,16 +493,8 @@ impl App {
         }
         if let TuiEvent::Mouse(mouse) = event {
             let composer_ready = self.chat_widget.prepare_composer_mouse(*mouse);
-            // Wheel input uses the painted viewport; only pointer gestures need fresh hit testing.
-            if matches!(
-                mouse.kind,
-                MouseEventKind::Down(_) | MouseEventKind::Drag(_) | MouseEventKind::Up(_)
-            ) {
-                let size = tui.prepare_draw_size()?;
-                self.render_owned_transcript(tui, size)?;
-            }
             if self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event) {
-                self.transcript_view.end_selection(&self.transcript_cells);
+                self.transcript_view.end_selection(&cells);
                 self.transcript_view.cancel_search();
                 self.transcript_view.clear_activity_focus();
                 tui.frame_requester().schedule_frame();
@@ -523,7 +527,7 @@ impl App {
                     crossterm::event::MouseEventKind::ScrollUp
                         | crossterm::event::MouseEventKind::ScrollDown
                 ) {
-                    self.transcript_view.end_selection(&self.transcript_cells);
+                    self.transcript_view.end_selection(&cells);
                     self.transcript_view.cancel_search();
                     self.transcript_view.clear_activity_focus();
                 }
@@ -545,12 +549,6 @@ impl App {
             }
         }
         if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
-            {
-                let _prepaint_stage =
-                    crate::ui_latency::enter(crate::ui_latency::Stage::PreKeyPaint);
-                let size = tui.prepare_draw_size()?;
-                self.render_owned_transcript(tui, size)?;
-            }
             if self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event) {
                 tui.frame_requester().schedule_frame();
                 return Ok(true);
@@ -665,17 +663,13 @@ impl App {
                 self.transcript_view.begin_search();
                 Some(ViewAction::Changed)
             }
-            TuiEvent::Key(key) => self
-                .transcript_view
-                .handle_key(*key, &self.transcript_cells),
-            TuiEvent::Mouse(mouse) if modal_transcript_mouse => self
-                .transcript_view
-                .handle_selection_mouse(*mouse, &self.transcript_cells),
-            TuiEvent::Mouse(mouse) => self
-                .transcript_view
-                .handle_mouse(*mouse, &self.transcript_cells),
+            TuiEvent::Key(key) => self.transcript_view.handle_key(*key, &cells),
+            TuiEvent::Mouse(mouse) if modal_transcript_mouse => {
+                self.transcript_view.handle_selection_mouse(*mouse, &cells)
+            }
+            TuiEvent::Mouse(mouse) => self.transcript_view.handle_mouse(*mouse, &cells),
             TuiEvent::Paste(text) => {
-                self.transcript_view.end_selection(&self.transcript_cells);
+                self.transcript_view.end_selection(&cells);
                 if self.transcript_view.paste_search(text) {
                     Some(ViewAction::Changed)
                 } else {
@@ -718,12 +712,9 @@ impl App {
             ViewAction::Copy(text)
             | ViewAction::CopyOnSelect(text)
             | ViewAction::CopyAndFollow(text) => {
-                let result = self.transcript_view.copy_selected_text(
-                    tui,
-                    &self.transcript_cells,
-                    &text,
-                    !copy_on_select,
-                );
+                let result =
+                    self.transcript_view
+                        .copy_selected_text(tui, &cells, &text, !copy_on_select);
                 if !copy_on_select || !cfg!(target_os = "linux") || result.is_err() {
                     self.transcript_view
                         .show_copy_feedback(&result, text.chars().count());

@@ -59,6 +59,7 @@ pub(crate) struct TerminalHints {
     pub(crate) colors: Option<crate::terminal_probe::DefaultColors>,
     pub(crate) enhanced_keys: Option<bool>,
     pub(crate) terminal_app_over_ssh: Option<bool>,
+    pub(crate) bracketed_paste: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

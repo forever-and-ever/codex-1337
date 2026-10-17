@@ -415,22 +415,10 @@ impl App {
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
-    ) -> bool {
-        if let Err(message) = self.interrupt_side_thread(app_server, thread_id).await {
-            tracing::warn!("{message}");
-            self.add_agents_overview_error(message);
-            return false;
-        }
-        if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
-            let message =
-                format!("Failed to close side conversation {thread_id}; it is still open: {err}");
-            tracing::warn!("{message}");
-            self.add_agents_overview_error(message);
-            return false;
-        }
-        self.abandoned_side_threads.insert(thread_id);
-        self.discard_thread_local_state(thread_id).await;
-        true
+    ) {
+        self.pending_app_server_requests
+            .cancel_thread_verification(&thread_id.to_string());
+        self.enqueue_side_cleanup(app_server, thread_id).await;
     }
 
     pub(super) async fn discard_side_thread_in_background(
@@ -438,9 +426,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        self.pending_app_server_requests
-            .cancel_thread_verification(&thread_id.to_string());
-        self.enqueue_side_cleanup(app_server, thread_id).await;
+        self.discard_side_thread(app_server, thread_id).await;
     }
 
     pub(super) async fn discard_closed_side_thread(&mut self, thread_id: ThreadId) {
@@ -463,65 +449,6 @@ impl App {
         }
         self.forget_realtime_replay_thread(thread_id);
         self.sync_active_agent_label();
-    }
-
-    async fn interrupt_side_thread(
-        &self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> std::result::Result<(), String> {
-        let interrupt_result =
-            if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
-                app_server.turn_interrupt(thread_id, turn_id).await
-            } else {
-                app_server.startup_interrupt(thread_id).await
-            };
-        // Replay-only sides may still be running after reconnect, so always interrupt.
-        // If the ephemeral thread is gone, let unsubscribe and local cleanup finish.
-        if let Err(TypedRequestError::Server { method, source }) = &interrupt_result
-            && method == "turn/interrupt"
-            && source.code == -32600
-            && source.message == format!("thread not found: {thread_id}")
-            && self
-                .thread_event_channels
-                .get(&thread_id)
-                .is_some_and(|channel| channel.attachment() == ThreadEventAttachment::ReplayOnly)
-        {
-            return Ok(());
-        }
-        interrupt_result.map_err(|err| {
-            format!("Failed to close side conversation {thread_id}; it is still open: {err}")
-        })
-    }
-
-    async fn keep_side_thread_visible_after_cleanup_failure(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) {
-        if self.active_thread_id != Some(thread_id)
-            && let Err(err) = self.select_agent_thread(tui, app_server, thread_id).await
-        {
-            tracing::warn!(
-                "failed to restore side conversation after cleanup failure for {thread_id}: {err}"
-            );
-        }
-    }
-
-    async fn discard_side_thread_or_keep_visible(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> bool {
-        if self.discard_side_thread(app_server, thread_id).await {
-            true
-        } else {
-            self.keep_side_thread_visible_after_cleanup_failure(tui, app_server, thread_id)
-                .await;
-            false
-        }
     }
 
     fn side_developer_instructions(existing_instructions: Option<&str>) -> String {
@@ -620,7 +547,7 @@ impl App {
 
     pub(super) async fn handle_start_side(
         &mut self,
-        tui: &mut tui::Tui,
+        _tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         parent_thread_id: ThreadId,
         mut user_message: Option<crate::chatwidget::UserMessage>,
@@ -638,114 +565,20 @@ impl App {
                 .add_error_message("Wait for permissions to update before forking.".into());
             return Ok(AppRunControl::Continue);
         }
-
-        if let Some((&side_thread_id, state)) = self.side_threads.iter().next()
-            && (parent_thread_id != state.parent_thread_id
-                || !self.discard_side_thread(app_server, side_thread_id).await)
+        if self
+            .side_threads
+            .values()
+            .any(|state| state.parent_thread_id != parent_thread_id)
         {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();
+            self.chat_widget
+                .add_error_message(SIDE_ALREADY_OPEN_MESSAGE.into());
             return Ok(AppRunControl::Continue);
         }
-
-        self.session_telemetry.counter(
-            "codex.thread.side",
-            /*inc*/ 1,
-            &[("source", "slash_command")],
-        );
-        self.refresh_in_memory_config_from_disk_best_effort("starting a side conversation")
-            .await;
-
-        let fork_config = self.side_fork_config();
-        let selected_profile = self.selected_server_profile(parent_thread_id);
-        match app_server
-            .fork_side_thread(
-                &self.local_settings,
-                fork_config,
-                parent_thread_id,
-                selected_profile.as_ref(),
-            )
-            .await
-        {
-            Ok(forked) => {
-                let child_thread_id = forked.session.thread_id;
-                let channel = self.ensure_thread_channel(child_thread_id);
-                {
-                    let mut store = channel.store.lock().await;
-                    Self::install_side_thread_snapshot(&mut store, forked.session, forked.turns);
-                }
-                self.side_threads
-                    .insert(child_thread_id, SideThreadState::new(parent_thread_id));
-                // `thread/started` is delivered after the fork response; seed navigation before
-                // the first selection without blocking on another app-server read.
-                self.upsert_agent_picker_thread(
-                    child_thread_id,
-                    /*agent_nickname*/ None,
-                    /*agent_role*/ None,
-                    /*is_closed*/ false,
-                );
-                if let Err(err) = app_server
-                    .thread_inject_items(child_thread_id, vec![Self::side_boundary_prompt_item()])
-                    .await
-                {
-                    self.discard_side_thread_or_keep_visible(tui, app_server, child_thread_id)
-                        .await;
-                    self.restore_side_user_message(user_message.take());
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to prepare side conversation {child_thread_id}: {err}"
-                    ));
-                    return Ok(AppRunControl::Continue);
-                }
-                if let Err(err) = self
-                    .select_agent_thread_and_discard_side(tui, app_server, child_thread_id)
-                    .await
-                {
-                    let discarded = self
-                        .discard_side_thread_or_keep_visible(tui, app_server, child_thread_id)
-                        .await;
-                    if discarded
-                        && self.active_thread_id != Some(parent_thread_id)
-                        && let Err(restore_err) = self
-                            .select_agent_thread(tui, app_server, parent_thread_id)
-                            .await
-                    {
-                        tracing::warn!(
-                            "failed to restore parent thread after side conversation switch failure: {restore_err}"
-                        );
-                    }
-                    self.restore_side_user_message(user_message.take());
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to switch into side conversation {child_thread_id}: {err}"
-                    ));
-                    return Ok(AppRunControl::Continue);
-                }
-                if self.active_thread_id == Some(child_thread_id) {
-                    if selected_profile.is_some() {
-                        self.adopt_inherited_server_selection();
-                    }
-                    if let Some(user_message) = user_message.take() {
-                        let _ = self
-                            .chat_widget
-                            .submit_user_message_as_plain_user_turn(user_message);
-                    }
-                } else {
-                    self.discard_side_thread_or_keep_visible(tui, app_server, child_thread_id)
-                        .await;
-                    self.restore_side_user_message(user_message.take());
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to switch into side conversation {child_thread_id}."
-                    ));
-                }
-            }
-            Err(err) => {
-                self.restore_side_user_message(user_message.take());
-                self.chat_widget
-                    .set_side_conversation_context_label(/*label*/ None);
-                self.chat_widget
-                    .add_error_message(Self::side_start_error_message(&err));
-            }
-        }
-
+        self.session_telemetry
+            .counter("codex.thread.side", 1, &[("source", "slash_command")]);
+        self.enqueue_side_fork(app_server, parent_thread_id, user_message);
         Ok(AppRunControl::Continue)
     }
 }

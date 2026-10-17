@@ -50,10 +50,12 @@ async fn permission_shortcut_rejections_leave_state_unchanged() -> Result<()> {
         let transcript_len = app.transcript_cells.len();
         app.apply_permission_shortcut(&mut app_server, ThreadId::new(), read_only_selection())
             .await;
+        app.settle_turn_submissions(&mut app_server).await?;
         assert_eq!(app.transcript_cells.len(), transcript_len);
         assert!(events.try_recv().is_err());
         app.apply_permission_shortcut(&mut app_server, thread_id, read_only_selection())
             .await;
+        app.settle_turn_submissions(&mut app_server).await?;
         assert_eq!(
             RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
             original
@@ -100,6 +102,7 @@ async fn permission_shortcut_confirms_without_persisting() -> Result<()> {
     let before = RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref());
     app.apply_permission_shortcut(&mut app_server, thread_id, read_only_selection())
         .await;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     assert_eq!(
         RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),

@@ -253,6 +253,11 @@ pub(crate) struct AgentPickerThreadRefresh {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    DirectoryChangeAdmitted {
+        thread_id: ThreadId,
+        cwd: AbsolutePathBuf,
+        generation: u64,
+    },
     SubagentTextInput {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
@@ -521,6 +526,7 @@ pub(crate) enum AppEvent {
     OpenWarnings,
     Queue(crate::app::QueueEvent),
     Submission(crate::app::turn_submissions::SubmissionEvent),
+    LocalUiReply(crate::app::UiReply),
     /// Copy a diagnostic and acknowledge in the footer, without appending history.
     CopyWarning(String),
     /// Apply the user's decisions for the frozen warning details, in viewer-close order.
@@ -533,6 +539,16 @@ pub(crate) enum AppEvent {
     /// Export all current-thread history to the selected destination.
     ExportTranscript {
         destination: TranscriptExportDestination,
+    },
+    OpenTranscriptExportMenu,
+    CancelTranscriptExport,
+    TranscriptExportProgress {
+        id: uuid::Uuid,
+        pages: usize,
+    },
+    FinishTranscriptExport {
+        id: uuid::Uuid,
+        result: Result<crate::app::transcript_export::PreparedExport, String>,
     },
 
     /// Select a response or block directly in the owned transcript.
@@ -674,7 +690,21 @@ pub(crate) enum AppEvent {
     },
     FinishPromptRevert {
         thread_id: ThreadId,
-        nth_user_message: usize,
+        selected_cell: Arc<dyn HistoryCell>,
+    },
+    ReconcilePromptRevert {
+        id: uuid::Uuid,
+    },
+    PromptRevertPrepared {
+        id: uuid::Uuid,
+        result: Result<crate::app::prompt_revert::RevertSelection, String>,
+    },
+    PromptRevertFinished {
+        id: uuid::Uuid,
+        result: Result<
+            codex_app_server_protocol::ThreadRevertResponse,
+            crate::app::prompt_revert::RevertFailure,
+        >,
     },
 
     /// Request to exit the application.
@@ -1269,6 +1299,7 @@ pub(crate) enum AppEvent {
     /// Emitted by `ChatWidget::on_plan_item_completed` after plan stream
     /// finalization.
     ConsolidateProposedPlan(String),
+    PreparedStream(crate::streaming::completion::PreparedStream),
 
     StartCommitAnimation,
     StopCommitAnimation,
@@ -1764,6 +1795,7 @@ pub(crate) enum AppEvent {
     LocalShellRequest(crate::local_shell::LocalShellRequest),
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
     OpenRouter(crate::openrouter::Event),
+    VerifiedServerNotification(Box<crate::app::VerifiedServerNotification>),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

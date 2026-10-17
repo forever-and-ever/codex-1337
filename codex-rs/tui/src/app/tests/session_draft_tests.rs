@@ -95,6 +95,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
             })),
         )
         .await;
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
         assert_eq!(
             serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
             original_input

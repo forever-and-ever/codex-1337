@@ -57,6 +57,9 @@ pub(crate) struct FrameRequest {
     interactive: bool,
 }
 
+#[path = "background_preparation.rs"]
+mod background_preparation;
+
 /// A requester for scheduling future frame draws on the TUI event loop.
 ///
 /// This is the handler side of an actor/handler pair with `FrameScheduler`, which coalesces
@@ -69,6 +72,8 @@ pub struct FrameRequester {
     frame_schedule_tx: mpsc::UnboundedSender<FrameRequest>,
     mode: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
+    paint_admitted: Arc<AtomicBool>,
+    background_preparation: Arc<AtomicBool>,
 }
 
 impl FrameRequester {
@@ -85,6 +90,8 @@ impl FrameRequester {
             frame_schedule_tx: tx,
             mode,
             dirty,
+            paint_admitted: Arc::new(AtomicBool::new(true)),
+            background_preparation: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -174,6 +181,32 @@ impl FrameRequester {
     pub(crate) fn take_dirty(&self) -> bool {
         self.dirty.swap(false, Ordering::Relaxed)
     }
+
+    pub(crate) fn next_frame_at(
+        started_at: Instant,
+        ended_at: Instant,
+        interactive: bool,
+    ) -> Instant {
+        let mut limiter = FrameRateLimiter::default();
+        limiter.mark_completed(started_at, ended_at);
+        if interactive {
+            limiter.clamp_deadline_with_interval(ended_at, Duration::ZERO)
+        } else {
+            limiter.clamp_deadline(ended_at)
+        }
+    }
+
+    pub(crate) fn set_paint_admitted(&self, admitted: bool) {
+        self.paint_admitted.store(admitted, Ordering::Relaxed);
+    }
+
+    pub(crate) fn paint_admitted(&self) -> bool {
+        self.paint_admitted.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn retain_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -185,6 +218,8 @@ impl FrameRequester {
             frame_schedule_tx: tx,
             mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
             dirty: Arc::new(AtomicBool::new(false)),
+            paint_admitted: Arc::new(AtomicBool::new(true)),
+            background_preparation: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -198,7 +233,7 @@ impl FrameRequester {
 struct FrameScheduler {
     receiver: mpsc::UnboundedReceiver<FrameRequest>,
     draw_tx: broadcast::Sender<()>,
-    rate_limiter: FrameRateLimiter,
+    last_content_at: Option<Instant>,
     mode: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
 }
@@ -214,7 +249,7 @@ impl FrameScheduler {
         Self {
             receiver,
             draw_tx,
-            rate_limiter: FrameRateLimiter::default(),
+            last_content_at: None,
             mode,
             dirty,
         }
@@ -278,7 +313,9 @@ impl FrameScheduler {
                             if due[FrameKind::Content as usize] {
                                 self.dirty.store(true, Ordering::Relaxed);
                             }
-                            self.rate_limiter.mark_emitted(scheduling_now());
+                            if due[FrameKind::Content as usize] {
+                                self.last_content_at = Some(scheduling_now());
+                            }
                             let _ = self.draw_tx.send(());
                     }
                 }
@@ -292,6 +329,7 @@ impl FrameScheduler {
             // Frozen may have been entered and left before this actor is polled.
             deadlines[FrameKind::Cosmetic as usize] = None;
             deadlines[FrameKind::Content as usize] = None;
+            self.last_content_at = None;
             return;
         }
         if matches!(request.kind, FrameKind::Cosmetic)
@@ -303,10 +341,11 @@ impl FrameScheduler {
             && self.mode.load(Ordering::Relaxed) == PresentationMode::Reduced as u8
             && !request.interactive
         {
-            self.rate_limiter
-                .clamp_deadline_with_interval(request.at, REDUCED_CONTENT_INTERVAL)
+            self.last_content_at.map_or(request.at, |last| {
+                request.at.max(last + REDUCED_CONTENT_INTERVAL)
+            })
         } else {
-            self.rate_limiter.clamp_deadline(request.at)
+            request.at
         };
         if matches!(request.kind, FrameKind::Content) {
             if deadlines[FrameKind::Cosmetic as usize]
@@ -339,6 +378,8 @@ mod tests {
                     frame_schedule_tx: tx,
                     mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
                     dirty: Arc::new(AtomicBool::new(false)),
+                    paint_admitted: Arc::new(AtomicBool::new(true)),
+                    background_preparation: Arc::new(AtomicBool::new(false)),
                 },
                 rx,
             )
@@ -569,135 +610,6 @@ mod tests {
         // The later delayed request should have been coalesced into the earlier one; no second draw.
         let second = draw_rx.recv().timeout(Duration::from_millis(120)).await;
         assert!(second.is_err(), "unexpected extra draw received");
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn test_limits_draw_notifications_to_120fps() {
-        let (draw_tx, mut draw_rx) = broadcast::channel(16);
-        let requester = FrameRequester::new(draw_tx);
-
-        requester.schedule_frame();
-        time::advance(Duration::from_millis(1)).await;
-        let first = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for first draw");
-        assert!(first.is_ok(), "broadcast closed unexpectedly");
-
-        requester.schedule_frame();
-        time::advance(Duration::from_millis(1)).await;
-        let early = draw_rx.recv().timeout(Duration::from_millis(1)).await;
-        assert!(
-            early.is_err(),
-            "draw fired too early; expected max 120fps (min interval {MIN_FRAME_INTERVAL:?})"
-        );
-
-        time::advance(MIN_FRAME_INTERVAL).await;
-        let second = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for second draw");
-        assert!(second.is_ok(), "broadcast closed unexpectedly");
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn test_late_draw_still_limits_the_next_frame() {
-        let (draw_tx, mut draw_rx) = broadcast::channel(16);
-        let requester = FrameRequester::new(draw_tx);
-        let delayed_deadline = Instant::now() - MIN_FRAME_INTERVAL.saturating_mul(2);
-        requester
-            .frame_schedule_tx
-            .send(FrameRequest {
-                at: delayed_deadline,
-                kind: FrameKind::Content,
-                interactive: false,
-            })
-            .expect("scheduler should accept the overdue draw");
-
-        draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for overdue draw")
-            .expect("broadcast closed unexpectedly");
-
-        requester.schedule_frame();
-        draw_rx
-            .recv()
-            .timeout(Duration::from_millis(1))
-            .await
-            .expect_err("a late draw must not trigger a redraw burst");
-
-        time::advance(MIN_FRAME_INTERVAL).await;
-        draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for rate-limited draw")
-            .expect("broadcast closed unexpectedly");
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn test_rate_limit_clamps_early_delayed_requests() {
-        let (draw_tx, mut draw_rx) = broadcast::channel(16);
-        let requester = FrameRequester::new(draw_tx);
-
-        requester.schedule_frame();
-        time::advance(Duration::from_millis(1)).await;
-        let first = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for first draw");
-        assert!(first.is_ok(), "broadcast closed unexpectedly");
-
-        requester.schedule_frame_in(Duration::from_millis(1));
-
-        time::advance(MIN_FRAME_INTERVAL / 2).await;
-        let too_early = draw_rx.recv().timeout(Duration::from_millis(1)).await;
-        assert!(
-            too_early.is_err(),
-            "draw fired too early; expected max 120fps (min interval {MIN_FRAME_INTERVAL:?})"
-        );
-
-        time::advance(MIN_FRAME_INTERVAL).await;
-        let second = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for clamped draw");
-        assert!(second.is_ok(), "broadcast closed unexpectedly");
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn test_rate_limit_does_not_delay_future_draws() {
-        let (draw_tx, mut draw_rx) = broadcast::channel(16);
-        let requester = FrameRequester::new(draw_tx);
-
-        requester.schedule_frame();
-        time::advance(Duration::from_millis(1)).await;
-        let first = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for first draw");
-        assert!(first.is_ok(), "broadcast closed unexpectedly");
-
-        requester.schedule_frame_in(Duration::from_millis(50));
-
-        time::advance(Duration::from_millis(49)).await;
-        let early = draw_rx.recv().timeout(Duration::from_millis(1)).await;
-        assert!(early.is_err(), "draw fired too early");
-
-        time::advance(Duration::from_millis(1)).await;
-        let second = draw_rx
-            .recv()
-            .timeout(Duration::from_millis(50))
-            .await
-            .expect("timed out waiting for delayed draw");
-        assert!(second.is_ok(), "broadcast closed unexpectedly");
     }
 
     #[tokio::test(flavor = "current_thread", start_paused = true)]

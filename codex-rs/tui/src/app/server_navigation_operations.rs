@@ -267,6 +267,10 @@ impl App {
         }
     }
 
+    pub(in crate::app) fn navigation_generation(&self) -> u64 {
+        self.server_operations.navigation.generation()
+    }
+
     #[cfg(test)]
     pub(in crate::app) fn pending_navigation_admission(&self) -> Option<(u64, u64, bool)> {
         self.server_operations

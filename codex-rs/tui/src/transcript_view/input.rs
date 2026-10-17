@@ -27,7 +27,7 @@ pub(crate) enum ViewAction {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MouseMode {
+pub(super) enum MouseMode {
     Interactive,
     Selection,
 }
@@ -97,7 +97,7 @@ impl TranscriptView {
         visible.layout.link_at(visible.row, column - self.area.x)
     }
 
-    pub(crate) fn navigate_pager(
+    pub(super) fn navigate_presented_pager(
         &mut self,
         key: KeyEvent,
         cells: &[Arc<dyn HistoryCell>],
@@ -166,7 +166,7 @@ impl TranscriptView {
                     && matches!(code, KeyCode::Char('c' | 'n' | 'p'))))
     }
 
-    pub(crate) fn handle_key(
+    pub(super) fn handle_presented_key(
         &mut self,
         key: KeyEvent,
         cells: &[Arc<dyn HistoryCell>],
@@ -218,7 +218,7 @@ impl TranscriptView {
         self.handle_mouse_with_mode(event, cells, MouseMode::Selection)
     }
 
-    fn handle_mouse_with_mode(
+    pub(super) fn handle_presented_mouse(
         &mut self,
         event: MouseEvent,
         cells: &[Arc<dyn HistoryCell>],

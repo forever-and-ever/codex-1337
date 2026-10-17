@@ -1101,7 +1101,7 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
 /// once the fetch completes. The app removes committed copies from transcript
 /// history, while `ChatWidget::clear_mcp_inventory_loading()` only clears the
 /// in-flight `active_cell`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct McpInventoryLoadingCell {
     start_time: Instant,
     animations_enabled: bool,

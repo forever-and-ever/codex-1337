@@ -6,7 +6,6 @@ use super::ThreadBufferedEvent;
 use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
 use super::app_server_event_targets::server_request_thread_id;
-use crate::app_command::AppCommand;
 use crate::app_event::AppEvent;
 use crate::app_event::RateLimitRefreshOrigin;
 #[cfg(any(target_os = "windows", test))]
@@ -15,7 +14,6 @@ use crate::app_info::app_info_from_api;
 use crate::app_server_session::AppServerSession;
 use crate::app_server_session::status_account_display_from_auth_mode;
 use codex_app_server_client::AppServerEvent;
-use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::AuthMode;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::RateLimitReachedType;
@@ -27,10 +25,8 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadSource;
-use codex_app_server_protocol::ThreadStatus;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
-use std::time::Duration;
 
 impl App {
     pub(super) fn refresh_mcp_startup_expected_servers_from_config(&mut self) {
@@ -100,6 +96,7 @@ impl App {
             }
             AppServerEvent::ServerNotification(mut notification) => {
                 self.note_submission_notification(notification.as_ref());
+                self.note_prompt_revert_notification(notification.as_ref());
                 if let ServerNotification::ThreadWorkStatusUpdated(update) = notification.as_mut()
                     && update.status.emitted_at.is_none()
                 {
@@ -122,6 +119,7 @@ impl App {
                 self.repaint_agents_overview();
             }
             AppServerEvent::Disconnected { message } => {
+                self.cancel_transcript_export();
                 if self.begin_reconnect() {
                     return;
                 }
@@ -149,62 +147,22 @@ impl App {
         if let ServerNotification::AccountLoginCompleted(completion) = &notification {
             self.finish_claude_login(completion);
         }
-        // A picker can leave an old runtime's close notification queued while the same thread
-        // is resumed. Thread IDs survive reloads, so confirm that the displayed thread is still
-        // unloaded before routing a close that would exit the TUI or switch away from it.
         if let ServerNotification::ThreadClosed(closed) = &notification
             && let Ok(thread_id) = ThreadId::from_string(&closed.thread_id)
             && self.current_displayed_thread_id() == Some(thread_id)
         {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(/*secs*/ 5);
-            for attempt in 0..2 {
-                let result = crate::ui_latency::rpc(tokio::time::timeout_at(
-                    deadline,
-                    app_server_client
-                        .request_handle()
-                        .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
-                            request_id: RequestId::String(format!(
-                                "thread-closed-{thread_id}-{attempt}"
-                            )),
-                            params: ThreadReadParams {
-                                thread_id: closed.thread_id.clone(),
-                                include_turns: false,
-                            },
-                        }),
-                ))
-                .await;
-                match result {
-                    Ok(Ok(response))
-                        if !matches!(response.thread.status, ThreadStatus::NotLoaded) =>
-                    {
-                        return;
-                    }
-                    Ok(Ok(_)) => break,
-                    // Unpersisted closed threads can no longer be read. Preserve that close
-                    // and compatibility with servers that do not support this request.
-                    Ok(Err(TypedRequestError::Server { source, .. }))
-                        if matches!(source.code, -32602..=-32600) =>
-                    {
-                        break;
-                    }
-                    Ok(Err(TypedRequestError::Server { source, .. }))
-                        if source.code == -32603 && attempt == 0 =>
-                    {
-                        continue;
-                    }
-                    Ok(Err(_)) | Err(_) => {
-                        // A failed read does not confirm closure. Remote connections recover
-                        // through the normal reconnect path, rather than exiting the TUI.
-                        tracing::warn!("could not confirm displayed thread closure");
-                        if self.begin_reconnect() {
-                            return;
-                        }
-                        break;
-                    }
-                }
-            }
+            self.verify_thread_closure(app_server_client, thread_id, notification);
+            return;
         }
+        self.route_verified_server_notification(app_server_client, notification)
+            .await;
+    }
 
+    pub(super) async fn route_verified_server_notification(
+        &mut self,
+        app_server_client: &AppServerSession,
+        notification: ServerNotification,
+    ) {
         if let ServerNotification::ThreadStarted(started) = &notification
             && started.thread.ephemeral
             && matches!(
@@ -447,21 +405,24 @@ impl App {
             ServerNotification::ExternalAgentConfigImportCompleted(notification) => {
                 let should_report_completion = app_server_client
                     .consume_external_agent_config_import_completion(&notification.import_id);
-                if !app_server_client.uses_remote_workspace()
-                    && let Err(err) = self.refresh_in_memory_config_from_disk().await
-                {
-                    tracing::warn!(
-                        error = %err,
-                        "failed to refresh config after external agent config import"
+                let notification = notification.clone();
+                if app_server_client.uses_remote_workspace() {
+                    self.finish_external_config_import(
+                        app_server_client,
+                        notification,
+                        should_report_completion,
                     );
-                }
-                let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
-                self.chat_widget.refresh_plugin_mentions();
-                self.chat_widget.submit_op(AppCommand::reload_user_config());
-                self.fetch_plugins_list(app_server_client, cwd);
-                if should_report_completion {
-                    self.chat_widget.add_plain_history_lines(
-                        crate::external_agent_config_migration::flow::external_agent_config_migration_finished_lines(notification),
+                } else {
+                    self.queue_config_refresh(
+                        "external agent config import",
+                        move |app, server, _result| {
+                            app.finish_external_config_import(
+                                server,
+                                notification,
+                                should_report_completion,
+                            );
+                            Ok(())
+                        },
                     );
                 }
                 return;
@@ -518,13 +479,18 @@ impl App {
                 }
                 let untracked_thread =
                     self.primary_thread_id.is_some() && !self.owns_thread_for_routing(thread_id);
-                if untracked_thread
-                    && !background_voice
-                    && !self
-                        .owns_untracked_notification(app_server_client, thread_id, &notification)
-                        .await
-                {
-                    return;
+                if untracked_thread && !background_voice {
+                    if matches!(notification, ServerNotification::McpServerStatusUpdated(_)) {
+                        self.verify_untracked_mcp_notification(
+                            app_server_client,
+                            thread_id,
+                            notification,
+                        );
+                        return;
+                    }
+                    if !self.owns_untracked_notification(&notification) {
+                        return;
+                    }
                 }
                 let result = if self.primary_thread_id.is_none() && !background_voice {
                     self.enqueue_primary_thread_notification(notification).await

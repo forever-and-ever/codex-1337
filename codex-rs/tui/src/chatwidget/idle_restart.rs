@@ -23,7 +23,7 @@ impl ChatWidget {
             && !self.input_queue.has_queued_follow_up_messages()
             && self.input_queue.pending_steer.is_none()
             && self.input_queue.pending_steer.replacement().is_none()
-            && !self.input_queue.rate_limit_recovery_pending
+            && !self.submission_settings_pending()
             && self.input_queue.pending_steer.interrupt()
                 != input_queue::SteerInterrupt::SubmitAsTurn
     }

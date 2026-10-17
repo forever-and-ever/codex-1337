@@ -91,6 +91,8 @@ async fn copy_export_picker_custom_keys_preserve_payloads_and_composer_draft() {
     assert_eq!(chat.bottom_pane.composer_text(), "Keep this draft");
 
     chat.show_transcript_export_popup();
+    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu)));
+    chat.show_transcript_export_options();
     chat.handle_key_event(KeyEvent::from(KeyCode::F(/*n*/ 2)));
     assert!(
         std::iter::from_fn(|| rx.try_recv().ok()).all(|event| !matches!(
@@ -99,6 +101,8 @@ async fn copy_export_picker_custom_keys_preserve_payloads_and_composer_draft() {
         ))
     );
     chat.show_transcript_export_popup();
+    assert!(std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches!(event, AppEvent::OpenTranscriptExportMenu)));
+    chat.show_transcript_export_options();
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::F(/*n*/ 3)));
     assert!(
@@ -148,8 +152,12 @@ async fn owned_copy_opens_transcript_selection() {
 #[tokio::test]
 async fn completed_copy_source_survives_replay_and_stream_consolidation() {
     let source = "Intro\r\n\r\n```sh\r\necho x  \r\n```\r\n";
-    for replay in [false, true] {
+    for (replay, background) in [(false, false), (true, false), (false, true)] {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        if background {
+            chat.thread_id = Some(ThreadId::new());
+            chat.frame_requester.enable_background_preparation();
+        }
         if replay {
             replay_agent_message(&mut chat, "source", source, ReplayKind::ThreadSnapshot);
         } else {
@@ -159,6 +167,25 @@ async fn completed_copy_source_survives_replay_and_stream_consolidation() {
                 source,
                 Some(MessagePhase::FinalAnswer),
             );
+        }
+        if background {
+            loop {
+                let event = rx.recv().await.expect("prepared completion");
+                if let AppEvent::PreparedStream(prepared) = event {
+                    assert_eq!(Some(prepared.thread_id), chat.thread_id);
+                    assert_eq!(prepared.item_id, "source");
+                    assert_eq!(prepared.cell.copy_source(), Some(source));
+                    let crate::streaming::completion::RevisionKind::Final(Some(markdown)) =
+                        prepared.kind
+                    else {
+                        panic!("authoritative final metadata");
+                    };
+                    chat.accept_prepared_markdown(prepared.thread_id, &prepared.item_id, markdown);
+                    assert_eq!(chat.transcript.last_agent_source.as_deref(), Some(source));
+                    break;
+                }
+            }
+            continue;
         }
         let retained = std::iter::from_fn(|| rx.try_recv().ok()).find_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => cell.copy_source().map(str::to_owned),

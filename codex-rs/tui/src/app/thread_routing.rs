@@ -12,7 +12,6 @@ use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
 
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
-const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
 
 use super::turn_submissions::CatalogRequest;
 use super::turn_submissions::ConnectionMutation;
@@ -20,32 +19,6 @@ use super::turn_submissions::ServerOperation;
 use super::turn_submissions::ThreadMutation;
 
 impl App {
-    pub(super) async fn stop_realtime_conversation(&mut self, app_server: &mut AppServerSession) {
-        let thread_id = self
-            .background_voice
-            .as_mut()
-            .and_then(|owner| owner.reset_realtime_conversation())
-            .or_else(|| self.chat_widget.reset_realtime_conversation());
-        self.retire_background_voice();
-        let Some(thread_id) = thread_id else {
-            return;
-        };
-        match tokio::time::timeout(
-            REALTIME_STOP_TIMEOUT,
-            app_server.thread_realtime_stop(thread_id),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(%thread_id, %error, "failed to stop voice conversation");
-            }
-            Err(_) => {
-                tracing::warn!(%thread_id, "timed out stopping voice conversation");
-            }
-        }
-    }
-
     pub(super) async fn shutdown_side_threads(&mut self, app_server: &mut AppServerSession) {
         let side_thread_ids: Vec<ThreadId> = self.side_threads.keys().copied().collect();
         for side_thread_id in side_thread_ids {
@@ -145,16 +118,6 @@ impl App {
         };
         let mut store = channel.store.lock().await;
         store.note_outbound_op(op);
-    }
-
-    pub(super) async fn note_active_thread_outbound_op(&mut self, op: &AppCommand) {
-        if !ThreadEventStore::op_can_change_pending_replay_state(op) {
-            return;
-        }
-        let Some(thread_id) = self.active_thread_id else {
-            return;
-        };
-        self.note_thread_outbound_op(thread_id, op).await;
     }
 
     pub(super) async fn active_turn_id_for_thread(&self, thread_id: ThreadId) -> Option<String> {
@@ -2110,12 +2073,7 @@ impl App {
             && self.chat_widget.has_active_modal()
             && self.startup_protected_input_boundary
         {
-            self.chat_widget.pre_draw_tick();
-            self.render_chat_widget_frame(tui, tui.terminal.last_known_screen_size)?;
-            if tui.presentation_mode() != crate::tui::PresentationMode::Frozen {
-                tui.discard_pending_input_before_interactive_screen()?;
-                self.startup_pending_protected_request = false;
-            }
+            self.request_modal_frame(tui.frame_requester());
         }
         if self.backtrack_render_pending {
             tui.frame_requester().schedule_frame();

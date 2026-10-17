@@ -26,6 +26,10 @@ mod windows_replay;
 /// Default wall-clock budget for each terminal probe or startup probe group.
 pub(crate) const DEFAULT_TIMEOUT: Duration = Duration::from_millis(/*millis*/ 250);
 
+mod bracketed_paste;
+
+pub(crate) use bracketed_paste::disable_paste_burst;
+
 /// Default terminal foreground and background colors reported by OSC 10 and OSC 11.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DefaultColors {
@@ -45,7 +49,6 @@ mod imp {
     use std::fs::File;
     use std::fs::OpenOptions;
     use std::io;
-    use std::io::Write;
     use std::os::fd::AsRawFd;
     use std::os::fd::FromRawFd;
     use std::time::Duration;
@@ -66,6 +69,7 @@ mod imp {
         pub(crate) default_colors: Option<DefaultColors>,
         pub(crate) keyboard_enhancement_supported: Option<bool>,
         pub(crate) terminal_app_over_ssh: Option<bool>,
+        pub(crate) bracketed_paste: Option<bool>,
     }
 
     /// Whether the startup probe should query keyboard enhancement support.
@@ -153,8 +157,7 @@ mod imp {
         }
 
         fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-            self.writer.write_all(bytes)?;
-            self.writer.flush()
+            crate::custom_terminal::output::query(&mut self.writer, bytes)
         }
 
         fn read_available(
@@ -280,6 +283,7 @@ mod imp {
     ) -> io::Result<StartupProbe> {
         #[cfg(target_os = "linux")]
         if let Some(probe) = crate::reload::worker::cached_terminal_probe() {
+            super::bracketed_paste::observe(probe.bracketed_paste);
             return Ok(probe);
         }
         let mut tty = Tty::open()?;
@@ -288,7 +292,8 @@ mod imp {
             .is_none()
             && (std::env::var_os("SSH_TTY").is_some()
                 || std::env::var_os("SSH_CONNECTION").is_some());
-        let mut query = b"\x1B[6n\x1B]10;?\x1B\\\x1B]11;?\x1B\\".to_vec();
+        let mut query = super::bracketed_paste::QUERY.to_vec();
+        query.extend_from_slice(b"\x1B[6n\x1B]10;?\x1B\\\x1B]11;?\x1B\\");
         if keyboard_probe == StartupKeyboardEnhancementProbe::Query {
             query.extend_from_slice(b"\x1B[?u");
         }
@@ -309,6 +314,9 @@ mod imp {
             query_identity,
             &mut buffer,
         );
+        if let Ok(probe) = &result {
+            super::bracketed_paste::observe(probe.bracketed_paste);
+        }
         #[cfg(target_os = "linux")]
         if let Ok(probe) = &result {
             crate::reload::worker::note_terminal_probe(probe);
@@ -354,6 +362,7 @@ mod imp {
         let deadline = Instant::now() + timeout;
         let mut probe = StartupProbe {
             cursor_position: None,
+            bracketed_paste: None,
             default_colors: None,
             keyboard_enhancement_supported: None,
             terminal_app_over_ssh: (!query_identity).then_some(/*t*/ false),
@@ -388,6 +397,9 @@ mod imp {
         buffer: &[u8],
         keyboard_probe: StartupKeyboardEnhancementProbe,
     ) {
+        if probe.bracketed_paste.is_none() {
+            probe.bracketed_paste = super::bracketed_paste::parse(buffer);
+        }
         if probe.cursor_position.is_none() {
             probe.cursor_position = parse_cursor_position(buffer);
         }
@@ -564,6 +576,7 @@ mod imp {
     mod tests {
         use super::*;
         use pretty_assertions::assert_eq;
+        use std::io::Write;
         use std::os::fd::OwnedFd;
         use std::os::unix::net::UnixStream;
 
@@ -663,36 +676,51 @@ mod imp {
 
         #[test]
         fn startup_probe_parses_batched_terminal_responses() {
-            let mut probe = StartupProbe {
-                cursor_position: None,
-                default_colors: None,
-                keyboard_enhancement_supported: None,
-                terminal_app_over_ssh: Some(false),
-            };
-            let mut saw_supported_keyboard = false;
-            update_startup_probe(
-                &mut probe,
-                &mut saw_supported_keyboard,
-                b"\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u",
-                StartupKeyboardEnhancementProbe::Query,
-            );
-
-            assert_eq!(
-                probe,
-                StartupProbe {
-                    cursor_position: Some(Position { x: 9, y: 19 }),
-                    default_colors: Some(DefaultColors {
-                        fg: (238, 238, 238),
-                        bg: (17, 17, 17),
-                    }),
-                    keyboard_enhancement_supported: Some(true),
+            for (reply, bracketed_paste) in [
+                ("\x1b[?2004;1$y", Some(true)),
+                ("\x1b[?2004;3$y", Some(true)),
+                ("\x1b[?2004;2$y", Some(false)),
+                ("\x1b[?2004;4$y", Some(false)),
+                ("\x1b[?2004;0$y", Some(false)),
+                ("", None),
+            ] {
+                let mut probe = StartupProbe {
+                    cursor_position: None,
+                    default_colors: None,
+                    keyboard_enhancement_supported: None,
                     terminal_app_over_ssh: Some(false),
-                }
-            );
-            assert!(startup_probe_complete(
-                &probe,
-                StartupKeyboardEnhancementProbe::Query
-            ));
+                    bracketed_paste: None,
+                };
+                let mut saw_supported_keyboard = false;
+                let mut buffer = reply.as_bytes().to_vec();
+                buffer.extend_from_slice(b"\x1B[20;10R\x1B]11;rgb:1111/1111/1111\x07\x1B[?64;1;2c\x1B]10;rgb:eeee/eeee/eeee\x1B\\\x1B[?7u");
+                update_startup_probe(
+                    &mut probe,
+                    &mut saw_supported_keyboard,
+                    &buffer,
+                    StartupKeyboardEnhancementProbe::Query,
+                );
+                assert_eq!(
+                    probe,
+                    StartupProbe {
+                        cursor_position: Some(Position { x: 9, y: 19 }),
+                        default_colors: Some(DefaultColors {
+                            fg: (238, 238, 238),
+                            bg: (17, 17, 17),
+                        }),
+                        keyboard_enhancement_supported: Some(true),
+                        terminal_app_over_ssh: Some(false),
+                        bracketed_paste,
+                    }
+                );
+                // Missing DECRPM must not extend the existing round trip.
+                assert!(startup_probe_complete(
+                    &probe,
+                    StartupKeyboardEnhancementProbe::Query
+                ));
+                let typed = format!("before{reply}after");
+                assert_eq!(startup_replay_input(typed.as_bytes()), b"beforeafter");
+            }
         }
 
         #[test]
@@ -702,6 +730,7 @@ mod imp {
                 default_colors: None,
                 keyboard_enhancement_supported: None,
                 terminal_app_over_ssh: None,
+                bracketed_paste: None,
             };
             let mut supported_keyboard = false;
             let input =
@@ -774,6 +803,7 @@ mod imp {
                     }),
                     keyboard_enhancement_supported: Some(true),
                     terminal_app_over_ssh: Some(false),
+                    bracketed_paste: None,
                 }
             );
             let mut expected_replay = vec![b'x'; 2_048];

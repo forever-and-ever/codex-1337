@@ -45,6 +45,7 @@ async fn backend_banner_fallback_applies_before_initial_and_queued_startup_promp
         },
     )
     .await?;
+    app.settle_turn_submissions(&mut server).await?;
     assert!(requests.lock().unwrap().is_empty());
     assert!(
         !render_bottom_popup(&app.chat_widget, /*width*/ 72)
@@ -56,6 +57,7 @@ async fn backend_banner_fallback_applies_before_initial_and_queued_startup_promp
     while events.try_recv().is_ok() {}
     app.handle_startup_thread_started(&mut server, Ok(started))
         .await?;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(app.active_thread_id, Some(thread_id));
     let submissions = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| {

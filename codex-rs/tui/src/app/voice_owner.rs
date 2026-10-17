@@ -101,30 +101,4 @@ impl App {
             self.retire_background_voice();
         }
     }
-
-    pub(super) async fn detach_current_thread_for_navigation(
-        &mut self,
-        app_server: &mut AppServerSession,
-        destination: Option<ThreadId>,
-    ) {
-        self.shutdown_side_threads(app_server).await;
-        let thread_ids: Vec<_> = self.thread_event_channels.keys().copied().collect();
-        for thread_id in thread_ids {
-            if self.voice_owner_thread_id() == Some(thread_id)
-                || destination == Some(thread_id)
-                || self
-                    .agents_overview
-                    .dispatched_requests
-                    .contains_key(&thread_id)
-                || self.agents_overview.blank_sessions.contains_key(&thread_id)
-            {
-                continue;
-            }
-            if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
-                tracing::warn!("failed to unsubscribe thread {thread_id}: {err}");
-            }
-            self.abort_thread_event_listener(thread_id);
-            self.pending_server_profiles.remove(&thread_id);
-        }
-    }
 }

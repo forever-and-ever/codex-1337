@@ -167,9 +167,11 @@ JSON has `schema_version: 1`, fixed stage names, nanosecond durations and
 child totals overlap: never sum them as disjoint CPU work. `IdleSelect` is
 select polling and waiting, normally idle rather than a handler. A slow
 synchronous select poll cannot be distinguished from ordinary waiting here. Other stages identify coarse dispatcher
-occupancy, key/pre-key painting, frame preparation/painting, invocation
-materialization, and terminal diff/write/flush. Selected inline server awaits
-are `RpcWait`; uninstrumented callees and awaits remain handler occupancy.
+occupancy, key routing, server and delivery completions, frame
+preparation/painting, invocation materialization, and terminal
+diff/write/flush. The output writer thread measures the terminal stages; the UI
+records them when it drains that frame's completion. Retired stage ids
+(`PreKeyPaint`, `RpcWait`) stay reserved and never record.
 A long handler does not prove CPU work or rendering is responsible. The slow
 ring retains the latest 128 completed non-idle spans of at least 8 ms; human
 reports mark 50 ms or more prominently. Ring sequence numbers reveal overwritten
@@ -177,6 +179,19 @@ history. All completed spans, including faster ones and idle waits, enter fixed
 histograms. Input reports the gate reason, three queue sizes and the latest
 consumed-input timestamp; it cannot measure physical key-to-consumption latency
 while input is gated.
+
+`ReactionLatency` measures the interval from app-side input consumption to
+completion of the first frame flush whose painting began after its handler
+returned. Key, paste, mouse-button and wheel events count; motion, focus and
+resize do not. Inputs eligible for the same frame share one sample, measured
+from the earliest input, including time queued behind admission gates. Every
+sample enters the fixed histogram; only reactions of at least 16.7 ms enter the
+slow ring, while stages retain the 8 ms threshold. JSON includes reactions in
+`stages` and `recent_slow`. Human dumps show p50 and p99 upper bounds from the
+histogram, capped by the observed maximum. Reset
+discards inputs still waiting for a frame. Empty-diff frames still complete a
+sample; no frame means no completed sample. This measures neither physical input arrival nor
+terminal presentation.
 
 Current top/parent stages are published before work. Last-committed progress
 remains separate; a suspended publisher never makes snapshots wait for it.
@@ -211,8 +226,7 @@ is no automatic disk stream, saved-report directory or built-in retention policy
 The listener can answer while the UI is synchronously blocked, awaiting a
 server response or blocked on terminal output, provided its own OS thread can
 run. It is not a crash debugger: SIGSTOP, death, process-wide corruption, severe
-resource exhaustion and total CPU starvation can prevent a reply. The recorder
-does not repair the existing queue gate, pre-key paint or inline-RPC debt.
+resource exhaustion and total CPU starvation can prevent a reply.
 
 ## Provider data
 

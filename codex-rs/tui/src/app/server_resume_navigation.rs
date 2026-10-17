@@ -100,6 +100,11 @@ pub(super) enum ResumePresentation {
 }
 
 pub(super) enum ResumeStage {
+    TrustedConfig(Box<ResumeContext>),
+    Rebuilding {
+        target: SessionTarget,
+        source: ResumeSource,
+    },
     Admitted(SessionTarget),
     OverviewAdmitted {
         thread_id: ThreadId,
@@ -146,10 +151,12 @@ impl ResumeStage {
             Self::OverviewAdmitted { thread_id, .. }
             | Self::OverviewConfig { thread_id, .. }
             | Self::OverviewMetadata { thread_id, .. } => *thread_id,
-            Self::Admitted(target) | Self::Config(target) | Self::Cwd { target, .. } => {
-                target.thread_id
-            }
-            Self::TrustMetadata(context)
+            Self::Admitted(target)
+            | Self::Config(target)
+            | Self::Cwd { target, .. }
+            | Self::Rebuilding { target, .. } => target.thread_id,
+            Self::TrustedConfig(context)
+            | Self::TrustMetadata(context)
             | Self::Trust { context, .. }
             | Self::Hooks(context)
             | Self::Acquiring(context)
@@ -196,7 +203,8 @@ impl ResumeReceipt {
 }
 
 enum ResumeOutcome {
-    Begin,
+    Refreshed(Result<Box<(Config, LocalSettings)>>),
+    Rebuilt(Result<Box<(Config, LocalSettings)>>),
     Thread(Result<api::Thread>),
     Project(Result<Option<RemoteProjectTrust>>),
     Rechecked(Result<api::Thread>),
@@ -211,7 +219,8 @@ enum ResumeOutcome {
 }
 
 enum ResumeEffect {
-    Begin,
+    Refresh(Box<super::navigation_config::ConfigRebuild>),
+    Rebuild(Box<super::navigation_config::ConfigRebuild>),
     Thread(ThreadId),
     Project {
         cwd: PathBuf,
@@ -253,7 +262,13 @@ impl App {
             _ => unreachable!("resume dispatch requires admitted target"),
         };
         operation.intent = NavigationIntent::Resume(stage);
-        self.spawn_resume_effect(operation, server.request_handle(), ResumeEffect::Begin);
+        self.spawn_resume_effect(
+            operation,
+            server.request_handle(),
+            ResumeEffect::Refresh(
+                self.capture_config_rebuild(self.chat_widget.config_ref().cwd.to_path_buf(), None),
+            ),
+        );
     }
 
     fn spawn_resume_effect(
@@ -272,7 +287,8 @@ impl App {
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match effect {
-                    ResumeEffect::Begin => ResumeOutcome::Begin,
+                    ResumeEffect::Refresh(plan) => ResumeOutcome::Refreshed(plan.run().await),
+                    ResumeEffect::Rebuild(plan) => ResumeOutcome::Rebuilt(plan.run().await),
                     ResumeEffect::Thread(thread_id) => ResumeOutcome::Thread(
                         preparation::read_thread(RequestPolicy::Interactive, &handle, thread_id)
                             .await,
@@ -387,7 +403,7 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
         operation: &mut PendingNavigation,
-        mut context: Box<ResumeContext>,
+        context: Box<ResumeContext>,
         mut plan: DirectoryTrustPreparation,
     ) -> Result<()> {
         if let Some(cwd) = plan.next_cwd() {
@@ -402,31 +418,14 @@ impl App {
         }
         let consent = plan.finish();
         if !server.uses_remote_workspace() && consent.directory_trust_persisted {
-            match self
-                .rebuild_config_for_cwd(context.config.cwd.to_path_buf())
-                .await
-            {
-                Ok(config) => {
-                    context.settings = self.local_settings.reloaded(&config);
-                    context.config = config;
-                }
-                Err(error) => {
-                    self.add_agents_overview_error(format!(
-                        "Failed to reload trusted folder settings: {error}"
-                    ));
-                    return Ok(());
-                }
-            }
-            if matches!(self.app_server_target, AppServerTarget::Embedded) {
-                let cwd = context.config.cwd.to_path_buf();
-                operation.intent = NavigationIntent::Resume(ResumeStage::Hooks(context));
-                self.spawn_resume_effect(
-                    operation,
-                    server.request_handle(),
-                    ResumeEffect::Hooks(cwd),
-                );
-                return Ok(());
-            }
+            let rebuild = self.capture_config_rebuild(context.config.cwd.to_path_buf(), None);
+            operation.intent = NavigationIntent::Resume(ResumeStage::TrustedConfig(context));
+            self.spawn_resume_effect(
+                operation,
+                server.request_handle(),
+                ResumeEffect::Rebuild(rebuild),
+            );
+            return Ok(());
         }
         self.prepare_resume_acquisition(server, operation, context);
         Ok(())
@@ -640,11 +639,43 @@ impl App {
         };
         let ResumeReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
-            (ResumeStage::OverviewConfig { thread_id, after }, ResumeOutcome::Begin)
+            (ResumeStage::TrustedConfig(mut context), ResumeOutcome::Rebuilt(result))
                 if matching =>
             {
-                self.refresh_in_memory_config_from_disk_best_effort("attaching a task")
+                match result {
+                    Ok(projected) => {
+                        let (config, settings) = *projected;
+                        context.config = config;
+                        context.settings = settings;
+                    }
+                    Err(error) => {
+                        self.add_agents_overview_error(format!(
+                            "Failed to reload trusted folder settings: {error}"
+                        ));
+                        return Ok(AppRunControl::Continue);
+                    }
+                }
+                if matches!(self.app_server_target, AppServerTarget::Embedded) {
+                    let cwd = context.config.cwd.to_path_buf();
+                    operation.intent = NavigationIntent::Resume(ResumeStage::Hooks(context));
+                    self.spawn_resume_effect(&mut operation, handle, ResumeEffect::Hooks(cwd));
+                } else {
+                    self.prepare_resume_acquisition(server, &mut operation, context);
+                }
+                self.server_operations.navigation.current = Some(operation);
+            }
+            (ResumeStage::Rebuilding { target, source }, ResumeOutcome::Rebuilt(result))
+                if matching =>
+            {
+                return self
+                    .finish_rebuilt_resume_config(server, operation, target, source, result)
                     .await;
+            }
+            (
+                ResumeStage::OverviewConfig { thread_id, after },
+                ResumeOutcome::Refreshed(result),
+            ) if matching => {
+                self.apply_navigation_config_refresh(result, "attaching a task");
                 operation.intent =
                     NavigationIntent::Resume(ResumeStage::OverviewMetadata { thread_id, after });
                 self.spawn_resume_effect(&mut operation, handle, ResumeEffect::Thread(thread_id));
@@ -679,9 +710,8 @@ impl App {
                 .await;
             }
             (ResumeStage::RestoringBlank(_), ResumeOutcome::Cached(_)) => {}
-            (ResumeStage::Config(target), ResumeOutcome::Begin) if matching => {
-                self.refresh_in_memory_config_from_disk_best_effort("resuming a thread")
-                    .await;
+            (ResumeStage::Config(target), ResumeOutcome::Refreshed(result)) if matching => {
+                self.apply_navigation_config_refresh(result, "resuming a thread");
                 let basis = match self.capture_resume_cwd_basis(server) {
                     Ok(basis) => basis,
                     Err(control) => return Ok(control),
@@ -1082,23 +1112,72 @@ impl App {
         Ok(AppRunControl::Continue)
     }
 
+    fn start_resume_config_rebuild(
+        &mut self,
+        server: &AppServerSession,
+        mut operation: PendingNavigation,
+        target: SessionTarget,
+        source: ResumeSource,
+        plan: Box<super::navigation_config::ConfigRebuild>,
+    ) {
+        operation.intent = NavigationIntent::Resume(ResumeStage::Rebuilding { target, source });
+        self.spawn_resume_effect(
+            &mut operation,
+            server.request_handle(),
+            ResumeEffect::Rebuild(plan),
+        );
+        self.server_operations.navigation.current = Some(operation);
+    }
+
     async fn finish_resume_cwd(
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
-        mut operation: PendingNavigation,
+        operation: PendingNavigation,
         target: SessionTarget,
         basis: ResumeCwdBasis,
         history_cwd: Option<PathBuf>,
         source: ResumeSource,
     ) -> Result<AppRunControl> {
-        let (config, settings) = match self
+        let plan = match self
             .project_resume_config(tui, &target, basis, history_cwd)
             .await
         {
-            Ok(result) => result,
+            Ok(plan) => plan,
             Err(control) => return Ok(control),
         };
+        self.start_resume_config_rebuild(server, operation, target, source, plan);
+        Ok(AppRunControl::Continue)
+    }
+
+    async fn finish_rebuilt_resume_config(
+        &mut self,
+        server: &mut AppServerSession,
+        mut operation: PendingNavigation,
+        target: SessionTarget,
+        source: ResumeSource,
+        result: Result<Box<(Config, LocalSettings)>>,
+    ) -> Result<AppRunControl> {
+        let (config, settings) = match result {
+            Ok(result) => *result,
+            Err(error) => {
+                self.add_agents_overview_error(format!(
+                    "Failed to rebuild configuration for resume: {error}"
+                ));
+                return Ok(AppRunControl::Continue);
+            }
+        };
+        let loaded = match &source {
+            ResumeSource::Overview { thread, .. }
+                if !matches!(thread.status, api::ThreadStatus::NotLoaded) =>
+            {
+                Some(thread.clone())
+            }
+            _ => None,
+        };
+        if loaded.is_none() && self.reject_remote_resume_permission_override(&config) {
+            return Ok(AppRunControl::Continue);
+        }
         let purpose = ResumePurpose::from_source(source, &config);
         let context = Box::new(ResumeContext {
             purpose,
@@ -1106,6 +1185,11 @@ impl App {
             config,
             settings,
         });
+        if let Some(thread) = loaded {
+            return self
+                .begin_resume_trust(server, operation, context, Some(&thread))
+                .await;
+        }
         if matches!(self.app_server_target, AppServerTarget::LocalDaemon { .. }) {
             let thread_id = context.target.thread_id;
             operation.intent = NavigationIntent::Resume(ResumeStage::TrustMetadata(context));

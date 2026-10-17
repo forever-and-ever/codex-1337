@@ -1,9 +1,8 @@
 //! Materializes oversized TUI goal objectives, pastes, and images as app-server-host files.
 
-use std::fs;
 use std::path::Path;
 
-use crate::app_server_session::AppServerSession;
+use crate::app_server_session::fs::AppServerFileSystem;
 use crate::bottom_pane::ChatComposer;
 use crate::bottom_pane::LocalImageAttachment;
 use anyhow::Context;
@@ -31,114 +30,121 @@ pub(crate) struct GoalDraft {
 pub(crate) type GoalFilePath = AppServerPath;
 
 pub(crate) async fn materialize_goal_draft(
-    app_server: &mut AppServerSession,
+    app_server: &AppServerFileSystem,
     codex_home: Option<&GoalFilePath>,
     draft: GoalDraft,
 ) -> Result<(String, Option<GoalFilePath>)> {
-    let mut objective = draft.objective;
-    if objective.trim().is_empty() {
-        bail!("Goal objective must not be empty.");
-    }
-    let text_elements = draft.text_elements;
-    if !draft.pending_pastes.is_empty() {
-        let (expanded_objective, _) = ChatComposer::expand_pending_pastes(
-            &objective,
-            text_elements.clone(),
-            &draft.pending_pastes,
-        );
-        if expanded_objective.trim().is_empty() {
+    let mut output_dir = None;
+    let result = async {
+        let mut objective = draft.objective;
+        if objective.trim().is_empty() {
             bail!("Goal objective must not be empty.");
         }
-    }
+        let text_elements = draft.text_elements;
+        if !draft.pending_pastes.is_empty() {
+            let (expanded_objective, _) = ChatComposer::expand_pending_pastes(
+                &objective,
+                text_elements.clone(),
+                &draft.pending_pastes,
+            );
+            if expanded_objective.trim().is_empty() {
+                bail!("Goal objective must not be empty.");
+            }
+        }
 
-    let mut active_placeholders = text_elements
-        .iter()
-        .filter_map(|element| element.placeholder(&objective))
-        .filter(|placeholder| !placeholder.is_empty())
-        .collect::<Vec<_>>();
-    let mut output_dir = None;
-    let mut replacements = Vec::new();
-    for (placeholder, text) in draft.pending_pastes.iter() {
-        let Some(active_idx) = active_placeholders
+        let mut active_placeholders = text_elements
             .iter()
-            .position(|active| *active == placeholder.as_str())
-        else {
-            continue;
-        };
-        active_placeholders.swap_remove(active_idx);
-        let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
-            .await?
-            .join(format!("pasted-text-{}.txt", replacements.len() + 1));
-        write_goal_file(app_server, path.clone(), text.as_bytes().to_vec()).await?;
-
-        replacements.push((
-            placeholder.clone(),
-            format!("pasted text file: {path}. Read this file before continuing."),
-        ));
-    }
-
-    let mut image_lines = Vec::new();
-    for (idx, image) in draft.local_images.iter().enumerate() {
-        if !image.placeholder.is_empty() {
+            .filter_map(|element| element.placeholder(&objective))
+            .filter(|placeholder| !placeholder.is_empty())
+            .collect::<Vec<_>>();
+        let mut replacements = Vec::new();
+        for (placeholder, text) in draft.pending_pastes.iter() {
             let Some(active_idx) = active_placeholders
                 .iter()
-                .position(|active| *active == image.placeholder.as_str())
+                .position(|active| *active == placeholder.as_str())
             else {
                 continue;
             };
             active_placeholders.swap_remove(active_idx);
+            let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
+                .await?
+                .join(format!("pasted-text-{}.txt", replacements.len() + 1));
+            write_goal_file(app_server, path.clone(), text.as_bytes().to_vec()).await?;
+
+            replacements.push((
+                placeholder.clone(),
+                format!("pasted text file: {path}. Read this file before continuing."),
+            ));
         }
-        let extension = image_extension(&image.path);
-        let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
-            .await?
-            .join(format!("image-{}.{}", idx + 1, extension));
-        let bytes = fs::read(&image.path)
-            .with_context(|| format!("Could not read goal image {}", image.path.display()))?;
-        write_goal_file(app_server, path.clone(), bytes).await?;
-        if image.placeholder.is_empty() {
-            image_lines.push(format!("- [Image #{}]: {path}", idx + 1));
-        } else {
-            replacements.push((image.placeholder.clone(), format!("image file: {path}")));
-        }
-    }
 
-    let (expanded_objective, _) =
-        ChatComposer::expand_pending_pastes(&objective, text_elements, &replacements);
-    objective = expanded_objective.trim().to_string();
-    append_section(&mut objective, "Referenced image files:", image_lines);
-
-    append_section(
-        &mut objective,
-        "Referenced image URLs:",
-        draft
-            .remote_image_urls
-            .into_iter()
-            .enumerate()
-            .map(|(idx, url)| format!("- [Image #{}]: {url}", idx + 1))
-            .collect(),
-    );
-
-    if objective.chars().count() > MAX_THREAD_GOAL_OBJECTIVE_CHARS {
-        let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
-            .await?
-            .join(GOAL_FILE_NAME);
-        let reference = match objective_file_reference(&path) {
-            Ok(reference) => reference,
-            Err(err) => {
-                if let Some(output_dir) = output_dir.as_ref() {
-                    let _ = app_server.file_system().fs_remove_path(output_dir).await;
-                }
-                return Err(err);
+        let mut image_lines = Vec::new();
+        for (idx, image) in draft.local_images.iter().enumerate() {
+            if !image.placeholder.is_empty() {
+                let Some(active_idx) = active_placeholders
+                    .iter()
+                    .position(|active| *active == image.placeholder.as_str())
+                else {
+                    continue;
+                };
+                active_placeholders.swap_remove(active_idx);
             }
-        };
-        write_goal_file(app_server, path.clone(), objective.as_bytes().to_vec()).await?;
-        objective = reference;
+            let extension = image_extension(&image.path);
+            let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
+                .await?
+                .join(format!("image-{}.{}", idx + 1, extension));
+            let bytes = tokio::fs::read(&image.path)
+                .await
+                .with_context(|| format!("Could not read goal image {}", image.path.display()))?;
+            write_goal_file(app_server, path.clone(), bytes).await?;
+            if image.placeholder.is_empty() {
+                image_lines.push(format!("- [Image #{}]: {path}", idx + 1));
+            } else {
+                replacements.push((image.placeholder.clone(), format!("image file: {path}")));
+            }
+        }
+
+        let (expanded_objective, _) =
+            ChatComposer::expand_pending_pastes(&objective, text_elements, &replacements);
+        objective = expanded_objective.trim().to_string();
+        append_section(&mut objective, "Referenced image files:", image_lines);
+
+        append_section(
+            &mut objective,
+            "Referenced image URLs:",
+            draft
+                .remote_image_urls
+                .into_iter()
+                .enumerate()
+                .map(|(idx, url)| format!("- [Image #{}]: {url}", idx + 1))
+                .collect(),
+        );
+
+        if objective.chars().count() > MAX_THREAD_GOAL_OBJECTIVE_CHARS {
+            let path = ensure_goal_output_dir(app_server, codex_home, &mut output_dir)
+                .await?
+                .join(GOAL_FILE_NAME);
+            let reference = objective_file_reference(&path)?;
+            write_goal_file(app_server, path.clone(), objective.as_bytes().to_vec()).await?;
+            objective = reference;
+        }
+        Ok(objective)
     }
-    Ok((objective, output_dir))
+    .await;
+    match result {
+        Ok(objective) => Ok((objective, output_dir)),
+        Err(error) => {
+            if let Some(output_dir) = output_dir
+                && let Err(cleanup_error) = app_server.fs_remove_path(&output_dir).await
+            {
+                tracing::warn!(%output_dir, %cleanup_error, "failed to clean up rejected goal draft");
+            }
+            Err(error)
+        }
+    }
 }
 
 pub(crate) async fn objective_text_for_edit(
-    app_server: &mut AppServerSession,
+    app_server: &AppServerFileSystem,
     codex_home: Option<&GoalFilePath>,
     objective: &str,
 ) -> Result<String> {
@@ -146,7 +152,6 @@ pub(crate) async fn objective_text_for_edit(
         return Ok(objective.to_string());
     };
     let bytes = app_server
-        .file_system()
         .fs_read_file_path(&path)
         .await
         .map_err(|err| anyhow::anyhow!("{err}"))
@@ -184,7 +189,7 @@ pub(crate) fn objective_file_reference(path: &GoalFilePath) -> Result<String> {
 }
 
 async fn ensure_goal_output_dir(
-    app_server: &mut AppServerSession,
+    app_server: &AppServerFileSystem,
     codex_home: Option<&GoalFilePath>,
     output_dir: &mut Option<GoalFilePath>,
 ) -> Result<GoalFilePath> {
@@ -197,7 +202,6 @@ async fn ensure_goal_output_dir(
         .join(GOAL_ATTACHMENT_DIR)
         .join(Uuid::new_v4().to_string());
     app_server
-        .file_system()
         .fs_create_directory_all_path(&path)
         .await
         .map_err(|err| anyhow::anyhow!("{err}"))
@@ -207,12 +211,11 @@ async fn ensure_goal_output_dir(
 }
 
 async fn write_goal_file(
-    app_server: &mut AppServerSession,
+    app_server: &AppServerFileSystem,
     path: GoalFilePath,
     bytes: Vec<u8>,
 ) -> Result<()> {
     app_server
-        .file_system()
         .fs_write_file_path(&path, bytes)
         .await
         .map_err(|err| anyhow::anyhow!("{err}"))

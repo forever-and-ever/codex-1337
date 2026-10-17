@@ -50,43 +50,13 @@ pub(super) fn overlay_new_session_defaults(
 }
 
 impl App {
-    pub(super) async fn load_new_session_config(
+    pub(super) fn project_new_session_config(
         &mut self,
         app_server: &AppServerSession,
-    ) -> Result<(Config, crate::local_settings::LocalSettings)> {
-        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
-        let defaults_cwd = match app_server.thread_params_mode() {
-            crate::app_server_session::ThreadParamsMode::Embedded => cwd.as_path(),
-            crate::app_server_session::ThreadParamsMode::Remote => {
-                app_server.remote_cwd_override().unwrap_or(Path::new("."))
-            }
-        };
-        let defaults = crate::config_update::read_effective_config_if_supported(
-            app_server.request_handle(),
-            defaults_cwd,
-        )
-        .await?;
-        self.project_new_session_config(app_server, cwd, defaults)
-            .await
-    }
-
-    pub(super) async fn project_new_session_config(
-        &mut self,
-        app_server: &AppServerSession,
-        cwd: PathBuf,
+        projected: (Config, crate::local_settings::LocalSettings),
         defaults: Option<crate::config_update::EffectiveConfig>,
     ) -> Result<(Config, crate::local_settings::LocalSettings)> {
-        // Stage local preferences and permission carryover without changing the active task.
-        let (mut config, local_settings) = match self.rebuild_config_for_cwd(cwd).await {
-            Ok(config) => {
-                let settings = self.local_settings.reloaded(&config);
-                (config, settings)
-            }
-            Err(err) => {
-                tracing::warn!(%err, "failed to refresh local settings before a new thread");
-                (self.config.clone(), self.local_settings.clone())
-            }
-        };
+        let (mut config, local_settings) = projected;
         if let Some(defaults) = defaults.as_ref() {
             crate::projectless::apply_defaults(
                 &mut config,

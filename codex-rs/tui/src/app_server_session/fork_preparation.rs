@@ -1,7 +1,9 @@
 use super::history::preparation::HistoryPaginationUpdate;
-use super::session_preparation::{
-    PreparedSession, RequestPolicy, SessionObservations, SubscriptionCustody, read_thread,
-};
+use super::session_preparation::PreparedSession;
+use super::session_preparation::RequestPolicy;
+use super::session_preparation::SessionObservations;
+use super::session_preparation::SubscriptionCustody;
+use super::session_preparation::read_thread;
 use super::*;
 use codex_app_server_client::AppServerRequestHandle;
 
@@ -24,9 +26,37 @@ pub(crate) struct ForkPreparation {
     source: ForkConfigSource,
     permissions: ForkPermissions,
     task_tools_available: bool,
+    boundary_items: Vec<ResponseItem>,
 }
 
 impl AppServerSession {
+    pub(crate) fn prepare_side_thread(
+        &self,
+        policy: RequestPolicy,
+        local_settings: &LocalSettings,
+        config: Config,
+        parent: ThreadId,
+        selected_profile: Option<&PermissionProfileSelection>,
+        boundary_items: Vec<ResponseItem>,
+    ) -> ForkPreparation {
+        let mut plan = self.prepare_fork_with_presentation(
+            policy,
+            local_settings,
+            config,
+            parent,
+            None,
+            None,
+            ForkGoalContinuation::StartIfIdle,
+            ForkPresentation::SideConversation,
+            selected_profile,
+            ForkPermissionMode::InheritSaved,
+            ForkConfigSource::Session,
+            None,
+        );
+        plan.boundary_items = boundary_items;
+        plan
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "fork position and named permissions are independent"
@@ -139,6 +169,7 @@ impl AppServerSession {
             source,
             permissions,
             task_tools_available: self.task_tools_available(thread_id),
+            boundary_items: Vec::new(),
         }
     }
 }
@@ -158,6 +189,7 @@ impl ForkPreparation {
             source,
             permissions,
             task_tools_available,
+            boundary_items,
         } = self;
         let mut observations = SessionObservations {
             history: HistoryPaginationUpdate::Untracked,
@@ -237,6 +269,38 @@ impl ForkPreparation {
                 }
             };
             custody = SubscriptionCustody::Subscribed(ThreadId::from_string(&response.thread.id)?);
+            if !boundary_items.is_empty() {
+                let child = ThreadId::from_string(&response.thread.id)?;
+                let items = boundary_items
+                    .into_iter()
+                    .map(serde_json::to_value)
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let injected: std::result::Result<ThreadInjectItemsResponse, TypedRequestError> =
+                    super::session_preparation::request(
+                        policy,
+                        &handle,
+                        ClientRequest::ThreadInjectItems {
+                            request_id: RequestId::String(format!(
+                                "tui-side-boundary-{}",
+                                uuid::Uuid::new_v4()
+                            )),
+                            params: ThreadInjectItemsParams {
+                                thread_id: child.to_string(),
+                                items,
+                            },
+                        },
+                    )
+                    .await;
+                if let Err(error) = injected {
+                    if !matches!(error, TypedRequestError::Server { .. }) {
+                        custody = SubscriptionCustody::Uncertain(child);
+                    }
+                    return Err(bootstrap_request_error(
+                        "side conversation boundary could not be confirmed",
+                        error,
+                    ));
+                }
+            }
             let mut response = response;
             if presentation == ForkPresentation::Regular && !response.thread.ephemeral {
                 let (result, update) = history::preparation::prepare_initial_thread_history(

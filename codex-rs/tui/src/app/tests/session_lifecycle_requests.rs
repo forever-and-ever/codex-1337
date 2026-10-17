@@ -124,6 +124,7 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
             .find(|event| matches!(event, AppEvent::PersistDaybreakSelection { .. }))
             .expect("Daybreak selection event");
         app.handle_event(&mut tui, &mut server, selection).await?;
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
         confirmations.push(next_history_message(&mut events));
         assert_eq!(
             server
@@ -144,6 +145,7 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
     app.active_thread_id = Some(missing_thread_id);
     app.persist_daybreak_selection(&mut server, missing_thread_id, /*enabled*/ true)
         .await;
+    app.settle_server_ui_requests(&mut tui, &mut server).await?;
     assert!(next_history_message(&mut events).contains("Failed to read the thread"));
     assert!(!app.chat_widget.daybreak_enabled);
     assert!(!app.config.daybreak_enabled);
@@ -1561,6 +1563,21 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
     ))
     .await?;
     assert!(app.chat_widget.queued_user_message_texts().is_empty());
+    assert!(app.active_export.is_some());
+    assert!(!export_path.exists());
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CancelTranscriptExport)).await?;
+    assert!(app.active_export.is_none());
+    assert!(!export_path.exists());
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::ExportTranscript {
+        destination: TranscriptExportDestination::File(export_path.clone()),
+    })).await?;
+    super::super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
+    .await?;
     let markdown = std::fs::read_to_string(export_path)?;
     assert!(
         (0..305)
@@ -1680,12 +1697,13 @@ async fn remote_legacy_history_start_negotiates_once_for_resume_and_fork() -> Re
 
     let initial_read_count = recorded_params(&requests, "thread/read").len();
     let exported = crate::app::transcript_export::load_export_transcript(
-        &mut app_server,
+        &app_server.request_handle(),
         paginated_thread_id,
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         Some(&app.config),
         vec![Arc::new(PlainHistoryCell::new(vec!["visible".into()]))],
         &|_| crate::multi_agents::AgentMetadata::default(),
+        &|| {},
     )
     .await
     .map_err(|error| color_eyre::eyre::eyre!(error))?;
@@ -2770,30 +2788,6 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         thread_id,
         requested_cwd: path.into(),
     };
-    let mut stale_config = app.rebuild_config_for_cwd(untrusted.clone()).await?;
-    stale_config.active_project.trust_level = None;
-    app.app_server_target = crate::AppServerTarget::LocalDaemon {
-        endpoint: crate::resolve_remote_addr("ws://127.0.0.1:8765")?,
-        allow_embedded_fallback: false,
-    };
-    history();
-    assert!(
-        app.confirm_directory_trust(
-            &mut tui,
-            &mut server,
-            &mut stale_config,
-            &untrusted,
-            crate::onboarding::DirectoryTrustOptions {
-                cancel: Some(crate::onboarding::TrustCancelAction::CurrentTask),
-                ..Default::default()
-            },
-            /*startup_draft*/ None,
-        )
-        .await
-        .is_err()
-    );
-    assert_snapshot!(history().join(""), @"■ Unable to check folder trust: Folder trust changed. Reopen the destination with its restricted settings.");
-    app.app_server_target = crate::AppServerTarget::Embedded;
     for (path, kind, expected) in [
         ("missing", "local", "Cannot access directory"),
         ("../config.toml", "local", "Not a directory"),
@@ -3021,6 +3015,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     assert_eq!(effort, Some(ReasoningEffortConfig::High));
     let approval = app.config.permissions.approval_policy.value();
     assert_eq!(approval, AskForApproval::OnRequest.to_core());
+    app.settle_turn_submissions(&mut server).await?;
     let forks = recorded_params(&requests, "thread/fork");
     assert_eq!(forks.len(), 1);
     let params = &forks[0];

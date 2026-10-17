@@ -12,7 +12,7 @@ use unicode_width::UnicodeWidthStr;
 
 #[derive(Default)]
 pub(super) struct FollowControl {
-    area: Option<Rect>,
+    pub(super) area: Option<Rect>,
     pointer: Option<ScreenPosition>,
     pressed: bool,
 }
