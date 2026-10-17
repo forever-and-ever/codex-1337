@@ -3467,6 +3467,9 @@ async fn update_memory_settings_persists_and_updates_widget_config() -> Result<(
         /*generate_memories*/ false,
     ))
     .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert!(!app.config.memories.use_memories);
     assert!(!app.config.memories.generate_memories);
@@ -3528,6 +3531,13 @@ fn update_memory_settings_updates_current_thread_memory_mode() -> Result<()> {
             /*generate_memories*/ false,
         ))
         .await;
+        // Navigating after acceptance cannot cancel the source conversation's mutation.
+        let replacement = app_server.start_thread(&app.config).await?;
+        app.active_thread_id = Some(replacement.session.thread_id);
+        let replacement_generate_memories = app.chat_widget.config_ref().memories.generate_memories;
+        let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+        app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+            .await?;
 
         let state_db = codex_state::StateRuntime::init(
             codex_state::SqliteConfig::new_for_testing(codex_home.path().abs()),
@@ -3540,6 +3550,10 @@ fn update_memory_settings_updates_current_thread_memory_mode() -> Result<()> {
             .await
             .expect("thread memory mode should be readable");
         assert_eq!(memory_mode.as_deref(), Some("disabled"));
+        assert_eq!(
+            app.chat_widget.config_ref().memories.generate_memories,
+            replacement_generate_memories
+        );
 
         app_server.shutdown().await?;
         Ok(())
@@ -3569,6 +3583,9 @@ async fn reset_memories_clears_local_memory_directories() -> Result<()> {
             Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
 
         Box::pin(app.reset_memories_with_app_server(&mut app_server)).await;
+        let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+        app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+            .await?;
 
         assert_eq!(std::fs::read_dir(&memory_root)?.count(), 0);
 
@@ -3877,6 +3894,9 @@ async fn update_feature_flags_enabling_guardian_selects_auto_review() -> Result<
 
     app.update_feature_flags(&mut app_server, vec![(Feature::GuardianApproval, true)])
         .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert!(app.config.features.enabled(Feature::GuardianApproval));
     assert!(
@@ -4005,6 +4025,9 @@ async fn update_feature_flags_disabling_guardian_clears_review_policy_and_restor
 
     app.update_feature_flags(&mut app_server, vec![(Feature::GuardianApproval, false)])
         .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert!(!app.config.features.enabled(Feature::GuardianApproval));
     assert!(
@@ -4081,6 +4104,9 @@ async fn update_feature_flags_enabling_guardian_overrides_explicit_manual_review
 
     app.update_feature_flags(&mut app_server, vec![(Feature::GuardianApproval, true)])
         .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert!(app.config.features.enabled(Feature::GuardianApproval));
     assert_eq!(
@@ -4153,6 +4179,9 @@ async fn update_feature_flags_disabling_guardian_clears_manual_review_policy_wit
 
     app.update_feature_flags(&mut app_server, vec![(Feature::GuardianApproval, false)])
         .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert!(!app.config.features.enabled(Feature::GuardianApproval));
     assert_eq!(app.config.approvals_reviewer, ApprovalsReviewer::User);
@@ -6818,8 +6847,11 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ConfirmIfExists,
     )
     .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
-    let response = app_server.thread_goal_get(thread_id).await?;
+    let response = crate::test_support::thread_goal_get(&app_server, thread_id).await?;
     let goal = response.goal.expect("goal should be set");
     let saved_objective = goal.objective.clone();
     let codex_home = app_server
@@ -6827,9 +6859,13 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         .expect("codex home");
     assert!(goal_files::objective_file_path(&goal.objective, Some(&codex_home)).is_some());
     assert_eq!(
-        goal_files::objective_text_for_edit(&mut app_server, Some(&codex_home), &goal.objective)
-            .await
-            .expect("managed goal file should be readable"),
+        goal_files::objective_text_for_edit(
+            &app_server.file_system(),
+            Some(&codex_home),
+            &goal.objective
+        )
+        .await
+        .expect("managed goal file should be readable"),
         objective
     );
     let is_managed = |home: &AppServerPath, path: &str| {
@@ -6871,14 +6907,16 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ConfirmIfExists,
     )
     .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
 
     assert_eq!(
         std::fs::read_dir(&attachments_dir)?.count(),
         attachment_count
     );
     assert_eq!(
-        app_server
-            .thread_goal_get(thread_id)
+        crate::test_support::thread_goal_get(&app_server, thread_id)
             .await?
             .goal
             .expect("goal should still be set")
@@ -6893,8 +6931,10 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
     .await;
-    let goal = app_server
-        .thread_goal_get(thread_id)
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
+    let goal = crate::test_support::thread_goal_get(&app_server, thread_id)
         .await?
         .goal
         .expect("replacement goal should be set");
@@ -6918,6 +6958,9 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
     .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
     assert_eq!(
         std::fs::read_dir(&attachments_dir)?.count(),
         attachment_count
@@ -6939,13 +6982,15 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
     .await;
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
     assert_eq!(
         std::fs::read_dir(&attachments_dir)?.count(),
         attachment_count
     );
     assert_eq!(
-        app_server
-            .thread_goal_get(thread_id)
+        crate::test_support::thread_goal_get(&app_server, thread_id)
             .await?
             .goal
             .expect("small goal should remain set")
@@ -6979,8 +7024,10 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
         crate::app_event::ThreadGoalSetMode::ReplaceExisting,
     )
     .await;
-    let objective = app_server
-        .thread_goal_get(thread_id)
+    let mut settle_tui = crate::tui::test_support::make_test_tui()?;
+    app.settle_server_ui_requests(&mut settle_tui, &mut app_server)
+        .await?;
+    let objective = crate::test_support::thread_goal_get(&app_server, thread_id)
         .await?
         .goal
         .expect("image goal should be set")
@@ -8948,15 +8995,15 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     assert_eq!(crate::app_backtrack::user_count(&app.transcript_cells), 2);
     let child_id = ThreadId::new();
     let child = Arc::clone(&app.ensure_thread_channel(child_id).store);
-    let goal = app_server
-        .thread_goal_set(
-            source_thread_id,
-            Some("Keep this goal".into()),
-            Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
-            /*token_budget*/ None,
-        )
-        .await?
-        .goal;
+    let goal = crate::test_support::thread_goal_set(
+        &app_server,
+        source_thread_id,
+        Some("Keep this goal".into()),
+        Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
+        /*token_budget*/ None,
+    )
+    .await?
+    .goal;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ true)?;
     let size = Size::new(/*width*/ 80, /*height*/ 24);
@@ -9241,7 +9288,9 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     assert_eq!(prompts, vec!["older prompt"]);
     assert!(!app_server.has_older_history(source_thread_id));
     assert_eq!(
-        app_server.thread_goal_get(source_thread_id).await?.goal,
+        crate::test_support::thread_goal_get(&app_server, source_thread_id)
+            .await?
+            .goal,
         Some(goal)
     );
     tui.set_owned_screen(/*owned*/ false)?;

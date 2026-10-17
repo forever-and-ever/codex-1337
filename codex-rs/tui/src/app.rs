@@ -241,6 +241,8 @@ mod link_hover;
 mod loaded_threads;
 mod misalignment_policy;
 mod model_defaults;
+mod local_ui_requests;
+pub(crate) use turn_submissions::ui_requests::UiReply;
 mod new_session;
 mod turn_tips;
 mod ui_reload;

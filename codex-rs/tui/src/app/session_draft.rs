@@ -101,21 +101,23 @@ impl App {
         self.config = self.chat_widget.config_ref().clone();
         self.model_catalog = self.chat_widget.model_catalog();
         server.set_available_models(self.model_catalog.models.clone());
-        if let Err(error) = self
-            .persist_model_defaults(
-                server.request_handle(),
-                crate::config_update::build_model_selection_edits(
-                    &choice.provider.id,
-                    &choice.model.model,
-                    Some(choice.effort),
-                ),
-                "default provider, model, and reasoning effort",
-            )
-            .await
-        {
-            self.chat_widget.add_error_message(format!(
-                "Provider selected for this draft, but failed to save defaults: {error}"
-            ));
-        }
+        self.queue_model_defaults(
+            server,
+            crate::config_update::build_model_selection_edits(
+                &choice.provider.id,
+                &choice.model.model,
+                Some(choice.effort),
+            ),
+            "default provider, model, and reasoning effort",
+            |app, _, result| {
+                if let Err(error) = result {
+                    app.chat_widget.add_error_message(format!(
+                        "Provider selected for this draft, but failed to save defaults: {}",
+                        error
+                    ));
+                }
+                Ok(())
+            },
+        );
     }
 }

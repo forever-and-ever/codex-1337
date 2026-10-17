@@ -143,7 +143,7 @@ impl<T: Send + 'static> ApplyReply for TypedReply<T> {
     }
 }
 
-pub(in crate::app) struct UiReply(SyncMutex<Option<Box<dyn ApplyReply>>>);
+pub(crate) struct UiReply(SyncMutex<Option<Box<dyn ApplyReply>>>);
 
 impl std::fmt::Debug for UiReply {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -152,7 +152,22 @@ impl std::fmt::Debug for UiReply {
 }
 
 impl UiReply {
-    pub(super) fn apply(self, app: &mut App, server: &mut AppServerSession) -> Result<()> {
+    pub(in crate::app) fn from_apply(
+        apply: impl FnOnce(&mut App, &mut AppServerSession) -> Result<()> + Send + 'static,
+    ) -> Self {
+        struct LocalReply<F>(F);
+        impl<F> ApplyReply for LocalReply<F>
+        where
+            F: FnOnce(&mut App, &mut AppServerSession) -> Result<()> + Send + 'static,
+        {
+            fn apply(self: Box<Self>, app: &mut App, server: &mut AppServerSession) -> Result<()> {
+                (self.0)(app, server)
+            }
+        }
+        Self(SyncMutex::new(Some(Box::new(LocalReply(apply)))))
+    }
+
+    pub(in crate::app) fn apply(self, app: &mut App, server: &mut AppServerSession) -> Result<()> {
         match self.0.into_inner().expect("UI reply owner poisoned") {
             Some(reply) => reply.apply(app, server),
             None => Ok(()),

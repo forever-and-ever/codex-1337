@@ -1185,13 +1185,11 @@ goals = true
         assert_eq!(user_message_count(&retry, previous_prompt), 1);
     }
 
-    let source_goal = app_server
-        .thread_goal_get(source_thread_id)
+    let source_goal = crate::test_support::thread_goal_get(&app_server, source_thread_id)
         .await?
         .goal
         .expect("source goal");
-    let retry_goal = app_server
-        .thread_goal_get(retry_thread_id)
+    let retry_goal = crate::test_support::thread_goal_get(&app_server, retry_thread_id)
         .await?
         .goal
         .expect("retry goal");

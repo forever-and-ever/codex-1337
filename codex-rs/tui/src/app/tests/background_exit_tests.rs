@@ -432,15 +432,15 @@ async fn exit_interrupts_before_requesting_shutdown() -> Result<()> {
     app.active_thread_id = Some(thread_id);
     app.chat_widget
         .handle_thread_session(started.session.clone());
-    let goal = app_server
-        .thread_goal_set(
-            thread_id,
-            Some("test goal".to_string()),
-            Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
-            /*token_budget*/ None,
-        )
-        .await?
-        .goal;
+    let goal = crate::test_support::thread_goal_set(
+        &app_server,
+        thread_id,
+        Some("test goal".to_string()),
+        Some(codex_app_server_protocol::ThreadGoalStatus::Paused),
+        /*token_budget*/ None,
+    )
+    .await?
+    .goal;
     app.chat_widget.handle_server_notification(
         ServerNotification::ThreadGoalUpdated(
             codex_app_server_protocol::ThreadGoalUpdatedNotification {

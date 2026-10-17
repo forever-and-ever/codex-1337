@@ -283,6 +283,7 @@ impl App {
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
             AppEvent::Submission(event) => self.handle_submission_event(app_server, event).await,
+            AppEvent::LocalUiReply(reply) => reply.apply(self, app_server)?,
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
                     return Ok(AppRunControl::Continue);
@@ -2101,27 +2102,29 @@ impl App {
                 self.sync_active_thread_service_tier_to_cached_session()
                     .await;
 
-                if let Some(default_effort) = default_effort.as_ref()
-                    && let Err(err) = self.persist_model_defaults(
-                        app_server.request_handle(),
-                        crate::config_update::build_model_selection_edits(
-                            &self.chat_widget.config_ref().model_provider_id,
-                            model.as_str(),
-                            Some(default_effort),
-                        ),
-                        "default model and reasoning effort",
-                    )
-                    .await
-                {
-                    let error = format_config_error(&err);
-                    tracing::error!(error = %error, "failed to persist conversation model");
-                    self.chat_widget
-                        .add_error_message(format!("Failed to save default model: {error}"));
-                } else {
-                    self.chat_widget.add_info_message(
-                        format!("Model changed to {model} {effort} for this conversation"),
-                        /*hint*/ None,
+                let message = format!("Model changed to {model} {effort} for this conversation");
+                if let Some(default_effort) = default_effort.as_ref() {
+                    let edits = crate::config_update::build_model_selection_edits(
+                        &self.chat_widget.config_ref().model_provider_id,
+                        model.as_str(),
+                        Some(default_effort),
                     );
+                    self.queue_model_defaults(
+                        app_server,
+                        edits,
+                        "default model and reasoning effort",
+                        move |app, _, result| {
+                            match result {
+                                Ok(()) => app.chat_widget.add_info_message(message, None),
+                                Err(error) => app.chat_widget.add_error_message(format!(
+                                    "Failed to save default model: {error}"
+                                )),
+                            }
+                            Ok(())
+                        },
+                    );
+                } else {
+                    self.chat_widget.add_info_message(message, None);
                 }
             }
             AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
@@ -2307,36 +2310,27 @@ impl App {
                     model.as_str(),
                     effort.as_ref(),
                 );
-                match self.persist_model_defaults(
-                    app_server.request_handle(),
+                self.queue_model_defaults(
+                    app_server,
                     edits,
                     "default model and reasoning effort",
-                )
-                .await
-                {
-                    Ok(()) => {
-                        let effort_label = effort
-                            .as_ref()
-                            .map(std::string::ToString::to_string)
-                            .unwrap_or_else(|| "default".to_string());
-                        tracing::info!("Selected model: {model}, Selected effort: {effort_label}");
-                        let mut message = format!("Model changed to {model}");
-                        if let Some(label) = Self::reasoning_label_for(&model, effort.as_ref()) {
-                            message.push(' ');
-                            message.push_str(&label);
+                    move |app, _, result| {
+                        match result {
+                            Ok(()) => {
+                                let mut message = format!("Model changed to {model}");
+                                if let Some(label) = Self::reasoning_label_for(&model, effort.as_ref()) {
+                                    message.push(' ');
+                                    message.push_str(&label);
+                                }
+                                app.chat_widget.add_info_message(message, None);
+                            }
+                            Err(error) => app.chat_widget.add_error_message(format!(
+                                "Failed to save default model: config/batchWrite failed in TUI: {error}"
+                            )),
                         }
-                        self.chat_widget.add_info_message(message, /*hint*/ None);
-                    }
-                    Err(err) => {
-                        let error = format_config_error(&err);
-                        tracing::error!(
-                            error = %error,
-                            "failed to persist model selection"
-                        );
-                        self.chat_widget
-                            .add_error_message(format!("Failed to save default model: {error}"));
-                    }
-                }
+                        Ok(())
+                    },
+                );
             }
             AppEvent::PersistDaybreakSelection { thread_id, enabled } => {
                 self.persist_daybreak_selection(app_server, thread_id, enabled).await;
@@ -2405,31 +2399,29 @@ impl App {
             AppEvent::PersistServiceTierSelection { service_tier } => {
                 self.refresh_status_line();
                 self.config.service_tier = service_tier.clone();
-                self.sync_active_thread_service_tier_to_cached_session()
-                    .await;
-                let edits = crate::config_update::build_service_tier_selection_edits(
-                    service_tier.as_deref(),
+                self.sync_active_thread_service_tier_to_cached_session().await;
+                let edits = crate::config_update::build_service_tier_selection_edits(service_tier.as_deref());
+                self.queue_model_defaults(
+                    app_server,
+                    edits,
+                    "default service tier",
+                    move |app, _, result| {
+                        match result {
+                            Ok(()) => app.chat_widget.add_info_message(
+                                service_tier.map_or_else(
+                                    || "Service tier cleared".to_string(),
+                                    |tier| format!("Service tier set to {tier}"),
+                                ),
+                                None,
+                            ),
+                            Err(error) => app.chat_widget.add_error_message(format!(
+                                "Failed to save default service tier: config/batchWrite failed in TUI: {error}\n\
+                                 You can continue this task. To save the default, resolve the error above, then switch to a different tier and back to the desired tier."
+                            )),
+                        }
+                        Ok(())
+                    },
                 );
-                match self.persist_model_defaults(app_server.request_handle(), edits, "default service tier")
-                    .await
-                {
-                    Ok(()) => {
-                        let message = if let Some(service_tier) = service_tier {
-                            format!("Service tier set to {service_tier}")
-                        } else {
-                            "Service tier cleared".to_string()
-                        };
-                        self.chat_widget.add_info_message(message, /*hint*/ None);
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, "failed to persist service tier selection");
-                        let error = format_config_error(&err);
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to save default service tier: {error}\n\
-                             You can continue this task. To save the default, resolve the error above, then switch to a different tier and back to the desired tier."
-                        ));
-                    }
-                }
             }
             AppEvent::UpdateAskForApprovalPolicy(policy) => {
                 if self.reject_pending_permission_change() {
@@ -2576,30 +2568,26 @@ impl App {
             }
             AppEvent::PersistPlanModeReasoningEffort(effort) => {
                 self.app_event_tx.send(AppEvent::FollowTranscript);
-                let key_path = "plan_mode_reasoning_effort";
-                let edit = if let Some(effort) = effort {
-                    crate::config_update::replace_config_value(
-                        key_path,
+                let edit = effort.map_or_else(
+                    || crate::config_update::clear_config_value("plan_mode_reasoning_effort"),
+                    |effort| crate::config_update::replace_config_value(
+                        "plan_mode_reasoning_effort",
                         serde_json::json!(effort.to_string()),
-                    )
-                } else {
-                    crate::config_update::clear_config_value(key_path)
-                };
-                if let Err(err) = self.persist_model_defaults(
-                    app_server.request_handle(),
+                    ),
+                );
+                self.queue_model_defaults(
+                    app_server,
                     vec![edit],
                     "Plan mode reasoning effort",
-                )
-                .await
-                {
-                    tracing::error!(
-                        error = %err,
-                        "failed to persist plan mode reasoning effort"
-                    );
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to save Plan mode reasoning effort: {err}"
-                    ));
-                }
+                    |app, _, result| {
+                        if let Err(error) = result {
+                            app.chat_widget.add_error_message(format!(
+                                "Failed to save Plan mode reasoning effort: {error}"
+                            ));
+                        }
+                        Ok(())
+                    },
+                );
             }
             AppEvent::PersistModelMigrationPromptAcknowledged {
                 from_model,

@@ -95,20 +95,23 @@ impl App {
         permission_overrides
     }
 
-    pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
+    fn config_builder_for_cwd(&self, cwd: PathBuf) -> ConfigBuilder {
         let mut overrides = self.harness_overrides.clone();
-        overrides.cwd = Some(cwd.clone());
-        let cwd_display = cwd.display().to_string();
-        let builder = ConfigBuilder::default()
+        overrides.cwd = Some(cwd);
+        ConfigBuilder::default()
             .codex_home(self.config.codex_home.to_path_buf())
             .cli_overrides(self.cli_kv_overrides.clone())
             .harness_overrides(overrides)
             .loader_overrides(self.loader_overrides.clone())
-            .cloud_config_bundle(self.cloud_config_bundle.clone());
+            .cloud_config_bundle(self.cloud_config_bundle.clone())
+    }
+
+    pub(super) async fn rebuild_config_for_cwd(&self, cwd: PathBuf) -> Result<Config> {
+        let builder = self.config_builder_for_cwd(cwd.clone());
         build_config_on_runtime_worker(
             builder,
             self.config.application_network_policy.clone(),
-            format!("Failed to rebuild config for cwd {cwd_display}"),
+            format!("Failed to rebuild config for cwd {}", cwd.display()),
         )
         .await
     }
@@ -467,14 +470,10 @@ impl App {
         self.adopt_server_permissions();
     }
 
-    pub(super) async fn refresh_in_memory_config_from_disk(&mut self) -> Result<()> {
-        let mut config = self
-            .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.to_path_buf())
-            .await?;
+    fn install_refreshed_config(&mut self, mut config: Config) -> Result<()> {
         self.apply_runtime_policy_overrides(&mut config, RuntimePolicyOverrideScope::All)?;
         self.local_settings = self.local_settings.reloaded(&config);
         self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
-        // Other preferences have runtime caches and are adopted when the widget is replaced.
         self.chat_widget
             .local_settings
             .tui
@@ -483,6 +482,66 @@ impl App {
         self.config = config;
         self.chat_widget.sync_plugin_mentions_config(&self.config);
         Ok(())
+    }
+
+    pub(super) fn queue_config_refresh<A>(&mut self, action: &'static str, apply: A)
+    where
+        A: FnOnce(&mut App, &mut AppServerSession, Result<()>) -> Result<()> + Send + 'static,
+    {
+        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+        let origin = self.current_displayed_thread_id();
+        let baseline = self.config.clone();
+        let builder = self.config_builder_for_cwd(cwd.clone());
+        let network_policy = self.config.application_network_policy.clone();
+        self.request_local(
+            "Refresh local configuration",
+            async move {
+                build_config_on_runtime_worker(
+                    builder,
+                    network_policy,
+                    format!("Failed to rebuild config for cwd {}", cwd.display()),
+                )
+                .await
+            },
+            move |app, server, result| {
+                if app.current_displayed_thread_id() != origin {
+                    return Ok(());
+                }
+                let result = if app.config == baseline {
+                    result.and_then(|config| app.install_refreshed_config(config))
+                } else {
+                    // A newer local selection wins over an earlier disk snapshot.
+                    result.map(|_| ())
+                };
+                if let Err(error) = &result {
+                    tracing::warn!(%error, action, "failed to refresh local configuration");
+                }
+                apply(app, server, result)
+            },
+        );
+    }
+
+    pub(super) fn finish_external_config_import(
+        &mut self,
+        server: &AppServerSession,
+        notification: codex_app_server_protocol::ExternalAgentConfigImportCompletedNotification,
+        report: bool,
+    ) {
+        let cwd = self.chat_widget.config_ref().cwd.to_path_buf();
+        self.chat_widget.refresh_plugin_mentions();
+        self.chat_widget.submit_op(AppCommand::reload_user_config());
+        self.fetch_plugins_list(server, cwd);
+        if report {
+            self.chat_widget.add_plain_history_lines(
+                crate::external_agent_config_migration::flow::external_agent_config_migration_finished_lines(&notification));
+        }
+    }
+
+    pub(super) async fn refresh_in_memory_config_from_disk(&mut self) -> Result<()> {
+        let config = self
+            .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.to_path_buf())
+            .await?;
+        self.install_refreshed_config(config)
     }
 
     pub(super) async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
@@ -495,26 +554,35 @@ impl App {
         }
     }
 
-    pub(super) async fn read_effective_config_after_overridden_write(
+    pub(super) fn read_effective_config_after_overridden_write<A>(
         &mut self,
-        app_server: &mut AppServerSession,
-        setting: &str,
-    ) -> Option<ConfigReadResponse> {
-        let cwd = self.chat_widget.config_ref().cwd.display().to_string();
-        match crate::config_update::read_effective_config(app_server.request_handle(), cwd).await {
-            Ok(response) => Some(response),
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    setting,
-                    "failed to refresh effective config after an overridden write"
-                );
-                self.chat_widget.add_error_message(format!(
-                    "{setting} were saved, but Codex could not refresh the effective config: {err}"
-                ));
-                None
-            }
-        }
+        server: &AppServerSession,
+        setting: &'static str,
+        cwd: String,
+        apply: A,
+    ) where
+        A: FnOnce(&mut App, &mut AppServerSession, ConfigReadResponse) -> Result<()>
+            + Send
+            + 'static,
+    {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        self.request_server(
+            server,
+            UiRequestScope::Connection,
+            UiRequestKind::ReadOnly,
+            "Read effective configuration",
+            move |handle| crate::config_update::read_effective_config_typed(handle, cwd),
+            move |app, server, result| match result {
+                Ok(response) => apply(app, server, response),
+                Err(error) => {
+                    app.chat_widget.add_error_message(format!(
+                        "{setting} were saved, but Codex could not refresh the effective config: {error}"
+                    ));
+                    Ok(())
+                }
+            },
+        );
     }
 
     pub(super) async fn rebuild_config_for_resume_or_fallback(
@@ -787,189 +855,203 @@ impl App {
             ));
         }
 
-        // Persist first so the live session does not diverge from disk if the
-        // config edit fails. Runtime/UI state is patched below only after the
-        // durable config update succeeds.
-        let write_response = match crate::config_update::write_config_batch(
-            app_server.request_handle(),
-            config_edits,
-        )
-        .await
-        {
-            Ok(response) => response,
-            Err(err) => {
-                let error = crate::config_update::format_config_error(&err);
-                tracing::error!(error = %error, "failed to persist feature flags");
-                self.chat_widget
-                    .add_error_message(format!("Failed to update experimental features: {error}"));
-                return;
-            }
-        };
-        if write_response.status == WriteStatus::OkOverridden {
-            let message = overridden_write_message(&write_response);
-            tracing::warn!(
-                message,
-                "feature flag config write was overridden by effective config"
-            );
-            self.chat_widget.add_error_message(format!(
-                "Experimental feature changes were saved but not applied: {message}"
-            ));
-            if let Some(effective_config) = self
-                .read_effective_config_after_overridden_write(
-                    app_server,
-                    "Experimental feature changes",
-                )
-                .await
-            {
-                self.sync_feature_state_from_effective_config(
-                    &effective_config,
-                    &feature_updates_to_apply,
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        let origin = self.current_displayed_thread_id();
+        let cwd = self.chat_widget.config_ref().cwd.display().to_string();
+        self.request_server(
+            app_server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            "Save experimental features",
+            move |handle| crate::config_update::write_config_batch_typed(handle, config_edits),
+            move |app, server, result| {
+                let write_response = match result {
+                    Ok(response) => response,
+                    Err(error) => {
+                        app.chat_widget.add_error_message(format!("Failed to update experimental features: {}", error));
+                        return Ok(());
+                    }
+                };
+                if write_response.status == WriteStatus::OkOverridden {
+                    let message = overridden_write_message(&write_response);
+                    app.chat_widget.add_error_message(format!("Experimental feature changes were saved but not applied: {message}"));
+                    app.read_effective_config_after_overridden_write(server, "Experimental feature changes", cwd,
+                        move |app, server, effective_config| {
+                            if app.current_displayed_thread_id() != origin {
+                                app.queue_background_auto_review_settings(server, origin, &effective_config, &feature_updates_to_apply);
+                                return Ok(());
+                            }
+                            app.sync_feature_state_from_effective_config(&effective_config, &feature_updates_to_apply);
+                            app.sync_auto_review_runtime_state_from_effective_config(server, &effective_config, &feature_updates_to_apply);
+                            Ok(())
+                        });
+                    return Ok(());
+                }
+                if app.current_displayed_thread_id() != origin {
+                    if let Some(thread_id) = origin
+                        && (approval_policy_override.is_some() || approvals_reviewer_override.is_some() || permission_profile_override.is_some()) {
+                        let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+                            thread_id: thread_id.to_string(),
+                            approval_policy: approval_policy_override,
+                            approvals_reviewer: approvals_reviewer_override.map(codex_app_server_protocol::ApprovalsReviewer::from),
+                            permissions: active_permission_profile_override.as_ref().map(|profile| profile.id.clone()),
+                            ..Default::default()
+                        };
+                        app.enqueue_server_operation(server, thread_id, super::turn_submissions::ServerOperation::Mutation(super::turn_submissions::ThreadMutation::Settings(params)));
+                    }
+                    app.chat_widget.add_info_message("Experimental features saved. Runtime changes still target the original conversation.".into(), None);
+                    return Ok(());
+                }
+                let memory_tool_was_enabled = app.config.features.enabled(Feature::MemoryTool);
+                for (feature, enabled) in &feature_updates_to_apply {
+                    if let Err(error) = app.config.features.set_enabled(*feature, *enabled) {
+                        app.chat_widget.add_error_message(format!("Failed to apply feature state: {error}"));
+                        return Ok(());
+                    }
+                }
+                if approval_policy_override.is_some() || permission_profile_override.is_some() {
+                    app.config.permissions = next_config.permissions;
+                }
+                if approvals_reviewer_override.is_some() {
+                    app.config.approvals_reviewer = next_config.approvals_reviewer;
+                }
+                let show_memory_enable_notice =
+                    feature_updates_to_apply.iter().any(|(feature, enabled)| {
+                        *feature == Feature::MemoryTool && *enabled && !memory_tool_was_enabled
+                    },
                 );
-                self.sync_auto_review_runtime_state_from_effective_config(
-                    &effective_config,
-                    &feature_updates_to_apply,
-                )
-                .await;
-            }
-            return;
-        }
+                for (feature, effective_enabled) in feature_updates_to_apply {
+                    app.chat_widget
+                        .set_feature_enabled(feature, effective_enabled);
+                }
+                if show_memory_enable_notice {
+                    app.chat_widget.add_memories_enable_notice();
+                }
+                if approvals_reviewer_override.is_some() {
+                    app.runtime_approvals_reviewer_override = approvals_reviewer_override;
+                    app.set_approvals_reviewer_in_app_and_widget(app.config.approvals_reviewer);
+                }
+                if approval_policy_override.is_some() {
+                    app.chat_widget.set_approval_policy(AskForApproval::from(
+                        app.config.permissions.approval_policy.value(),
+                    ));
+                }
+                let permission_profile_override_value = permission_profile_override
+                    .is_some()
+                    .then(|| app.config.permissions.permission_profile().clone());
+                if let Some(permission_profile) = permission_profile_override_value.as_ref()
+                    && let Err(err) = app
+                        .chat_widget
+                        .set_permission_profile_from_session_snapshot(
+                            PermissionProfileSnapshot::from_session_snapshot(
+                                permission_profile.clone(),
+                                active_permission_profile_override.clone(),
+                            ),
+                        )
+                {
+                    tracing::error!(
+                        error = %err,
+                        "failed to set auto-review permission profile on chat config"
+                    );
+                    app.chat_widget
+                        .add_error_message(format!("Failed to enable Approve for me: {err}"));
+                }
+                if permission_profile_override.is_some() {
+                    app.runtime_approvals_reviewer_override = Some(app.config.approvals_reviewer);
+                    app.runtime_permission_profile_override =
+                        Some(RuntimePermissionProfileOverride::from_config(&app.config));
+                }
 
-        let memory_tool_was_enabled = self.config.features.enabled(Feature::MemoryTool);
-        self.config = next_config;
-        let show_memory_enable_notice =
-            feature_updates_to_apply.iter().any(|(feature, enabled)| {
-                *feature == Feature::MemoryTool && *enabled && !memory_tool_was_enabled
+                if approval_policy_override.is_some()
+                    || approvals_reviewer_override.is_some()
+                    || permission_profile_override.is_some()
+                {
+
+                    // This uses `OverrideTurnContext` intentionally: toggling the
+                    // experiment should update the active thread's effective approval
+                    // settings immediately, just like a `/permissions` selection. Without
+                    // this runtime patch, the config edit would only affect future
+                    // sessions or turns recreated from disk.
+                    let op = AppCommand::override_turn_context(
+                        /*cwd*/ None,
+                        approval_policy_override,
+                        approvals_reviewer_override,
+                        permission_profile_override,
+                        active_permission_profile_override,
+                        /*model*/ None,
+                        /*effort*/ None,
+                        /*summary*/ None,
+                        /*service_tier*/ None,
+                        /*collaboration_mode*/ None,
+                    );
+                    app.submit_permission_runtime_update(server, op);
+                }
+
+                if let Some(label) = permissions_history_label {
+                    app.chat_widget.add_info_message(
+                        format!("Permissions updated to {label}"),
+                        /*hint*/ None,
+                    );
+                }
+                Ok(())
             });
-        for (feature, effective_enabled) in feature_updates_to_apply {
-            self.chat_widget
-                .set_feature_enabled(feature, effective_enabled);
-        }
-        if show_memory_enable_notice {
-            self.chat_widget.add_memories_enable_notice();
-        }
-        if approvals_reviewer_override.is_some() {
-            self.runtime_approvals_reviewer_override = approvals_reviewer_override;
-            self.set_approvals_reviewer_in_app_and_widget(self.config.approvals_reviewer);
-        }
-        if approval_policy_override.is_some() {
-            self.chat_widget.set_approval_policy(AskForApproval::from(
-                self.config.permissions.approval_policy.value(),
-            ));
-        }
-        let permission_profile_override_value = permission_profile_override
-            .is_some()
-            .then(|| self.config.permissions.permission_profile().clone());
-        if let Some(permission_profile) = permission_profile_override_value.as_ref()
-            && let Err(err) = self
-                .chat_widget
-                .set_permission_profile_from_session_snapshot(
-                    PermissionProfileSnapshot::from_session_snapshot(
-                        permission_profile.clone(),
-                        active_permission_profile_override.clone(),
-                    ),
-                )
-        {
-            tracing::error!(
-                error = %err,
-                "failed to set auto-review permission profile on chat config"
-            );
-            self.chat_widget
-                .add_error_message(format!("Failed to enable Approve for me: {err}"));
-        }
-        if permission_profile_override.is_some() {
-            self.runtime_approvals_reviewer_override = Some(self.config.approvals_reviewer);
-            self.runtime_permission_profile_override =
-                Some(RuntimePermissionProfileOverride::from_config(&self.config));
-        }
-
-        if approval_policy_override.is_some()
-            || approvals_reviewer_override.is_some()
-            || permission_profile_override.is_some()
-        {
-            self.sync_active_thread_permission_settings_to_cached_session()
-                .await;
-            // This uses `OverrideTurnContext` intentionally: toggling the
-            // experiment should update the active thread's effective approval
-            // settings immediately, just like a `/permissions` selection. Without
-            // this runtime patch, the config edit would only affect future
-            // sessions or turns recreated from disk.
-            let op = AppCommand::override_turn_context(
-                /*cwd*/ None,
-                approval_policy_override,
-                approvals_reviewer_override,
-                permission_profile_override,
-                active_permission_profile_override,
-                /*model*/ None,
-                /*effort*/ None,
-                /*summary*/ None,
-                /*service_tier*/ None,
-                /*collaboration_mode*/ None,
-            );
-            let replay_state_op =
-                ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
-            let submitted = self.chat_widget.submit_op(op);
-            if submitted && let Some(op) = replay_state_op.as_ref() {
-                self.note_active_thread_outbound_op(op).await;
-                self.refresh_pending_thread_approvals().await;
-            }
-        }
-
-        if let Some(label) = permissions_history_label {
-            self.chat_widget.add_info_message(
-                format!("Permissions updated to {label}"),
-                /*hint*/ None,
-            );
-        }
     }
 
-    pub(super) async fn update_memory_settings(
+    fn queue_memory_settings(
         &mut self,
-        app_server: &mut AppServerSession,
+        server: &AppServerSession,
         use_memories: bool,
         generate_memories: bool,
-    ) -> bool {
+    ) {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        let previous_generate = self.config.memories.generate_memories;
+        let origin = self.current_displayed_thread_id();
+        let cwd = self.chat_widget.config_ref().cwd.display().to_string();
         let edits =
             crate::config_update::build_memory_settings_edits(use_memories, generate_memories);
-
-        let write_response = match crate::config_update::write_config_batch(
-            app_server.request_handle(),
-            edits,
-        )
-        .await
-        {
-            Ok(response) => response,
-            Err(err) => {
-                tracing::error!(error = %err, "failed to persist memory settings");
-                self.app_event_tx.send(AppEvent::FollowTranscript);
-                self.chat_widget
-                    .add_error_message(format!("Failed to save memory settings: {err}"));
-                return false;
-            }
-        };
-        if write_response.status == WriteStatus::OkOverridden {
-            let message = overridden_write_message(&write_response);
-            tracing::warn!(
-                message,
-                "memory settings config write was overridden by effective config"
-            );
-            self.app_event_tx.send(AppEvent::FollowTranscript);
-            self.chat_widget.add_error_message(format!(
-                "Memory setting changes were saved but not applied: {message}"
-            ));
-            let Some(effective_config) = self
-                .read_effective_config_after_overridden_write(app_server, "Memory setting changes")
-                .await
-            else {
-                return false;
-            };
-            return self.sync_memory_state_from_effective_config(&effective_config);
-        }
-
-        self.config.memories.use_memories = use_memories;
-        self.config.memories.generate_memories = generate_memories;
-        self.chat_widget
-            .set_memory_settings(use_memories, generate_memories);
-        true
+        self.request_server(
+            server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            "Save memory settings", move |handle| crate::config_update::write_config_batch_typed(handle, edits),
+            move |app, server, result| {
+                let response = match result {
+                    Ok(response) => response,
+                    Err(error) => {
+                        app.app_event_tx.send(AppEvent::FollowTranscript);
+                        app.chat_widget.add_error_message(format!("Failed to save memory settings: {error}"));
+                        return Ok(());
+                    }
+                };
+                if response.status == WriteStatus::OkOverridden {
+                    app.app_event_tx.send(AppEvent::FollowTranscript);
+                    app.chat_widget.add_error_message(format!("Memory setting changes were saved but not applied: {}", overridden_write_message(&response)));
+                    app.read_effective_config_after_overridden_write(server, "Memory setting changes", cwd,
+                        move |app, server, effective_config| {
+                            let Some(memories) = memories_from_effective_config(&effective_config) else {
+                                app.chat_widget.add_error_message("Memory settings were saved, but their effective values could not be confirmed.".into());
+                                return Ok(());
+                            };
+                            let effective_generate = memories.generate_memories.unwrap_or(previous_generate);
+                            if app.current_displayed_thread_id() == origin {
+                                app.sync_memory_state_from_effective_config(&effective_config);
+                            }
+                            app.queue_thread_memory_mode(server, origin, previous_generate, effective_generate);
+                            Ok(())
+                        });
+                } else {
+                    if app.current_displayed_thread_id() == origin {
+                        app.config.memories.use_memories = use_memories;
+                        app.config.memories.generate_memories = generate_memories;
+                        app.chat_widget.set_memory_settings(use_memories, generate_memories);
+                    }
+                    app.queue_thread_memory_mode(server, origin, previous_generate, generate_memories);
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn update_memory_settings_with_app_server(
@@ -978,52 +1060,100 @@ impl App {
         use_memories: bool,
         generate_memories: bool,
     ) {
-        let previous_generate_memories = self.config.memories.generate_memories;
-        if !self
-            .update_memory_settings(app_server, use_memories, generate_memories)
-            .await
-        {
+        self.queue_memory_settings(app_server, use_memories, generate_memories);
+    }
+
+    fn queue_thread_memory_mode(
+        &mut self,
+        server: &AppServerSession,
+        origin: Option<ThreadId>,
+        previous_generate: bool,
+        generate_memories: bool,
+    ) {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
+        if generate_memories == previous_generate {
             return;
         }
-
-        let generate_memories = self.config.memories.generate_memories;
-        if previous_generate_memories == generate_memories {
-            return;
-        }
-
-        let Some(thread_id) = self.current_displayed_thread_id() else {
+        let Some(thread_id) = origin else {
             return;
         };
-
         let mode = if generate_memories {
             ThreadMemoryMode::Enabled
         } else {
             ThreadMemoryMode::Disabled
         };
-
-        if let Err(err) = app_server.thread_memory_mode_set(thread_id, mode).await {
-            tracing::error!(error = %err, %thread_id, "failed to update thread memory mode");
-            self.app_event_tx.send(AppEvent::FollowTranscript);
-            self.chat_widget.add_error_message(format!(
-                "Saved memory settings, but failed to update the current thread: {err}"
-            ));
-        }
+        self.request_server(
+            server,
+            UiRequestScope::Thread(thread_id),
+            UiRequestKind::Mutation,
+            "Update thread memory mode",
+            move |handle| async move {
+                handle
+                    .request_typed::<codex_app_server_protocol::ThreadMemoryModeSetResponse>(
+                        ClientRequest::ThreadMemoryModeSet {
+                            request_id: codex_app_server_protocol::RequestId::String(format!(
+                                "tui-memory-mode-{}",
+                                uuid::Uuid::new_v4()
+                            )),
+                            params: codex_app_server_protocol::ThreadMemoryModeSetParams {
+                                thread_id: thread_id.to_string(),
+                                mode,
+                            },
+                        },
+                    )
+                    .await
+            },
+            move |app, _, result| {
+                if let Err(error) = result {
+                    app.app_event_tx.send(AppEvent::FollowTranscript);
+                    app.chat_widget.add_error_message(format!(
+                        "Saved memory settings, but failed to update conversation {thread_id}: {}",
+                        error
+                    ));
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn reset_memories_with_app_server(
         &mut self,
         app_server: &mut AppServerSession,
     ) {
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
         self.app_event_tx.send(AppEvent::FollowTranscript);
-        if let Err(err) = app_server.memory_reset().await {
-            tracing::error!(error = %err, "failed to reset memories");
-            self.chat_widget
-                .add_error_message(format!("Failed to reset memories: {err}"));
-            return;
-        }
-
-        self.chat_widget
-            .add_info_message("Reset local memories.".to_string(), /*hint*/ None);
+        self.request_server(
+            app_server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            "Reset memories",
+            |handle| async move {
+                handle
+                    .request_typed::<codex_app_server_protocol::MemoryResetResponse>(
+                        ClientRequest::MemoryReset {
+                            request_id: codex_app_server_protocol::RequestId::String(format!(
+                                "tui-memory-reset-{}",
+                                uuid::Uuid::new_v4()
+                            )),
+                            params: None,
+                        },
+                    )
+                    .await
+            },
+            |app, _, result| {
+                match result {
+                    Ok(_) => app
+                        .chat_widget
+                        .add_info_message("Reset local memories.".to_string(), None),
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(format!("Failed to reset memories: {}", error)),
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) fn reasoning_label(reasoning_effort: Option<&ReasoningEffortConfig>) -> String {
@@ -1245,8 +1375,89 @@ impl App {
         }
     }
 
-    async fn sync_auto_review_runtime_state_from_effective_config(
+    fn submit_permission_runtime_update(&mut self, server: &AppServerSession, op: AppCommand) {
+        let Some(thread_id) = self.active_thread_id else {
+            self.chat_widget.submit_op(op);
+            return;
+        };
+        let AppCommand::OverrideTurnContext {
+            cwd,
+            approval_policy,
+            approvals_reviewer,
+            active_permission_profile,
+            model,
+            effort,
+            summary,
+            service_tier,
+            collaboration_mode,
+            ..
+        } = op
+        else {
+            unreachable!("feature settings require a turn-context override");
+        };
+        let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+            thread_id: thread_id.to_string(),
+            cwd,
+            approval_policy,
+            approvals_reviewer: approvals_reviewer
+                .map(codex_app_server_protocol::ApprovalsReviewer::from),
+            permissions: active_permission_profile.map(|profile| profile.id),
+            model,
+            effort: effort.unwrap_or_default(),
+            summary,
+            service_tier,
+            collaboration_mode,
+            ..Default::default()
+        };
+        self.enqueue_server_operation(
+            server,
+            thread_id,
+            super::turn_submissions::ServerOperation::Mutation(
+                super::turn_submissions::ThreadMutation::Settings(params),
+            ),
+        );
+    }
+
+    fn queue_background_auto_review_settings(
         &mut self,
+        server: &AppServerSession,
+        origin: Option<ThreadId>,
+        effective_config: &ConfigReadResponse,
+        feature_updates: &[(Feature, bool)],
+    ) {
+        let Some(thread_id) = origin else {
+            return;
+        };
+        if !feature_updates
+            .iter()
+            .any(|(feature, _)| *feature == Feature::GuardianApproval)
+            || !feature_enabled_from_effective_config(effective_config, Feature::GuardianApproval)
+            || sandbox_mode_from_effective_config(effective_config)
+                != Some(AppServerSandboxMode::WorkspaceWrite)
+        {
+            return;
+        }
+        let preset = auto_review_mode();
+        let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+            thread_id: thread_id.to_string(),
+            approval_policy: approval_policy_from_effective_config(effective_config),
+            approvals_reviewer: approvals_reviewer_from_effective_config(effective_config)
+                .map(codex_app_server_protocol::ApprovalsReviewer::from),
+            permissions: Some(preset.active_permission_profile.id),
+            ..Default::default()
+        };
+        self.enqueue_server_operation(
+            server,
+            thread_id,
+            super::turn_submissions::ServerOperation::Mutation(
+                super::turn_submissions::ThreadMutation::Settings(params),
+            ),
+        );
+    }
+
+    fn sync_auto_review_runtime_state_from_effective_config(
+        &mut self,
+        server: &AppServerSession,
         effective_config: &ConfigReadResponse,
         feature_updates: &[(Feature, bool)],
     ) {
@@ -1291,8 +1502,6 @@ impl App {
         self.runtime_approvals_reviewer_override = Some(self.config.approvals_reviewer);
         self.runtime_permission_profile_override =
             Some(RuntimePermissionProfileOverride::from_config(&self.config));
-        self.sync_active_thread_permission_settings_to_cached_session()
-            .await;
 
         let approval_policy = AskForApproval::from(self.config.permissions.approval_policy.value());
         let op = AppCommand::override_turn_context(
@@ -1307,13 +1516,7 @@ impl App {
             /*service_tier*/ None,
             /*collaboration_mode*/ None,
         );
-        let replay_state_op =
-            ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
-        let submitted = self.chat_widget.submit_op(op);
-        if submitted && let Some(op) = replay_state_op.as_ref() {
-            self.note_active_thread_outbound_op(op).await;
-            self.refresh_pending_thread_approvals().await;
-        }
+        self.submit_permission_runtime_update(server, op);
     }
 
     fn sync_memory_state_from_effective_config(
