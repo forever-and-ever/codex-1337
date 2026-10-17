@@ -6,7 +6,7 @@ expression: terminal.backend()
 "                  use                                       "
 "  /account        choose this conversation's account; /     "
 "                  account <alias> also works                "
-"  /ide            include current selection, open files, and"
+"  /permissions    choose what Codex is allowed to do        "
 "                                                            "
 "› /                                                         "
 "                                                          󰜗 "

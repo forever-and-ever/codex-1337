@@ -41,16 +41,18 @@ PROTOCOL_COMPATIBILITY = (
     "codex-rs/tui/src/chatwidget/protocol.rs",
 )
 IMPORT_REFERENCE = re.compile(
-    r"external_agent_(?:config|migration)|ExternalAgentConfig|externalAgentConfig"
+    r"external_agent_(?:config|migration)|ExternalAgentConfig|externalAgentConfig",
+    re.IGNORECASE,
 )
 CUT_REFERENCES = re.compile(
-    r"\b(?:ambient_pet|tui_pet|pet_picker)\w*|\btextarea_right_reserve\b"
+    r"\b(?:ambient_pet|tui_pet|pet_picker|pet_selection)\w*|\btextarea_right_reserve\b"
     r"|\b(?:TuiPetAnchor|PetSelected|PetDisabled|PetPreview\w*|ConfiguredPetLoaded)\b"
     r"|SlashCommand::(?:Pets|Ide|Import)\b|\b(?:mod pets|pets::)"
     r"|\b(?:IdeContextState|set_ide_context_active|maybe_apply_ide_context)\b"
     r"|(?:mod |crate::)ide_context\b"
     r"|\b(?:mod |pub use )external_agent_(?:config|migration)\w*"
-    r"|\bexternal_agent_config_processor\b|codex_external_agent_migration::"
+    r"|\bexternal_agent_config_processor\b|codex_external_agent_migration::",
+    re.IGNORECASE,
 )
 
 
