@@ -114,7 +114,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         &role,
         "model = \"role-model\"\nmodel_reasoning_effort = \"low\"\ndeveloper_instructions = \"Preserve the default role restriction.\"\n",
     )?;
-    MockResponsesConfig::new(&server.uri())
+    MockResponsesConfig::new(server.uri())
         .with_provider_config("requires_openai_auth = true")
         .with_root_config(&format!("chatgpt_base_url = {:?}", server.uri()))
         .enable_feature(Feature::MultiAgentV2)

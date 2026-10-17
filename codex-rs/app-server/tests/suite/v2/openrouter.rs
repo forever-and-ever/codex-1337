@@ -16,6 +16,7 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
+use codex_protocol::KeyName;
 use codex_protocol::Usd;
 use core_test_support::mock_server;
 use core_test_support::responses;
@@ -157,7 +158,7 @@ request_max_retries = 0
         let request = app.send_request("thread/account/list", Some(json!({"threadId": started.thread.id}))).await?;
         let accounts: codex_app_server_protocol::ThreadAccountListResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         assert_eq!(accounts.conversation_provider, Some(codex_app_server_protocol::AccountProvider::OpenRouter));
-        assert_eq!(accounts.selected_openrouter_key.as_ref().map(|name| name.as_str()), Some("main"));
+        assert_eq!(accounts.selected_openrouter_key.as_ref().map(KeyName::as_str), Some("main"));
         assert_eq!(accounts.pending_openrouter_key, None);
         assert_eq!(accounts.openrouter_keys.len(), 1);
         for scope in [json!({"threadId": started.thread.id}), json!({"newThread": {"modelProvider": "openrouter"}})] {
@@ -265,7 +266,7 @@ request_max_retries = 0
         }))).await?;
         let accounts: codex_app_server_protocol::ThreadAccountListResponse =
             timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        assert_eq!(accounts.selected_openrouter_key.as_ref().map(|name| name.as_str()), Some("spare"));
+        assert_eq!(accounts.selected_openrouter_key.as_ref().map(KeyName::as_str), Some("spare"));
         assert_eq!(accounts.openrouter_keys.iter().map(|status| status.key.name.as_str()).collect::<Vec<_>>(),
             vec!["main", "spare"]);
 
