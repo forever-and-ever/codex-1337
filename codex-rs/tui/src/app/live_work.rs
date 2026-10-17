@@ -204,6 +204,12 @@ impl LiveWorkState {
         }
     }
 
+    pub(super) fn promote_presented_frame(&mut self) {
+        if let Some(scope) = &mut self.scope {
+            scope.view.promote_presented_frame();
+        }
+    }
+
     pub(super) fn refresh_in(&self) -> Option<Duration> {
         self.scope
             .as_ref()

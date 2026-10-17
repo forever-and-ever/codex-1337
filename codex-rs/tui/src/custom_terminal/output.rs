@@ -86,7 +86,13 @@ struct State {
     completed: VecDeque<Completion>,
     submitted: Option<FrameId>,
     presented: Option<FrameId>,
-    wake: Option<FrameRequester>,
+    ui: Option<UiLink>,
+    waiting: bool,
+}
+
+struct UiLink {
+    requester: FrameRequester,
+    completed: tokio::sync::broadcast::Sender<()>,
 }
 
 #[derive(Default)]
@@ -199,7 +205,7 @@ impl Output {
         let Some(shared) = active() else {
             return io::stdout().sync_update(|_| f(self));
         };
-        paint_ready();
+        drain_completions();
         check(
             &shared
                 .state
@@ -448,12 +454,35 @@ pub(crate) fn query(fallback: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
 
 pub(crate) fn bind(requester: FrameRequester) {
     if let Some(shared) = active() {
-        shared
+        let mut state = shared
             .state
             .lock()
-            .expect("terminal output mailbox poisoned")
-            .wake = Some(requester);
+            .expect("terminal output mailbox poisoned");
+        state.ui = Some(UiLink {
+            requester,
+            completed: tokio::sync::broadcast::channel(16).0,
+        });
     }
+}
+
+pub(crate) fn completion_events() -> Option<tokio::sync::broadcast::Receiver<()>> {
+    let shared = active()?;
+    let state = shared
+        .state
+        .lock()
+        .expect("terminal output mailbox poisoned");
+    state.ui.as_ref().map(|ui| ui.completed.subscribe())
+}
+
+pub(crate) async fn next_completion(receiver: &mut Option<tokio::sync::broadcast::Receiver<()>>) {
+    match receiver {
+        Some(channel) => match channel.recv().await {
+            Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => *receiver = None,
+        },
+        None => {}
+    }
+    std::future::pending::<()>().await;
 }
 
 pub(crate) fn current_frame() -> Option<FrameId> {
@@ -477,23 +506,47 @@ pub(crate) fn presented_frame() -> Option<FrameId> {
         .presented
 }
 
-/// Called only by the UI task. Completion timestamps, not receipt times, end the metric.
 pub(crate) fn paint_ready() -> bool {
+    drain_completions();
     let Some(shared) = active() else { return true };
-    let (completed, ready) = {
-        let mut state = shared
+    let mut state = shared
+        .state
+        .lock()
+        .expect("terminal output mailbox poisoned");
+    let ready = matches!(state.phase, Phase::Failed(_) | Phase::Stopped)
+        || (matches!(state.phase, Phase::Idle) && state.queue.is_empty());
+    state.waiting |= !ready;
+    ready
+}
+
+fn drain_completions() {
+    let Some(shared) = active() else { return };
+    let completed = std::mem::take(
+        &mut shared
             .state
             .lock()
-            .expect("terminal output mailbox poisoned");
-        let completed = std::mem::take(&mut state.completed);
-        let ready = matches!(state.phase, Phase::Failed(_) | Phase::Stopped)
-            || (matches!(state.phase, Phase::Idle) && state.queue.is_empty());
-        (completed, ready)
-    };
+            .expect("terminal output mailbox poisoned")
+            .completed,
+    );
     for completion in completed {
         ui_latency::frame_completed(completion.stamp, completion.phases, completion.ended_at);
     }
-    ready
+}
+
+pub(crate) fn completion_received() {
+    drain_completions();
+    let Some(shared) = active() else { return };
+    let mut state = shared
+        .state
+        .lock()
+        .expect("terminal output mailbox poisoned");
+    let failed = matches!(state.phase, Phase::Failed(_));
+    if failed || (state.waiting && matches!(state.phase, Phase::Idle) && state.queue.is_empty()) {
+        state.waiting = false;
+        if let Some(ui) = &state.ui {
+            ui.requester.schedule_frame();
+        }
+    }
 }
 
 /// A writer panic must not make the global panic hook join its own flush barrier.
@@ -505,8 +558,8 @@ pub(crate) fn prepare_panic() {
             state.phase = Phase::Failed(Arc::new(io::Error::other(
                 "terminal output writer panicked",
             )));
-            if let Some(wake) = &state.wake {
-                wake.schedule_frame();
+            if let Some(ui) = &state.ui {
+                let _ = ui.completed.send(());
             }
         }
         shared.changed.notify_all();
@@ -549,7 +602,7 @@ pub(crate) fn barrier() -> io::Result<()> {
     }
     check(&state)?;
     drop(state);
-    paint_ready();
+    drain_completions();
     Ok(())
 }
 
@@ -673,12 +726,12 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
             state.presented = Some(completion.id);
             state.completed.push_back(completion);
         }
-        if let Some(wake) = &state.wake
+        if let Some(ui) = &state.ui
             && (frame_completed
                 || matches!(state.phase, Phase::Failed(_))
                 || state.queue.is_empty())
         {
-            wake.schedule_frame();
+            let _ = ui.completed.send(());
         }
         shared.changed.notify_all();
         if stop || matches!(state.phase, Phase::Failed(_)) {
@@ -745,6 +798,9 @@ mod tests {
             shared: Arc::clone(&shared),
             worker: Some(thread::spawn(move || run(mailbox, terminal))),
         };
+        let (requester, mut draws) = FrameRequester::test_channel();
+        bind(requester);
+        let mut completions = completion_events().expect("writer completion stream");
         let view = RefCell::new(crate::transcript_view::TranscriptView::default());
         let submit = |text: &str, width: u16| -> io::Result<()> {
             let mut buffer = Buffer::empty(ratatui::layout::Rect::new(0, 0, 3, 1));
@@ -766,6 +822,15 @@ mod tests {
         };
         submit("abc", 3)?;
         barrier()?;
+        assert!(
+            completions.try_recv().is_ok(),
+            "completion wakes the UI separately"
+        );
+        completion_received();
+        assert!(
+            draws.try_recv().is_err(),
+            "an idle completion must not start a repaint loop"
+        );
         view.borrow_mut().promote_presented_frame();
         assert_eq!(view.borrow().remaining_area().width, 3);
         let initial = presented_frame().expect("initial completed frame");
@@ -834,6 +899,13 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("barrier completed")?;
         waiter.join().expect("barrier waiter");
+        completion_received();
+        assert!(
+            draws.try_recv().is_ok(),
+            "completion retries a paint refused by backpressure"
+        );
+        completion_received();
+        assert!(draws.try_recv().is_err(), "a refused paint wakes only once");
         assert!(paint_ready());
         assert_eq!(presented_frame(), Some(latest));
         view.borrow_mut().promote_presented_frame();

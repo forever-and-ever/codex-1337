@@ -1099,6 +1099,8 @@ See the Codex keymap documentation for supported actions and examples."
             return shutdown_on_startup_error(app_server, err).await;
         }
         let tui_events = tui.event_stream();
+        let mut output_completions = crate::custom_terminal::output::completion_events();
+        app.complete_terminal_output();
         tokio::pin!(tui_events);
         #[cfg(target_os = "linux")]
         let mut desktop_attention = tui.desktop_attention_receiver();
@@ -1357,6 +1359,11 @@ See the Codex keymap documentation for supported actions and examples."
                 let select_stage = enter(Stage::IdleSelect);
                 let frame_wake = schedule.wake_at();
                 let control = select! {
+                    () = crate::custom_terminal::output::next_completion(&mut output_completions) => {
+                        drop(select_stage);
+                        app.complete_terminal_output();
+                        AppRunControl::Continue
+                    }
                     () = async {
                         match frame_wake {
                             Some(at) => tokio::time::sleep_until(at.into()).await,

@@ -342,9 +342,14 @@ impl StartupDraftPump {
         if self.initial_screen == StartupDraftInitialScreen::Composer {
             self.draw(tui, tui.terminal.last_known_screen_size)?;
         }
+        let mut output_completions = crate::custom_terminal::output::completion_events();
+        crate::custom_terminal::output::completion_received();
         tokio::pin!(future);
         loop {
             tokio::select! {
+                () = crate::custom_terminal::output::next_completion(&mut output_completions) => {
+                    crate::custom_terminal::output::completion_received();
+                }
                 output = &mut future => return Ok(output),
                 event = self.events.next() => {
                     let Some(event) = event else {

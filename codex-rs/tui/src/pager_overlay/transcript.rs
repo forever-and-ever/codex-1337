@@ -201,6 +201,7 @@ impl TranscriptOverlay {
         {
             self.draw(tui)?;
         }
+        self.view.promote_presented_frame();
         let action = match event {
             TuiEvent::Key(key) => self.handle_key(key),
             TuiEvent::Mouse(mut mouse) => {
