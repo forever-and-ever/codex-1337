@@ -210,6 +210,33 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
                     assert_eq!(stats[4..].iter().sum::<u64>(), 1);
                     assert!(writer.ready_input.is_none());
                 });
+
+                input_handled(input_consumed(&input).expect("submitted input"));
+                drop(enter(Stage::FramePaint));
+                let submitted = frame_submitted();
+                let flush_end = Instant::now();
+                // Input handled after submission belongs to a later frame, even if the
+                // writer's completion is delivered to the UI after that handler.
+                input_handled(input_consumed(&input).expect("later input"));
+                let phases = [(flush_end, flush_end); 3];
+                frame_completed(submitted, phases, flush_end);
+                let completed = shared.committed.read().expect("delayed completion");
+                let completed_at = flush_end.duration_since(shared.origin).as_nanos() as u64;
+                assert_eq!(completed[1], completed_at);
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    2
+                );
+                assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
+                drop(enter(Stage::FramePaint));
+                let stale = frame_submitted();
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                frame_completed(stale, phases, flush_end);
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "reset rejects delayed writer completions"
+                );
             })
             .await;
         let future = WRITER.scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {

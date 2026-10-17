@@ -257,7 +257,8 @@ impl App {
     ) -> bool {
         if matches!(event, TuiEvent::Draw) {
             let requester = tui.frame_requester();
-            if requester.paint_admitted()
+            if crate::custom_terminal::output::paint_ready()
+                && requester.paint_admitted()
                 && tui.presentation_mode() != tui::PresentationMode::Frozen
             {
                 return false;
