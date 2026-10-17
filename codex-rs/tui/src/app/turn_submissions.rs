@@ -24,6 +24,8 @@ pub(crate) use worker::ACK_TIMEOUT;
 
 #[path = "server_operation_requests.rs"]
 mod requests;
+#[path = "server_ui_requests.rs"]
+pub(in crate::app) mod ui_requests;
 
 pub(in crate::app) use requests::ServerRequestDelivery;
 
@@ -119,6 +121,7 @@ enum LaneState {
     Queued,
     Running(AbortOnDropHandle<()>),
     Uncertain,
+    Applying { followups: usize },
 }
 
 #[derive(Clone)]
@@ -462,6 +465,23 @@ pub(super) enum SubmissionFailure {
     Rejected(TypedRequestError),
     Uncertain(TypedRequestError),
     TimedOut,
+    Cancelled,
+}
+
+impl std::fmt::Display for SubmissionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rejected(error) => write!(formatter, "{error}"),
+            Self::Uncertain(error) => {
+                write!(formatter, "{error}. Outcome unknown; no retry was sent.")
+            }
+            Self::TimedOut => formatter
+                .write_str("Acknowledgement timed out. Outcome unknown; no retry was sent."),
+            Self::Cancelled => formatter.write_str(
+                "Local request cancelled. A remote mutation may still complete; no retry was sent.",
+            ),
+        }
+    }
 }
 
 impl PendingSubmission {

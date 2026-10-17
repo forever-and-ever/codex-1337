@@ -1,12 +1,13 @@
+use crate::custom_terminal::output;
+use crate::custom_terminal::output::Output;
+use crate::custom_terminal::output::stdout;
 use std::fmt;
 use std::future::Future;
 use std::io;
 use std::io::IsTerminal;
 use std::io::Result;
-use std::io::Stdout;
 use std::io::Write;
 use std::io::stdin;
-use std::io::stdout;
 use std::panic;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,7 +16,6 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crossterm::Command;
-use crossterm::SynchronizedUpdate;
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::DisableBracketedPaste;
 use crossterm::event::DisableFocusChange;
@@ -105,7 +105,7 @@ mod windows_key_sequence;
 pub(crate) const TARGET_FRAME_INTERVAL: Duration = frame_rate_limiter::MIN_FRAME_INTERVAL;
 
 /// A type alias for the terminal type used in this application
-pub type Terminal = CustomTerminal<CrosstermBackend<Stdout>>;
+pub type Terminal = CustomTerminal<CrosstermBackend<Output>>;
 
 pub(crate) struct InitializedTerminal {
     pub(crate) terminal: Terminal,
@@ -337,7 +337,10 @@ fn restore_common(
     keyboard_restore: KeyboardRestore,
     handoff: TerminalHandoff,
 ) -> Result<()> {
-    let mut first_error = ensure_virtual_terminal_processing().err();
+    let mut first_error = output::restoration_barrier().err();
+    if let Err(error) = ensure_virtual_terminal_processing() {
+        first_error.get_or_insert(error);
+    }
 
     let screen_result = match handoff {
         TerminalHandoff::KeepScreen if ALTERNATE_SCREEN.is_active() => {
@@ -372,6 +375,9 @@ fn restore_common(
         crossterm::cursor::Show
     ) {
         first_error.get_or_insert(err);
+    }
+    if let Err(error) = output::restoration_barrier() {
+        first_error.get_or_insert(error);
     }
     match first_error {
         Some(err) => Err(err),
@@ -481,9 +487,6 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
     set_panic_hook();
 
     #[cfg(unix)]
-    let backend = CrosstermBackend::new(stdout());
-
-    #[cfg(unix)]
     let startup_probe = {
         use crate::terminal_probe::StartupKeyboardEnhancementProbe;
 
@@ -553,6 +556,11 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
     // trust and other protected startup screens have finished accepting their security decisions.
     crate::terminal_palette::set_default_colors_from_startup_probe(/*colors*/ None);
 
+    #[cfg(unix)]
+    let backend = CrosstermBackend::new(Output::start(
+        crossterm::terminal::size()?.into(),
+        cursor_pos,
+    )?);
     let tui = CustomTerminal::with_options_and_cursor_position(backend, cursor_pos)?;
     let stderr_guard = terminal_stderr::TerminalStderrGuard::install()?;
     let initialized_terminal = InitializedTerminal {
@@ -571,7 +579,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
 }
 
 #[cfg(not(unix))]
-fn cursor_position_with_crossterm(backend: &mut CrosstermBackend<Stdout>) -> Position {
+fn cursor_position_with_crossterm(backend: &mut CrosstermBackend<Output>) -> Position {
     backend.get_cursor_position().unwrap_or_else(|err| {
         tracing::warn!("failed to read initial cursor position; defaulting to origin: {err}");
         Position { x: 0, y: 0 }
@@ -610,6 +618,8 @@ fn probe_windows_default_colors() {
 fn set_panic_hook() {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
+        output::prepare_panic();
+        let _ = output::barrier();
         let _ = restore_after_exit(); // ignore any errors as we are already failing
         hook(panic_info);
     }));
@@ -739,6 +749,7 @@ impl Tui {
     ) -> Self {
         let (draw_tx, _) = broadcast::channel(1);
         let frame_requester = FrameRequester::new(draw_tx.clone());
+        output::bind(frame_requester.clone());
         let presentation_over_ssh = crate::clipboard_copy::is_ssh_session();
         if presentation_over_ssh {
             frame_requester.set_mode(PresentationMode::Reduced);
@@ -1005,6 +1016,9 @@ impl Tui {
         };
         if let Err(err) = restore_result {
             tracing::warn!("failed to restore terminal modes before external program: {err}");
+        }
+        if let Err(error) = output::barrier() {
+            tracing::warn!(%error, "failed to flush terminal before external program");
         }
         if let Err(err) = terminal_stderr::pause() {
             tracing::warn!("failed to restore terminal stderr before external program: {err}");

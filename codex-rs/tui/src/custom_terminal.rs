@@ -51,6 +51,8 @@ use ratatui::widgets::WidgetRef;
 
 mod cursor;
 
+pub(crate) mod output;
+
 #[cfg(test)]
 #[path = "custom_terminal_test_support.rs"]
 pub(crate) mod test_support;
@@ -442,6 +444,19 @@ where
         let cursor_position = frame.cursor_position;
         let cursor_style = frame.cursor_style;
 
+        if output::capture_frame(
+            self.current_buffer(),
+            self.previous_buffer(),
+            screen_size,
+            cursor_position,
+            cursor_style,
+        ) {
+            self.last_known_cursor_pos = cursor_position.unwrap_or(self.last_known_cursor_pos);
+            self.hidden_cursor = cursor_position.is_none();
+            self.swap_buffers();
+            return Ok(());
+        }
+
         // Not every terminal or multiplexer hides intermediate cursor moves inside a
         // synchronized update, especially when the frame spans multiple writes.
         let updates = {
@@ -504,6 +519,12 @@ where
     /// This is the position of the cursor after the last draw call.
     #[allow(dead_code)]
     pub fn get_cursor_position(&mut self) -> io::Result<Position> {
+        if output::is_active() {
+            return crate::terminal_probe::cursor_position(crate::terminal_probe::DEFAULT_TIMEOUT)?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::TimedOut, "terminal cursor query timed out")
+                });
+        }
         self.backend.get_cursor_position()
     }
 

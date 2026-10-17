@@ -24,6 +24,7 @@ pub(in crate::app) enum ThreadMutation {
     ServerShell(String),
     Settings(api::ThreadSettingsUpdateParams),
     GuardianApproval(serde_json::Value),
+    UiRequest(super::ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
@@ -32,6 +33,7 @@ pub(in crate::app) enum CatalogRequest {
         params: api::SkillsListParams,
         cwd: PathBuf,
     },
+    UiRequest(super::ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
@@ -44,6 +46,7 @@ pub(in crate::app) enum ConnectionMutation {
     },
     Removal(super::removal::RemovalOperation),
     Trust(super::navigation::trust::TrustOperation),
+    UiRequest(super::ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
@@ -103,6 +106,8 @@ pub(in crate::app) enum OperationReceipt {
     ModelDefaultsSaved(api::ConfigWriteResponse),
     Removal(super::removal::RemovalReceipt),
     TrustSaved,
+    UiRequest(super::ui_requests::UiReply),
+    UiRequestApplied,
 }
 
 impl ServerOperation {
@@ -130,8 +135,11 @@ impl ServerOperation {
                 ThreadMutation::ServerShell(_) => "Running shell command on server",
                 ThreadMutation::Settings(_) => "Updating conversation settings",
                 ThreadMutation::GuardianApproval(_) => "Approving reviewed action",
+                ThreadMutation::UiRequest(request) => request.label(),
             },
             Self::Catalog(CatalogRequest::Skills { .. }) => "Loading skills",
+            Self::Catalog(CatalogRequest::UiRequest(request))
+            | Self::Connection(ConnectionMutation::UiRequest(request)) => request.label(),
             Self::Connection(ConnectionMutation::Trust(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ReloadUserConfig) => "Reloading settings",
             Self::Connection(ConnectionMutation::Removal(operation)) => operation.label(),
@@ -147,6 +155,15 @@ impl ServerOperation {
                     "Confirming saved voice preference"
                 }
             },
+        }
+    }
+
+    pub(super) fn ui_request(&self) -> Option<&super::ui_requests::UiRequest> {
+        match self {
+            Self::Mutation(ThreadMutation::UiRequest(request))
+            | Self::Catalog(CatalogRequest::UiRequest(request))
+            | Self::Connection(ConnectionMutation::UiRequest(request)) => Some(request),
+            _ => None,
         }
     }
 
@@ -186,6 +203,9 @@ pub(super) async fn send(
     operation: ServerOperation,
     origin: OperationOrigin,
 ) -> Result<OperationReceipt, TypedRequestError> {
+    if let Some(request) = operation.ui_request() {
+        return request.send(handle).await.map(OperationReceipt::UiRequest);
+    }
     let request_id = api::RequestId::String(format!("tui-operation-{id}"));
     match operation {
         ServerOperation::Response(delivery) => {
@@ -248,6 +268,9 @@ pub(super) async fn send(
             control::send(&handle, thread_id, id, operation, store).await
         }
         ServerOperation::Mutation(mutation) => match mutation {
+            ThreadMutation::UiRequest(_) => {
+                unreachable!("UI request dispatched before thread projection")
+            }
             ThreadMutation::Compact => {
                 let _: api::ThreadCompactStartResponse = handle
                     .request_typed(api::ClientRequest::ThreadCompactStart {
@@ -348,6 +371,9 @@ pub(super) async fn send(
                 Ok(OperationReceipt::GuardianApproved)
             }
         },
+        ServerOperation::Catalog(CatalogRequest::UiRequest(_)) => {
+            unreachable!("UI request dispatched before thread projection")
+        }
         ServerOperation::Catalog(CatalogRequest::Skills { params, .. }) => handle
             .request_typed(api::ClientRequest::SkillsList { request_id, params })
             .await
@@ -398,6 +424,10 @@ impl App {
         }
         let thread_id = origin.thread().0;
         match receipt {
+            OperationReceipt::UiRequestApplied => {}
+            OperationReceipt::UiRequest(_) => {
+                unreachable!("typed UI reply reduced before the operation lane")
+            }
             OperationReceipt::Removal(_) => {}
             OperationReceipt::ServerRequestDelivered => {
                 if let ServerOperation::Response(delivery) = operation
@@ -518,7 +548,7 @@ impl App {
                 SubmissionFailure::Uncertain(error) => format!(
                     "Trust save outcome for {scope} is unknown: {error}. No write was retried. Close and reopen this TUI to reread trust settings; the earlier write may still complete."
                 ),
-                SubmissionFailure::TimedOut => format!(
+                SubmissionFailure::TimedOut | SubmissionFailure::Cancelled => format!(
                     "Trust save acknowledgement for {scope} timed out. No write was retried. Close and reopen this TUI to reread trust settings; the earlier write may still complete."
                 ),
             };
@@ -558,7 +588,7 @@ impl App {
                 "{} outcome is unknown: {error}. No retry was sent.",
                 operation.label()
             ),
-            SubmissionFailure::TimedOut => format!(
+            SubmissionFailure::TimedOut | SubmissionFailure::Cancelled => format!(
                 "{} acknowledgement timed out. The server may still complete it; no retry was sent.",
                 operation.label()
             ),

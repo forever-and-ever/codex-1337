@@ -379,6 +379,84 @@ pub(crate) enum InputGate {
 
 pub(crate) struct InputStamp(Span);
 
+/// Owned by a submitted frame until the UI receives its flush completion.
+pub(crate) struct FrameStamp {
+    epoch: u64,
+    input: Option<Span>,
+}
+
+pub(crate) fn frame_submitted() -> Option<FrameStamp> {
+    WRITER
+        .try_with(|writer| {
+            let mut writer = writer.borrow_mut();
+            writer.activate_reset();
+            FrameStamp {
+                epoch: writer.epoch,
+                input: writer.armed_input.take(),
+            }
+        })
+        .ok()
+}
+
+pub(crate) fn merge_frame_stamps(
+    old: Option<FrameStamp>,
+    new: Option<FrameStamp>,
+) -> Option<FrameStamp> {
+    match (old, new) {
+        (Some(old), Some(mut new)) if old.epoch == new.epoch => {
+            if let Some(input) = old.input
+                && new.input.is_none_or(|pending| input.start < pending.start)
+            {
+                new.input = Some(input);
+            }
+            Some(new)
+        }
+        (_, Some(new)) => Some(new),
+        (old, None) => old,
+    }
+}
+
+pub(crate) fn frame_completed(
+    stamp: Option<FrameStamp>,
+    phases: [(Instant, Instant); 3],
+    ended_at: Instant,
+) {
+    let Some(stamp) = stamp else { return };
+    let _ = WRITER.try_with(|writer| {
+        let mut writer = writer.borrow_mut();
+        writer.activate_reset();
+        if stamp.epoch != writer.epoch {
+            return;
+        }
+        let origin = writer.shared.origin;
+        let nanos = |at: Instant| {
+            at.saturating_duration_since(origin)
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64
+        };
+        for (stage, (started, ended)) in [
+            Stage::TerminalDiff,
+            Stage::TerminalWrite,
+            Stage::TerminalFlush,
+        ]
+        .into_iter()
+        .zip(phases)
+        {
+            writer.record(
+                Span {
+                    stage,
+                    start: nanos(started),
+                    epoch: stamp.epoch,
+                },
+                nanos(ended),
+            );
+        }
+        if let Some(input) = stamp.input {
+            writer.record(input, nanos(ended_at));
+        }
+    });
+}
+
 pub(crate) fn input_consumed(event: &crate::tui::TuiEvent) -> Option<InputStamp> {
     let eligible = match event {
         crate::tui::TuiEvent::Key(_) | crate::tui::TuiEvent::Paste(_) => true,

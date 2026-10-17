@@ -335,6 +335,9 @@ fn wsl_clipboard_copy(_text: &str) -> Result<(), String> {
 /// Write text to the clipboard via the OSC 52 terminal escape sequence.
 fn osc52_copy_to(text: &str, target: SelectionTarget) -> Result<(), String> {
     let sequence = osc52_sequence(text, target, std::env::var_os("TMUX").is_some())?;
+    if crate::custom_terminal::output::is_active() {
+        return write_osc52_to_writer(crate::custom_terminal::output::stdout(), &sequence);
+    }
     #[cfg(unix)]
     {
         match std::fs::OpenOptions::new().write(true).open("/dev/tty") {

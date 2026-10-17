@@ -383,6 +383,8 @@ impl App {
                 frame.set_cursor_style(cursor_style);
                 frame.set_cursor_position(position);
             }
+            view.capture_painted_frame();
+            live_work.capture_painted_frame(composer_gap.is_some());
         })?;
         if let Some((surface, tip)) = &turn_tip
             && tip.rendered.get()
@@ -420,6 +422,7 @@ impl App {
         app_server: &mut AppServerSession,
         event: &TuiEvent,
     ) -> Result<bool> {
+        self.transcript_view.promote_presented_frame();
         let _routing_stage = matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_))
             .then(|| crate::ui_latency::enter(crate::ui_latency::Stage::KeyRouting));
         let has_modal = self.chat_widget.has_active_modal();

@@ -49,7 +49,6 @@ mod imp {
     use std::fs::File;
     use std::fs::OpenOptions;
     use std::io;
-    use std::io::Write;
     use std::os::fd::AsRawFd;
     use std::os::fd::FromRawFd;
     use std::time::Duration;
@@ -158,8 +157,7 @@ mod imp {
         }
 
         fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-            self.writer.write_all(bytes)?;
-            self.writer.flush()
+            crate::custom_terminal::output::query(&mut self.writer, bytes)
         }
 
         fn read_available(
@@ -578,6 +576,7 @@ mod imp {
     mod tests {
         use super::*;
         use pretty_assertions::assert_eq;
+        use std::io::Write;
         use std::os::fd::OwnedFd;
         use std::os::unix::net::UnixStream;
 

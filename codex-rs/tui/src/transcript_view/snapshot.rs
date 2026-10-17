@@ -39,10 +39,8 @@ impl TranscriptView {
     }
 
     pub(super) fn capture_snapshot(&mut self, cells: &[Arc<dyn HistoryCell>]) -> ViewSnapshot {
-        let cells = self
-            .snapshot_cells()
-            .or_else(|| self.presented_cells.clone())
-            .unwrap_or_else(|| Arc::from(cells));
+        // Input paths pass presented cells; model transitions capture current revisions.
+        let cells = self.snapshot_cells().unwrap_or_else(|| Arc::from(cells));
         let mut pinned = self
             .snapshot()
             .map(|snapshot| snapshot.pinned.clone())

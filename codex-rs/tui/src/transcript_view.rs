@@ -247,6 +247,7 @@ impl TranscriptView {
         self.visible.clear();
         if area.is_empty() {
             self.tail_visible = false;
+            self.capture_synchronous_frame();
             return;
         }
         let initial_start = self.start(cells);
@@ -353,6 +354,7 @@ impl TranscriptView {
             self.scroll(current_cells, /*rows*/ 0);
         }
         self.render_search(buf);
+        self.capture_synchronous_frame();
     }
 
     pub(crate) fn sync_live_tail(

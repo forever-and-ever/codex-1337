@@ -26,6 +26,7 @@ impl Drop for TerminalInitializationGuard {
 ///
 /// Partial control sequences remain quarantined; an unresolved boundary fails after one second.
 pub(crate) fn discard_pending_terminal_input() -> Result<()> {
+    crate::custom_terminal::output::barrier()?;
     #[cfg(unix)]
     let _ = crossterm::event::discard_buffered_input()?;
 

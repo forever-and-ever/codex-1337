@@ -11,7 +11,6 @@ use std::task::Poll;
 use std::time::Duration;
 use tokio::time::Instant;
 
-use crossterm::SynchronizedUpdate;
 use ratatui::layout::Size;
 use ratatui::style::Stylize;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -152,7 +151,7 @@ impl StartupDraft {
             pump,
         };
         // Present the screen switch and its first composer frame together.
-        std::io::stdout().sync_update(|_| {
+        crate::custom_terminal::output::stdout().sync_update(|_| {
             draft
                 .tui
                 .set_owned_screen(screen.transcript_mode.is_owned())?;
@@ -343,9 +342,14 @@ impl StartupDraftPump {
         if self.initial_screen == StartupDraftInitialScreen::Composer {
             self.draw(tui, tui.terminal.last_known_screen_size)?;
         }
+        let mut output_completions = crate::custom_terminal::output::completion_events();
+        crate::custom_terminal::output::completion_received();
         tokio::pin!(future);
         loop {
             tokio::select! {
+                () = crate::custom_terminal::output::next_completion(&mut output_completions) => {
+                    crate::custom_terminal::output::completion_received();
+                }
                 output = &mut future => return Ok(output),
                 event = self.events.next() => {
                     let Some(event) = event else {

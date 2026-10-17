@@ -716,7 +716,7 @@ async fn run_onboarding_screen_inner(
                             {
                                 // Reset any lingering SGR (underline/color) before clearing
                                 let _ = ratatui::crossterm::execute!(
-                                    std::io::stdout(),
+                                    crate::custom_terminal::output::stdout(),
                                     ratatui::crossterm::style::SetAttribute(
                                         ratatui::crossterm::style::Attribute::Reset
                                     ),
