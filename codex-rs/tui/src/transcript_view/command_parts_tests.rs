@@ -76,7 +76,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                     crate::history_cell::has_active_invocations(cell.as_ref()),
                     crate::history_cell::invocation::collect(cell.as_ref())
                         .iter()
-                        .any(|call| call.is_active()),
+                        .any(crate::history_cell::invocation::Invocation::is_active),
                     "{label}",
                 );
             }
@@ -296,7 +296,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         call_id: "b".into(),
         action: Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
     };
-    assert!(view.focus_fold(&batch, 1, input_b.clone()));
+    assert!(view.focus_fold(&batch, 1, input_b));
     view.handle_key(KeyCode::Enter.into(), &batch);
     render(&mut view, &batch, 104, "one child input");
     assert!(tests::text(&tests::render(&mut view, &batch, 104, 26)).contains("print('beta')"));

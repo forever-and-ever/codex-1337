@@ -4,6 +4,8 @@ use super::*;
 use crate::custom_terminal::output;
 use crate::custom_terminal::output::FrameId;
 
+pub(super) type Cells = Arc<[Arc<dyn HistoryCell>]>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum LayoutSource {
     Current,
@@ -63,7 +65,7 @@ impl TranscriptView {
             area: self.area,
             visible: self.visible.clone(),
             tail_visible: self.tail_visible,
-            suppressed_header: self.suppressed_prompt_header.clone(),
+            suppressed_header: self.suppressed_prompt_header,
             cells: self.presented_cells.clone(),
             follow_area: self.follow_control.area,
             composer_tip: self.composer_tip.clone(),
@@ -96,7 +98,7 @@ impl TranscriptView {
             self.area = frame.area;
             self.visible = frame.visible.clone();
             self.tail_visible = frame.tail_visible;
-            self.suppressed_prompt_header = frame.suppressed_header.clone();
+            self.suppressed_prompt_header = frame.suppressed_header;
             self.presented_cells = frame.cells.clone();
             self.follow_control.area = frame.follow_area;
             self.composer_tip = frame.composer_tip.clone();
@@ -223,6 +225,10 @@ impl TranscriptView {
         self.cache.waiting |= waiting;
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A ready frame installs its retained cells before publishing the presented revision."
+    )]
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         if self.cache.frames.is_none() {
             self.render_prepared(area, buf, cells);
@@ -277,7 +283,7 @@ impl TranscriptView {
                 area: self.area,
                 visible: self.visible.clone(),
                 tail_visible: self.tail_visible,
-                suppressed_header: self.suppressed_prompt_header.clone(),
+                suppressed_header: self.suppressed_prompt_header,
             });
         }
         if self.cache.waiting || self.live_preparation.is_pending() {
@@ -303,7 +309,7 @@ impl TranscriptView {
                 .collect();
             self.presented_cells = Some(Arc::clone(&presented.cells));
             self.tail_visible = presented.tail_visible;
-            self.suppressed_prompt_header = presented.suppressed_header.clone();
+            self.suppressed_prompt_header = presented.suppressed_header;
         } else {
             self.visible.clear();
             self.presented_cells = None;
@@ -312,6 +318,10 @@ impl TranscriptView {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A visible first row guarantees that the same immutable slice has a last row."
+    )]
     fn prefetch(&mut self, cells: &[Arc<dyn HistoryCell>]) {
         let Some(first) = self.visible.first().map(|row| row.index) else {
             return;

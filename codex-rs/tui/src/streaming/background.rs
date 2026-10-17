@@ -67,7 +67,7 @@ impl IntoIterator for Rows {
 
 pub(super) enum Core {
     Inline(Box<StreamCore>),
-    Background(Background),
+    Background(Box<Background>),
 }
 
 enum Command {
@@ -170,6 +170,10 @@ impl Background {
             oldest: None,
         }
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "The pinned lane initializes this stream before executing any later command."
+    )]
     fn poll(&mut self) {
         if let Work::Running(task) = &mut self.work
             && let Some(lines) = task.poll()
@@ -247,6 +251,10 @@ impl Background {
         self.commands.push(command);
         self.poll();
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "A chunk selected from the exclusively borrowed queue remains at its front until removed."
+    )]
     fn drain(&mut self, max: usize) -> crate::history_cell::SharedRows {
         self.poll();
         let mut rows = crate::history_cell::SharedRows::default();
@@ -280,6 +288,10 @@ impl Background {
     fn is_idle(&self) -> bool {
         self.lines.is_empty() && self.commands.is_empty() && matches!(self.work, Work::Idle)
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "Consuming the stream finalizes its initialized pinned-lane state exactly once."
+    )]
     pub(crate) fn finish(mut self, finish: impl FnOnce(String) + Send + 'static) {
         let work = std::mem::replace(&mut self.work, Work::Closed);
         let commands = std::mem::take(&mut self.commands);
@@ -400,7 +412,7 @@ impl Core {
 
     pub(super) fn with_background(self, frames: FrameRequester) -> Self {
         match self {
-            Self::Inline(core) => Self::Background(Background::new(core, frames)),
+            Self::Inline(core) => Self::Background(Box::new(Background::new(core, frames))),
             Self::Background(_) => self,
         }
     }

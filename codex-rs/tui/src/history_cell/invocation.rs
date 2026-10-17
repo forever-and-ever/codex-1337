@@ -91,6 +91,10 @@ impl From<super::activity_parts::ActivityParts> for InvocationInput {
 }
 
 impl InvocationInput {
+    #[expect(
+        clippy::expect_used,
+        reason = "A started activity with the static reduced-motion bullet always has a visible marker."
+    )]
     pub(crate) fn paint(&self) -> super::activity_parts::ActivityParts {
         let mut parts = self.parts.clone();
         for indicator in &self.indicators {

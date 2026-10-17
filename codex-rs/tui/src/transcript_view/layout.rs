@@ -261,9 +261,7 @@ impl TranscriptView {
         index: usize,
     ) -> Option<Arc<TextLayout>> {
         if self.layout_source == super::presented::LayoutSource::Presented {
-            if self.presented_cells.is_none() {
-                return None;
-            }
+            self.presented_cells.as_ref()?;
             let key = self.entry_key(cells, index);
             if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
                 return Some(Arc::clone(&visible.layout));

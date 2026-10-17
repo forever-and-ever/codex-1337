@@ -172,7 +172,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         .iter()
         .position(|visible| visible.row == row)
         .unwrap();
-    assert!(view.toggle_disclosure_at(&cells, column.start as u16, screen_row as u16));
+    assert!(view.toggle_disclosure_at(&cells, column.start, screen_row as u16));
     assert!(view.is_following());
     let expanded = crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
     assert!(crate::transcript_view::tests::text(&expanded).contains("+second beta line"));

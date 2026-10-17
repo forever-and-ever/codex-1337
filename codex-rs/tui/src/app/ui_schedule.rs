@@ -393,7 +393,7 @@ pub(super) async fn drive(
         schedule.drain_ready(tui_events).await;
         for _ in 0..ui_schedule::INPUT_BATCH {
             let admitted = ui_schedule::input_admitted(
-                &app,
+                app,
                 !app_event_rx.is_empty(),
                 pending_startup_draft.is_some(),
                 waiting_for_initial_session_configured,
@@ -542,7 +542,7 @@ pub(super) async fn drive(
         }
         idle_restart.set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());
         let block_terminal_input_for_pending_startup_events = !ui_schedule::input_admitted(
-            &app,
+            app,
             has_pending_app_events,
             pending_startup_draft.is_some(),
             waiting_for_initial_session_configured,

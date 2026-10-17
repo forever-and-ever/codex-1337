@@ -265,6 +265,10 @@ impl LayoutCache {
 }
 
 impl TranscriptView {
+    #[expect(
+        clippy::expect_used,
+        reason = "Feed body placement is assigned only to entries with a feed body."
+    )]
     pub(in crate::transcript_view) fn prepare_entry_layout(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
@@ -600,7 +604,7 @@ impl TranscriptView {
                         &output_tokens,
                         &expanded_parts,
                         output_mode,
-                        &invocations,
+                        invocations,
                         full_content,
                         width,
                     ));

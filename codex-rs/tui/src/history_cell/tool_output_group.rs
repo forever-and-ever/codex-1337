@@ -467,10 +467,10 @@ impl HistoryCell for ToolOutputGroup {
             parts.output = self.activity_disclosure(width);
             if self.activity_ids().iter().any(|id| expanded.contains(id)) {
                 for output in self.members.iter().skip(1) {
-                    if let Some(output) = output.as_any().downcast_ref::<ToolOutputCell>() {
-                        if output.activity_disclosure(width).is_some() {
-                            output.append_result_parts(&mut parts, width, expanded, mode);
-                        }
+                    if let Some(output) = output.as_any().downcast_ref::<ToolOutputCell>()
+                        && output.activity_disclosure(width).is_some()
+                    {
+                        output.append_result_parts(&mut parts, width, expanded, mode);
                     }
                 }
             }

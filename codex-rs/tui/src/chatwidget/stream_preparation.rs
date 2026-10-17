@@ -49,6 +49,10 @@ impl ChatWidget {
             && item_id.is_some()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission requires an origin thread and item identity."
+    )]
     pub(super) fn enable_answer_preparation(
         &self,
         controller: StreamController,
@@ -79,6 +83,10 @@ impl ChatWidget {
             }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission requires an origin and item; nonempty prepared rows always emit a plan cell."
+    )]
     pub(super) fn enable_plan_preparation(
         &self,
         controller: PlanStreamController,
@@ -115,6 +123,10 @@ impl ChatWidget {
             }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An admitted background stream retains its origin thread and item identity until consumed."
+    )]
     pub(super) fn prepare_answer_stream(
         &mut self,
         controller: StreamController,
@@ -166,6 +178,10 @@ impl ChatWidget {
         None
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An admitted background stream retains its origin thread and item identity until consumed."
+    )]
     pub(super) fn prepare_plan_stream(
         &mut self,
         controller: PlanStreamController,
@@ -220,6 +236,10 @@ impl ChatWidget {
         self.prepare_answer_stream(controller, completed)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission was checked against this controller item identity."
+    )]
     pub(super) fn start_prepared_plan_stream(&mut self) {
         let mut controller = PlanStreamController::new(
             self.current_stream_width(/*reserved_cols*/ 4),
@@ -241,6 +261,10 @@ impl ChatWidget {
         self.plan_stream_controller = Some(controller);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission was checked against this controller item identity."
+    )]
     pub(super) fn prepare_new_answer_stream(
         &mut self,
         mut controller: StreamController,
@@ -269,7 +293,7 @@ impl ChatWidget {
                 .as_ref()
                 .is_some_and(StreamController::is_background)
             {
-                self.finalize_completed_assistant_message(Some(&message));
+                self.finalize_completed_assistant_message(Some(message));
                 self.transcript.agent_timestamp = None;
                 self.status_state.pending_status_indicator_restore = item.questions.is_some()
                     || match item.phase {

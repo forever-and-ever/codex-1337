@@ -29,14 +29,13 @@ pub(crate) struct PatchHistoryCell {
 }
 
 impl PatchHistoryCell {
+    #[expect(clippy::expect_used, reason = "Continuations always own a file.")]
     pub(crate) fn with_activity_id(mut self, id: String) -> Self {
         self.call_id = id.clone();
         // The first file owns the call's token bill; sibling disclosures have separate IDs.
         self.activity_id = if self.continuation {
-            format!(
-                "patch-file:{id}:{:?}",
-                self.file.as_ref().expect("continuation has a file").0
-            )
+            let (path, _) = self.file.as_ref().expect("continuation has a file");
+            format!("patch-file:{id}:{path:?}")
         } else {
             format!("patch:{id}")
         };

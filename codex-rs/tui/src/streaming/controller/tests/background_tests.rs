@@ -262,7 +262,7 @@ impl Trial {
                 hyperlink_lines_to_plain_strings(&resized),
                 hyperlink_lines_to_plain_strings(&canonical)
             );
-            if suffix.starts_with('|') {
+            if let Some(suffix) = suffix.strip_prefix('|') {
                 let held = revised.current_tail_lines();
                 revised.push("|");
                 revised.core.settle().await;
@@ -272,7 +272,7 @@ impl Trial {
                     held,
                     "late pipe freezes the line"
                 );
-                revised.push(&suffix[1..]);
+                revised.push(suffix);
             } else {
                 revised.push(suffix);
             }
