@@ -113,6 +113,8 @@ pub(crate) struct TranscriptView {
     area: Rect,
     suppressed_prompt_header: Option<prompt_header::SuppressedHeader>,
     visible: Vec<VisibleRow>,
+    // These revisions back `area` and `visible`, not unpresented transcript updates.
+    presented_cells: Option<Arc<[Arc<dyn HistoryCell>]>>,
     selection: Option<Selection>,
     copy_mode: Option<copy_mode::CopyMode>,
     held_reading: Option<ViewSnapshot>,
@@ -154,6 +156,7 @@ impl Default for TranscriptView {
             area: Rect::default(),
             suppressed_prompt_header: None,
             visible: Vec::new(),
+            presented_cells: None,
             selection: None,
             copy_mode: None,
             held_reading: None,
@@ -203,6 +206,15 @@ impl TranscriptView {
         let resized = self.area.width != area.width || self.area.bottom() != area.bottom();
         self.prepare_width(area.width);
         self.area = area;
+        if self.presented_cells.as_ref().is_none_or(|presented| {
+            presented.len() != cells.len()
+                || presented
+                    .iter()
+                    .zip(cells)
+                    .any(|(previous, current)| !Arc::ptr_eq(previous, current))
+        }) {
+            self.presented_cells = Some(Arc::from(cells));
+        }
         self.normalize_selection(cells);
         if resized {
             self.reveal_copy_context(cells);
