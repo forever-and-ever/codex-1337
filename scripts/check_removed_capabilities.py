@@ -90,19 +90,16 @@ def main() -> int:
                         match := IMPORT_REFERENCE.search(line)
                     ):
                         failures.append(f"{name}:{number}: import reference {match[0]}")
-            elif path.name == "Cargo.toml":
-                config = tomllib.loads(path.read_text())
-                for section in (config, config.get("workspace", {})):
-                    for key in (
-                        "dependencies",
-                        "dev-dependencies",
-                        "build-dependencies",
-                    ):
-                        if "codex-external-agent-migration" in section.get(key, {}):
-                            failures.append(f"{name}: import crate dependency restored")
+            elif path.name == "Cargo.toml" and re.search(
+                r"codex-external-agent-migration|path\s*=\s*[\"'][^\"']*external-agent-migration",
+                path.read_text(),
+            ):
+                failures.append(f"{name}: import crate dependency restored")
     workspace = tomllib.loads((ROOT / "codex-rs/Cargo.toml").read_text())["workspace"]
     if "external-agent-migration" in workspace["members"]:
         failures.append("import crate restored to workspace")
+    if "external-agent-migration" not in workspace.get("exclude", []):
+        failures.append("import crate must stay excluded from workspace")
     if "codex-external-agent-migration" in (ROOT / "codex-rs/Cargo.lock").read_text():
         failures.append("import crate restored to Cargo.lock")
     features = (ROOT / "codex-rs/features/src/lib.rs").read_text()
