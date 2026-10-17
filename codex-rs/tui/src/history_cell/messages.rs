@@ -423,7 +423,7 @@ impl HistoryCell for ReasoningSummaryCell {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct AgentMessageCell {
     lines: Vec<HyperlinkLine>,
     is_first_line: bool,
@@ -516,6 +516,24 @@ pub(crate) struct AgentMarkdownCell {
     inline_visualization_context: Option<crate::inline_visualization::InlineVisualizationContext>,
     rendered_lines: Option<MarkdownRenderCache>,
     spoken_artifacts: bool,
+}
+
+impl Clone for AgentMarkdownCell {
+    fn clone(&self) -> Self {
+        Self {
+            timestamp: self.timestamp,
+            item_id: self.item_id.clone(),
+            markdown_source: self.markdown_source.clone(),
+            copy_source: self.copy_source.clone(),
+            cwd: self.cwd.clone(),
+            inline_visualization_context: self.inline_visualization_context.clone(),
+            rendered_lines: self
+                .rendered_lines
+                .as_ref()
+                .map(|_| MarkdownRenderCache::default()),
+            spoken_artifacts: self.spoken_artifacts,
+        }
+    }
 }
 
 impl AgentMarkdownCell {
@@ -697,7 +715,7 @@ mod tests;
 /// During streaming, lines that have not yet been committed to scrollback because they belong to
 /// an in-progress table are displayed via this cell in the `active_cell` slot. It is replaced on
 /// deltas that change the visible tail or retained source, and cleared when the stream finalizes.
-#[derive(Debug, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub(crate) struct StreamingAgentTailCell {
     lines: Vec<HyperlinkLine>,
     is_first_line: bool,

@@ -253,6 +253,41 @@ pub(super) struct Header {
     pub(super) spacious: bool,
 }
 
+pub(super) struct HeaderPreparation {
+    feed: FeedIndex,
+    cells: Vec<Arc<dyn HistoryCell>>,
+    header: Header,
+    bills: StepBills,
+}
+
+impl HeaderPreparation {
+    pub(super) fn sources(&self) -> impl Iterator<Item = &dyn HistoryCell> {
+        self.cells.iter().map(AsRef::as_ref)
+    }
+
+    pub(super) fn render(
+        &self,
+        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
+        expanded: &HashSet<String>,
+        mode: OutputMode,
+        invocations: &super::invocation::Invocations,
+        full: bool,
+        width: u16,
+    ) -> HeaderRows {
+        self.feed.header_rows(
+            &self.cells,
+            &self.header,
+            &self.bills,
+            output_tokens,
+            expanded,
+            mode,
+            invocations,
+            full,
+            width,
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HeaderDisclosure {
     FixedOpen,
@@ -298,6 +333,61 @@ impl Seat {
 }
 
 impl FeedIndex {
+    pub(super) fn prepare_header(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        header: &Header,
+        bills: &StepBills,
+    ) -> HeaderPreparation {
+        let item = &self.items[header.item];
+        let mut sources = Vec::new();
+        let mut remap = |index: usize| {
+            let next = sources.len();
+            sources.push(Arc::clone(&cells[index]));
+            next
+        };
+        let mut header = header.clone();
+        header.item = 0;
+        header.scope = header.scope.iter().map(|index| remap(*index)).collect();
+        header.title = match header.title {
+            Title::Owned(index) => Title::Owned(remap(index)),
+            Title::Borrowed(index) => Title::Borrowed(remap(index)),
+            title => title,
+        };
+        let mut billed_steps = item.steps.clone();
+        if let Kind::User {
+            admitted: Some((step, _)),
+        } = &item.kind
+        {
+            billed_steps.push(step.clone());
+        }
+        billed_steps.extend(sources.iter().filter_map(|cell| {
+            cell.as_any()
+                .downcast_ref::<ArrivalCell>()
+                .map(|arrival| arrival.response_id().to_owned())
+        }));
+        HeaderPreparation {
+            feed: FeedIndex {
+                items: vec![Item {
+                    kind: item.kind.clone(),
+                    fold: item.fold.clone(),
+                    fold_mark: item.fold_mark.clone(),
+                    steps: item.steps.clone(),
+                    segments: Vec::new(),
+                }],
+                placed_users: item
+                    .steps
+                    .iter()
+                    .filter_map(|id| self.placed_users.get(id).map(|count| (id.clone(), *count)))
+                    .collect(),
+                ..Self::default()
+            },
+            cells: sources,
+            header,
+            bills: bills.subset(&billed_steps),
+        }
+    }
+
     /// Whether the index still describes these cells and bills.
     fn verify(
         &mut self,

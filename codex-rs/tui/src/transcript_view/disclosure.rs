@@ -102,6 +102,15 @@ impl TranscriptView {
     }
 
     pub(super) fn activity_ids(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Vec<String> {
+        if self.layout_source == super::presented::LayoutSource::Presented {
+            if self.presented_cells.is_none() {
+                return Vec::new();
+            }
+            let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
+            if let Some(visible) = self.visible.iter().find(|visible| visible.key == key) {
+                return visible.activity_ids.to_vec();
+            }
+        }
         let Some(cell) = cells.get(index) else {
             return self.disclosure.live_ids.clone();
         };
@@ -126,6 +135,11 @@ impl TranscriptView {
         self.snapshot()
             .and_then(|snapshot| snapshot.activities.get(&key))
             .cloned()
+            .or_else(|| {
+                (key == EntryKey::Live)
+                    .then(|| self.live_preparation.activity_ids())
+                    .flatten()
+            })
             .unwrap_or_else(|| self.activity_ids(cells, index).into())
     }
 
@@ -218,6 +232,10 @@ impl TranscriptView {
                     if !self.activity_ids(cells, index).is_empty()
                         && self.focus_activity(cells, index)
                     {
+                        break;
+                    }
+                    if self.cache.waiting {
+                        self.deferred_focus = Some(key);
                         break;
                     }
                 }
@@ -341,7 +359,7 @@ impl TranscriptView {
         })
     }
 
-    fn canonical_fold_index(
+    pub(super) fn canonical_fold_index(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
         ids: &[String],
@@ -355,6 +373,9 @@ impl TranscriptView {
                     .is_some_and(|layout| layout.fold_position(target).is_some()))
         {
             return Some(candidate);
+        }
+        if self.cache.waiting {
+            return None;
         }
         // A historical group can split across pages. Resolve its part, not the first shared ID.
         (0..=cells.len()).find(|index| {

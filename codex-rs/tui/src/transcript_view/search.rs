@@ -332,8 +332,10 @@ impl TranscriptView {
             return;
         }
         self.rewrap_snapshot(width);
-        if let Some(found) = &mut self.search.current {
-            found.layout = Arc::new(found.layout.rewrap(width));
+        if let Some(found) = &mut self.search.current
+            && let Some(layout) = self.cache.rewrap(&found.layout, width, false)
+        {
+            found.layout = layout;
         }
         self.area.width = width;
         if self.search.current.is_none()
@@ -377,7 +379,9 @@ impl TranscriptView {
             };
             cursor.anchor.index = self.resolve(cells, cursor.anchor);
             let Some(layout) = self.search_layout(cells, cursor.anchor) else {
-                self.advance_search_cursor(cells, cursor, 0..0, /*text_len*/ 0);
+                if !self.cache.waiting {
+                    self.advance_search_cursor(cells, cursor, 0..0, /*text_len*/ 0);
+                }
                 return false;
             };
             let text = layout.text();

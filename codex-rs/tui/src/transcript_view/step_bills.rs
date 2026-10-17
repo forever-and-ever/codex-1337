@@ -15,7 +15,7 @@ use codex_protocol::step_admission::AdmissionPrecision;
 use codex_protocol::step_admission::ArrivalKind;
 use std::collections::HashMap;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct StepBills {
     by_response: HashMap<String, StepAdmissionItem>,
     response_by_call: HashMap<String, String>,
@@ -68,6 +68,20 @@ pub(super) enum Total {
 }
 
 impl StepBills {
+    pub(super) fn subset(&self, ids: &[String]) -> Self {
+        Self {
+            by_response: ids
+                .iter()
+                .filter_map(|id| {
+                    self.by_response
+                        .get(id)
+                        .map(|step| (id.clone(), step.clone()))
+                })
+                .collect(),
+            ..Self::default()
+        }
+    }
+
     /// Advances whenever a record changes, so derived presentation can tell it is stale.
     pub(super) fn revision(&self) -> u64 {
         self.revision
