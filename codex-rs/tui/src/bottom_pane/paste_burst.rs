@@ -1,4 +1,8 @@
-//! Paste-burst detection for terminals without bracketed paste.
+//! Paste-burst detection for terminals without confirmed bracketed paste.
+//!
+//! Startup queries mode 2004 after enabling bracketed paste. Confirmed terminals bypass this
+//! detector; missing or negative replies retain it. Configuration can force the bypass, not the hold.
+//! Keystroke-injected text on a confirming terminal is outside this detector's contract.
 //!
 //! On some platforms (notably Windows), pastes often arrive as a rapid stream of
 //! `KeyCode::Char`, `KeyCode::Enter`, and `KeyCode::Tab` key events rather than as a single "paste" event.

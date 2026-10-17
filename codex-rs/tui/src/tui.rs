@@ -513,6 +513,7 @@ pub(crate) fn init() -> Result<InitializedTerminal> {
                 crate::terminal_probe::StartupProbe {
                     cursor_position: None,
                     default_colors: None,
+                    bracketed_paste: None,
                     keyboard_enhancement_supported: None,
                     terminal_app_over_ssh: None,
                 }

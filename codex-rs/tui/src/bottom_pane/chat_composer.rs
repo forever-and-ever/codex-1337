@@ -264,7 +264,9 @@
 //! editor's pending burst can otherwise keep the shared draw loop waiting indefinitely.
 //!
 //! Submission flushes expired characters and buffers before classifying Enter, independent of
-//! UI flush ticks. `disable_paste_burst` bypasses detection; setting it flushes and clears in-flight state.
+//! UI flush ticks. `disable_paste_burst = true` or startup confirmation of bracketed paste bypasses
+//! detection; enabling the bypass flushes and clears in-flight state. False or absent uses terminal
+//! auto detection. Keystroke-injected pastes on confirming terminals have no forced-hold override.
 //! Mouse edits flush pending typing; selection and copy behavior lives in [`mouse`]. Confirmed
 //! copies clear the selection while preserving the draft and cursor.
 //!
