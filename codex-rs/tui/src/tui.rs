@@ -1576,6 +1576,11 @@ impl Tui {
     }
 
     fn pending_viewport_area(&mut self, screen_size: Size) -> Result<Option<Rect>> {
+        // The cursor heuristic re-anchors an inline viewport. An owned screen is the whole
+        // terminal, so a resize there must not cost a synchronous cursor-position round trip.
+        if self.owned_screen {
+            return Ok(None);
+        }
         let terminal = &mut self.terminal;
         let last_known_screen_size = terminal.last_known_screen_size;
         if screen_size != last_known_screen_size
