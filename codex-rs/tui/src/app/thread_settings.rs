@@ -21,10 +21,6 @@ use codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::MODEL_SPECIALTY_CYBER;
 
-
-
-
-
 impl App {
     pub(super) async fn sync_active_thread_model_setting(
         &mut self,
@@ -197,7 +193,7 @@ impl App {
                 app_server,
                 thread_id,
                 super::turn_submissions::ServerOperation::Mutation(
-                    super::turn_submissions::ThreadMutation::Settings(params),
+                    super::turn_submissions::ThreadMutation::Settings(Box::new(params)),
                 ),
             );
         }

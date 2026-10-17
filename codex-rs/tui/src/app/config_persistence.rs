@@ -965,7 +965,7 @@ impl App {
         if let Err(err) = self
             .chat_widget
             .set_permission_profile_from_session_snapshot(PermissionProfileSnapshot::active(
-                permission_profile.clone(),
+                permission_profile,
                 auto_review_preset.active_permission_profile.clone(),
             ))
         {

@@ -584,15 +584,11 @@ impl ChatWidget {
         }
 
         if render_in_history {
-            if !render_before_submit {
-                self.on_identified_user_message_display(
-                    user_message_display_for_history(submitted_message, &history_record),
-                    crate::prompt_order::UserPromptIdentity {
-                        client_id: Some(client_user_message_id.clone()),
-                        source_response_item_id: None,
-                    },
+            self.on_submitted_user_message_display(
+                submitted_message,
+                &history_record,
+                (!render_before_submit).then_some(client_user_message_id.as_str()),
                 );
-            }
         }
 
         if render_in_history {

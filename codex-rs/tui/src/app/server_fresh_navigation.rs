@@ -1,11 +1,11 @@
 //! Fresh acquisition retains the unsent initial draft independently of subscription custody.
 
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::app_server_session::session_preparation::{
     PreparedSession, StartPreparation, SubscriptionCustody, ThreadStartChoice,
 };
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use crate::local_settings::LocalSettings;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -31,9 +31,9 @@ pub(super) struct FreshReady {
 }
 
 pub(super) enum FreshStage {
-    Admitted(FreshInput),
+    Admitted(Box<FreshInput>),
     Defaults {
-        input: FreshInput,
+        input: Box<FreshInput>,
     },
     Starting(Box<FreshContext>),
     Naming(Box<FreshReady>),
@@ -69,7 +69,7 @@ enum FreshOutcome {
             String,
         >,
     ),
-    Started(PreparedSession),
+    Started(Box<PreparedSession>),
     Named(Result<String, String>),
     Detached(detach::DetachReceipt),
     Terminated,
@@ -80,7 +80,7 @@ enum FreshEffect {
         cwd: PathBuf,
         config: Box<super::navigation_config::ConfigRebuild>,
     },
-    Start(StartPreparation),
+    Start(Box<StartPreparation>),
     Name {
         thread_id: ThreadId,
         name: String,
@@ -139,13 +139,13 @@ impl App {
                 });
         self.enqueue_navigation(
             server,
-            NavigationIntent::Fresh(FreshStage::Admitted(FreshInput {
+            NavigationIntent::Fresh(FreshStage::Admitted(Box::new(FreshInput {
                 origin,
                 message,
                 source,
                 name,
                 provider,
-            })),
+            }))),
         );
     }
 
@@ -237,18 +237,19 @@ impl App {
                         };
                         FreshOutcome::Defaults(result)
                     }
-                    FreshEffect::Start(plan) => FreshOutcome::Started(plan.run().await),
+                    FreshEffect::Start(plan) => FreshOutcome::Started(Box::new(plan.run().await)),
                     FreshEffect::Name { thread_id, name } => {
                         let result = tokio::time::timeout(
                             ACK_TIMEOUT,
-                            handle.thread_allocate_name(api::RequestId::String(format!(
-                                        "tui-operation-{id}-name"
-                                    )), api::ThreadSetNameParams {
-                                        thread_id: thread_id.to_string(),
-                                        name: name.clone(),
-                                        naming_mode: Some(api::ThreadNameMode::Explicit),
-                                        conflict_thread_ids: None,
-                                    }),
+                            handle.thread_allocate_name(
+                                api::RequestId::String(format!("tui-operation-{id}-name")),
+                                api::ThreadSetNameParams {
+                                    thread_id: thread_id.to_string(),
+                                    name: name.clone(),
+                                    naming_mode: Some(api::ThreadNameMode::Explicit),
+                                    conflict_thread_ids: None,
+                                },
+                            ),
                         )
                         .await
                         .map_err(|_| {
@@ -275,13 +276,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(FreshOutcome::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Fresh(FreshReceipt { handle, outcome }),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Fresh(FreshReceipt { handle, outcome }),
+                },
+            )));
         })));
     }
 
@@ -401,16 +404,16 @@ impl App {
                     config.service_tier = Some("default".into());
                     ThreadStartChoice::Provider(choice.provider.id.clone())
                 } else {
-                    ThreadStartChoice::Configured(input.source.clone())
+                    ThreadStartChoice::Configured(input.source)
                 };
                 let plan = server.prepare_start_thread(&self.local_settings, &config, choice);
                 operation.intent =
                     NavigationIntent::Fresh(FreshStage::Starting(Box::new(FreshContext {
-                        input,
+                        input: *input,
                         config,
                         settings,
                     })));
-                self.spawn_fresh_effect(&mut operation, handle, FreshEffect::Start(plan));
+                self.spawn_fresh_effect(&mut operation, handle, FreshEffect::Start(Box::new(plan)));
                 self.server_operations.navigation.current = Some(operation);
             }
             (FreshStage::Starting(mut context), FreshOutcome::Started(prepared)) => {
@@ -418,41 +421,44 @@ impl App {
                     result,
                     custody,
                     observations,
-                } = prepared;
+                } = *prepared;
                 if same_epoch {
                     server.apply_session_observations(observations);
                 }
-                if !matching || result.is_err() {
-                    self.recover_fresh_input(&mut context.input);
-                    if matching && let Err(error) = &result {
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to start a fresh session through the app server: {error}"
-                        ));
-                    }
-                    match custody {
-                        SubscriptionCustody::Subscribed(thread_id) => self
-                            .start_navigation_cleanup(
-                                operation,
-                                handle,
-                                thread_id,
-                                Vec::new(),
-                                CleanupContinuation::Done,
-                                false,
-                            ),
-                        SubscriptionCustody::NewThreadUncertain
-                        | SubscriptionCustody::Uncertain(_)
-                            if same_epoch =>
-                        {
-                            self.chat_widget.add_error_message("New conversation acquisition outcome is unknown. No start was retried. Close and reopen this TUI to resynchronize; the earlier request may still complete.".into());
-                            self.retain_navigation_uncertainty(operation, Vec::new(), false);
+                let started = match result {
+                    Ok(started) if matching => started,
+                    result => {
+                        self.recover_fresh_input(&mut context.input);
+                        if matching && let Err(error) = &result {
+                            self.chat_widget.add_error_message(format!(
+                                "Failed to start a fresh session through the app server: {error}"
+                            ));
                         }
-                        _ => {}
+                        match custody {
+                            SubscriptionCustody::Subscribed(thread_id) => self
+                                .start_navigation_cleanup(
+                                    operation,
+                                    handle,
+                                    thread_id,
+                                    Vec::new(),
+                                    CleanupContinuation::Done,
+                                    false,
+                                ),
+                            SubscriptionCustody::NewThreadUncertain
+                            | SubscriptionCustody::Uncertain(_)
+                                if same_epoch =>
+                            {
+                                self.chat_widget.add_error_message("New conversation acquisition outcome is unknown. No start was retried. Close and reopen this TUI to resynchronize; the earlier request may still complete.".into());
+                                self.retain_navigation_uncertainty(operation, Vec::new(), false);
+                            }
+                            _ => {}
+                        }
+                        return Ok(());
                     }
-                    return Ok(());
-                }
+                };
                 let ready = Box::new(FreshReady {
                     context: *context,
-                    started: result.expect("successful fresh preparation"),
+                    started,
                     name_error: None,
                 });
                 if let Some(name) = ready.context.input.name.clone() {

@@ -36,6 +36,10 @@ pub(super) struct DirectoryInput {
 }
 
 impl DirectoryInput {
+    #[expect(
+        clippy::expect_used,
+        reason = "Directory replacement is admitted only from a thread origin."
+    )]
     fn thread_id(&self) -> ThreadId {
         self.origin
             .thread_id()
@@ -141,7 +145,7 @@ enum DirectoryEffect {
         ids: Vec<ThreadId>,
         target: AppServerTarget,
     },
-    Acquire(Acquisition),
+    Acquire(Box<Acquisition>),
     Detach(detach::DetachPlan),
     Hooks(PathBuf),
 }
@@ -308,12 +312,10 @@ impl App {
                         }
                         .await,
                     ),
-                    DirectoryEffect::Acquire(Acquisition::Start(plan)) => {
-                        DirectoryOutcome::Acquired(plan.run().await)
-                    }
-                    DirectoryEffect::Acquire(Acquisition::Fork(plan)) => {
-                        DirectoryOutcome::Acquired(plan.run().await)
-                    }
+                    DirectoryEffect::Acquire(plan) => match *plan {
+                        Acquisition::Start(plan) => DirectoryOutcome::Acquired(plan.run().await),
+                        Acquisition::Fork(plan) => DirectoryOutcome::Acquired(plan.run().await),
+                    },
                     DirectoryEffect::Detach(mut plan) => DirectoryOutcome::Detached(
                         match tokio::time::timeout(ACK_TIMEOUT, async {
                             let primary = detach::DetachPlan {
@@ -348,13 +350,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(DirectoryOutcome::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Directory(DirectoryReceipt { handle, outcome }),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Directory(DirectoryReceipt { handle, outcome }),
+                },
+            )));
         })));
     }
 
@@ -494,10 +498,7 @@ impl App {
             return Err("Requested permission policy cannot be preserved by /cd.".into());
         }
         let local_settings = self.local_settings.reloaded(&config);
-        let keymap = match RuntimeKeymap::from_config(&local_settings.tui.keymap) {
-            Ok(keymap) => keymap,
-            Err(error) => return Err(error),
-        };
+        let keymap = RuntimeKeymap::from_config(&local_settings.tui.keymap)?;
         config.service_tier = self.chat_widget.configured_service_tier();
 
         Ok(DirectoryReady {
@@ -659,7 +660,7 @@ impl App {
             operation,
             server.request_handle(),
             DirectoryStage::Acquiring(ready),
-            DirectoryEffect::Acquire(effect),
+            DirectoryEffect::Acquire(Box::new(effect)),
         ));
     }
 

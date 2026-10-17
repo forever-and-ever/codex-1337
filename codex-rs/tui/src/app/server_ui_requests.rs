@@ -44,6 +44,10 @@ struct Completion<T> {
 }
 
 impl<T: Send + 'static> Completion<T> {
+    #[expect(
+        clippy::expect_used,
+        reason = "Each continuation completes once; a poisoned owner is an unrecoverable earlier panic."
+    )]
     fn finish(
         &self,
         app: &mut App,
@@ -104,6 +108,10 @@ where
     Fut: Future<Output = Result<T, TypedRequestError>> + Send + 'static,
     T: Send + 'static,
 {
+    #[expect(
+        clippy::expect_used,
+        reason = "A poisoned request owner indicates an earlier panic; its preparation cannot safely resume."
+    )]
     fn prepare(&self, app: &mut App, server: &AppServerSession) {
         let mut state = self.request.lock().expect("UI request owner poisoned");
         let RequestState::Waiting(prepare) = std::mem::replace(&mut *state, RequestState::Sent)
@@ -113,6 +121,10 @@ where
         *state = RequestState::Prepared(prepare(app, server));
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Dispatch follows preparation; a poisoned request owner is an unrecoverable earlier panic."
+    )]
     fn start(
         &self,
         handle: AppServerRequestHandle,
@@ -185,6 +197,10 @@ impl UiReply {
         Self(SyncMutex::new(Some(Box::new(LocalReply(apply)))))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A poisoned reply owner is an unrecoverable earlier panic."
+    )]
     pub(in crate::app) fn apply(self, app: &mut App, server: &mut AppServerSession) -> Result<()> {
         match self.0.into_inner().expect("UI reply owner poisoned") {
             Some(reply) => reply.apply(app, server),

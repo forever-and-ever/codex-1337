@@ -548,11 +548,8 @@ impl App {
                 return Ok(false);
             }
         }
-        if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release) {
-            if self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event) {
-                tui.frame_requester().schedule_frame();
+        if self.handle_live_work_key_event(tui, event) {
                 return Ok(true);
-            }
         }
         if matches!(event, TuiEvent::Key(_))
             || matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind, MouseEventKind::Down(_)))

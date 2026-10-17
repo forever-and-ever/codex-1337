@@ -1,9 +1,28 @@
-use super::{ChatWidget, UserMessageDisplay};
+use super::user_messages::user_message_display_for_history;
+use super::{ChatWidget, UserMessage, UserMessageDisplay, UserMessageHistoryRecord};
 use crate::app_event::AppEvent;
 use crate::history_cell;
 use crate::prompt_order::UserPromptIdentity;
 
 impl ChatWidget {
+    pub(super) fn on_submitted_user_message_display(
+        &mut self,
+        message: UserMessage,
+        history: &UserMessageHistoryRecord,
+        client_id: Option<&str>,
+    ) {
+        let Some(client_id) = client_id else {
+            return;
+        };
+        self.on_identified_user_message_display(
+            user_message_display_for_history(message, history),
+            UserPromptIdentity {
+                client_id: Some(client_id.to_owned()),
+                source_response_item_id: None,
+            },
+        );
+    }
+
     pub(super) fn on_identified_user_message_display(
         &mut self,
         display: UserMessageDisplay,

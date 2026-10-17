@@ -1,8 +1,8 @@
 //! Destructive task actions retain the connection barrier through reconciliation and presentation.
 
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use crate::app_event::AgentsOverviewAction;
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_app_server_protocol::SessionSource;
@@ -117,14 +117,22 @@ async fn belongs_to(
     if thread_id == root {
         return Ok(true);
     }
-    let response: api::ThreadReadResponse = handle.thread_read(api::RequestId::String(format!("tui-removal-{id}-read-{thread_id}")), api::ThreadReadParams {
+    let response: api::ThreadReadResponse = handle
+        .thread_read(
+            api::RequestId::String(format!("tui-removal-{id}-read-{thread_id}")),
+            api::ThreadReadParams {
                 thread_id: thread_id.to_string(),
                 include_turns: false,
-            })
+            },
+        )
         .await?;
     Ok(response.thread.session_id == root.to_string())
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "Removal reconciliation is constructed with the affected primary thread."
+)]
 pub(super) async fn send(
     handle: AppServerRequestHandle,
     id: Uuid,
@@ -195,10 +203,14 @@ pub(super) async fn send(
                 .expect("reconciliation has an affected primary");
             let mut cursor = None;
             let loaded = loop {
-                let page: api::ThreadLoadedListResponse = handle.thread_loaded_list(api::RequestId::String(format!("tui-removal-{id}-loaded")), api::ThreadLoadedListParams {
+                let page: api::ThreadLoadedListResponse = handle
+                    .thread_loaded_list(
+                        api::RequestId::String(format!("tui-removal-{id}-loaded")),
+                        api::ThreadLoadedListParams {
                             cursor,
                             limit: None,
-                        })
+                        },
+                    )
                     .await?;
                 if page.data.contains(&primary.to_string()) {
                     break true;
@@ -352,6 +364,10 @@ impl App {
         plan
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The matching removal completion exclusively owns the connection lane."
+    )]
     pub(super) async fn finish_removal_completion(
         &mut self,
         tui: &mut tui::Tui,

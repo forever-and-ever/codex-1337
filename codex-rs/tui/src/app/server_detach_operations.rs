@@ -1,7 +1,7 @@
 //! Subscription detachment is not runtime shutdown. A plan retains each local store it owns.
 
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 
@@ -124,6 +124,10 @@ pub(super) async fn send(
 }
 
 impl App {
+    #[expect(
+        clippy::needless_collect,
+        reason = "Snapshot side identifiers before mutably borrowing App to prepare their detachment."
+    )]
     pub(in crate::app) async fn prepare_detach_plan(&mut self, scope: DetachScope) -> DetachPlan {
         let destination = match scope {
             DetachScope::Navigation { destination } => destination,
@@ -192,6 +196,10 @@ impl App {
         DetachPlan { targets, voice }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The target channel was checked against the detach receipt before mutation."
+    )]
     pub(in crate::app) async fn finish_detach_plan(
         &mut self,
         plan: &DetachPlan,

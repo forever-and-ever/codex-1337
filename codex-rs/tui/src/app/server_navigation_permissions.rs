@@ -3,7 +3,7 @@ use super::*;
 #[derive(Clone)]
 pub(super) enum PermissionAuthority {
     Configured {
-        profile: RuntimePermissionProfileOverride,
+        profile: Box<RuntimePermissionProfileOverride>,
         approval_policy: AskForApproval,
         approvals_reviewer: ApprovalsReviewer,
     },
@@ -15,7 +15,7 @@ impl PermissionAuthority {
         match selected {
             Some(selected) => Self::Selected(selected),
             None => Self::Configured {
-                profile: RuntimePermissionProfileOverride::from_config(config),
+                profile: Box::new(RuntimePermissionProfileOverride::from_config(config)),
                 approval_policy: config.permissions.approval_policy.value().into(),
                 approvals_reviewer: config.approvals_reviewer,
             },

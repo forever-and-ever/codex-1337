@@ -1,7 +1,7 @@
 //! Typed requests and receipts for the non-turn branches of the ordered operation ledger.
 
-use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 
@@ -23,7 +23,7 @@ pub(in crate::app) enum ThreadMutation {
     CleanBackgroundTerminals,
     DisarmAlarm(String),
     ServerShell(String),
-    Settings(api::ThreadSettingsUpdateParams),
+    Settings(Box<api::ThreadSettingsUpdateParams>),
     GuardianApproval(serde_json::Value),
     UiRequest(super::ui_requests::UiRequest),
 }
@@ -54,7 +54,7 @@ pub(in crate::app) enum ConnectionMutation {
 pub(in crate::app) enum ServerRequestDelivery {
     Resolved {
         resolution: super::super::app_server_requests::AppServerRequestResolution,
-        command: AppCommand,
+        command: Box<AppCommand>,
     },
     DynamicTool(super::super::app_server_requests::AppServerRequestResolution),
     Rejected {
@@ -283,8 +283,8 @@ pub(super) async fn send(
             }
             ThreadMutation::Rename(params) => {
                 let name = params.name.clone();
-                let response: api::ThreadSetNameResponse = handle.thread_set_name(request_id, params)
-                    .await?;
+                let response: api::ThreadSetNameResponse =
+                    handle.thread_set_name(request_id, params).await?;
                 Ok(OperationReceipt::Renamed(
                     response.thread_name.unwrap_or(name),
                 ))
@@ -341,7 +341,7 @@ pub(super) async fn send(
                 Ok(OperationReceipt::ServerShellFinished)
             }
             ThreadMutation::Settings(params) => {
-                match handle.thread_settings_update(request_id, params).await {
+                match handle.thread_settings_update(request_id, *params).await {
                     Ok(true) => Ok(OperationReceipt::SettingsUpdated),
                     Ok(false) => Ok(OperationReceipt::SettingsUnsupported),
                     Err(error) => Err(error),
@@ -421,7 +421,7 @@ impl App {
             OperationReceipt::ServerRequestDelivered => {
                 if let ServerOperation::Response(delivery) = operation
                     && let ServerRequestDelivery::Resolved { command, .. } = &**delivery
-                    && ThreadEventStore::op_can_change_pending_replay_state(command)
+                    && ThreadEventStore::op_can_change_pending_replay_state(command.as_ref())
                 {
                     self.note_thread_outbound_op(thread_id, command).await;
                     self.refresh_pending_thread_approvals().await;
@@ -601,13 +601,11 @@ impl App {
             self.add_agents_overview_error(message);
             return;
         }
-        if thread_id.is_none() || self.chat_widget.thread_id() == thread_id {
-            self.chat_widget.add_error_message(message);
+        if let Some(thread_id) = thread_id.filter(|id| self.chat_widget.thread_id() != Some(*id)) {
+            self.chat_widget
+                .add_error_message(format!("Conversation {thread_id}: {message}"));
         } else {
-            self.chat_widget.add_error_message(format!(
-                "Conversation {}: {message}",
-                thread_id.expect("noncurrent thread origin")
-            ));
+            self.chat_widget.add_error_message(message);
         }
     }
 }

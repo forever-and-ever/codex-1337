@@ -47,8 +47,8 @@ pub(in crate::app) use control::GoalStop;
 
 #[derive(Debug)]
 pub(in crate::app) enum ServerCompletion {
-    Request(ControlCompletion),
-    Navigation(navigation::NavigationCompletion),
+    Request(Box<ControlCompletion>),
+    Navigation(Box<navigation::NavigationCompletion>),
     RecoverDraft(LocalDraftRecovery),
 }
 
@@ -457,7 +457,7 @@ pub(super) enum SubmissionReceipt {
     },
     Cancelled(bool),
     Deferred(String),
-    Continued(codex_app_server_protocol::Turn),
+    Continued(Box<codex_app_server_protocol::Turn>),
 }
 
 #[derive(Debug)]
@@ -561,6 +561,10 @@ impl PendingSubmission {
 }
 
 impl ServerOperations {
+    #[expect(
+        clippy::expect_used,
+        reason = "The selected lane and queued entry cannot change before synchronous removal."
+    )]
     fn take_unsent(
         &mut self,
         thread_id: ThreadId,

@@ -587,6 +587,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/agents_overview_new/admission.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/backend_banner_fallback/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/history_pagination/failed_turns.rs` — `fast-ui-thread`: preserve failed-turn cells across prepared history replacement.
 - `codex-rs/tui/src/app/app_server_thread_ownership/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/config_persistence/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/daybreak/continuations.rs`: fast-ui-thread

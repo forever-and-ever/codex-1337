@@ -279,6 +279,10 @@ impl App {
             SubmissionRequest::Operation(Box::new(operation)),
         );
     }
+    #[expect(
+        clippy::expect_used,
+        reason = "The operation sequence cannot exhaust u64 within one frontend lifetime."
+    )]
     fn enqueue_origin_submission(
         &mut self,
         server: &AppServerSession,
@@ -335,6 +339,10 @@ impl App {
         self.refresh_submission_preview();
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The selected queued lane remains owned until it is removed for dispatch."
+    )]
     pub(in crate::app) fn drive_server_operations(&mut self, server: &AppServerSession) {
         let barrier = self
             .server_operations
@@ -449,12 +457,14 @@ impl App {
                 worker::send(handle, request, origin).await
             };
             if urgent {
-                let _ = control_completions.send(ServerCompletion::Request(ControlCompletion {
-                    scope,
-                    id,
-                    epoch,
-                    outcome,
-                }));
+                let _ = control_completions.send(ServerCompletion::Request(Box::new(
+                    ControlCompletion {
+                        scope,
+                        id,
+                        epoch,
+                        outcome,
+                    },
+                )));
                 return;
             }
             let OperationScope::Thread(thread_id) = scope else {
@@ -465,7 +475,7 @@ impl App {
                     thread_id,
                     id,
                     epoch,
-                    outcome,
+                    outcome: Box::new(outcome),
                 })
                 .await;
         }));
@@ -538,6 +548,10 @@ impl App {
         .await
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The connection epoch cannot exhaust u64 within one frontend lifetime."
+    )]
     pub(in crate::app) async fn handle_submission_event(
         &mut self,
         server: &AppServerSession,
@@ -686,7 +700,7 @@ impl App {
                 Ok(AppRunControl::Continue)
             }
             ServerCompletion::Request(completion) if self.owns_removal_completion(&completion) => {
-                self.finish_removal_completion(tui, server, completion)
+                self.finish_removal_completion(tui, server, *completion)
                     .await
             }
             ServerCompletion::Request(completion) => {
@@ -704,12 +718,16 @@ impl App {
                 Ok(control)
             }
             ServerCompletion::Navigation(completion) => {
-                self.finish_navigation_operation(tui, server, completion)
+                self.finish_navigation_operation(tui, server, *completion)
                     .await
             }
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The completion owns its lane, and accepted user turns retain their client identity."
+    )]
     pub(in crate::app) async fn finish_submission(
         &mut self,
         server: &mut AppServerSession,
@@ -1055,7 +1073,7 @@ impl App {
                         None
                     }
                     Ok(SubmissionReceipt::Continued(turn)) => {
-                        self.finish_misalignment_continuation(thread_id, &active, turn).await;
+                        self.finish_misalignment_continuation(thread_id, &active, *turn).await;
                         None
                     }
                     Ok(SubmissionReceipt::Steered) => None,

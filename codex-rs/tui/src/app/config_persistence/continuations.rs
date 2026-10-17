@@ -276,7 +276,7 @@ impl App {
                                 permissions: active_permission_profile_override.as_ref().map(|profile| profile.id.clone()),
                                 ..Default::default()
                             };
-                            app.enqueue_server_operation(server, thread_id, super::super::turn_submissions::ServerOperation::Mutation(super::super::turn_submissions::ThreadMutation::Settings(params)));
+                            app.enqueue_server_operation(server, thread_id, super::super::turn_submissions::ServerOperation::Mutation(super::super::turn_submissions::ThreadMutation::Settings(Box::new(params))));
                         }
                         app.chat_widget.add_info_message("Experimental features saved. Runtime changes still target the original conversation.".into(), None);
                         return Ok(());
@@ -340,12 +340,12 @@ impl App {
                         app.runtime_permission_profile_override =
                             Some(RuntimePermissionProfileOverride::from_config(&app.config));
                     }
-    
+
                     if approval_policy_override.is_some()
                         || approvals_reviewer_override.is_some()
                         || permission_profile_override.is_some()
                     {
-    
+
                         // This uses `OverrideTurnContext` intentionally: toggling the
                         // experiment should update the active thread's effective approval
                         // settings immediately, just like a `/permissions` selection. Without
@@ -365,7 +365,7 @@ impl App {
                         );
                         app.submit_permission_runtime_update(server, op);
                     }
-    
+
                     if let Some(label) = permissions_history_label {
                         app.chat_widget.add_info_message(
                             format!("Permissions updated to {label}"),
@@ -562,7 +562,7 @@ impl App {
             server,
             thread_id,
             super::super::turn_submissions::ServerOperation::Mutation(
-                super::super::turn_submissions::ThreadMutation::Settings(params),
+                super::super::turn_submissions::ThreadMutation::Settings(Box::new(params)),
             ),
         );
     }
@@ -599,7 +599,7 @@ impl App {
             server,
             thread_id,
             super::super::turn_submissions::ServerOperation::Mutation(
-                super::super::turn_submissions::ThreadMutation::Settings(params),
+                super::super::turn_submissions::ThreadMutation::Settings(Box::new(params)),
             ),
         );
     }

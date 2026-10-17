@@ -168,6 +168,10 @@ impl NavigationOwner {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The navigation generation cannot exhaust u64 within one frontend lifetime."
+    )]
     pub(super) fn retire_current(&mut self) {
         self.generation = self
             .generation
@@ -331,6 +335,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "App owns the completion receiver throughout local navigation recovery."
+    )]
     pub(in crate::app) async fn drain_local_navigation_recovery(&mut self) {
         let mut retained = Vec::new();
         while let Ok(completion) = self.server_operations.control_rx.try_recv() {
@@ -359,6 +367,10 @@ impl App {
         self.enqueue_navigation(server, NavigationIntent::Picker);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The operation sequence cannot exhaust u64 within one frontend lifetime."
+    )]
     fn enqueue_navigation(&mut self, server: &AppServerSession, intent: NavigationIntent) {
         self.supersede_pending_navigation();
         let order = self.server_operations.next_order;
@@ -474,13 +486,15 @@ impl App {
             .await
             .map_err(|_| "Picker defaults task terminated unexpectedly".to_string())
             .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::PickerDefaults(result),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::PickerDefaults(result),
+                },
+            )));
         })));
         self.server_operations.navigation.current = Some(operation);
     }
@@ -715,13 +729,15 @@ impl App {
             .await
             .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
             .and_then(|result| result.map_err(|error| error.to_string()));
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Picker(result),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Picker(result),
+                },
+            )));
         })));
     }
 
@@ -744,13 +760,15 @@ impl App {
                 }
                 Err(_) => tracing::warn!("superseded picker cleanup task terminated unexpectedly"),
             }
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::PickerClosed,
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::PickerClosed,
+                },
+            )));
         })));
     }
 }

@@ -1568,9 +1568,14 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
     Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CancelTranscriptExport)).await?;
     assert!(app.active_export.is_none());
     assert!(!export_path.exists());
-    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::ExportTranscript {
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::ExportTranscript {
         destination: TranscriptExportDestination::File(export_path.clone()),
-    })).await?;
+        },
+    ))
+    .await?;
     super::super::test_support::settle_frontend_requests(
         &mut app,
         &mut tui,
@@ -2015,7 +2020,7 @@ async fn paginated_resume_and_fork_survive_post_response_hydration_failure() -> 
         let item_ids = retained_turns
             .iter()
             .flat_map(|turn| &turn.items)
-            .map(|item| item.id())
+            .map(codex_app_server_protocol::ThreadItem::id)
             .collect::<Vec<_>>();
         assert!(item_ids.len() >= 120);
         assert_eq!(

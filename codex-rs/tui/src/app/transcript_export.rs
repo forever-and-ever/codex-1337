@@ -31,8 +31,6 @@ use crate::legacy_core::config::Config;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::thread_items_to_transcript_cells;
 
-
-
 #[cfg(test)]
 fn write_transcript(cwd: &Path, requested_path: &Path, markdown: &str) -> Result<PathBuf, String> {
     let (file, path) = continuations::prepare_transcript(cwd, requested_path, markdown)?;
@@ -182,10 +180,9 @@ fn context_export_lines(cell: &dyn HistoryCell) -> Option<Vec<ratatui::text::Lin
             preamble.feed_title(),
             preamble.source_lines(OutputMode::Raw),
         )
-    } else if let Some(arrival) = cell.as_any().downcast_ref::<ArrivalCell>() {
-        (arrival.feed_title(), arrival.source_lines(OutputMode::Raw))
     } else {
-        return None;
+        let arrival = cell.as_any().downcast_ref::<ArrivalCell>()?;
+        (arrival.feed_title(), arrival.source_lines(OutputMode::Raw))
     };
     let mut lines = vec!["[Client annotation]".into(), title];
     let mut previous = None;

@@ -11,6 +11,10 @@ use tokio::sync::mpsc;
 pub(in crate::app) struct ConnectionEpoch(u64);
 
 impl ConnectionEpoch {
+    #[expect(
+        clippy::expect_used,
+        reason = "The connection epoch cannot exhaust u64 within one frontend lifetime."
+    )]
     pub(in crate::app) fn advance(&mut self) {
         self.0 = self.0.checked_add(1).expect("connection epoch exhausted");
     }

@@ -17,7 +17,7 @@ pub(in crate::app) enum VoicePreferenceOperation {
     Confirm {
         cwd: PathBuf,
         voice: RealtimeVoice,
-        write: api::ConfigWriteResponse,
+        write: Box<api::ConfigWriteResponse>,
     },
 }
 
@@ -132,7 +132,7 @@ impl App {
         *preference = VoicePreferenceOperation::Confirm {
             cwd: cwd.clone(),
             voice: *voice,
-            write: write.clone(),
+            write: Box::new(write.clone()),
         };
         true
     }

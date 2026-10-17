@@ -10,6 +10,10 @@ fn source_item_id(cell: &dyn HistoryCell) -> Option<&str> {
 }
 
 impl App {
+    #[expect(
+        clippy::expect_used,
+        reason = "The initial search already located an item matching the same immutable predicate."
+    )]
     pub(super) fn discard_stream_items(&mut self, tui: &mut tui::Tui, item_ids: &[String]) {
         let discarded = |cell: &Arc<dyn HistoryCell>| {
             source_item_id(cell.as_ref()).is_some_and(|id| item_ids.iter().any(|item| item == id))

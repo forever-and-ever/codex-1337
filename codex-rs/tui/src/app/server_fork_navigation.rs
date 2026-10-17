@@ -23,6 +23,10 @@ pub(super) struct ForkInput {
 }
 
 impl ForkInput {
+    #[expect(
+        clippy::expect_used,
+        reason = "Fork navigation is admitted only from a thread origin."
+    )]
     fn thread_id(&self) -> ThreadId {
         self.origin.thread_id().expect("fork has a source thread")
     }
@@ -46,7 +50,7 @@ enum ForkPurpose {
         from_agents_overview: bool,
         source_turn_running: bool,
     },
-    Safety(SafetyContinuation),
+    Safety(Box<SafetyContinuation>),
     Side {
         prompt: Option<crate::chatwidget::UserMessage>,
     },
@@ -114,15 +118,15 @@ enum ForkEffect {
         turn_id: String,
     },
     History(SafetyHistoryPreparation),
-    Acquire(ForkPreparation),
+    Acquire(Box<ForkPreparation>),
     Detach(detach::DetachPlan),
 }
 enum ForkOutcome {
     Refreshed(Result<Box<(Config, crate::local_settings::LocalSettings)>>),
     Begin,
     Interrupted(std::result::Result<(), TypedRequestError>),
-    History(PreparedSafetyHistory),
-    Acquired(PreparedSession),
+    History(Box<PreparedSafetyHistory>),
+    Acquired(Box<PreparedSession>),
     Detached(detach::DetachReceipt),
     Terminated,
 }
@@ -231,6 +235,10 @@ impl App {
         );
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The safety producer admits only validated user turns."
+    )]
     pub(in crate::app) async fn enqueue_safety_fork(
         &mut self,
         server: &AppServerSession,
@@ -247,12 +255,12 @@ impl App {
                 self.chat_widget.config_ref(),
                 self.selected_server_profile(thread_id),
             ),
-            purpose: ForkPurpose::Safety(SafetyContinuation {
+            purpose: ForkPurpose::Safety(Box::new(SafetyContinuation {
                 turn_id,
                 turn: UserTurnReplay::new(turn).expect("safety producer validated a user turn"),
                 prompt: Some(prompt),
                 latest_turn_id,
-            }),
+            })),
         };
         self.enqueue_navigation(
             server,
@@ -322,8 +330,8 @@ impl App {
                         .await
                         .map(|_| ()),
                     ),
-                    ForkEffect::History(plan) => ForkOutcome::History(plan.run().await),
-                    ForkEffect::Acquire(plan) => ForkOutcome::Acquired(plan.run().await),
+                    ForkEffect::History(plan) => ForkOutcome::History(Box::new(plan.run().await)),
+                    ForkEffect::Acquire(plan) => ForkOutcome::Acquired(Box::new(plan.run().await)),
                     ForkEffect::Detach(plan) => ForkOutcome::Detached(match tokio::time::timeout(
                         ACK_TIMEOUT,
                         detach::send(&handle, id, &plan),
@@ -338,13 +346,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(ForkOutcome::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Fork(ForkReceipt { handle, outcome }),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Fork(ForkReceipt { handle, outcome }),
+                },
+            )));
         })));
     }
 
@@ -437,7 +447,7 @@ impl App {
                 operation,
                 server.request_handle(),
                 ForkStage::Acquiring(context),
-                ForkEffect::Acquire(plan),
+                ForkEffect::Acquire(Box::new(plan)),
             ));
             return;
         }
@@ -477,7 +487,7 @@ impl App {
             operation,
             server.request_handle(),
             ForkStage::Acquiring(context),
-            ForkEffect::Acquire(plan),
+            ForkEffect::Acquire(Box::new(plan)),
         ));
     }
 }
@@ -555,6 +565,10 @@ impl App {
         ));
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Successful fork installation creates the target session before preparing its retry."
+    )]
     async fn commit_fork_navigation(
         &mut self,
         tui: &mut tui::Tui,
@@ -889,7 +903,7 @@ impl App {
                     result,
                     custody,
                     observations,
-                } = prepared;
+                } = *prepared;
                 if same_epoch {
                     server.apply_session_observations(observations);
                 }

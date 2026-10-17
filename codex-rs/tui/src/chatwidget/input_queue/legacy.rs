@@ -137,7 +137,7 @@ impl LegacyInput {
         let pending_steer =
             self.pending_steer
                 .map_or(SteerInput::Idle, |steer| SteerInput::Pending {
-                    steer,
+                    steer: Box::new(steer),
                     interrupt: if self.submit_pending_steer_after_interrupt {
                         SteerInterrupt::SubmitAsTurn
                     } else {

@@ -36,7 +36,7 @@ fn first_screen_respects_available_space_without_a_replay_hitbox() {
         let text = buffer
             .content
             .iter()
-            .map(|cell| cell.symbol())
+            .map(ratatui::buffer::Cell::symbol)
             .collect::<String>();
         assert_eq!(text.contains("/resume"), free.height >= 4);
         for y in screen.y..screen.bottom() {

@@ -163,6 +163,10 @@ impl App {
         });
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The matching pending prompt edit was checked before taking it."
+    )]
     pub(super) async fn prompt_revert_prepared(
         &mut self,
         server: &mut AppServerSession,
@@ -259,6 +263,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Prompt edit admission retains the source input until recovery."
+    )]
     async fn recover_prompt_revert(&mut self, pending: &mut PendingRevert) {
         let Some(prompt) = pending.prompt.take() else {
             return;
@@ -328,6 +336,10 @@ impl App {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The matching pending prompt edit was checked before taking it."
+    )]
     pub(super) async fn reconcile_prompt_revert(&mut self, id: uuid::Uuid) {
         if self
             .pending_revert
@@ -376,6 +388,10 @@ impl App {
         self.pending_revert = Some(pending);
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The matching pending prompt edit was checked before taking it."
+    )]
     pub(super) async fn finish_prompt_revert(
         &mut self,
         tui: &mut tui::Tui,
