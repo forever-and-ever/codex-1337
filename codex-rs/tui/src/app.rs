@@ -272,6 +272,7 @@ mod context_inventory;
 mod context_role;
 pub(crate) mod live_work;
 mod mouse_paste;
+pub(crate) mod prompt_revert;
 mod realtime_delivery;
 mod realtime_settings;
 mod reasoning_replay;
@@ -301,7 +302,7 @@ mod thread_routing;
 mod thread_session_state;
 mod thread_settings;
 mod thread_title;
-mod transcript_export;
+pub(crate) mod transcript_export;
 mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
@@ -699,6 +700,8 @@ pub(crate) struct App {
     // App fixtures keep their home alive across widget replacement; drop it last.
     #[cfg(test)]
     _test_codex_home: Option<tempfile::TempDir>,
+    active_export: Option<transcript_export::ActiveExport>,
+    pending_revert: Option<prompt_revert::PendingRevert>,
 }
 
 struct PendingMcpLoginStart {

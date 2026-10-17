@@ -146,6 +146,7 @@ impl App {
         let view = self.agents_overview_view(threads, selected_thread_id);
         self.agents_overview.visible_thread_ids = view.thread_ids();
         self.chat_widget.show_bottom_pane_view(Box::new(view));
+        self.sync_frontend_requests();
         if self.reconnect.offline {
             self.reconnect.presentation = reconnect::ReconnectPresentation::Overview;
             let mut state = self
@@ -512,12 +513,7 @@ impl App {
             let presentation = ThreadAttachPresentation::FreshWithDraft;
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
-                    let discarded = startup_draft
-                        .run_until(tui, self.discard_side_thread(app_server, side_thread_id))
-                        .await?;
-                    if !discarded {
-                        return Ok(AppRunControl::Continue);
-                    }
+                    self.discard_side_thread(app_server, side_thread_id).await;
                 }
             }
             for (thread_id, requests) in previous_pending_requests {

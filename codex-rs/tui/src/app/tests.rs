@@ -3305,6 +3305,9 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     ))
     .await?;
 
+    assert_eq!(app.active_thread_id, Some(parent_thread_id));
+    app.settle_navigation(&mut tui, &mut app_server).await?;
+
     let side_thread_id = app
         .active_thread_id
         .expect("side conversation should become active");
@@ -6162,10 +6165,9 @@ async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
             /*is_closed*/ false,
         );
 
-        assert!(
-            app.discard_side_thread(&mut app_server, side_thread_id)
-                .await
-        );
+        app.discard_side_thread(&mut app_server, side_thread_id)
+            .await;
+        app.settle_turn_submissions(&mut app_server).await?;
 
         assert_eq!(app.agent_navigation.get(&side_thread_id), None);
         assert!(!app.side_threads.contains_key(&side_thread_id));
@@ -6192,10 +6194,11 @@ async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Resu
             /*is_closed*/ false,
         );
 
-        assert!(
-            !app.discard_side_thread(&mut app_server, side_thread_id)
-                .await
-        );
+        app.discard_side_thread(&mut app_server, side_thread_id)
+            .await;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.settle_navigation(&mut tui, &mut app_server).await?;
+        assert!(!app.abandoned_side_threads.contains(&side_thread_id));
 
         assert_eq!(app.active_thread_id, Some(side_thread_id));
         assert_eq!(
@@ -6667,6 +6670,8 @@ async fn make_test_app() -> Box<App> {
         pending_server_profiles: HashMap::new(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
+        active_export: None,
+        pending_revert: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -6790,6 +6795,8 @@ pub(super) async fn make_test_app_with_channels() -> (
             pending_server_profiles: HashMap::new(),
             agents_overview: Default::default(),
             side_threads: HashMap::new(),
+            active_export: None,
+            pending_revert: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -9130,6 +9137,15 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     )
     .await?;
     let control = Box::pin(app.handle_event(&mut tui, &mut app_server, selection)).await?;
+    assert!(app.pending_revert.is_some());
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("Reverting"));
+    super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
+    .await?;
 
     while let Ok(event) = app_event_rx.try_recv() {
         match event {
@@ -9235,6 +9251,13 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
             prompt: "retained prompt".into(),
         },
     ))
+    .await?;
+    super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
     .await?;
     while let Ok(event) = app_event_rx.try_recv() {
         if matches!(event, AppEvent::FinishPromptRevert { .. }) {

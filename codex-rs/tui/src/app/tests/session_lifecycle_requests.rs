@@ -1563,6 +1563,21 @@ async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()>
     ))
     .await?;
     assert!(app.chat_widget.queued_user_message_texts().is_empty());
+    assert!(app.active_export.is_some());
+    assert!(!export_path.exists());
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::CancelTranscriptExport)).await?;
+    assert!(app.active_export.is_none());
+    assert!(!export_path.exists());
+    Box::pin(app.handle_event(&mut tui, &mut app_server, AppEvent::ExportTranscript {
+        destination: TranscriptExportDestination::File(export_path.clone()),
+    })).await?;
+    super::super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
+    .await?;
     let markdown = std::fs::read_to_string(export_path)?;
     assert!(
         (0..305)
@@ -1682,12 +1697,13 @@ async fn remote_legacy_history_start_negotiates_once_for_resume_and_fork() -> Re
 
     let initial_read_count = recorded_params(&requests, "thread/read").len();
     let exported = crate::app::transcript_export::load_export_transcript(
-        &mut app_server,
+        &app_server.request_handle(),
         paginated_thread_id,
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         Some(&app.config),
         vec![Arc::new(PlainHistoryCell::new(vec!["visible".into()]))],
         &|_| crate::multi_agents::AgentMetadata::default(),
+        &|| {},
     )
     .await
     .map_err(|error| color_eyre::eyre::eyre!(error))?;

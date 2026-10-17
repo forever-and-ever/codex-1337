@@ -99,6 +99,7 @@ impl App {
             }
             AppServerEvent::ServerNotification(mut notification) => {
                 self.note_submission_notification(notification.as_ref());
+                self.note_prompt_revert_notification(notification.as_ref());
                 if let ServerNotification::ThreadWorkStatusUpdated(update) = notification.as_mut()
                     && update.status.emitted_at.is_none()
                 {
@@ -121,6 +122,7 @@ impl App {
                 self.repaint_agents_overview();
             }
             AppServerEvent::Disconnected { message } => {
+                self.cancel_transcript_export();
                 if self.begin_reconnect() {
                     return;
                 }

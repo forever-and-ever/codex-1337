@@ -19,7 +19,6 @@ use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
-use codex_app_server_protocol::ThreadRevertParams;
 use codex_app_server_protocol::ThreadRevertResponse;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
@@ -209,23 +208,13 @@ pub(crate) struct ThreadHistoryPagination {
 }
 
 impl AppServerSession {
-    pub(crate) async fn revert_thread(
+
+    pub(crate) fn apply_prompt_revert(
         &mut self,
         thread_id: ThreadId,
-        before_turn_id: String,
         retained_turns: &[Turn],
-    ) -> std::result::Result<ThreadRevertResponse, codex_app_server_client::TypedRequestError> {
-        let request_id = self.next_request_id();
-        let response: ThreadRevertResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadRevert {
-                request_id,
-                params: ThreadRevertParams {
-                    thread_id: thread_id.to_string(),
-                    before_turn_id,
-                },
-            })
-            .await?;
+        response: &ThreadRevertResponse,
+    ) {
         // Older cursors in the retained prefix remain valid. If the entire displayed window
         // disappeared, resume paging at the replacement history's end instead.
         if retained_turns.iter().all(|turn| turn.items.is_empty()) {
@@ -241,7 +230,6 @@ impl AppServerSession {
         } else if let Some(page) = self.history_pagination.get_mut(&thread_id) {
             page.loading_older = false;
         }
-        Ok(response)
     }
 
     pub(crate) fn has_older_history(&self, thread_id: ThreadId) -> bool {

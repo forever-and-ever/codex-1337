@@ -59,6 +59,8 @@ impl App {
             && matches!(self.farm.state, farm::FarmRequestState::Idle)
             && self.queued_messages.mutations.is_empty()
             && self.server_operations.is_empty()
+            && self.active_export.is_none()
+            && self.pending_revert.is_none()
             && self.overlay.is_none()
             && self.jira.is_none()
             && self.temporary_structured_requests.is_empty()

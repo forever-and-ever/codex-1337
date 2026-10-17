@@ -11,6 +11,7 @@ mod external_agent_config;
 pub(crate) mod fork_preparation;
 pub(crate) mod fs;
 mod history;
+pub(crate) mod history_job;
 mod models;
 pub(crate) mod provider_selection;
 #[cfg(test)]
