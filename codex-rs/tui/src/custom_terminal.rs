@@ -156,6 +156,7 @@ where
     pub last_known_cursor_pos: Position,
     /// Count of visible history rows rendered above the viewport in inline mode.
     visible_history_rows: u16,
+    output_invalidation: output::Invalidation,
     #[cfg(test)]
     screen_size_override: Option<Size>,
 }
@@ -236,6 +237,7 @@ where
             last_known_screen_size: screen_size,
             last_known_cursor_pos: cursor_pos,
             visible_history_rows: 0,
+            output_invalidation: output::Invalidation::default(),
             #[cfg(test)]
             screen_size_override: None,
         }
@@ -444,9 +446,10 @@ where
         let cursor_position = frame.cursor_position;
         let cursor_style = frame.cursor_style;
 
+        let invalidate = self.output_invalidation.take();
         if output::capture_frame(
             self.current_buffer(),
-            self.previous_buffer(),
+            invalidate,
             screen_size,
             cursor_position,
             cursor_style,
@@ -546,6 +549,7 @@ where
 
     /// Clear from `position` through the end of the visible screen and force a full redraw.
     pub(crate) fn clear_after_position(&mut self, position: Position) -> io::Result<()> {
+        self.output_invalidation.mark();
         self.backend.set_cursor_position(position)?;
         self.backend.clear_region(ClearType::AfterCursor)?;
         // Reset the back buffer to make sure the next update will redraw everything.
@@ -558,6 +562,7 @@ where
     /// diff buffer alone would leave default-style spaces equal to their previous
     /// cells, allowing stale terminal content to show through those spaces.
     pub fn invalidate_viewport(&mut self) {
+        self.output_invalidation.mark();
         let previous_buffer = self.previous_buffer_mut();
         previous_buffer.reset();
         for cell in &mut previous_buffer.content {
@@ -567,6 +572,7 @@ where
 
     /// Clear the entire visible screen (not just the viewport) and force a full redraw.
     pub fn clear_visible_screen(&mut self) -> io::Result<()> {
+        self.output_invalidation.mark();
         let home = Position { x: 0, y: 0 };
         // Some terminals (notably Terminal.app) behave more reliably if we pair ED2
         // with an explicit cursor-home before/after, matching the common `clear`
@@ -585,6 +591,7 @@ where
     /// Some terminals behave more reliably when purge + clear are emitted as a
     /// single ANSI sequence instead of separate backend commands.
     pub fn clear_scrollback_and_visible_screen_ansi(&mut self) -> io::Result<()> {
+        self.output_invalidation.mark();
         if self.viewport_area.is_empty() {
             return Ok(());
         }
@@ -730,7 +737,7 @@ fn diff_buffers(a: &Buffer, b: &Buffer) -> Vec<DrawCommand> {
 
     for (x, y, cell) in cell_updates {
         let row = usize::from(y - a.area.y);
-        if x <= last_nonblank_columns[row] {
+        if x - a.area.x <= last_nonblank_columns[row] {
             updates.push(DrawCommand::Put {
                 x,
                 y,
