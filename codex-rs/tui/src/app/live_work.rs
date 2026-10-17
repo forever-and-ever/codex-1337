@@ -198,6 +198,12 @@ impl LiveWorkState {
         }
     }
 
+    pub(super) fn capture_painted_frame(&mut self, visible: bool) {
+        if let Some(scope) = &mut self.scope {
+            scope.view.capture_painted_frame(visible);
+        }
+    }
+
     pub(super) fn refresh_in(&self) -> Option<Duration> {
         self.scope
             .as_ref()
@@ -369,6 +375,7 @@ impl App {
         let Some(scope) = &mut self.live_work.scope else {
             return false;
         };
+        scope.view.promote_presented_frame();
         scope.view.selection_view().copy_on_select = self.transcript_view.copy_on_select;
         scope
             .view
@@ -416,6 +423,7 @@ impl App {
         let Some(scope) = &mut self.live_work.scope else {
             return false;
         };
+        scope.view.promote_presented_frame();
         let interaction = match event {
             TuiEvent::Mouse(mouse) => scope.view.handle_mouse(*mouse),
             TuiEvent::Key(key) => scope.view.handle_key(*key),

@@ -1,6 +1,7 @@
 //! Human-only work below the transcript. Disclosures own their height; only terminal bounds clip.
 
 pub(crate) mod operations;
+mod presented;
 
 use std::collections::HashSet;
 
@@ -185,6 +186,7 @@ pub(crate) struct LiveWorkView {
     selected: Option<Focus>,
     focused: bool,
     hits: Vec<(Rect, Focus)>,
+    painted_hits: presented::FrameHits,
     hover: Option<Hover>,
     selection: crate::transcript_view::TranscriptView,
 }

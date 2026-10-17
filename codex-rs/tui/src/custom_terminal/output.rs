@@ -338,18 +338,19 @@ impl CaptureGuard {
             .expect("terminal output mailbox poisoned");
         check(&state)?;
         state.submitted = Some(id);
-        // Only adjacent frames can supersede one another: a control or barrier is an ordering fence.
-        if matches!(
-            state.queue.back(),
-            Some(Envelope {
-                job: Job::Frame(_),
-                ..
-            })
-        ) {
+        // Controls keep their place; only an explicit flush fence protects an older frame.
+        let pending = state
+            .queue
+            .iter()
+            .enumerate()
+            .rev()
+            .take_while(|(_, entry)| !matches!(entry.job, Job::Barrier | Job::Stop))
+            .find_map(|(index, entry)| matches!(entry.job, Job::Frame(_)).then_some(index));
+        if let Some(index) = pending {
             let Envelope {
+                sequence,
                 job: Job::Frame(old),
-                ..
-            } = state.queue.pop_back().expect("pending frame vanished")
+            } = state.queue.remove(index).expect("pending frame vanished")
             else {
                 unreachable!()
             };
@@ -358,11 +359,21 @@ impl CaptureGuard {
                 .operations
                 .iter()
                 .any(|op| matches!(op, Operation::Frame(frame) if frame.invalidate));
-            let mut retained: Vec<_> = old
-                .operations
-                .into_iter()
-                .filter(|op| matches!(op, Operation::Bytes(_)))
-                .collect();
+            let mut retained = Vec::new();
+            for operation in old.operations {
+                if let Operation::Bytes(bytes) = operation {
+                    retained.extend(bytes);
+                }
+            }
+            if !retained.is_empty() {
+                state.queue.insert(
+                    index,
+                    Envelope {
+                        sequence,
+                        job: Job::Control(retained),
+                    },
+                );
+            }
             if invalidated {
                 for op in &mut operations {
                     if let Operation::Frame(frame) = op {
@@ -370,8 +381,6 @@ impl CaptureGuard {
                     }
                 }
             }
-            retained.append(&mut operations);
-            operations = retained;
         }
         state.sequence += 1;
         let sequence = state.sequence;
@@ -451,6 +460,7 @@ pub(crate) fn current_frame() -> Option<FrameId> {
     CAPTURE.with_borrow(|capture| capture.as_ref().map(|capture| capture.id))
 }
 
+#[cfg(test)]
 pub(crate) fn submitted_frame() -> Option<FrameId> {
     active()?
         .state
@@ -500,6 +510,16 @@ pub(crate) fn prepare_panic() {
             }
         }
         shared.changed.notify_all();
+    }
+}
+
+pub(crate) fn restoration_barrier() -> io::Result<()> {
+    // Editor handoff restores modes inside a synchronized frame. Its outer barrier
+    // transfers ownership only after that whole update, not halfway through it.
+    if current_frame().is_some() {
+        Ok(())
+    } else {
+        barrier()
     }
 }
 
@@ -725,10 +745,16 @@ mod tests {
             shared: Arc::clone(&shared),
             worker: Some(thread::spawn(move || run(mailbox, terminal))),
         };
-        let submit = |text: &str| -> io::Result<()> {
+        let view = RefCell::new(crate::transcript_view::TranscriptView::default());
+        let submit = |text: &str, width: u16| -> io::Result<()> {
             let mut buffer = Buffer::empty(ratatui::layout::Rect::new(0, 0, 3, 1));
-            buffer.set_string(0, 0, text, ratatui::style::Style::default());
             stdout().sync_update(|_| {
+                view.borrow_mut().render(
+                    ratatui::layout::Rect::new(0, 0, width, 1),
+                    &mut buffer,
+                    &[],
+                );
+                buffer.set_string(0, 0, text, ratatui::style::Style::default());
                 assert!(capture_frame(
                     &buffer,
                     &Buffer::empty(buffer.area),
@@ -738,8 +764,10 @@ mod tests {
                 ));
             })
         };
-        submit("abc")?;
+        submit("abc", 3)?;
         barrier()?;
+        view.borrow_mut().promote_presented_frame();
+        assert_eq!(view.borrow().remaining_area().width, 3);
         let initial = presented_frame().expect("initial completed frame");
         block.store(true, Ordering::Release);
         stdout().write_all(b"\x1b]0;before\x07")?;
@@ -750,11 +778,18 @@ mod tests {
             !paint_ready(),
             "the UI skips paint instead of joining blocked I/O"
         );
-        submit("xbc")?;
+        submit("xbc", 2)?;
         let skipped = submitted_frame().expect("pending frame");
-        submit("xby")?;
+        stdout().write_all(b"\x1b]0;middle\x07")?;
+        submit("xby", 1)?;
         let latest = submitted_frame().expect("latest frame");
         assert_ne!(skipped, latest);
+        view.borrow_mut().promote_presented_frame();
+        assert_eq!(
+            view.borrow().remaining_area().width,
+            3,
+            "routing retains completed geometry while output is blocked"
+        );
         assert_eq!(
             presented_frame(),
             Some(initial),
@@ -763,9 +798,13 @@ mod tests {
         {
             let state = shared.state.lock().expect("mailbox poisoned");
             assert_eq!(
-                state.queue.len(),
+                state
+                    .queue
+                    .iter()
+                    .filter(|entry| matches!(entry.job, Job::Frame(_)))
+                    .count(),
                 1,
-                "latest-wins slot never queues stale frames"
+                "latest-wins slot never queues stale frames across controls"
             );
         }
         stdout().write_all(b"\x1b]0;after\x07")?;
@@ -797,6 +836,12 @@ mod tests {
         waiter.join().expect("barrier waiter");
         assert!(paint_ready());
         assert_eq!(presented_frame(), Some(latest));
+        view.borrow_mut().promote_presented_frame();
+        assert_eq!(
+            view.borrow().remaining_area().width,
+            1,
+            "only the completed latest frame promotes its geometry"
+        );
         let output = bytes.lock().expect("capture poisoned").clone();
         let before = output
             .windows(9)
@@ -806,7 +851,11 @@ mod tests {
             .windows(8)
             .position(|part| part == b"0;after\x07")
             .expect("after title");
-        assert!(before < after);
+        let middle = output
+            .windows(9)
+            .position(|part| part == b"0;middle\x07")
+            .expect("middle title");
+        assert!(before < middle && middle < after);
         let frame_output = &output[before..after];
         assert!(frame_output.windows(8).any(|part| part == b"\x1b[?2026h"));
         assert!(frame_output.windows(8).any(|part| part == b"\x1b[?2026l"));

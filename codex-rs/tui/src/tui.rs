@@ -337,7 +337,7 @@ fn restore_common(
     keyboard_restore: KeyboardRestore,
     handoff: TerminalHandoff,
 ) -> Result<()> {
-    let mut first_error = output::barrier().err();
+    let mut first_error = output::restoration_barrier().err();
     if let Err(error) = ensure_virtual_terminal_processing() {
         first_error.get_or_insert(error);
     }
@@ -376,7 +376,7 @@ fn restore_common(
     ) {
         first_error.get_or_insert(err);
     }
-    if let Err(error) = output::barrier() {
+    if let Err(error) = output::restoration_barrier() {
         first_error.get_or_insert(error);
     }
     match first_error {
@@ -619,6 +619,7 @@ fn set_panic_hook() {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
         output::prepare_panic();
+        let _ = output::barrier();
         let _ = restore_after_exit(); // ignore any errors as we are already failing
         hook(panic_info);
     }));
@@ -949,7 +950,6 @@ impl Tui {
     /// update, trust, or migration prompt before the user has seen it. Pause the event stream,
     /// drain all input through crossterm so incomplete bracketed paste remains safely framed.
     pub(crate) fn discard_pending_input_before_interactive_screen(&mut self) -> Result<()> {
-        output::barrier()?;
         self.pause_events();
         let drain_result = discard_pending_terminal_input();
         self.resume_events();

@@ -1,6 +1,8 @@
-//! A presentation commits only when every layout it used is ready.
+//! Layout readiness admits paint; terminal completion admits its routing geometry.
 
 use super::*;
+use crate::custom_terminal::output;
+use crate::custom_terminal::output::FrameId;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum LayoutSource {
@@ -16,10 +18,103 @@ pub(super) struct Scroll {
 
 pub(super) struct Presented {
     buffer: Buffer,
+    cells: Arc<[Arc<dyn HistoryCell>]>,
+    frames: FrameRecords,
     area: Rect,
     visible: Vec<VisibleRow>,
     tail_visible: bool,
     suppressed_header: Option<prompt_header::SuppressedHeader>,
+}
+
+#[derive(Default)]
+struct FrameRecords {
+    completed: Option<(FrameId, RoutingFrame)>,
+    pending: Option<(FrameId, RoutingFrame)>,
+}
+
+struct RoutingFrame {
+    area: Rect,
+    visible: Vec<VisibleRow>,
+    tail_visible: bool,
+    suppressed_header: Option<prompt_header::SuppressedHeader>,
+    cells: Option<Arc<[Arc<dyn HistoryCell>]>>,
+    follow_area: Option<Rect>,
+    composer_tip: Option<(Rect, HyperlinkLine)>,
+}
+
+impl FrameRecords {
+    fn promote(&mut self) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|(id, _)| Some(*id) == output::presented_frame())
+        {
+            self.completed = self.pending.take();
+        }
+    }
+}
+
+impl TranscriptView {
+    pub(crate) fn capture_painted_frame(&mut self) {
+        let Some(id) = output::current_frame() else {
+            return;
+        };
+        let frame = RoutingFrame {
+            area: self.area,
+            visible: self.visible.clone(),
+            tail_visible: self.tail_visible,
+            suppressed_header: self.suppressed_prompt_header.clone(),
+            cells: self.presented_cells.clone(),
+            follow_area: self.follow_control.area,
+            composer_tip: self.composer_tip.clone(),
+        };
+        let presented = self.presented.get_or_insert_with(|| Presented {
+            buffer: Buffer::empty(Rect::ZERO),
+            cells: Arc::from([]),
+            frames: FrameRecords::default(),
+            area: Rect::ZERO,
+            visible: Vec::new(),
+            tail_visible: false,
+            suppressed_header: None,
+        });
+        presented.frames.promote();
+        presented.frames.pending = Some((id, frame));
+    }
+
+    pub(crate) fn promote_presented_frame(&mut self) {
+        if !output::is_active() {
+            return;
+        }
+        if let Some(presented) = &mut self.presented {
+            presented.frames.promote();
+        }
+        let completed = self
+            .presented
+            .as_ref()
+            .and_then(|presented| presented.frames.completed.as_ref());
+        if let Some((_, frame)) = completed {
+            self.area = frame.area;
+            self.visible = frame.visible.clone();
+            self.tail_visible = frame.tail_visible;
+            self.suppressed_prompt_header = frame.suppressed_header.clone();
+            self.presented_cells = frame.cells.clone();
+            self.follow_control.area = frame.follow_area;
+            self.composer_tip = frame.composer_tip.clone();
+        } else {
+            self.area.height = 0;
+            self.visible.clear();
+            self.tail_visible = false;
+            self.presented_cells = None;
+            self.follow_control.area = None;
+            self.composer_tip = None;
+        }
+    }
+
+    pub(super) fn capture_synchronous_frame(&mut self) {
+        if self.cache.frames.is_none() {
+            self.capture_painted_frame();
+        }
+    }
 }
 
 impl TranscriptView {
@@ -167,8 +262,18 @@ impl TranscriptView {
             {
                 frames.schedule_frame();
             }
+            let frames = self
+                .presented
+                .take()
+                .map(|presented| presented.frames)
+                .unwrap_or_default();
             self.presented = Some(Presented {
                 buffer: prepared,
+                cells: self
+                    .presented_cells
+                    .clone()
+                    .expect("prepared cells retained"),
+                frames,
                 area: self.area,
                 visible: self.visible.clone(),
                 tail_visible: self.tail_visible,
@@ -196,6 +301,7 @@ impl TranscriptView {
                 .take(usize::from(self.area.height))
                 .cloned()
                 .collect();
+            self.presented_cells = Some(Arc::clone(&presented.cells));
             self.tail_visible = presented.tail_visible;
             self.suppressed_prompt_header = presented.suppressed_header.clone();
         } else {
