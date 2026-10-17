@@ -4,6 +4,9 @@
 //! when a config mutation must be owned by the app server rather than written
 //! to the local `config.toml` directly.
 
+mod continuations;
+pub(crate) use continuations::read_effective_config_typed;
+
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ClientRequest;
@@ -195,21 +198,6 @@ pub(crate) async fn read_effective_config(
     read_effective_config_typed(request_handle, cwd)
         .await
         .wrap_err("config/read failed in TUI")
-}
-
-pub(crate) async fn read_effective_config_typed(
-    request_handle: AppServerRequestHandle,
-    cwd: String,
-) -> std::result::Result<ConfigReadResponse, TypedRequestError> {
-    request_handle
-        .request_typed(ClientRequest::ConfigRead {
-            request_id: RequestId::String(format!("tui-config-read-{}", Uuid::new_v4())),
-            params: ConfigReadParams {
-                include_layers: false,
-                cwd: Some(cwd),
-            },
-        })
-        .await
 }
 
 pub(crate) async fn read_remote_project_trust(

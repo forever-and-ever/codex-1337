@@ -53,7 +53,7 @@ impl App {
                     tui,
                     TranscriptSplice::Revision {
                         range: index..index + 1,
-                        cell: cell,
+                        cell,
                     },
                 );
             }

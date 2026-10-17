@@ -247,6 +247,10 @@ impl LiveWorkState {
         };
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The requested scope is installed immediately before it is returned."
+    )]
     fn scope(&mut self, thread: ThreadId) -> &mut Scope {
         if self
             .scope
@@ -272,6 +276,10 @@ impl App {
         self.live_work.scope = None;
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Process admission validates each process owner as a ThreadId."
+    )]
     pub(super) fn prepare_live_work(&mut self) {
         let Some(thread) = self.active_thread_id.filter(|_| !self.reconnect.offline) else {
             self.live_work.scope = None;
@@ -416,6 +424,20 @@ impl App {
         }
         tui.frame_requester().schedule_frame();
         true
+    }
+
+    pub(super) fn handle_live_work_key_event(
+        &mut self,
+        tui: &mut tui::Tui,
+        event: &TuiEvent,
+    ) -> bool {
+        if matches!(event, TuiEvent::Key(key) if key.kind != KeyEventKind::Release)
+            && (self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event))
+        {
+            tui.frame_requester().schedule_frame();
+            return true;
+        }
+        false
     }
 
     pub(super) fn handle_live_work_input(&mut self, event: &TuiEvent) -> bool {

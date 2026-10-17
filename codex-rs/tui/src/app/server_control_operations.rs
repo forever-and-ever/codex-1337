@@ -1,5 +1,6 @@
 //! Urgent control bypasses admission barriers without abandoning request ownership.
 
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use super::*;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -68,32 +69,22 @@ pub(super) async fn send(
             let turn_id = match cached {
                 Some(turn_id) => Some(turn_id),
                 None => {
-                    let thread: api::ThreadReadResponse = handle
-                        .request_typed(api::ClientRequest::ThreadRead {
-                            request_id: api::RequestId::String(format!("tui-operation-{id}-read")),
-                            params: api::ThreadReadParams {
+                    let thread: api::ThreadReadResponse = handle.thread_read(api::RequestId::String(format!("tui-operation-{id}-read")), api::ThreadReadParams {
                                 thread_id: thread_id.to_string(),
                                 include_turns: false,
-                            },
-                        })
+                            })
                         .await?;
                     let history = if thread.thread.history_mode == api::ThreadHistoryMode::Paginated
                         && paginated_history
                     {
                         None
                     } else {
-                        match handle
-                            .request_typed::<api::ThreadReadResponse>(
-                                api::ClientRequest::ThreadRead {
-                                    request_id: api::RequestId::String(format!(
+                        match handle.thread_read(api::RequestId::String(format!(
                                         "tui-operation-{id}-history"
-                                    )),
-                                    params: api::ThreadReadParams {
+                                    )), api::ThreadReadParams {
                                         thread_id: thread_id.to_string(),
                                         include_turns: true,
-                                    },
-                                },
-                            )
+                                    })
                             .await
                         {
                             Ok(history) => Some(history.thread.turns),
@@ -140,17 +131,13 @@ pub(super) async fn send(
         }
         ControlOperation::StopAndExit { turn_id, goal } => {
             if matches!(goal, GoalStop::Pause) {
-                let _: api::ThreadGoalSetResponse = handle
-                    .request_typed(api::ClientRequest::ThreadGoalSet {
-                        request_id: api::RequestId::String(format!("tui-operation-{id}-pause")),
-                        params: api::ThreadGoalSetParams {
+                let _: api::ThreadGoalSetResponse = handle.thread_goal_set(api::RequestId::String(format!("tui-operation-{id}-pause")), api::ThreadGoalSetParams {
                             thread_id: thread_id.to_string(),
                             origin: Some(api::ThreadGoalMutationOrigin::User),
                             objective: None,
                             status: Some(api::ThreadGoalStatus::Paused),
                             token_budget: None,
-                        },
-                    })
+                        })
                     .await?;
             }
             (turn_id, true)
@@ -158,16 +145,12 @@ pub(super) async fn send(
     };
     if let Some(mut turn_id) = turn_id {
         for attempt in 0..2 {
-            let result = handle
-                .request_typed::<api::TurnInterruptResponse>(api::ClientRequest::TurnInterrupt {
-                    request_id: api::RequestId::String(format!(
+            let result = handle.turn_interrupt(api::RequestId::String(format!(
                         "tui-operation-{id}-interrupt-{attempt}"
-                    )),
-                    params: api::TurnInterruptParams {
+                    )), api::TurnInterruptParams {
                         thread_id: thread_id.to_string(),
                         turn_id: turn_id.clone(),
-                    },
-                })
+                    })
                 .await;
             match result {
                 Ok(_) => break,

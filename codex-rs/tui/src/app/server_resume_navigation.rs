@@ -46,7 +46,7 @@ pub(super) enum ResumePurpose {
     Explicit,
     Overview {
         thread: Box<api::Thread>,
-        baseline: OverviewBaseline,
+        baseline: Box<OverviewBaseline>,
         after: SelectionAfter,
     },
 }
@@ -75,7 +75,7 @@ impl ResumePurpose {
             ResumeSource::Overview { thread, after } => Self::Overview {
                 thread,
                 after,
-                baseline: OverviewBaseline::capture(config),
+                baseline: Box::new(OverviewBaseline::capture(config)),
             },
         }
     }
@@ -228,9 +228,9 @@ enum ResumeEffect {
     },
     Recheck(ThreadId),
     Hooks(PathBuf),
-    Acquire(ResumePreparation),
-    Cached(crate::app_server_session::AppServerStartedThread),
-    View(ViewPreparation),
+    Acquire(Box<ResumePreparation>),
+    Cached(Box<crate::app_server_session::AppServerStartedThread>),
+    View(Box<ViewPreparation>),
     Detach(detach::DetachPlan),
     Loaded(ThreadId),
     Goal(ThreadId),
@@ -315,7 +315,7 @@ impl App {
                         .map_err(|_| "Folder hooks read timed out".into()),
                     ),
                     ResumeEffect::Acquire(plan) => ResumeOutcome::Acquired(plan.run().await),
-                    ResumeEffect::Cached(started) => ResumeOutcome::Cached(started),
+                    ResumeEffect::Cached(started) => ResumeOutcome::Cached(*started),
                     ResumeEffect::View(plan) => ResumeOutcome::Viewed(plan.run().await),
                     ResumeEffect::Detach(plan) => ResumeOutcome::Detached(
                         match tokio::time::timeout(ACK_TIMEOUT, detach::send(&handle, id, &plan))
@@ -350,13 +350,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(ResumeOutcome::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Resumed(ResumeReceipt { handle, outcome }),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Resumed(ResumeReceipt { handle, outcome }),
+                },
+            )));
         })));
     }
 
@@ -516,7 +518,7 @@ impl App {
     ) {
         let loaded_overview = matches!(&context.purpose, ResumePurpose::Overview { thread, .. } if !matches!(thread.status, api::ThreadStatus::NotLoaded));
         if let ResumePurpose::Overview { baseline, .. } = &mut context.purpose {
-            *baseline = OverviewBaseline::capture(&context.config);
+            **baseline = OverviewBaseline::capture(&context.config);
         }
         if !loaded_overview {
             if let Err(error) = self.apply_runtime_policy_overrides(
@@ -560,7 +562,7 @@ impl App {
             self.spawn_resume_effect(
                 operation,
                 server.request_handle(),
-                ResumeEffect::Cached(started),
+                ResumeEffect::Cached(Box::new(started)),
             );
             return;
         }
@@ -581,7 +583,7 @@ impl App {
         self.spawn_resume_effect(
             operation,
             server.request_handle(),
-            ResumeEffect::Acquire(plan),
+            ResumeEffect::Acquire(Box::new(plan)),
         );
     }
 
@@ -878,67 +880,74 @@ impl App {
                 if same_epoch {
                     server.apply_session_observations(observations);
                 }
-                if !matching || result.is_err() {
-                    if matching
-                        && !(matches!(custody, SubscriptionCustody::None)
-                            && result
-                                .as_ref()
-                                .is_err_and(crate::app_server_session::is_active_writer_error))
-                        && let Err(error) = &result
-                    {
-                        self.add_agents_overview_error(format!(
-                            "Failed to resume session from {}: {error:#}",
-                            context.target.display_label()
-                        ));
+                match result {
+                    Ok(started) if matching => {
+                        self.detach_for_resume(
+                            server,
+                            operation,
+                            Box::new(ResumeReady {
+                                context: *context,
+                                started,
+                                presentation: ResumePresentation::Writable,
+                            }),
+                        )
+                        .await;
                     }
-                    match custody {
-                        SubscriptionCustody::Subscribed(thread_id) => self
-                            .start_navigation_cleanup(
-                                operation,
-                                handle,
-                                thread_id,
-                                Vec::new(),
-                                CleanupContinuation::Done,
-                                false,
-                            ),
-                        SubscriptionCustody::Uncertain(thread_id) if same_epoch => {
-                            self.chat_widget.add_error_message("Conversation attachment outcome is unknown. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete.".into());
-                            self.retain_navigation_uncertainty(operation, vec![thread_id], false);
-                        }
-                        SubscriptionCustody::None
-                            if matching
-                                && result.as_ref().is_err_and(
-                                    crate::app_server_session::is_active_writer_error,
-                                ) =>
+                    result => {
+                        if matching
+                            && !(matches!(custody, SubscriptionCustody::None)
+                                && result
+                                    .as_ref()
+                                    .is_err_and(crate::app_server_session::is_active_writer_error))
+                            && let Err(error) = &result
                         {
-                            let plan = server.prepare_thread_view(
-                                RequestPolicy::Interactive,
-                                &context.config,
-                                &context.settings,
-                                context.target.thread_id,
-                            );
-                            operation.intent =
-                                NavigationIntent::Resume(ResumeStage::Viewing(context));
-                            self.spawn_resume_effect(
-                                &mut operation,
-                                handle,
-                                ResumeEffect::View(plan),
-                            );
-                            self.server_operations.navigation.current = Some(operation);
+                            self.add_agents_overview_error(format!(
+                                "Failed to resume session from {}: {error:#}",
+                                context.target.display_label()
+                            ));
                         }
-                        _ => {}
+                        match custody {
+                            SubscriptionCustody::Subscribed(thread_id) => self
+                                .start_navigation_cleanup(
+                                    operation,
+                                    handle,
+                                    thread_id,
+                                    Vec::new(),
+                                    CleanupContinuation::Done,
+                                    false,
+                                ),
+                            SubscriptionCustody::Uncertain(thread_id) if same_epoch => {
+                                self.chat_widget.add_error_message("Conversation attachment outcome is unknown. No resume was retried; close and reopen this TUI to resynchronize. The earlier request may still complete.".into());
+                                self.retain_navigation_uncertainty(
+                                    operation,
+                                    vec![thread_id],
+                                    false,
+                                );
+                            }
+                            SubscriptionCustody::None
+                                if matching
+                                    && result.as_ref().is_err_and(
+                                        crate::app_server_session::is_active_writer_error,
+                                    ) =>
+                            {
+                                let plan = server.prepare_thread_view(
+                                    RequestPolicy::Interactive,
+                                    &context.config,
+                                    &context.settings,
+                                    context.target.thread_id,
+                                );
+                                operation.intent =
+                                    NavigationIntent::Resume(ResumeStage::Viewing(context));
+                                self.spawn_resume_effect(
+                                    &mut operation,
+                                    handle,
+                                    ResumeEffect::View(Box::new(plan)),
+                                );
+                                self.server_operations.navigation.current = Some(operation);
+                            }
+                            _ => {}
+                        }
                     }
-                } else {
-                    self.detach_for_resume(
-                        server,
-                        operation,
-                        Box::new(ResumeReady {
-                            context: *context,
-                            started: result.expect("successful resume preparation"),
-                            presentation: ResumePresentation::Writable,
-                        }),
-                    )
-                    .await;
                 }
             }
             (ResumeStage::Viewing(context), ResumeOutcome::Viewed(prepared)) if matching => {

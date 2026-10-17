@@ -112,8 +112,7 @@ impl App {
             |app, _, result| {
                 if let Err(error) = result {
                     app.chat_widget.add_error_message(format!(
-                        "Provider selected for this draft, but failed to save defaults: {}",
-                        error
+                        "Provider selected for this draft, but failed to save defaults: {error}"
                     ));
                 }
                 Ok(())

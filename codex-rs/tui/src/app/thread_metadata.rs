@@ -3,6 +3,7 @@
 use super::App;
 use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use codex_app_server_protocol as api;
 use codex_protocol::ThreadId;
 
@@ -20,20 +21,18 @@ impl App {
             "Syncing thread git branch",
             move |handle| async move {
                 handle
-                    .request_typed::<api::ThreadMetadataUpdateResponse>(
-                        api::ClientRequest::ThreadMetadataUpdate {
-                            request_id: api::RequestId::String(uuid::Uuid::new_v4().to_string()),
-                            params: api::ThreadMetadataUpdateParams {
-                                thread_id: thread_id.to_string(),
-                                project_id: None,
-                                daybreak_enabled: None,
-                                comms: None,
-                                git_info: Some(api::ThreadMetadataGitInfoUpdateParams {
-                                    sha: None,
-                                    branch: Some(Some(branch)),
-                                    origin_url: None,
-                                }),
-                            },
+                    .thread_metadata_update_branch(
+                        api::RequestId::String(uuid::Uuid::new_v4().to_string()),
+                        api::ThreadMetadataUpdateParams {
+                            thread_id: thread_id.to_string(),
+                            project_id: None,
+                            daybreak_enabled: None,
+                            comms: None,
+                            git_info: Some(api::ThreadMetadataGitInfoUpdateParams {
+                                sha: None,
+                                branch: Some(Some(branch)),
+                                origin_url: None,
+                            }),
                         },
                     )
                     .await
@@ -78,8 +77,8 @@ impl App {
                             request_id: api::RequestId::String(uuid::Uuid::new_v4().to_string()),
                             params: api::ThreadUnsubscribeParams { thread_id: thread_id.to_string() },
                         }).await;
-                        if matches!(&result, Err(codex_app_server_client::TypedRequestError::Transport { .. } | codex_app_server_client::TypedRequestError::Deserialize { .. })) {
-                            return Err(result.expect_err("unknown unsubscribe outcome"));
+                        if let Err(error @ (codex_app_server_client::TypedRequestError::Transport { .. } | codex_app_server_client::TypedRequestError::Deserialize { .. })) = result {
+                            return Err(error);
                         }
                         results.push((*thread_id, result));
                     }

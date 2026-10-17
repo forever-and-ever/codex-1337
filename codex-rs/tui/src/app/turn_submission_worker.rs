@@ -83,7 +83,7 @@ async fn send_inner(
             return finished(
                 ReplacementContinuation::NoReceipt,
                 Vec::new(),
-                result.map(|response| SubmissionReceipt::Continued(response.turn)),
+                result.map(|response| SubmissionReceipt::Continued(Box::new(response.turn))),
             );
         }
         WorkerRequest::Cancel { client_id } => {

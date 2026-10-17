@@ -148,11 +148,11 @@ pub(super) enum SteerInput {
     #[default]
     Idle,
     Pending {
-        steer: PendingSteer,
+        steer: Box<PendingSteer>,
         interrupt: SteerInterrupt,
     },
     Replacing {
-        replacement: PendingSteerReplacement,
+        replacement: Box<PendingSteerReplacement>,
         interrupt: SteerInterrupt,
     },
 }
@@ -187,7 +187,10 @@ impl SteerInput {
     }
     pub(super) fn set(&mut self, steer: Option<PendingSteer>) {
         let interrupt = self.interrupt();
-        *self = steer.map_or(Self::Idle, |steer| Self::Pending { steer, interrupt });
+        *self = steer.map_or(Self::Idle, |steer| Self::Pending {
+            steer: Box::new(steer),
+            interrupt,
+        });
     }
     pub(super) fn replacement(&self) -> Option<&PendingSteerReplacement> {
         match self {
@@ -198,7 +201,7 @@ impl SteerInput {
     pub(super) fn replace(&mut self, replacement: PendingSteerReplacement) {
         let interrupt = self.interrupt();
         *self = Self::Replacing {
-            replacement,
+            replacement: Box::new(replacement),
             interrupt,
         };
     }
@@ -232,7 +235,10 @@ impl SteerInput {
         } else {
             replacement.appended
         };
-        *self = Self::Pending { steer, interrupt };
+        *self = Self::Pending {
+            steer: Box::new(steer),
+            interrupt,
+        };
         true
     }
     pub(super) fn abort_replacement(&mut self) -> Option<PendingSteer> {
@@ -247,7 +253,7 @@ impl SteerInput {
             unreachable!()
         };
         *self = Self::Pending {
-            steer: replacement.previous,
+            steer: Box::new(replacement.previous),
             interrupt,
         };
         Some(replacement.appended)

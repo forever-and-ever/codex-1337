@@ -4,9 +4,9 @@ use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
 use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
 
 enum TrustConsent {
-    Resume(ResumeTrustConsent),
-    DirectoryChange(directory::DirectoryTrustAdmission),
-    Dashboard(crate::app::agents_overview::trust::DashboardTrustAdmission),
+    Resume(Box<ResumeTrustConsent>),
+    DirectoryChange(Box<directory::DirectoryTrustAdmission>),
+    Dashboard(Box<crate::app::agents_overview::trust::DashboardTrustAdmission>),
 }
 
 pub(super) enum ResumeTrustConsent {
@@ -30,15 +30,17 @@ pub(in crate::app) struct TrustOperation {
 impl TrustOperation {
     pub(in crate::app::turn_submissions) fn scope(&self) -> String {
         match &*self.consent {
-            TrustConsent::Resume(ResumeTrustConsent::Directory {
-                consent: DirectoryTrustConsent::Path(path),
-                ..
-            }) => path.display().to_string(),
-            TrustConsent::Resume(ResumeTrustConsent::Directory {
-                consent: DirectoryTrustConsent::Key(key),
-                ..
-            }) => key.clone(),
-            TrustConsent::Resume(ResumeTrustConsent::Hooks { context, .. }) => context.hook_scope(),
+            TrustConsent::Resume(consent) => match consent.as_ref() {
+                ResumeTrustConsent::Directory {
+                    consent: DirectoryTrustConsent::Path(path),
+                    ..
+                } => path.display().to_string(),
+                ResumeTrustConsent::Directory {
+                    consent: DirectoryTrustConsent::Key(key),
+                    ..
+                } => key.clone(),
+                ResumeTrustConsent::Hooks { context, .. } => context.hook_scope(),
+            },
             TrustConsent::Dashboard(consent) => consent.scope(),
             TrustConsent::DirectoryChange(consent) => consent.scope(),
         }
@@ -46,8 +48,10 @@ impl TrustOperation {
 
     pub(in crate::app::turn_submissions) fn label(&self) -> &'static str {
         match &*self.consent {
-            TrustConsent::Resume(ResumeTrustConsent::Directory { .. }) => "Saving folder trust",
-            TrustConsent::Resume(ResumeTrustConsent::Hooks { .. }) => "Trusting hooks",
+            TrustConsent::Resume(consent) => match consent.as_ref() {
+                ResumeTrustConsent::Directory { .. } => "Saving folder trust",
+                ResumeTrustConsent::Hooks { .. } => "Trusting hooks",
+            },
             TrustConsent::Dashboard(consent) => consent.label(),
             TrustConsent::DirectoryChange(_) => "Saving folder trust",
         }
@@ -59,12 +63,14 @@ impl TrustOperation {
         id: Uuid,
     ) -> Result<OperationReceipt, TypedRequestError> {
         match &*self.consent {
-            TrustConsent::Resume(ResumeTrustConsent::Directory { consent, .. }) => {
-                consent.clone().send(handle, id).await?
-            }
-            TrustConsent::Resume(ResumeTrustConsent::Hooks { updates, .. }) => {
-                write_hook_trusts_typed(handle, updates.clone()).await?;
-            }
+            TrustConsent::Resume(consent) => match consent.as_ref() {
+                ResumeTrustConsent::Directory { consent, .. } => {
+                    consent.clone().send(handle, id).await?
+                }
+                ResumeTrustConsent::Hooks { updates, .. } => {
+                    write_hook_trusts_typed(handle, updates.clone()).await?;
+                }
+            },
             TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
             TrustConsent::DirectoryChange(consent) => {
                 consent.consent.clone().send(handle, id).await?
@@ -84,7 +90,7 @@ impl App {
             server,
             ServerOperation::Connection(ConnectionMutation::Trust(TrustOperation {
                 generation: self.server_operations.navigation.generation,
-                consent: Arc::new(TrustConsent::Dashboard(consent)),
+                consent: Arc::new(TrustConsent::Dashboard(Box::new(consent))),
             })),
         );
     }
@@ -166,7 +172,7 @@ impl App {
         operation: PendingNavigation,
         consent: ResumeTrustConsent,
     ) {
-        self.transfer_trust_consent(server, operation, TrustConsent::Resume(consent));
+        self.transfer_trust_consent(server, operation, TrustConsent::Resume(Box::new(consent)));
     }
     pub(super) fn transfer_directory_trust(
         &mut self,
@@ -174,7 +180,11 @@ impl App {
         operation: PendingNavigation,
         consent: directory::DirectoryTrustAdmission,
     ) {
-        self.transfer_trust_consent(server, operation, TrustConsent::DirectoryChange(consent));
+        self.transfer_trust_consent(
+            server,
+            operation,
+            TrustConsent::DirectoryChange(Box::new(consent)),
+        );
     }
 
     pub(in crate::app::turn_submissions) async fn continue_confirmed_trust(

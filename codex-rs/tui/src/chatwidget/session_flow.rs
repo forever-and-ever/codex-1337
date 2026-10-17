@@ -2,6 +2,8 @@
 //! Confirmed model-picker changes can offer the flourish only on their original task; the app
 //! checks the previous model when it applies the final selection.
 
+mod continuations;
+
 use super::*;
 use crate::style::accent_color;
 
@@ -320,22 +322,6 @@ impl ChatWidget {
         self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
             PlainHistoryCell::new(vec![line]),
         )));
-    }
-
-    pub(crate) fn project_prompt_revert_notice(&mut self, notice: &str) {
-        if self.bottom_pane.composer_input_enabled() {
-            self.set_prompt_revert_notice(Some(notice));
-        }
-    }
-
-    pub(crate) fn set_prompt_revert_notice(&mut self, notice: Option<&str>) {
-        self.set_queue_autosend_suppressed(notice.is_some());
-        let enabled = notice.is_none()
-            && !self.blocks_direct_input
-            && !self.has_misalignment_policy_violation();
-        self.bottom_pane
-            .set_composer_input_enabled(enabled, notice.map(str::to_string));
-        self.request_redraw();
     }
 
     /// Clear history-derived state while preserving this thread's settings and goal.

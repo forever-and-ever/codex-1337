@@ -62,7 +62,7 @@ fn new_startup_decoration_tracks_draft_and_session_action() {
             buffer
                 .content
                 .iter()
-                .map(|cell| cell.symbol())
+                .map(ratatui::buffer::Cell::symbol)
                 .collect::<String>()
                 .contains("/resume"),
         );
@@ -130,7 +130,7 @@ async fn configured_welcome_opt_out_controls_static_landing_page() -> anyhow::Re
             let visible = buffer
                 .content
                 .iter()
-                .map(|cell| cell.symbol())
+                .map(ratatui::buffer::Cell::symbol)
                 .collect::<String>()
                 .contains("/resume");
             assert_eq!(

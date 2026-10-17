@@ -1886,7 +1886,7 @@ async fn restore_thread_input_state_applies_running_state_policy() {
                 },
             ),
             pending_steer: input_queue::SteerInput::Pending {
-                steer: submitted_pending_steer,
+                steer: Box::new(submitted_pending_steer),
                 interrupt: input_queue::SteerInterrupt::SubmitAsTurn,
             },
             queued_user_messages: VecDeque::from([QueuedUserMessage {

@@ -197,7 +197,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     // Activity text is a projection: neither legacy labels nor row recreation own the timer.
     chat.bottom_pane.reset_status_timer(Duration::from_secs(42));
     let elapsed = chat.bottom_pane.status_elapsed().unwrap();
-    let mut legacy = status.clone();
+    let mut legacy = status;
     legacy.activity = format!("{}👩‍🔬 extra", "x".repeat(48));
     chat.set_status_header("Reconnecting…".into());
     chat.on_work_status_updated(legacy);

@@ -24,6 +24,10 @@ pub(super) enum SelectStage {
 }
 
 impl SelectStage {
+    #[expect(
+        clippy::expect_used,
+        reason = "Side cleanup is admitted with a target thread."
+    )]
     pub(super) fn thread_id(&self) -> ThreadId {
         match self {
             Self::Liveness { thread_id, .. } => *thread_id,
@@ -71,7 +75,7 @@ enum SelectedThread {
     },
     Attached(AppServerStartedThread),
     Refreshed(AppServerStartedThread),
-    ReadOnly(api::Thread),
+    ReadOnly(Box<api::Thread>),
 }
 
 pub(super) enum SelectionReceipt {
@@ -95,14 +99,14 @@ enum SelectionEffect {
         handle: AppServerRequestHandle,
     },
     Resume {
-        plan: ResumePreparation,
+        plan: Box<ResumePreparation>,
         handle: AppServerRequestHandle,
     },
     Fallback {
         thread_id: ThreadId,
         handle: AppServerRequestHandle,
-        config: Config,
-        local_settings: LocalSettings,
+        config: Box<Config>,
+        local_settings: Box<LocalSettings>,
     },
 }
 
@@ -179,8 +183,8 @@ impl App {
                             RequestPolicy::Interactive,
                             handle,
                             thread_id,
-                            config,
-                            local_settings,
+                            *config,
+                            *local_settings,
                         )
                         .await,
                     ),
@@ -189,16 +193,22 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(SelectionReceipt::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Selected(receipt),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Selected(receipt),
+                },
+            )));
         })));
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Side cleanup retains its admitted target until completion."
+    )]
     pub(super) async fn finish_selection_operation(
         &mut self,
         tui: &mut tui::Tui,
@@ -351,7 +361,7 @@ impl App {
                                     tui,
                                     server,
                                     *context,
-                                    SelectedThread::ReadOnly(thread),
+                                    SelectedThread::ReadOnly(Box::new(thread)),
                                 )
                                 .await?
                             }
@@ -471,7 +481,7 @@ impl App {
             self.spawn_selection_effect(
                 &mut operation,
                 SelectionEffect::Resume {
-                    plan,
+                    plan: Box::new(plan),
                     handle: server.request_handle(),
                 },
             );
@@ -512,8 +522,8 @@ impl App {
             SelectionEffect::Fallback {
                 thread_id,
                 handle: server.request_handle(),
-                config: self.config.clone(),
-                local_settings: self.local_settings.clone(),
+                config: Box::new(self.config.clone()),
+                local_settings: Box::new(self.local_settings.clone()),
             },
         );
         self.server_operations.navigation.current = Some(operation);
@@ -599,6 +609,10 @@ impl App {
         Ok(())
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The operation sequence cannot exhaust u64 within one frontend lifetime."
+    )]
     pub(in crate::app) async fn enqueue_side_cleanup(
         &mut self,
         server: &AppServerSession,

@@ -32,7 +32,7 @@ impl ChatComposer {
             let Some(lease) = self
                 .local_shell_admission
                 .as_ref()
-                .and_then(|admission| admission.try_acquire())
+                .and_then(crate::local_shell::LocalShellAdmission::try_acquire)
             else {
                 self.show_footer_flash(
                     Line::from("Local shell occupied; draft unchanged · !! view/restore"),

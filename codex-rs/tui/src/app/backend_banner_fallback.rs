@@ -1,5 +1,7 @@
 //! Apply backend-authorized fallback and task-local Reserve settings without saving defaults.
 
+mod continuations;
+
 use super::App;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
@@ -35,21 +37,7 @@ impl App {
             collaboration_mode: Some(mode.clone()),
             ..ThreadSettingsUpdateParams::default()
         };
-        self.model_selection_generation.advance();
-        let generation = self.model_selection_generation;
-        self.request_thread_settings_update(app_server, params, move |app, updated| {
-            if updated
-                && app.model_selection_generation == generation
-                && app.active_thread_id == Some(thread_id)
-                && app.chat_widget.thread_id() == Some(thread_id)
-                && app.chat_widget.current_model() == LUNA_RESERVE_MODEL
-            {
-                app.chat_widget.set_reasoning_effort(effort.clone());
-                if mode.mode == ModeKind::Plan {
-                    app.chat_widget.set_plan_mode_reasoning_effort(effort);
-                }
-            }
-        });
+        self.request_reserve_reasoning(app_server, thread_id, effort, mode, params);
     }
 
     pub(super) async fn apply_backend_banner_fallback(
@@ -110,42 +98,18 @@ impl App {
         // Older remote servers can decline this method. Keep the existing recovery UI in that
         // case or on failure, rather than changing local selection before the task accepts it.
         // The operation lane orders the write before later manual selections.
-        let accepted =
-            self.request_thread_settings_update(app_server, params, move |app, updated| {
-                if app.active_thread_id != Some(thread_id)
-                    || app.chat_widget.thread_id() != Some(thread_id)
-                    || app.model_selection_generation != generation
-                {
-                    return;
-                }
-                if updated {
-                    app.chat_widget.finish_backend_banner_fallback(
-                        mode,
-                        original_model,
-                        original_effort,
-                    );
-                    let (prefix, suffix) = match switch.reason {
-                        AutomaticModelSwitchReason::UsageLimit => {
-                            ("Automatically switched to", " due to usage limits.")
-                        }
-                        AutomaticModelSwitchReason::UsageRecovered => (
-                            "Automatically switched back to",
-                            " because ordinary usage is available again.",
-                        ),
-                    };
-                    let mut message = format!("{prefix} {}", model_display_name(&target.model));
-                    if let Some(label) = Self::reasoning_label_for(&target.model, Some(&effort)) {
-                        message.push(' ');
-                        message.push_str(&label);
-                    }
-                    message.push_str(suffix);
-                    app.chat_widget.add_info_message(message, /*hint*/ None);
-                } else if entering_reserve {
-                    app.chat_widget.show_unavailable_reserve_recovery();
-                }
-            });
-        if !accepted && entering_reserve {
-            self.chat_widget.show_unavailable_reserve_recovery();
-        }
+        self.request_backend_banner_fallback(
+            app_server,
+            thread_id,
+            params,
+            mode,
+            generation,
+            original_model,
+            original_effort,
+            target.model,
+            switch.reason,
+            effort,
+            entering_reserve,
+        );
     }
 }

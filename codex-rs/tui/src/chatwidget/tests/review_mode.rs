@@ -419,7 +419,7 @@ async fn restore_thread_input_state_restores_pending_steer_without_downgrading_t
             composer: None,
             input_queue: InputQueueState {
                 pending_steer: input_queue::SteerInput::Pending {
-                    steer: pending_steer,
+                    steer: Box::new(pending_steer),
                     interrupt: input_queue::SteerInterrupt::RestoreDraft,
                 },
                 rejected_steers_queue,
@@ -486,7 +486,7 @@ async fn identical_steer_receipts_only_acknowledge_the_matching_submission() {
             chat.input_queue
                 .pending_steer
                 .as_ref()
-                .map(|steer| steer.into_owned()),
+                .map(std::borrow::Cow::into_owned),
             expected
         );
     }

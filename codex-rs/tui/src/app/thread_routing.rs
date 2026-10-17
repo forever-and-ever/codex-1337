@@ -987,7 +987,7 @@ impl App {
             ServerOperation::Response(Box::new(
                 super::turn_submissions::ServerRequestDelivery::Resolved {
                     resolution,
-                    command: op.clone(),
+                    command: Box::new(op.clone()),
                 },
             )),
         );

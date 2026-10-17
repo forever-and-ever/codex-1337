@@ -1334,7 +1334,7 @@ impl ChatWidget {
                     mention_bindings: mention_bindings_from_user_inputs(items, &display.message),
                     pending_pastes: Vec::new(),
                 });
-            self.on_identified_user_message_display(display, identity.clone());
+            self.on_identified_user_message_display(display, identity);
             return;
         }
 

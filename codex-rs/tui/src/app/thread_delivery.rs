@@ -13,7 +13,7 @@ pub(super) enum LocalThreadCompletion {
         thread_id: ThreadId,
         id: uuid::Uuid,
         epoch: u64,
-        outcome: super::turn_submissions::SubmissionOutcome,
+        outcome: Box<super::turn_submissions::SubmissionOutcome>,
     },
     HistoryLookup {
         thread_id: ThreadId,
@@ -159,7 +159,7 @@ impl App {
                 epoch,
                 outcome,
             } => {
-                self.finish_submission(app_server, thread_id, id, epoch, outcome)
+                self.finish_submission(app_server, thread_id, id, epoch, *outcome)
                     .await?;
             }
             LocalThreadCompletion::HistoryLookup { thread_id, event } => {

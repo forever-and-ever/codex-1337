@@ -454,6 +454,10 @@ impl InputQueueState {
         }
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The pending steer identity was checked immediately before taking it."
+    )]
     fn finish_submission_cancel(
         &mut self,
         client_id: &str,

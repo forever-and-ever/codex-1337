@@ -5,6 +5,8 @@
 //! Reserve recovery uses a focused picker and a persisted task-local return model.
 //! Its entry notice is shared across chats until the backend confirms ordinary usage has recovered.
 
+mod continuations;
+
 use super::ChatWidget;
 
 use super::luna_reserve_return::ReserveReturnModel;
@@ -213,9 +215,7 @@ impl ChatWidget {
     /// A composer submission can already be in the app queue when a model switch starts.
     /// Reuse the retained prompt/steer rather than sending it on the blocked model.
     pub(crate) fn defer_pending_turn_for_model_settings(&mut self) -> bool {
-        if !self.waiting_for_luna_reserve()
-            && !self.input_queue_frontend.automatic_model_switch_pending
-        {
+        if !self.model_settings_block_submission() {
             return false;
         }
         if self.input_queue.turn.is_pending()
@@ -250,10 +250,7 @@ impl ChatWidget {
             self.set_plan_mode_reasoning_effort(mode.reasoning_effort());
         }
         self.set_effective_collaboration_mode(mode);
-        self.automatic_model_switch_state = AutomaticModelSwitchState {
-            reserve_return,
-            replaced_model: Some(previous_model),
-        };
+        self.commit_automatic_model_switch(reserve_return, previous_model);
         // Showing the post-switch notice is distinct from having seen the original blocked state.
         self.backend_banner_state.shown = false;
         self.backend_banner_state.dismissed = self.reserve_notice_already_shown();

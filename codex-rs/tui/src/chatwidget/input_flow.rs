@@ -81,6 +81,10 @@ impl ChatWidget {
         })
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "A selected child always has capturable input state."
+    )]
     pub(super) fn emit_subagent_text(&mut self, input: PreparedSubagentText) {
         let source = match input.source {
             UserMessageSource::Prompt => crate::app::turn_submissions::SubagentTextSource::Prompt,

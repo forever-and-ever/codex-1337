@@ -8,6 +8,10 @@ pub(super) enum CleanupContinuation {
 }
 
 impl App {
+    #[expect(
+        clippy::expect_used,
+        reason = "The operation sequence cannot exhaust u64 within one frontend lifetime."
+    )]
     pub(in crate::app) fn adopt_navigation_cleanup(
         &mut self,
         server: &AppServerSession,
@@ -91,13 +95,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or_else(|_| Err("Unsubscribe task terminated unexpectedly".into()));
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Cleaned(result),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Cleaned(result),
+                },
+            )));
         })));
         if matching {
             self.server_operations.navigation.current = Some(operation);

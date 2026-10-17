@@ -135,13 +135,15 @@ impl App {
             .catch_unwind()
             .await
             .unwrap_or(DiscoveryReceipt::Terminated);
-            let _ = completions.send(ServerCompletion::Navigation(NavigationCompletion {
-                id,
-                order,
-                epoch,
-                generation,
-                receipt: NavigationReceipt::Discovered(receipt),
-            }));
+            let _ = completions.send(ServerCompletion::Navigation(Box::new(
+                NavigationCompletion {
+                    id,
+                    order,
+                    epoch,
+                    generation,
+                    receipt: NavigationReceipt::Discovered(receipt),
+                },
+            )));
         })));
     }
 
@@ -197,6 +199,10 @@ impl App {
         Ok(())
     }
 
+    #[expect(
+        clippy::needless_collect,
+        reason = "Snapshot channel identifiers before mutably borrowing App to seed picker entries."
+    )]
     pub(in crate::app) fn show_agent_picker(&mut self, app_server: &AppServerSession) {
         let path_backed_threads = self
             .agent_navigation
