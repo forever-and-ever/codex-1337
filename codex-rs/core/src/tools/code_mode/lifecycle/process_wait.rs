@@ -14,6 +14,10 @@ pub(crate) struct ProcessWait {
 }
 
 impl ProcessWait {
+    #[expect(
+        clippy::expect_used,
+        reason = "the tracked task owns close through recording completion and is never aborted"
+    )]
     pub(crate) async fn finish(self) {
         let Self { release, closed } = self;
         drop(release);
@@ -24,6 +28,10 @@ impl ProcessWait {
 }
 
 impl CodeModeService {
+    #[expect(
+        clippy::expect_used,
+        reason = "the tracked task owns opened through admission and is never aborted"
+    )]
     pub(crate) async fn begin_process_wait(
         &self,
         call_id: &str,

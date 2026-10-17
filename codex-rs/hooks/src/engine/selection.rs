@@ -12,10 +12,9 @@ pub(crate) struct ToolMatcher {
 }
 
 impl ToolMatcher {
-    fn compile(selector: Option<&HookSelector>) -> Result<Option<Self>, String> {
+    fn compile(selector: &HookSelector) -> Result<Self, String> {
         match selector {
-            None => Ok(None),
-            Some(HookSelector::Tool { namespace, name }) => Ok(Some(Self {
+            HookSelector::Tool { namespace, name } => Ok(Self {
                 namespace: namespace
                     .as_deref()
                     .map(HookMatcher::new)
@@ -26,18 +25,17 @@ impl ToolMatcher {
                     .map(HookMatcher::new)
                     .transpose()
                     .map_err(|err| err.to_string())?,
-            })),
-            Some(HookSelector::EventValue { .. }) => {
+            }),
+            HookSelector::EventValue { .. } => {
                 Err("tool events require a tool selector".to_string())
             }
         }
     }
 
     fn matches(&self, tool: &ToolName) -> bool {
-        let namespace = if tool.is_default_namespace() {
-            DEFAULT_FUNCTION_NAMESPACE
-        } else {
-            tool.namespace.as_deref().expect("nondefault namespace")
+        let namespace = match tool.namespace.as_deref() {
+            Some(namespace) if !tool.is_default_namespace() => namespace,
+            _ => DEFAULT_FUNCTION_NAMESPACE,
         };
         self.namespace
             .as_ref()
@@ -67,41 +65,53 @@ pub(crate) enum HookSelection {
 }
 
 impl HookSelection {
+    /// Selects every occurrence of `event`.
+    pub(crate) fn unfiltered(event: HookEventName) -> Self {
+        match event {
+            HookEventName::PreToolUse => Self::PreToolUse(None),
+            HookEventName::PermissionRequest => Self::PermissionRequest(None),
+            HookEventName::PostToolUse => Self::PostToolUse(None),
+            HookEventName::PreCompact => Self::PreCompact(None),
+            HookEventName::PostCompact => Self::PostCompact(None),
+            HookEventName::SessionStart => Self::SessionStart(None),
+            HookEventName::SessionEnd => Self::SessionEnd(None),
+            HookEventName::SubagentStart => Self::SubagentStart(None),
+            HookEventName::SubagentStop => Self::SubagentStop(None),
+            HookEventName::UserPromptSubmit => Self::UserPromptSubmit,
+            HookEventName::Stop => Self::Stop,
+            HookEventName::Interrupt => Self::Interrupt,
+        }
+    }
+
     pub(crate) fn compile(
         event: HookEventName,
         selector: Option<&HookSelector>,
     ) -> Result<Self, String> {
+        let Some(selector) = selector else {
+            return Ok(Self::unfiltered(event));
+        };
+        let tool = || ToolMatcher::compile(selector).map(Some);
         let event_value = || match selector {
-            None => Ok(None),
-            Some(HookSelector::EventValue { pattern }) => HookMatcher::new(pattern)
+            HookSelector::EventValue { pattern } => HookMatcher::new(pattern)
                 .map(Some)
                 .map_err(|err| err.to_string()),
-            Some(HookSelector::Tool { .. }) => {
+            HookSelector::Tool { .. } => {
                 Err("lifecycle events require an event_value selector".to_string())
             }
         };
-        let unfiltered = |selection| {
-            if selector.is_some() {
-                Err("this event does not accept a selector".to_string())
-            } else {
-                Ok(selection)
-            }
-        };
         match event {
-            HookEventName::PreToolUse => ToolMatcher::compile(selector).map(Self::PreToolUse),
-            HookEventName::PermissionRequest => {
-                ToolMatcher::compile(selector).map(Self::PermissionRequest)
-            }
-            HookEventName::PostToolUse => ToolMatcher::compile(selector).map(Self::PostToolUse),
+            HookEventName::PreToolUse => tool().map(Self::PreToolUse),
+            HookEventName::PermissionRequest => tool().map(Self::PermissionRequest),
+            HookEventName::PostToolUse => tool().map(Self::PostToolUse),
             HookEventName::PreCompact => event_value().map(Self::PreCompact),
             HookEventName::PostCompact => event_value().map(Self::PostCompact),
             HookEventName::SessionStart => event_value().map(Self::SessionStart),
             HookEventName::SessionEnd => event_value().map(Self::SessionEnd),
             HookEventName::SubagentStart => event_value().map(Self::SubagentStart),
             HookEventName::SubagentStop => event_value().map(Self::SubagentStop),
-            HookEventName::UserPromptSubmit => unfiltered(Self::UserPromptSubmit),
-            HookEventName::Stop => unfiltered(Self::Stop),
-            HookEventName::Interrupt => unfiltered(Self::Interrupt),
+            HookEventName::UserPromptSubmit | HookEventName::Stop | HookEventName::Interrupt => {
+                Err("this event does not accept a selector".to_string())
+            }
         }
     }
 
