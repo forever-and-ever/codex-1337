@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering, fence};
 use std::time::Instant;
 
+use crossterm::event::MouseEventKind;
+
 pub use endpoint::discover;
 pub use endpoint::query;
 
@@ -33,24 +35,30 @@ pub const BUCKET_UPPER_NS: [u64; BUCKETS] = [
 ];
 
 macro_rules! stages {
-    ($($name:ident = $id:literal),+ $(,)?) => {
+    (active { $($name:ident = $id:literal),+ $(,)? }
+     retired { $($retired:ident = $retired_id:literal),* $(,)? }) => {
         #[derive(Clone, Copy, Debug)]
         #[repr(usize)]
         pub(crate) enum Stage { $($name = $id),+ }
-        pub const STAGE_NAMES: [&str; [$(stringify!($name)),+].len()] = {
-            let mut names = [""; [$(stringify!($name)),+].len()];
+        pub const STAGE_NAMES: [&str; [$(stringify!($name)),+, $(stringify!($retired)),*].len()] = {
+            let mut names = [""; [$(stringify!($name)),+, $(stringify!($retired)),*].len()];
             $(names[$id] = stringify!($name);)+
+            $(names[$retired_id] = stringify!($retired);)*
             names
         };
     };
 }
 // Protocol v1 IDs are permanent. Append IDs; never reuse or renumber them.
 stages! {
+    active {
     Startup = 0, Maintenance = 1, IdleSelect = 2, AppEvent = 3, ThreadEvent = 4,
     TerminalEvent = 5, ServerCompletion = 6, DeliveryCompletion = 7, ServerEvent = 8,
     Reconnect = 9, Timer = 10, KeyRouting = 11, PreKeyPaint = 12,
     FramePreparation = 13, FramePaint = 14, InvocationPreparation = 15,
     TerminalDiff = 16, TerminalWrite = 17, TerminalFlush = 18, RpcWait = 19,
+    ReactionLatency = 20,
+    }
+    retired {}
 }
 const STAGES: usize = STAGE_NAMES.len();
 
@@ -145,6 +153,8 @@ struct Writer {
     slow_count: u64,
     gate: InputGate,
     gate_since: u64,
+    ready_input: Option<Span>,
+    armed_input: Option<Span>,
 }
 impl Writer {
     fn new(shared: Arc<Shared>) -> Self {
@@ -163,6 +173,8 @@ impl Writer {
             slow_count: 0,
             gate: InputGate::Open,
             gate_since: 0,
+            ready_input: None,
+            armed_input: None,
         }
     }
     fn activate_reset(&mut self) {
@@ -176,6 +188,8 @@ impl Writer {
         self.suppressed_scopes = 0;
         self.shared.suppressed_scopes.store(0, Ordering::Relaxed);
         self.slow_count = 0;
+        self.ready_input = None;
+        self.armed_input = None;
         // Old shared rows need not be cleared: each row carries its epoch.
         self.shared.active_epoch.store(epoch, Ordering::Release);
     }
@@ -204,6 +218,9 @@ impl Writer {
                 .store(self.suppressed_scopes, Ordering::Relaxed);
             return None;
         }
+        if matches!(stage, Stage::FramePaint) && self.armed_input.is_none() {
+            self.armed_input = self.ready_input.take();
+        }
         let depth = self.depth;
         let now = self.shared.now();
         self.stack[depth] = Span {
@@ -218,51 +235,69 @@ impl Writer {
     fn leave(&mut self, depth: usize) {
         assert_eq!(self.depth, depth + 1, "UI latency scopes must be nested");
         self.activate_reset();
-        let Span {
+        let span = self.stack[depth];
+        let now = self.shared.now();
+        self.depth = depth;
+        self.record(span, now);
+        if matches!(span.stage, Stage::TerminalFlush)
+            && let Some(input) = self.armed_input.take()
+        {
+            self.record(input, now);
+        }
+        self.current(now);
+    }
+    fn record(
+        &mut self,
+        Span {
             stage,
             start,
             epoch,
-        } = self.stack[depth];
-        let now = self.shared.now();
-        self.depth = depth;
-        if epoch == self.epoch {
-            let elapsed = now.saturating_sub(start);
-            let bucket = BUCKET_UPPER_NS.partition_point(|upper| *upper < elapsed);
-            let stats = &mut self.stats[stage as usize];
-            stats[0] = epoch;
-            stats[1] = stats[1].saturating_add(1);
-            stats[2] = stats[2].saturating_add(elapsed);
-            stats[3] = stats[3].max(elapsed);
-            stats[4 + bucket] = stats[4 + bucket].saturating_add(1);
-            self.shared.stats[stage as usize].publish(|words| {
-                // Reset activates lazily per row; old histogram buckets must
-                // disappear before the first new-epoch completion is accepted.
-                if words[0].load(Ordering::Relaxed) != epoch {
-                    for word in &words[4..] {
-                        word.store(0, Ordering::Relaxed);
-                    }
-                }
-                for index in 0..4 {
-                    words[index].store(stats[index], Ordering::Relaxed);
-                }
-                words[4 + bucket].store(stats[4 + bucket], Ordering::Relaxed);
-            });
-            self.completed = self.completed.saturating_add(1);
-            self.shared
-                .committed
-                .store([epoch, now, stage as u64 + 1, elapsed, self.completed]);
-            if elapsed >= SLOW_NS && !matches!(stage, Stage::IdleSelect) {
-                self.shared.slow[self.slow_count as usize % SLOW].store([
-                    epoch,
-                    self.slow_count.saturating_add(1),
-                    stage as u64 + 1,
-                    start,
-                    elapsed,
-                ]);
-                self.slow_count = self.slow_count.saturating_add(1);
-            }
+        }: Span,
+        now: u64,
+    ) {
+        if epoch != self.epoch {
+            return;
         }
-        self.current(now);
+        let elapsed = now.saturating_sub(start);
+        let bucket = BUCKET_UPPER_NS.partition_point(|upper| *upper < elapsed);
+        let stats = &mut self.stats[stage as usize];
+        stats[0] = epoch;
+        stats[1] = stats[1].saturating_add(1);
+        stats[2] = stats[2].saturating_add(elapsed);
+        stats[3] = stats[3].max(elapsed);
+        stats[4 + bucket] = stats[4 + bucket].saturating_add(1);
+        self.shared.stats[stage as usize].publish(|words| {
+            // Reset activates lazily per row; old histogram buckets must
+            // disappear before the first new-epoch completion is accepted.
+            if words[0].load(Ordering::Relaxed) != epoch {
+                for word in &words[4..] {
+                    word.store(0, Ordering::Relaxed);
+                }
+            }
+            for index in 0..4 {
+                words[index].store(stats[index], Ordering::Relaxed);
+            }
+            words[4 + bucket].store(stats[4 + bucket], Ordering::Relaxed);
+        });
+        self.completed = self.completed.saturating_add(1);
+        self.shared
+            .committed
+            .store([epoch, now, stage as u64 + 1, elapsed, self.completed]);
+        let slow_ns = if matches!(stage, Stage::ReactionLatency) {
+            16_700_000
+        } else {
+            SLOW_NS
+        };
+        if elapsed >= slow_ns && !matches!(stage, Stage::IdleSelect) {
+            self.shared.slow[self.slow_count as usize % SLOW].store([
+                epoch,
+                self.slow_count.saturating_add(1),
+                stage as u64 + 1,
+                start,
+                elapsed,
+            ]);
+            self.slow_count = self.slow_count.saturating_add(1);
+        }
     }
 }
 
@@ -342,23 +377,49 @@ pub(crate) enum InputGate {
     Startup,
 }
 
-pub(crate) fn input_consumed(event: &crate::tui::TuiEvent) {
-    if matches!(
-        event,
-        crate::tui::TuiEvent::Key(_)
-            | crate::tui::TuiEvent::Paste(_)
-            | crate::tui::TuiEvent::Mouse(_)
-    ) {
-        let _ = WRITER.try_with(|writer| {
-            let writer = writer.borrow();
-            if writer.depth != 0 {
-                writer
-                    .shared
-                    .last_input_ns
-                    .store(writer.stack[writer.depth - 1].start, Ordering::Relaxed);
+pub(crate) struct InputStamp(Span);
+
+pub(crate) fn input_consumed(event: &crate::tui::TuiEvent) -> Option<InputStamp> {
+    let eligible = match event {
+        crate::tui::TuiEvent::Key(_) | crate::tui::TuiEvent::Paste(_) => true,
+        crate::tui::TuiEvent::Mouse(event) => matches!(
+            event.kind,
+            MouseEventKind::Down(_)
+                | MouseEventKind::Up(_)
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+        ),
+        _ => return None,
+    };
+    WRITER
+        .try_with(|writer| {
+            let mut writer = writer.borrow_mut();
+            writer.activate_reset();
+            let now = writer.shared.now();
+            writer.shared.last_input_ns.store(now, Ordering::Relaxed);
+            eligible.then_some(InputStamp(Span {
+                stage: Stage::ReactionLatency,
+                start: now,
+                epoch: writer.epoch,
+            }))
+        })
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn input_handled(InputStamp(input): InputStamp) {
+    let _ = WRITER.try_with(|writer| {
+        let mut writer = writer.borrow_mut();
+        writer.activate_reset();
+        if input.epoch == writer.epoch {
+            let pending = writer.ready_input.get_or_insert(input);
+            if input.start < pending.start {
+                *pending = input;
             }
-        });
-    }
+        }
+    });
 }
 
 const _: () = assert!(size_of::<Shared>() + size_of::<Writer>() <= 64 * 1024);
