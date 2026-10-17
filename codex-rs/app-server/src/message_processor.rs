@@ -532,7 +532,7 @@ impl MessageProcessor {
             auth_manager.clone(),
             Arc::clone(&thread_manager),
             outgoing.clone(),
-            arg0_paths.clone(),
+            arg0_paths,
             Arc::clone(&config),
             config_manager.clone(),
             Arc::clone(&thread_store),
