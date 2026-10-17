@@ -53,12 +53,12 @@ stages! {
     active {
     Startup = 0, Maintenance = 1, IdleSelect = 2, AppEvent = 3, ThreadEvent = 4,
     TerminalEvent = 5, ServerCompletion = 6, DeliveryCompletion = 7, ServerEvent = 8,
-    Reconnect = 9, Timer = 10, KeyRouting = 11, PreKeyPaint = 12,
+    Reconnect = 9, Timer = 10, KeyRouting = 11,
     FramePreparation = 13, FramePaint = 14, InvocationPreparation = 15,
     TerminalDiff = 16, TerminalWrite = 17, TerminalFlush = 18, RpcWait = 19,
     ReactionLatency = 20,
     }
-    retired {}
+    retired { PreKeyPaint = 12 }
 }
 const STAGES: usize = STAGE_NAMES.len();
 
