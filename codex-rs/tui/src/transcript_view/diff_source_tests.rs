@@ -80,7 +80,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         action,
     };
     let layout = paint(&mut view, 104, "source and file groups");
-    assert!(layout.text().starts_with(source));
+    assert!(layout.text().contains(source));
     assert!(
         !layout
             .fold_targets()
@@ -121,7 +121,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         assert!(view.focus_fold(&cells, 0, control(Action::Toggle(Port::Input, panel))));
         view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         let layout = paint(&mut view, 80, "input visibility preserves file folds");
-        assert_eq!(layout.text().starts_with(source), panel.visible());
+        assert_eq!(layout.text().contains(source), panel.visible());
         assert!(layout.text().contains("+second beta line"));
         assert!(!layout.text().contains("+second alpha line"));
     }
@@ -144,7 +144,7 @@ fn file_disclosures_are_independent_and_not_copied() {
         assert!(view.focus_fold(&cells, 0, control(Action::Format(Port::Output, mode))));
         view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         let layout = paint(&mut view, 104, "output format preserves file folds");
-        assert!(layout.text().starts_with('{'));
+        assert!(layout.text().contains('{'));
         assert!(layout.text().contains("\"patched\""));
         assert!(layout.text().contains("Edited"));
         assert!(layout.text().contains("+alpha body"));

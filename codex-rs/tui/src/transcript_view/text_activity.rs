@@ -1,6 +1,39 @@
-//! Heading decorations are visual only; controls and token bills never enter copied source.
+//! Headings retain selectable text; interactive controls stay outside copied source.
 
 use super::*;
+
+fn byte_at_column(text: &str, column: usize) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut width = 0;
+    for (offset, grapheme) in text.grapheme_indices(true) {
+        if width >= column {
+            return offset;
+        }
+        width += display_width(grapheme);
+    }
+    text.len()
+}
+
+impl HeaderRows {
+    /// Source belongs only to the label; clocks, figures and controls are decoration.
+    pub(in crate::transcript_view) fn label(
+        line: Line<'static>,
+        columns: Range<usize>,
+    ) -> HyperlinkLine {
+        let text = line.to_string();
+        let start = byte_at_column(&text, columns.start);
+        let end = byte_at_column(&text, columns.end);
+        let mut source = LogicalLineSource::from_line(&logical::slice_line(&line, start..end));
+        source.prefix_bytes = start;
+        let mut label = HyperlinkLine::from(line);
+        label.source = Some(source);
+        crate::history_cell::output_provenance::mark_lines(
+            std::slice::from_mut(&mut label),
+            crate::history_cell::output_provenance::OutputProvenance::Client,
+        );
+        label
+    }
+}
 
 impl TextRow {
     pub(super) fn decoration_column(&self, column: usize) -> usize {
@@ -71,7 +104,7 @@ impl TextLayout {
         self.with_leading_disclosure_on_line(label, source_line, FoldTarget::Activity)
     }
 
-    /// Selectable-source offset of an input row, excluding client-only labels.
+    /// Selectable-source offset of an input row.
     pub(in crate::transcript_view) fn line_offset(&self, line: usize) -> usize {
         self.row_for_input_line(line)
             .map_or(self.text.len(), |row| self.rows[row].source.start)
@@ -93,7 +126,7 @@ impl TextLayout {
         line: usize,
         target: FoldTarget,
     ) -> Self {
-        // A source offset cannot distinguish client-only rows, and wrapped input
+        // A source offset cannot distinguish empty rows, and wrapped input
         // rows may coalesce. Retain the supplied row through that projection.
         let Some(row) = self.row_for_input_line(line) else {
             return self;
@@ -143,9 +176,42 @@ impl TextLayout {
 
     /// Head the layout with a Feed Item's header rows, its fold after the clock.
     pub(in crate::transcript_view) fn with_fold_header(self, rows: HeaderRows) -> Self {
+        // Headers are already laid out; frozen headers clip on resize rather than rewrapping chrome.
+        let mut header = TextLayout::new(rows.lines.clone(), u16::MAX);
         let mut layout = self;
-        for line in rows.lines.iter().rev() {
-            layout = layout.with_leading_row(line.clone());
+        let prefix = header.text.len() + usize::from(!layout.logical.is_empty());
+        for line in &mut header.logical {
+            line.input_rows = usize::MAX..usize::MAX;
+        }
+        for row in &mut header.rows {
+            row.content_width = layout.width;
+        }
+        for row in &mut layout.rows {
+            row.source.start += prefix;
+            row.source.end += prefix;
+            row.line_end = row.line_end.map(|offset| offset + prefix);
+            row.logical_line = row.logical_line.map(|index| index + header.logical.len());
+        }
+        header.logical.extend(layout.logical);
+        layout.logical = header.logical;
+        if !layout.text.is_empty() || layout.logical.len() > rows.lines.len() {
+            header.text.push('\n');
+        }
+        header.text.push_str(&layout.text);
+        layout.text = header.text;
+        header.rows.extend(layout.rows);
+        layout.rows = header.rows;
+        for (anchor, _) in &mut layout.heading.inline {
+            if let InlineAnchor::Source(offset) = anchor {
+                *offset += prefix;
+            }
+        }
+        for control in &mut layout.disclosure_controls {
+            control.row += rows.lines.len();
+            control.source_offset += prefix;
+        }
+        for (index, line) in rows.lines.iter().enumerate() {
+            layout.rows[index].line = line.clone();
         }
         if let Some((target, unfolded)) = &rows.fold {
             layout.disclosure = true;
@@ -211,11 +277,62 @@ impl TextLayout {
     }
 
     pub(in crate::transcript_view) fn with_inline_decoration_at(
-        mut self,
+        self,
         offset: usize,
         label: String,
     ) -> Self {
-        let row_index = self.row_for_offset(offset.saturating_sub(1));
+        self.with_inline_line_at(InlineAnchor::Source(offset), Line::from(label).dim())
+    }
+
+    pub(in crate::transcript_view) fn with_invocation_rows(
+        mut lines: Vec<HyperlinkLine>,
+        width: u16,
+        controls: Vec<HeaderControl>,
+    ) -> Self {
+        let mut decorations = Vec::new();
+        for index in 0..lines.len() {
+            let original = &mut lines[index];
+            let Some(source) = &original.source else {
+                continue;
+            };
+            let end = source.prefix_bytes + source.range.len();
+            if end >= original.line.to_string().len() {
+                continue;
+            }
+            let label = logical::slice_line(&original.line, end..usize::MAX);
+            original.line = logical::slice_line(&original.line, 0..end);
+            decorations.push((index, source.range.len(), label));
+        }
+        let mut layout = Self::new(lines, width);
+        for (line, column, label) in decorations {
+            layout = layout.with_inline_line_at(
+                InlineAnchor::InputLine {
+                    line,
+                    offset: column,
+                },
+                label,
+            );
+        }
+        for control in controls {
+            layout = layout.with_invocation_control(control);
+        }
+        layout
+    }
+
+    pub(super) fn with_inline_line_at(
+        mut self,
+        anchor: InlineAnchor,
+        label: Line<'static>,
+    ) -> Self {
+        let (offset, row_index) = match anchor {
+            InlineAnchor::Source(offset) => (offset, self.row_for_offset(offset.saturating_sub(1))),
+            InlineAnchor::InputLine { line, offset } => {
+                let Some(row) = self.row_for_input_line(line) else {
+                    return self;
+                };
+                (self.rows[row].source.start + offset, row)
+            }
+        };
         let Some(row) = self.rows.get_mut(row_index) else {
             return self;
         };
@@ -228,9 +345,9 @@ impl TextLayout {
             + offset
             - row.source.start;
         let column = row.first_column + display_width(&self.text[row.source.start..offset]);
-        let width = display_width(&label);
+        let width = label.width();
         let mut line = logical::slice_line(&row.line.line, 0..byte);
-        line.push_span(label.clone().dim());
+        line.extend(label.spans.clone());
         line.extend(logical::slice_line(&row.line.line, byte..usize::MAX).spans);
         row.line.line = truncate_line_to_width(line, usize::from(self.width));
         for link in &mut row.line.hyperlinks {
@@ -242,7 +359,7 @@ impl TextLayout {
             }
         }
         row.inline_decoration = Some((column, width));
-        self.heading.output_controls = Some((offset, label));
+        self.heading.inline.push((anchor, label));
         self
     }
 }

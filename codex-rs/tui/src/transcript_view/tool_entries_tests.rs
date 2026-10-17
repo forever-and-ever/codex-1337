@@ -131,7 +131,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         let text = layout.text().to_owned();
         assert!(text.ends_with(&format!("\n{plain}\n{invalid}")));
         if mode == OutputMode::Raw {
-            assert_eq!(text, [json, plain, invalid].join("\n"));
+            assert!(text.ends_with(&[json, plain, invalid].join("\n")));
         } else {
             assert!(text.contains("9007199254740993123456789"));
             assert!(text.contains("1.2300e+04"));
@@ -158,7 +158,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     let mut surfaces = output.output_lines(/*width*/ 80, OutputMode::Fmt);
     surfaces.push(client_notice("Stored result · exact capture unavailable"));
     let layout = TextLayout::new(surfaces, /*width*/ 80);
-    assert!(!layout.text().contains("Stored result"));
+    assert!(layout.text().contains("Stored result"));
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 14,
     );
@@ -172,7 +172,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     let mut buffer = Buffer::empty(area);
     narrow.render(area, &mut buffer, /*start_row*/ 0);
     assert!(tests::text(&buffer).contains("Stored result"));
-    assert!(!narrow.text().contains("Stored result"));
+    assert!(narrow.text().contains("Stored result"));
+    assert_eq!(narrow.text(), layout.text());
     assert!(
         output
             .output_lines(/*width*/ 80, OutputMode::Fmt)
@@ -229,7 +230,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 OutputProvenance::Client
             );
             let layout = TextLayout::new(lines, u16::MAX);
-            assert_eq!(layout.text(), safe);
+            assert!(layout.text().starts_with(&safe));
         }
         if !paint {
             continue;
@@ -248,7 +249,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         selection.start.offset = start;
         selection.end.offset = start + safe.len();
         tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
-        assert_eq!(view.selected_text(&cells), Some(safe));
+        assert_eq!(view.selected_text(&cells).as_deref(), Some(safe.as_str()));
         view.end_selection(&cells);
         let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
         assert!(
@@ -266,7 +267,12 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         for layout in [layout.as_ref(), &layout.rewrap(24)] {
             let (row, columns, _) = layout.fold_position(&target).unwrap();
             assert_eq!(layout.fold_at(row, columns.start), Some(target.clone()));
-            assert!(!layout.text().contains("[out"));
+            let capture = layout.text().find(&safe).unwrap();
+            assert!(
+                !layout.text()[..capture].contains(['[', ']']),
+                "{:?}",
+                layout.text()
+            );
         }
         painted.push(format!("escaped capture\n{buffer:?}"));
     }
@@ -317,7 +323,11 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         let replay =
             crate::history_cell::ArrivalCell::new(serde_json::from_value(encoded).unwrap());
         let raw = crate::history_cell::output_provenance::raw_cell_lines(&replay, u16::MAX);
-        assert_eq!(TextLayout::new(raw.clone(), u16::MAX).text(), json);
+        assert!(
+            TextLayout::new(raw.clone(), u16::MAX)
+                .text()
+                .ends_with(json)
+        );
         let body = raw
             .iter()
             .find(|line| line.line.to_string().contains("9007199254740993123456789"))
@@ -342,8 +352,14 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(layout.text().contains("9007199254740993123456789"));
             assert!(layout.text().contains("1.2300e+04"));
             assert_eq!(layout.text().matches("\"a\":").count(), 2);
-            assert!(!layout.text().contains("Legacy arrival"));
-            assert!(!layout.text().contains("Tool Declarations"));
+            assert_eq!(
+                layout.text().contains("Legacy arrival"),
+                source == ArrivalSource::Legacy
+            );
+            assert_eq!(
+                layout.text().contains("Tool Declarations"),
+                matches!(source, ArrivalSource::ToolDeclarations { .. })
+            );
         }
     }
     crate::terminal_palette::with_test_default_colors(
@@ -448,7 +464,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 }
             }
             // The same submitted definitions cross Preamble, /context and Injection surfaces.
-            // Rewrapping must retain mode-specific fills and uncopyable headings.
+            // Rewrapping retains provenance fills and selectable human headings.
             let sources = vec![
                 codex_protocol::ContextSource::Prompt {
                     label: "Base instructions".into(),
@@ -533,7 +549,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                         );
                     }
                     let layout = TextLayout::new(lines, u16::MAX).rewrap(24);
-                    assert!(!layout.text().contains("Tool Declarations"));
+                    assert!(layout.text().contains("Tool Declarations"));
 
                     assert_eq!(
                         layout.text().matches("9007199254740993123456789").count(),
@@ -574,7 +590,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             tests::render(&mut view, &cells, 64, 12);
             let layout = view.current_layout(&cells, 0).unwrap();
             let start = layout.text().find(json).unwrap();
-            assert!(!layout.text().contains("Tool Declarations"));
+            assert!(layout.text().contains("Tool Declarations"));
             view.begin_selection(&cells, 6, 1, 1);
             let selection = view.selection.as_mut().unwrap();
             selection.start.offset = start;
@@ -642,7 +658,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     assert_eq!(
         TextLayout::new(projected, u16::MAX).text(),
-        blocks.join("\n")
+        format!("Text block 1\n{}\nText block 2\n{}", blocks[0], blocks[1])
     );
     let sources = [
         codex_protocol::ContextSource::Prompt {

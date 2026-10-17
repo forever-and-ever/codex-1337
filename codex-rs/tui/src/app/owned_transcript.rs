@@ -28,6 +28,7 @@ impl App {
         if tui.is_owned_screen()
             && self.overlay.is_none()
             && !self.transcript_view.has_active_interaction()
+            && !self.live_work.has_selection()
             && let Some((char_count, result)) = self
                 .chat_widget
                 .copy_composer_selection(event, |text| copy(tui, text))
@@ -488,7 +489,7 @@ impl App {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
-            if self.handle_live_work_input(event) {
+            if self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event) {
                 self.transcript_view.end_selection(&self.transcript_cells);
                 self.transcript_view.cancel_search();
                 self.transcript_view.clear_activity_focus();
@@ -550,7 +551,7 @@ impl App {
                 let size = tui.prepare_draw_size()?;
                 self.render_owned_transcript(tui, size)?;
             }
-            if self.handle_live_work_input(event) {
+            if self.handle_live_work_selection(tui, event) || self.handle_live_work_input(event) {
                 tui.frame_requester().schedule_frame();
                 return Ok(true);
             }

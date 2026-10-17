@@ -24,7 +24,6 @@ use ratatui::widgets::Widget;
 use crate::style::accent_style;
 use crate::style::secondary_text_style;
 use crate::wrapping::RtOptions;
-use crate::wrapping::word_wrap_lines;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Group {
@@ -169,7 +168,7 @@ impl Focus {
 }
 
 struct WorkLine {
-    line: Line<'static>,
+    line: crate::terminal_hyperlinks::HyperlinkLine,
     focus: Option<Focus>,
     group_header: bool,
 }
@@ -187,6 +186,7 @@ pub(crate) struct LiveWorkView {
     focused: bool,
     hits: Vec<(Rect, Focus)>,
     hover: Option<Hover>,
+    selection: crate::transcript_view::TranscriptView,
 }
 
 impl LiveWorkView {
@@ -247,6 +247,7 @@ impl LiveWorkView {
     }
 
     pub(crate) fn focus_group(&mut self, group: Group) {
+        self.selection.jump_to_latest();
         self.release_hover();
         let key = Key::Group(group);
         if self.find(&key).is_some_and(Row::is_visible) {
@@ -258,8 +259,11 @@ impl LiveWorkView {
     }
 
     pub(crate) fn blur(&mut self) {
-        self.release_hover();
         self.focused = false;
+        self.selection.end_drag();
+        if !self.selection.has_active_interaction() {
+            self.release_hover();
+        }
     }
 
     pub(crate) fn is_focused(&self) -> bool {
@@ -288,6 +292,7 @@ impl LiveWorkView {
         let mut remaining_headers = lines.iter().filter(|line| line.group_header).count();
         let mut y = area.y;
         let mut shown = 0;
+        let mut painted = Vec::new();
         // Reserve the other groups' folds before spending terminal space on expanded details.
         for work_line in &lines {
             if work_line.group_header {
@@ -323,7 +328,12 @@ impl LiveWorkView {
                 line = Line::styled(
                     format!("{disclosure}No longer active"),
                     secondary_text_style(),
-                );
+                )
+                .into();
+                let mut source =
+                    crate::terminal_hyperlinks::LogicalLineSource::new("No longer active".into());
+                source.prefix_bytes = disclosure.len();
+                line.source = Some(source);
             } else if !available {
                 line = Line::styled(
                     format!(
@@ -331,28 +341,124 @@ impl LiveWorkView {
                         " ".repeat(crate::render::disclosure::columns() + 1)
                     ),
                     secondary_text_style(),
+                )
+                .into();
+                let mut source = crate::terminal_hyperlinks::LogicalLineSource::new(
+                    "No longer available".into(),
                 );
+                source.prefix_bytes = crate::render::disclosure::columns() + 1;
+                line.source = Some(source);
             } else if self.focused && work_line.focus.as_ref() == self.selected.as_ref() {
-                line = line.patch_style(match &work_line.focus {
+                line.line = line.line.patch_style(match &work_line.focus {
                     Some(Focus::Row(_)) => crate::render::disclosure::style(true),
                     _ => accent_style().underlined(),
                 });
             }
-            line.render(line_area, buf);
             if available && let Some(focus) = &work_line.focus {
-                self.hits.push((line_area, focus.clone()));
+                match focus {
+                    Focus::Row(key) if self.find(key).is_some_and(Row::has_disclosure) => {
+                        if let Some(source) = &line.source
+                            && source.range.start == 0
+                        {
+                            let indent = source
+                                .prefix_bytes
+                                .saturating_sub(crate::render::disclosure::columns() + 1);
+                            self.hits.push((
+                                Rect::new(
+                                    line_area.x + indent as u16,
+                                    line_area.y,
+                                    crate::render::disclosure::columns() as u16,
+                                    1,
+                                ),
+                                focus.clone(),
+                            ));
+                        }
+                    }
+                    Focus::Action { .. } => self.hits.push((line_area, focus.clone())),
+                    _ => {}
+                }
             }
+            painted.push(line);
             y = y.saturating_add(1);
             shown += 1;
             budget -= 1;
         }
         if clipped {
-            Line::styled(
-                format!("… {} lines hidden · ← fold", lines.len() - shown),
-                secondary_text_style(),
-            )
-            .render(Rect::new(area.x, y, area.width, 1), buf);
+            let hint = crate::line_truncation::truncate_line_to_width(
+                Line::styled(
+                    format!("… {} lines hidden · ← fold", lines.len() - shown),
+                    secondary_text_style(),
+                ),
+                usize::from(area.width),
+            );
+            painted.push(hint.into());
         }
+        self.selection.render_surface(
+            Rect::new(area.x, area.y, area.width, painted.len() as u16),
+            buf,
+            painted,
+        );
+    }
+
+    pub(crate) fn selection_event(
+        &mut self,
+        event: &crate::tui::TuiEvent,
+    ) -> Option<crate::transcript_view::ViewAction> {
+        match event {
+            crate::tui::TuiEvent::Mouse(mouse) => {
+                if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+                    && !mouse.modifiers.contains(KeyModifiers::SHIFT)
+                    && self
+                        .hits
+                        .iter()
+                        .any(|(area, _)| area.contains(Position::new(mouse.column, mouse.row)))
+                {
+                    self.selection.jump_to_latest();
+                    self.release_hover();
+                    return None;
+                }
+                if mouse.kind == MouseEventKind::Moved && self.selection.has_active_interaction() {
+                    return Some(crate::transcript_view::ViewAction::Changed);
+                }
+                let action = self.selection.handle_selection_mouse(*mouse, &[]);
+                if action.is_some() {
+                    self.focused = false;
+                    if self.selection.has_active_interaction() {
+                        self.hover.get_or_insert(Hover {
+                            position: Position::new(mouse.column, mouse.row),
+                            pending_rows: None,
+                        });
+                    } else {
+                        self.release_hover();
+                    }
+                } else if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                    self.selection.jump_to_latest();
+                    self.release_hover();
+                }
+                action
+            }
+            crate::tui::TuiEvent::Key(key) if self.selection.has_active_interaction() => {
+                let action = self.selection.handle_key(*key, &[]);
+                if !self.selection.has_active_interaction() {
+                    self.selection.jump_to_latest();
+                    self.release_hover();
+                }
+                action
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn has_selection(&self) -> bool {
+        self.selection.has_active_interaction()
+    }
+
+    pub(crate) fn owns_selection_key(&self, key: KeyEvent) -> bool {
+        self.has_selection() && self.selection.owns_interaction_key(key)
+    }
+
+    pub(crate) fn selection_view(&mut self) -> &mut crate::transcript_view::TranscriptView {
+        &mut self.selection
     }
 
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent) -> Interaction {
@@ -629,7 +735,7 @@ fn append_lines(
     let options = RtOptions::new(usize::from(width))
         .initial_indent(prefix)
         .subsequent_indent(Line::from(" ".repeat(indent + control_width)));
-    for line in word_wrap_lines([line], options) {
+    for line in crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(&[line.into()], options) {
         lines.push(WorkLine {
             line,
             focus: focus.clone(),
@@ -862,5 +968,55 @@ mod tests {
         assert_eq!(view.handle_mouse(click), Interaction::Consumed);
         assert_eq!(view.desired_height(60), 3);
         assert_eq!(view.handle_mouse(click), Interaction::Ignored);
+        // Selection uses logical source, not wrapped rows or the disclosure/action hit targets.
+        let command = "Command · printf 'alpha   beta gamma 界界界 delta'";
+        let operation = row(
+            Key::Operation {
+                thread_id: ThreadId::new(),
+                id: "copy".into(),
+            },
+            command,
+            Vec::new(),
+        );
+        view.set_rows(vec![row(Key::Group(Group::Work), "", vec![operation])]);
+        view.focus_group(Group::Work);
+        let area = Rect::new(2, 3, 30, 10);
+        let mut buf = Buffer::empty(area);
+        view.render(area, &mut buf);
+        let mouse = |kind, column, row| {
+            crate::tui::TuiEvent::Mouse(MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        assert!(
+            view.selection_event(&mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                area.x + crate::ui_consts::LIVE_PREFIX_COLS,
+                area.y + 1
+            ))
+            .is_some()
+        );
+        view.selection_event(&mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            area.right() - 1,
+            area.bottom() - 1,
+        ));
+        view.selection_event(&mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            area.right() - 1,
+            area.bottom() - 1,
+        ));
+        assert_eq!(view.selection.selected_text(&[]).as_deref(), Some(command));
+        view.set_rows(vec![row(
+            Key::Group(Group::Work),
+            "",
+            vec![row(Key::ProcessStatus, "New work", Vec::new())],
+        )]);
+        let area = Rect::new(2, 3, 24, 10);
+        view.render(area, &mut Buffer::empty(area));
+        assert_eq!(view.selection.selected_text(&[]).as_deref(), Some(command));
     }
 }

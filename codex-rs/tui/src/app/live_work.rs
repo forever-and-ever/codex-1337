@@ -157,6 +157,41 @@ impl LiveWorkState {
         }
     }
 
+    pub(super) fn has_selection(&self) -> bool {
+        self.scope
+            .as_ref()
+            .is_some_and(|scope| scope.view.has_selection())
+    }
+
+    pub(super) fn owns_selection_key(&self, key: KeyEvent) -> bool {
+        self.scope
+            .as_ref()
+            .is_some_and(|scope| scope.view.owns_selection_key(key))
+    }
+
+    pub(super) fn cancel_primary(&mut self) {
+        if let Some(scope) = &mut self.scope {
+            scope.view.selection_view().cancel_primary();
+        }
+    }
+
+    pub(super) fn finish_copy(
+        &mut self,
+        completion: &(u64, crate::clipboard_copy::worker::CopyResult),
+        current: bool,
+    ) {
+        if let Some(scope) = &mut self.scope {
+            let view = scope.view.selection_view();
+            let completed = view.finish_copy(&[], completion, current);
+            if completed.is_some()
+                && completion.1 == Ok(crate::clipboard_copy::CopyStatus::Confirmed)
+                && !view.has_selection_range()
+            {
+                view.jump_to_latest();
+            }
+        }
+    }
+
     pub(super) fn render(&mut self, area: Rect, buffer: &mut Buffer) {
         if let Some(scope) = &mut self.scope {
             scope.view.render(area, buffer);
@@ -319,6 +354,48 @@ impl App {
             group(Group::Processes, processes),
             group(Group::Alarms, alarms),
         ]);
+    }
+
+    pub(super) fn handle_live_work_selection(
+        &mut self,
+        tui: &mut tui::Tui,
+        event: &TuiEvent,
+    ) -> bool {
+        if !self.chat_widget.no_modal_or_popup_active()
+            || self.chat_widget.is_external_writer_view()
+        {
+            return false;
+        }
+        let Some(scope) = &mut self.live_work.scope else {
+            return false;
+        };
+        scope.view.selection_view().copy_on_select = self.transcript_view.copy_on_select;
+        scope
+            .view
+            .selection_view()
+            .set_keymap_bindings(&self.keymap);
+        let Some(action) = scope.view.selection_event(event) else {
+            return false;
+        };
+        use crate::transcript_view::ViewAction;
+        let view = scope.view.selection_view();
+        match action {
+            ViewAction::PrimarySelection(text) | ViewAction::CopyOnSelect(text) => {
+                view.publish_primary(tui, &text)
+            }
+            ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
+                let result = view.copy_selected_text(tui, &[], &text, true);
+                if result == Ok(crate::clipboard_copy::CopyStatus::Confirmed) {
+                    view.jump_to_latest();
+                }
+                self.transcript_view
+                    .show_copy_feedback(&result, text.chars().count());
+            }
+            ViewAction::Changed => {}
+            ViewAction::OpenLink(_) => unreachable!("Work selection never activates links"),
+        }
+        tui.frame_requester().schedule_frame();
+        true
     }
 
     pub(super) fn handle_live_work_input(&mut self, event: &TuiEvent) -> bool {

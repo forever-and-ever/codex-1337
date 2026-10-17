@@ -380,6 +380,8 @@ impl TranscriptView {
         };
         self.end_selection(cells);
         self.jump_to_entry(cells, index);
+        // The previous paint cannot prove visibility after this explicit jump.
+        self.visible.clear();
         self.refresh_feed(cells, index);
         if let Some(fold) = self.feed.fold_of(index)
             && self.feed.is_unfolded(fold, &self.disclosure.expanded) == Some(false)
