@@ -214,6 +214,7 @@ impl Borrow<ResponseItem> for ResponseItemEnvelope {
 
 /// Persisted rollout item used by core history and rollout storage.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum RolloutItem {
     SessionMeta(SessionMetaLine),
     ResponseItem(ResponseItemEnvelope),

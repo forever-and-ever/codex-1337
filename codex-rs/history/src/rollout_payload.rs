@@ -30,6 +30,7 @@ const CODE_MODE_DELIVERY_UNAVAILABLE: &str = "The content of a confirmed assista
 /// Persisted rollout item used by core history and rollout storage.
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub(super) enum RolloutItemWire<'a> {
     SessionMeta {
         payload: Cow<'a, SessionMetaLine>,
