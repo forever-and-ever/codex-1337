@@ -1,0 +1,55 @@
+//! Local asynchronous work returns through the same typed UI reply as server requests.
+
+use super::turn_submissions::ui_requests::UiReply;
+use super::*;
+use std::future::Future;
+
+impl App {
+    pub(in crate::app) fn request_local<T, F, A>(&self, label: &'static str, future: F, apply: A)
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        A: FnOnce(&mut App, &mut AppServerSession, T) -> Result<()> + Send + 'static,
+    {
+        let events = self.app_event_tx.clone();
+        let epoch = self.server_operations.epoch();
+        tokio::spawn(async move {
+            let value = future.await;
+            events.send(AppEvent::LocalUiReply(UiReply::from_apply(
+                move |app, server| {
+                    if app.server_operations.epoch() != epoch {
+                        tracing::debug!(
+                            operation = label,
+                            "dropping local completion from retired connection"
+                        );
+                        return Ok(());
+                    }
+                    apply(app, server, value)
+                },
+            )));
+        });
+    }
+}
+
+#[cfg(test)]
+impl App {
+    pub(in crate::app) async fn settle_server_ui_requests(
+        &mut self,
+        tui: &mut tui::Tui,
+        server: &mut AppServerSession,
+    ) -> Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !self.server_operations.is_empty() {
+                let completion = self
+                    .server_operations
+                    .control_rx
+                    .recv()
+                    .await
+                    .expect("server completion");
+                Box::pin(self.handle_server_completion(tui, server, completion)).await?;
+            }
+            Ok(())
+        })
+        .await?
+    }
+}

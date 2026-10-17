@@ -283,6 +283,7 @@ impl App {
             AppEvent::OpenWarnings => self.chat_widget.open_warnings(&self.transcript_cells),
             AppEvent::Queue(event) => self.handle_queue_event(app_server, event).await,
             AppEvent::Submission(event) => self.handle_submission_event(app_server, event).await,
+            AppEvent::LocalUiReply(reply) => reply.apply(self, app_server)?,
             AppEvent::UpdateWarnings { transcript, dismissed, kept } => {
                 if !Arc::ptr_eq(&transcript, &self.chat_widget.warning_display_state.transcript) {
                     return Ok(AppRunControl::Continue);
