@@ -30,12 +30,18 @@ async fn select_transcript(
     app.transcript_view
         .set_presentation(detailed, HistoryRenderMode::Rich);
     app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(vec![
-        "replaced cell".into(),
-    ]))];
-    app.render_owned_transcript(tui, Size::new(/*width*/ 80, /*height*/ 12))?;
-    app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(vec![
         "select this transcript".into(),
     ]))];
+    app.render_owned_transcript(tui, Size::new(/*width*/ 80, /*height*/ 12))?;
+    let presented =
+        crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
+    // An unpresented revision must not replace the cells behind the retained hit areas.
+    let presented_cells = std::mem::replace(
+        &mut app.transcript_cells,
+        vec![Arc::new(PlainHistoryCell::new(vec![
+            "unpresented replacement".into(),
+        ]))],
+    );
     app.handle_tui_event(
         tui,
         app_server,
@@ -58,12 +64,18 @@ async fn select_transcript(
         )
         .await?;
     }
+    // Key routing changes interaction state, not the already presented frame.
+    assert_eq!(
+        crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
+        &presented,
+    );
     assert_eq!(
         app.transcript_view
             .selected_text(&app.transcript_cells)
             .as_deref(),
         Some("select")
     );
+    app.transcript_cells = presented_cells;
     Ok(())
 }
 

@@ -472,6 +472,8 @@ async fn owned_drag_stops_when_focus_or_input_ownership_is_lost() -> Result<()> 
         app.transcript_view
             .scroll(&app.transcript_cells, /*rows*/ -12);
         app.render_owned_transcript(&mut tui, size)?;
+        let presented =
+            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
         for (kind, row) in [
             (MouseEventKind::Down(MouseButton::Left), 2),
             (MouseEventKind::Drag(MouseButton::Left), 0),
@@ -487,6 +489,11 @@ async fn owned_drag_stops_when_focus_or_input_ownership_is_lost() -> Result<()> 
                 }),
             )?;
         }
+        // Pointer routing uses the presented hit areas without painting selection mid-gesture.
+        assert_eq!(
+            crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),
+            &presented,
+        );
         assert!(app.transcript_view.tick_selection(&app.transcript_cells));
         let selected = app.transcript_view.selected_text(&app.transcript_cells);
         let event = match owner {
