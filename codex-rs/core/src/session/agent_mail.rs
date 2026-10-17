@@ -101,10 +101,13 @@ impl Session {
         &self,
         communication: &InterAgentCommunication,
     ) -> CodexResult<bool> {
-        if !is_accepted_agent_mail(communication) {
+        let Some(id) = communication
+            .id
+            .as_ref()
+            .filter(|_| is_accepted_agent_mail(communication))
+        else {
             return Ok(true);
-        }
-        let id = communication.id.as_ref().expect("accepted mail has an ID");
+        };
         let db = self
             .state_db()
             .ok_or_else(|| CodexErr::Fatal("accepted agent-mail database is unavailable".into()))?;
@@ -150,6 +153,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the acceptance gate serializes recovery with durable sends; recovery never reacquires it or waits for an actor to process a send"
+    )]
     pub(crate) async fn recover_accepted_agent_mail(self: &Arc<Self>) -> CodexResult<()> {
         let acceptance = self.agent_mail.acceptance.lock().await;
         self.recover_accepted_agent_mail_locked().await?;
@@ -158,6 +165,10 @@ impl Session {
         Ok(())
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "idle queue checks and enqueue must be atomic with projection marks and turn admission; mailbox operations only take their private queue lock and never acquire received or active_turn"
+    )]
     pub(crate) async fn recover_accepted_agent_mail_locked(&self) -> CodexResult<bool> {
         self.check_agent_mail_health()?;
         let Some(db) = self.state_db() else {
@@ -254,11 +265,12 @@ impl Session {
                     })?;
                 continue;
             }
+            let config = self.get_config().await;
             let mut received = self.agent_mail.received.lock().await;
-            if !received.contains_key(&record.id) {
+            if let std::collections::hash_map::Entry::Vacant(projection) = received.entry(record.id)
+            {
                 // Reuse current execution state and any original held deadline.
                 // Restart has no ACTIVE guards; in-process retries obey normal batching.
-                let config = self.get_config().await;
                 let execution = *self
                     .services
                     .local_agent_runtime
@@ -272,7 +284,7 @@ impl Session {
                         execution,
                     )
                     .await;
-                received.insert(record.id, MailProjection::Published);
+                projection.insert(MailProjection::Published);
             }
         }
         Ok(!publication_blocked)
@@ -381,9 +393,14 @@ impl Session {
         model_info: &ModelInfo,
         communication: &InterAgentCommunication,
     ) -> CodexResult<bool> {
-        if !is_accepted_agent_mail(communication) {
+        let Some(id) = communication
+            .id
+            .as_ref()
+            .filter(|_| is_accepted_agent_mail(communication))
+        else {
             return Ok(false);
-        }
+        };
+        let id = id.clone();
         // Never wait for a lifecycle writer while a caller might own a reader.
         // No operation is transferred if this nonblocking admission fails.
         let lifecycle = self
@@ -413,7 +430,6 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .spawn(async move {
-                    let id = mail.id.as_ref().expect("accepted mail has an ID");
                     session
                         .agent_mail
                         .received
@@ -421,17 +437,17 @@ impl Session {
                         .await
                         .insert(id.clone(), MailProjection::Admitting);
                     let result = std::panic::AssertUnwindSafe(
-                        session.commit_accepted_agent_mail(&turn, &model, &mail),
+                        session.commit_accepted_agent_mail(&turn, &model, &mail, &id),
                     )
                     .catch_unwind()
                     .await
                     .unwrap_or_else(|_| {
-                        session.fence_agent_mail(id, "admission operation panicked".into());
+                        session.fence_agent_mail(&id, "admission operation panicked".into());
                         Err(CodexErr::Fatal(
                             "accepted agent-mail admission panicked; inbox retained".into(),
                         ))
                     });
-                    session.agent_mail.received.lock().await.remove(id);
+                    session.agent_mail.received.lock().await.remove(&id);
                     drop(boundary);
                     drop(lifecycle);
                     result
@@ -459,8 +475,8 @@ impl Session {
         turn_context: &TurnContext,
         model_info: &ModelInfo,
         communication: &InterAgentCommunication,
+        id: &ResponseItemId,
     ) -> CodexResult<Option<ResponseItem>> {
-        let id = communication.id.as_ref().expect("accepted mail has an ID");
         let db = self
             .state_db()
             .ok_or_else(|| CodexErr::Fatal("accepted agent-mail database is unavailable".into()))?;

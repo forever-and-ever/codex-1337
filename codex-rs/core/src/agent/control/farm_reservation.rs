@@ -142,9 +142,8 @@ impl LocalAgentControl {
             let stem = task_name.as_deref().unwrap_or_else(|| {
                 requested_path
                     .as_str()
-                    .rsplit('/')
-                    .next()
-                    .expect("child path has a name")
+                    .rsplit_once('/')
+                    .map_or(requested_path.as_str(), |(_, name)| name)
             });
             let mut reserved = None;
             for suffix in 0..10_000 {
@@ -249,7 +248,7 @@ impl LocalAgentControl {
                     agent_path: child
                         .metadata
                         .agent_path
-                        .expect("farm child has its reserved path")
+                        .ok_or_else(|| CodexErr::Fatal("farm child lost its reserved path".into()))?
                         .to_string(),
                 };
                 parent

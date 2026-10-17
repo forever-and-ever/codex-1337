@@ -237,8 +237,7 @@ pub(crate) async fn run_pre_tool_use_hooks(
         ))
     } else {
         PreToolUseHookResult::Blocked(format!(
-            "Tool call blocked by PreToolUse hook: {reason}. Tool: {}",
-            tool_name
+            "Tool call blocked by PreToolUse hook: {reason}. Tool: {tool_name}"
         ))
     }
 }
