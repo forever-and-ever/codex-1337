@@ -294,6 +294,7 @@ impl CodexThread {
                     .is_none_or(|selection| selection.provider_id == turn.config.model_provider_id)
                     .then_some(SpawnAgentForkMode::FullHistory),
             };
+            #[expect(clippy::expect_used, reason = "only non-fresh modes select full history, and both captured a history result before model selection")]
             let fork_history = if fork_mode.is_some() {
                 Some(fork_history.expect("history mode captures parent history")?)
             } else {

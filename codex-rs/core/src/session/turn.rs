@@ -2994,6 +2994,10 @@ async fn try_run_sampling_request(
                             .await;
                         }
                     }
+                    #[expect(
+                        clippy::expect_used,
+                        reason = "stream item IDs are canonicalized before response item handling"
+                    )]
                     let id = item.id().expect("canonical streamed item ID").clone();
                     items.present(id, turn_item, stream_item_to_client);
                 }
