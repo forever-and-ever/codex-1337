@@ -155,6 +155,63 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
         .build()
         .expect("runtime");
     runtime.block_on(async {
+        WRITER
+            .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
+                let input = crate::tui::TuiEvent::Paste(String::new());
+                let old = input_consumed(&input).expect("consumed input");
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                input_handled(old);
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "reset discards an input still waiting for its frame"
+                );
+
+                let mut first = input_consumed(&input).expect("first input");
+                // Synthetic starts expose replacing the oldest input without
+                // sleeping or relying on scheduler timing.
+                first.0.start = 0;
+                let first_start = first.0.start;
+                let second = input_consumed(&input).expect("second input");
+                assert!(second.0.start > first_start);
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                assert_eq!(
+                    WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
+                    0,
+                    "pre-key paint cannot acknowledge an unfinished input handler"
+                );
+                // Handling order need not equal consumption order: the slot
+                // still keeps the oldest consumed input.
+                input_handled(second);
+                input_handled(first);
+                tokio::spawn(async {
+                    assert!(input_consumed(&crate::tui::TuiEvent::Paste(String::new())).is_none());
+                    drop(enter(Stage::TerminalFlush));
+                })
+                .await
+                .expect("non-UI task");
+                assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
+                drop(enter(Stage::FramePaint));
+                drop(enter(Stage::TerminalFlush));
+                let committed = shared.committed.read().expect("reaction publication");
+                assert_eq!(committed[2], Stage::ReactionLatency as u64 + 1);
+                assert_eq!(committed[3], committed[1] - first_start);
+                drop(enter(Stage::TerminalFlush));
+                WRITER.with(|writer| {
+                    let writer = writer.borrow();
+                    let stats = writer.stats[Stage::ReactionLatency as usize];
+                    assert_eq!(
+                        stats[1], 1,
+                        "one reaction per frame, not per input or flush"
+                    );
+                    assert_eq!(stats[4..].iter().sum::<u64>(), 1);
+                    assert!(writer.ready_input.is_none());
+                });
+            })
+            .await;
         let future = WRITER.scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
             let _handler = enter(Stage::AppEvent);
             std::future::pending::<()>().await;

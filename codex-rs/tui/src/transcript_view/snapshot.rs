@@ -34,6 +34,10 @@ impl TranscriptView {
         self.snapshot().map(|snapshot| Arc::clone(&snapshot.cells))
     }
 
+    pub(crate) fn presented_cells(&self) -> Option<Arc<[Arc<dyn HistoryCell>]>> {
+        self.presented_cells.clone()
+    }
+
     pub(super) fn capture_snapshot(&mut self, cells: &[Arc<dyn HistoryCell>]) -> ViewSnapshot {
         let cells = self.snapshot_cells().unwrap_or_else(|| Arc::from(cells));
         let mut pinned = self

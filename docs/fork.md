@@ -178,6 +178,20 @@ histograms. Input reports the gate reason, three queue sizes and the latest
 consumed-input timestamp; it cannot measure physical key-to-consumption latency
 while input is gated.
 
+`ReactionLatency` measures the interval from app-side input consumption to
+completion of the first frame flush whose painting began after its handler
+returned. Key, paste, mouse-button and wheel events count; motion, focus and
+resize do not. Inputs eligible for the same frame share one sample, measured
+from the earliest input, including time queued behind admission gates. Every
+sample enters the fixed histogram; only reactions of at least 16.7 ms enter the
+slow ring, while stages retain the 8 ms threshold. JSON includes reactions in
+`stages` and `recent_slow`. Human dumps show p50 and p99 upper bounds from the
+histogram, capped by the observed maximum. Reset
+discards inputs still waiting for a frame. Empty-diff frames still complete a
+sample; no frame means no completed sample. Pre-key painting cannot acknowledge
+the input being handled. This measures neither physical input arrival nor
+terminal presentation.
+
 Current top/parent stages are published before work. Last-committed progress
 remains separate; a suspended publisher never makes snapshots wait for it.
 Each accepted atomic record is consistent, but records are not one simultaneous
