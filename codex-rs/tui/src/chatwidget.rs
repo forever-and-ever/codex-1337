@@ -176,8 +176,6 @@ const PLAN_MODE_REASONING_SCOPE_TITLE: &str = "Apply reasoning change";
 const PLAN_MODE_REASONING_SCOPE_PLAN_ONLY: &str = "Apply to Plan mode override";
 const PLAN_MODE_REASONING_SCOPE_ALL_MODES: &str = "Apply to global default and Plan mode override";
 const CONNECTORS_SELECTION_VIEW_ID: &str = "connectors-selection";
-const PET_SELECTION_LOADING_VIEW_ID: &str = "pet-selection-loading";
-const AMBIENT_PET_WRAP_GAP_COLUMNS: u16 = 2;
 const TUI_STUB_MESSAGE: &str = "Not available in TUI yet.";
 const PARENT_OWNED_INPUT_MESSAGE: &str =
     "This action is unavailable in a parent-controlled sub-agent.";
@@ -280,9 +278,7 @@ use self::goal_status::GoalStatusState;
 use self::goal_status::goal_status_indicator_from_app_goal;
 pub(crate) mod goal_command;
 mod goal_menu;
-mod ide_context;
 mod image_submission;
-use self::ide_context::IdeContextState;
 mod input_queue;
 mod server_queue;
 mod turn_submissions;
@@ -310,8 +306,6 @@ use self::mcp_startup::McpStartupStatus;
 mod misalignment_policy;
 pub(crate) use misalignment_policy::MisalignmentReview;
 pub(crate) use misalignment_policy::MisalignmentTurnSource;
-mod pets;
-pub(crate) mod pets_command;
 mod session_flow;
 mod session_header;
 use self::session_header::SessionHeader;
@@ -662,7 +656,6 @@ pub(crate) struct ChatWidget {
     /// Tracks whether the buffered next round has seen any `Starting` update yet.
     mcp_startup_pending_next_round_saw_starting: bool,
     connectors: ConnectorsState,
-    ide_context: IdeContextState,
     plugins_cache: PluginsCacheState,
     plugins_fetch_state: PluginListFetchState,
     plugin_remote_sections_loading: bool,
@@ -684,17 +677,6 @@ pub(crate) struct ChatWidget {
     review: ReviewState,
     // Active hook runs render in a dedicated live cell so they can run alongside tools.
     active_hook_cell: Option<HookCell>,
-    // Reused for built-in pet CDN requests so redirects remain route-aware.
-    pub(crate) pet_http_client: codex_http_client::RouteAwareClientPool,
-    // Ambient companion rendered over the transcript area, never inside the footer rows.
-    ambient_pet: Option<crate::pets::AmbientPet>,
-    pet_picker_preview_state: crate::pets::PetPickerPreviewState,
-    pet_picker_preview_pet: Option<crate::pets::AmbientPet>,
-    pet_picker_preview_request_id: u64,
-    pet_picker_preview_image_visible: std::cell::Cell<bool>,
-    pet_selection_load_request_id: u64,
-    #[cfg(test)]
-    pet_image_support_override: Option<crate::pets::PetImageSupport>,
     thread_id: Option<ThreadId>,
     pub(crate) session_draft: Option<SessionDraft>,
     thread_name: Option<String>,
@@ -1186,9 +1168,6 @@ impl ChatWidget {
         self.flush_realtime_transcript_history();
         if self.frame_requester.mode() == crate::tui::PresentationMode::Normal {
             self.refresh_realtime_microphone_level();
-            if let Some(pet) = self.ambient_pet.as_ref() {
-                pet.schedule_next_frame();
-            }
             self.refresh_goal_status_indicator_for_time_tick();
         }
         if self.frame_requester.mode() != crate::tui::PresentationMode::Frozen
@@ -1262,7 +1241,7 @@ impl ChatWidget {
         let history_width = self
             .last_rendered_width
             .get()
-            .map(|width| self.history_wrap_width(width))
+            .map(|width| width.max(1))
             .unwrap_or(u16::MAX);
 
         if !keep_placeholder_header_active
@@ -1641,7 +1620,7 @@ impl ChatWidget {
             if width == 0 {
                 None
             } else {
-                let width = self.history_wrap_width(width);
+                let width = width.max(1);
                 let width = if self.local_settings.transcript_mode.is_owned() {
                     crate::transcript_geometry::content_width(width, self.history_render_mode())
                 } else {

@@ -543,7 +543,6 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Diff
                 | SlashCommand::Mention
                 | SlashCommand::Skills
-                | SlashCommand::Import
                 | SlashCommand::Hooks
                 | SlashCommand::Status
                 | SlashCommand::Warnings
@@ -551,12 +550,10 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::Reload
                 | SlashCommand::Jira
                 | SlashCommand::Usage
-                | SlashCommand::Ide
                 | SlashCommand::DebugConfig
                 | SlashCommand::Title
                 | SlashCommand::Statusline
                 | SlashCommand::Theme
-                | SlashCommand::Pets
                 | SlashCommand::Shimmer
                 | SlashCommand::Ps
                 | SlashCommand::Stop
@@ -789,7 +786,6 @@ impl ChatComposer {
                 context_window_pending: false,
                 collaboration_mode_indicator: None,
                 goal_status_indicator: None,
-                ide_context_active: false,
                 status_line_value: None,
                 status_line_hyperlink_url: None,
                 status_line_enabled: false,
@@ -1139,10 +1135,6 @@ impl ChatComposer {
         self.footer.goal_status_indicator = indicator;
     }
 
-    pub fn set_ide_context_active(&mut self, active: bool) {
-        self.footer.ide_context_active = active;
-    }
-
     pub fn set_side_conversation_active(&mut self, active: bool) {
         self.side_conversation_active = active;
     }
@@ -1443,7 +1435,6 @@ impl ChatComposer {
         if let Some(indicators) = status_line_right_indicator_line(
             self.footer.collaboration_mode_indicator,
             self.footer.goal_status_indicator.as_ref(),
-            self.footer.ide_context_active,
             show_cycle_hint,
         ) {
             if !spans.is_empty() {
@@ -9068,7 +9059,6 @@ mod tests {
             ("/mo", "model"),
             ("/res", "resume"),
             ("/ar", "archive"),
-            ("/pet", "pets"),
             ("/bt", "btw"),
             ("/si", "side"),
         ] {

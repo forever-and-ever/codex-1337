@@ -320,7 +320,6 @@ fn active_transcript_preserves_clipped_markdown_hyperlinks() {
     let renderable = TranscriptAreaRenderable {
         child: &cell,
         top: 1,
-        right: 2,
         persistent_layout: None,
     };
     let area = Rect::new(

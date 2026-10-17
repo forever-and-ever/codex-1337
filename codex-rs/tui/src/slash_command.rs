@@ -15,7 +15,6 @@ pub enum SlashCommand {
     Model,
     Account,
     Daybreak,
-    Ide,
     Permissions,
     Keymap,
     Vim,
@@ -26,7 +25,6 @@ pub enum SlashCommand {
     AutoReview,
     Memories,
     Skills,
-    Import,
     Hooks,
     Review,
     Rename,
@@ -72,8 +70,6 @@ pub enum SlashCommand {
     Title,
     Statusline,
     Theme,
-    #[strum(to_string = "pets", serialize = "pet")]
-    Pets,
     Shimmer,
     Mcp,
     Apps,
@@ -126,7 +122,6 @@ impl SlashCommand {
             SlashCommand::Diff => "show git diff (including untracked files)",
             SlashCommand::Mention => "mention a file",
             SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",
-            SlashCommand::Import => "import setup, this project, and recent chats from Claude Code",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Daemon => "Manage the local background server.",
             SlashCommand::Reload => "reload the UI without interrupting your agents",
@@ -144,7 +139,6 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
-            SlashCommand::Pets => crate::chatwidget::pets_command::PETS_DESCRIPTION,
             SlashCommand::Shimmer => "choose the animation on the working rows",
             SlashCommand::Ps => "show this agent tree’s running processes",
             SlashCommand::Stop => "stop all background terminals",
@@ -155,9 +149,6 @@ impl SlashCommand {
                 "choose this conversation's account; /account <alias> also works"
             }
             SlashCommand::Daybreak => "turn Daybreak on or off",
-            SlashCommand::Ide => {
-                "include current selection, open files, and other context from your IDE"
-            }
             SlashCommand::Plan => "switch to Plan mode",
             SlashCommand::Voice => "start or stop voice; use /voice settings to choose a voice",
             SlashCommand::Goal => crate::chatwidget::goal_command::GOAL_DESCRIPTION,
@@ -205,7 +196,6 @@ impl SlashCommand {
                 | SlashCommand::Plan
                 | SlashCommand::Goal
                 | SlashCommand::Voice
-                | SlashCommand::Ide
                 | SlashCommand::Keymap
                 | SlashCommand::Mcp
                 | SlashCommand::Export
@@ -213,7 +203,6 @@ impl SlashCommand {
                 | SlashCommand::Cd
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
-                | SlashCommand::Pets
                 | SlashCommand::Side
                 | SlashCommand::Btw
                 | SlashCommand::Resume
@@ -237,7 +226,6 @@ impl SlashCommand {
                 | SlashCommand::Warnings
                 | SlashCommand::Pwd
                 | SlashCommand::Usage
-                | SlashCommand::Ide
         )
     }
 
@@ -285,7 +273,6 @@ impl SlashCommand {
             | SlashCommand::ElevateSandbox
             | SlashCommand::Experimental
             | SlashCommand::Memories
-            | SlashCommand::Import
             | SlashCommand::Review
             | SlashCommand::Plan
             | SlashCommand::Cd
@@ -331,7 +318,6 @@ impl SlashCommand {
             | SlashCommand::Statusline
             | SlashCommand::AutoReview
             | SlashCommand::Feedback
-            | SlashCommand::Ide
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Side
@@ -341,7 +327,7 @@ impl SlashCommand {
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,
             SlashCommand::Shimmer => true,
-            SlashCommand::Theme | SlashCommand::Pets => false,
+            SlashCommand::Theme => false,
         }
     }
 
@@ -382,15 +368,8 @@ mod tests {
     }
 
     #[test]
-    fn pet_alias_parses_to_pets_command() {
-        assert_eq!(SlashCommand::Pets.command(), "pets");
-        assert_eq!(SlashCommand::from_str("pet"), Ok(SlashCommand::Pets));
-    }
-
-    #[test]
     fn certain_commands_are_available_during_task() {
         assert!(SlashCommand::Goal.available_during_task());
-        assert!(SlashCommand::Ide.available_during_task());
         assert!(SlashCommand::Title.available_during_task());
         assert!(SlashCommand::Statusline.available_during_task());
         assert!(SlashCommand::Raw.available_during_task());

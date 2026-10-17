@@ -109,10 +109,6 @@ impl ChatWidget {
         self.reasoning_header = None;
         self.status_state.reasoning_item_id = None;
         self.status_state.reasoning_resume_turn_id = None;
-        self.set_ambient_pet_notification(
-            crate::pets::PetNotificationKind::Running,
-            /*body*/ None,
-        );
         self.request_redraw();
     }
 
@@ -189,10 +185,6 @@ impl ChatWidget {
         self.suppressed_exec_calls.clear();
         self.last_unified_wait = None;
         self.unified_exec_wait_streak = None;
-        if !from_replay {
-            let body = Notification::agent_turn_preview(&notification_response);
-            self.set_ambient_pet_notification(crate::pets::PetNotificationKind::Review, body);
-        }
         self.request_redraw();
 
         let had_pending_steer = self.input_queue.pending_steer.is_some();
@@ -384,10 +376,6 @@ impl ChatWidget {
         self.flush_answer_stream_with_separator();
         self.finalize_turn();
         self.add_to_history(history_cell::new_error_event(message));
-        self.set_ambient_pet_notification(
-            crate::pets::PetNotificationKind::Failed,
-            /*body*/ None,
-        );
         self.request_redraw();
 
         // After an error ends the turn, try sending the next queued input.

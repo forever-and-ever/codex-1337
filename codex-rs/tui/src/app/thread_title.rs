@@ -63,7 +63,8 @@ impl App {
         thread_id: ThreadId,
         title: String,
     ) {
-        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+        use super::turn_submissions::ui_requests::UiRequestKind;
+        use super::turn_submissions::ui_requests::UiRequestScope;
         use codex_app_server_protocol as api;
         self.request_server(
             server,
@@ -381,7 +382,7 @@ where
                     .iter()
                     .filter_map(|input| match input {
                         UserInput::Text { text, .. } => {
-                            Some(crate::ide_context::extract_prompt_request_with_offset(text).0)
+                            Some(crate::prompt_request::extract_prompt_request_with_offset(text).0)
                         }
                         _ => None,
                     })

@@ -198,9 +198,7 @@ impl App {
         cell: &Arc<dyn HistoryCell>,
         deferred: bool,
     ) {
-        let width = self
-            .chat_widget
-            .history_wrap_width(tui.terminal.last_known_screen_size.width);
+        let width = tui.terminal.last_known_screen_size.width.max(1);
         // Thread-switch replay retains source cells; the tail renderer chooses what to format.
         // Usage cards still need their rendered identity for subsequent in-place refreshes.
         let render_from_tail = self
@@ -300,9 +298,7 @@ impl App {
             return Ok(());
         }
 
-        let width = self
-            .chat_widget
-            .history_wrap_width(tui.terminal.last_known_screen_size.width);
+        let width = tui.terminal.last_known_screen_size.width.max(1);
         let updated_lines = status_cell
             .display_hyperlink_lines_for_mode(width, self.chat_widget.history_render_mode());
         if updated_lines == status_history.lines {
@@ -477,9 +473,7 @@ impl App {
             tui.frame_requester().schedule_frame();
             return;
         }
-        let width = self
-            .chat_widget
-            .history_wrap_width(tui.terminal.last_known_screen_size.width);
+        let width = tui.terminal.last_known_screen_size.width.max(1);
         let header_lines = self.clear_ui_header_lines(width);
         if !header_lines.is_empty() {
             tui.insert_history_lines_with_wrap_policy(

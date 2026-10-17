@@ -355,6 +355,33 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50148 adds model-facing managed-worktree tools hosted by the TUI; #50416 expands checkout choices for new and forked conversations. Neither should restore a product-owned worktree lifecycle.
 - Evidence: maintainer decision on 2026-10-11 during 0.162.1 merge triage; CLI-wide locked checks and focused exact-cwd picker checks after removal.
 
+### no-terminal-pets
+
+- Telos: terminal companions cost neither rendering complexity nor recurring merge work.
+- Holds: no pet picker, assets, animation, terminal-image rendering, settings or slash command remains. Old `[tui]` pet keys are ignored by serde, like other unknown preferences; the schema no longer advertises them.
+- Owners: none. Deleted prefixes: `codex-rs/tui/src/pets/`, `codex-rs/tui/src/app/pets.rs`, `codex-rs/tui/src/chatwidget/pets`; pet-only snapshots are deleted too. Resolve modify/delete conflicts with `git rm`.
+- Tripwire: `python scripts/check_removed_capabilities.py --check`; omit `--check` after a merge to re-delete restored capability files and report wiring that needs removal.
+- Pressure: nine release merges from `rust-v0.153.4` to `rust-v0.162.1`: estimated 0.6 modify/delete conflicts, 0.1 orphan files and 1.2 seam files per merge after this cut.
+- Evidence: maintainer capability-cut decision; existing TUI configuration-default case also exercises ignored retired keys.
+
+### no-ide-context-capture
+
+- Telos: the terminal does not control or query an IDE.
+- Holds: `/ide`, IDE IPC/context collection and its status indicator are absent. Rendering and title generation still recognize context-prefixed history supplied by other clients; `codex-rs/tui/src/prompt_request.rs` owns that shared replay delimiter.
+- Owners: none for capture. Deleted prefixes: `codex-rs/tui/src/ide_context`, `codex-rs/tui/src/chatwidget/ide_context.rs`; its footer snapshot is deleted too. Resolve modify/delete conflicts with `git rm`.
+- Tripwire: `python scripts/check_removed_capabilities.py --check` (or omit `--check` to reapply file deletions).
+- Pressure: nine release merges from `rust-v0.153.4` to `rust-v0.162.1`: estimated 0.4 modify/delete conflicts per merge, without recurring seams.
+- Evidence: maintainer capability-cut decision; existing replay/display tests retain cross-client history behavior.
+
+### no-external-agent-import
+
+- Telos: importing another agent's settings and sessions costs no runtime or build graph.
+- Holds: `/import`, migration screens, app-server handlers and state import-record APIs are absent. The four existing external-agent RPC methods answer an unsupported error; app-server-protocol and shared `codex-analytics` emitter/event/fact/reducer code stay unchanged to avoid recurring upstream seams; no built import path calls those emitters. Both applied import SQL migrations remain because SQLx validates migration history. `Feature::ExternalAgentMemoryImport` and `Feature::ExternalMigration` are removed.
+- Owners: none. `codex-rs/external-agent-migration/` stays whole and unbuilt, explicitly excluded from the workspace and absent from dependencies and Cargo.lock; upstream edits there merge normally. Deleted prefixes: `codex-rs/tui/src/external_agent_config_migration/`, `codex-rs/tui/src/app_server_session/external_agent_config`, `codex-rs/app-server/src/external_agent_migration/`, `codex-rs/app-server/tests/suite/v2/external_agent`, `codex-rs/state/src/runtime/external_agent_config_imports`. Resolve modify/delete conflicts with `git rm`, not partial orphan modules.
+- Tripwire: `python scripts/check_removed_capabilities.py --check` (or omit `--check` to reapply file deletions); the existing `legacy_permission_profile_requests_fail_closed` integration case also checks all four unsupported methods.
+- Pressure: deleting the migration crate would add about 2.3 modify/delete conflicts per merge across the nine releases from `rust-v0.153.4` to `rust-v0.162.1`; retaining it unbuilt avoids those conflicts.
+- Evidence: maintainer capability-cut decision; protocol schemas and state migration history are retained verbatim.
+
 ## Build economy
 
 ### one-dependency-graph
@@ -378,7 +405,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### removed-stacks
 
 - Telos: capabilities this workstation never uses cost no compile time and no merge surface.
-- Holds: the workspace and `codex-rs/Cargo.lock` contain none of: native Amazon Bedrock providers, credentials and onboarding; the OpenTelemetry SDK and exporters (`opentelemetry` remains with `trace` only); the managed network-proxy transport and Rama; AWS SigV4 and `codex-aws-auth`; the voice host and its WebRTC and ALSA graph; `tcp-tunnel`; `responses-api-proxy`; `app-server-test-client`; arboard's Wayland backend; `thread-manager-sample` and `core-api`; Windows sandbox dependencies outside `cfg(windows)` targets. `sdk/typescript`, its npm dependency graph, build/test integration and publication artifact are removed. Shared TypeScript protocol generators, the Python SDK, Rust APIs, headless execution and CLI packaging remain. Shared MCP conformance fixtures remain in Python CI; the SDK-hosted official and production reviewer CI gates are retired. Manual conformance requires an externally provisioned runner and never bootstraps registry dependencies.
+- Holds: the workspace and `codex-rs/Cargo.lock` contain none of: native Amazon Bedrock providers, credentials and onboarding; the OpenTelemetry SDK and exporters (`opentelemetry` remains with `trace` only); the managed network-proxy transport and Rama; AWS SigV4 and `codex-aws-auth`; the voice host and its WebRTC and ALSA graph; terminal pets and their image-rendering path; TUI IDE-context capture; external-agent config/session import (the migration crate remains in-tree but unbuilt); `tcp-tunnel`; `responses-api-proxy`; `app-server-test-client`; arboard's Wayland backend; `thread-manager-sample` and `core-api`; Windows sandbox dependencies outside `cfg(windows)` targets. `sdk/typescript`, its npm dependency graph, build/test integration and publication artifact are removed. Shared TypeScript protocol generators, the Python SDK, Rust APIs, headless execution and CLI packaging remain. Shared MCP conformance fixtures remain in Python CI; the SDK-hosted official and production reviewer CI gates are retired. Manual conformance requires an externally provisioned runner and never bootstraps registry dependencies.
 - Owners: none; the deletions leave seams in `codex-rs/Cargo.toml`, `codex-rs/cli/Cargo.toml`, `codex-rs/cli/src/main.rs`, `codex-rs/windows-sandbox-rs/Cargo.toml` and `codex-rs/mxc-sandbox/Cargo.toml`.
 - Tripwire: none; needs a denylist check of the deleted directories, of `Cargo.lock` packages (`opentelemetry_sdk`, `opentelemetry-otlp`, `rama*`, `aws-sigv4`, `webrtc*`, `alsa`, `wayland*`) and of arboard features.
 - Pressure: 42 files deleted on main are modified upstream between `rust-v0.160.0` and `rust-v0.162.0`, chiefly under `model-provider/src/amazon_bedrock`, `voice-host`, `tcp-tunnel` and `otel/tests`; each is a modify/delete conflict whose resolution is `git rm`. 0.162 #49836 adds voice microphone selection to `core/src/config/mod.rs`.
@@ -707,7 +734,6 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app_server_session/account.rs`: pinned-accounts
 - `codex-rs/tui/src/chatwidget/goal_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/chatwidget/context_role.rs`: explicit-command-verbs
-- `codex-rs/tui/src/chatwidget/pets_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/history_cell/code_mode.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/code_mode_projection.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/preamble.rs`: token-bills
@@ -722,6 +748,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/presentation.rs`: attention-gated-painting
 - `codex-rs/utils/output-truncation/src/token_count.rs`: token-bills
 - `docs/fork.md`: provider-parity
+- `scripts/check_removed_capabilities.py`: no-terminal-pets, no-ide-context-capture, no-external-agent-import
+- `codex-rs/tui/src/prompt_request.rs`: no-ide-context-capture
 - `scripts/check_feature_parity.py`: one-dependency-graph
 - `scripts/run_tests.py`: pipelined-crate-graph, hermetic-test-runs
 - `scripts/systemd/codex-app-server-refresh.path`: shared-daemon
