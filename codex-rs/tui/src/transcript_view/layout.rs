@@ -133,8 +133,7 @@ pub(super) fn activity_layout(
 }
 
 /// Give an activity's first row to its header, keeping the rows after it and their controls.
-/// A row with text the reader can select: only such a row holds a control. Blank rows and
-/// client labels, such as a stored result's provenance, do not.
+/// Only a nonempty source row holds a control; blank or indentation-only rows do not.
 fn holds_control(line: &HyperlinkLine) -> bool {
     line.width() > 0
         && line

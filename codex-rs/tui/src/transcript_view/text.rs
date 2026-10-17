@@ -57,6 +57,7 @@ pub(super) struct TextLayout {
     text: String,
     rows: Vec<TextRow>,
     width: u16,
+    preserve_indent: bool,
     pub(super) separated: bool,
     pub(super) disclosure: bool,
     disclosure_controls: Vec<DisclosureControl>,
@@ -68,7 +69,7 @@ pub(super) struct TextLayout {
 /// A Feed Item's synthetic header rows: its fold on the first, and a control their text draws.
 #[derive(Clone)]
 pub(super) struct HeaderRows {
-    pub(super) lines: Vec<Line<'static>>,
+    pub(super) lines: Vec<HyperlinkLine>,
     pub(super) fold: Option<(FoldTarget, bool)>,
     pub(super) controls: Vec<HeaderControl>,
 }
@@ -81,11 +82,17 @@ pub(super) struct HeaderControl {
     pub(super) target: FoldTarget,
 }
 
+#[derive(Clone)]
+enum InlineAnchor {
+    Source(usize),
+    InputLine { line: usize, offset: usize },
+}
+
 #[derive(Default)]
 struct HeadingDecorations {
     /// A loose row's tokens, and where they go.
     tokens: Option<(u64, crate::transcript_geometry::TokenSeat)>,
-    output_controls: Option<(usize, String)>,
+    inline: Vec<(InlineAnchor, Line<'static>)>,
 }
 
 struct DisclosureControl {
@@ -192,15 +199,42 @@ impl TextLayout {
 
     pub(super) fn new(lines: Vec<HyperlinkLine>, width: u16) -> Self {
         let logical = logical_lines(&lines);
-        Self::from_logical(logical, width)
+        Self::from_logical(logical, width, false)
+    }
+
+    pub(super) fn surface(lines: Vec<HyperlinkLine>, width: u16) -> Self {
+        Self::from_logical(logical_lines(&lines), width, true)
+    }
+
+    pub(super) fn content_start(&self) -> usize {
+        let header_lines = self.feed_header.as_ref().map_or(0, |rows| rows.lines.len());
+        if header_lines == 0 {
+            return 0;
+        }
+        self.logical[..header_lines]
+            .iter()
+            .filter(|line| !line.is_decoration())
+            .map(|line| line.origin.range.len() + 1)
+            .sum::<usize>()
+            .saturating_sub(usize::from(self.logical.len() == header_lines))
     }
 
     /// Reflow the same displayed content revision, retaining styles, links and disclosure label.
     pub(super) fn rewrap(&self, width: u16) -> Self {
-        let mut layout = Self::from_logical(self.logical.clone(), width);
+        let header_lines = self.feed_header.as_ref().map_or(0, |rows| rows.lines.len());
+        let prefix = self.content_start();
+        let mut layout = Self::from_logical(
+            self.logical[header_lines..].to_vec(),
+            width,
+            self.preserve_indent,
+        );
         layout.heading.tokens = self.heading.tokens;
-        if let Some((offset, label)) = &self.heading.output_controls {
-            layout = layout.with_inline_decoration_at(*offset, label.clone());
+        for (anchor, label) in &self.heading.inline {
+            let anchor = match anchor {
+                InlineAnchor::Source(offset) => InlineAnchor::Source(offset.saturating_sub(prefix)),
+                anchor => anchor.clone(),
+            };
+            layout = layout.with_inline_line_at(anchor, label.clone());
         }
         for control in &self.disclosure_controls {
             layout = match control.placement {
@@ -210,9 +244,10 @@ impl TextLayout {
                         columns: start..end,
                         target: control.target.clone(),
                     }),
-                DisclosurePlacement::Row => {
-                    layout.with_disclosure_control_at(control.label.clone(), control.source_offset)
-                }
+                DisclosurePlacement::Row => layout.with_disclosure_control_at(
+                    control.label.clone(),
+                    control.source_offset.saturating_sub(prefix),
+                ),
                 DisclosurePlacement::Leading { line } => layout.with_leading_disclosure_on_line(
                     control.label.clone(),
                     line,
@@ -224,7 +259,7 @@ impl TextLayout {
                     if let FoldTarget::OutputMode(mode) = control.target {
                         layout.with_output_target(
                             control.label.clone(),
-                            control.source_offset,
+                            control.source_offset.saturating_sub(prefix),
                             mode,
                             start..end,
                         )
@@ -484,6 +519,21 @@ impl TextLayout {
         }
     }
 
+    pub(super) fn selection_position_at(&self, row: usize, column: u16) -> usize {
+        if self
+            .feed_header
+            .as_ref()
+            .is_some_and(|header| row < header.lines.len())
+            && self
+                .rows
+                .get(row)
+                .is_some_and(|row| usize::from(column) < row.first_column)
+        {
+            return self.content_start();
+        }
+        self.position_at(row, column)
+    }
+
     /// Resolve a cell coordinate to a grapheme boundary, clamping padding to the row's text.
     pub(super) fn position_at(&self, row: usize, column: u16) -> usize {
         let Some(row) = self.rows.get(row) else {
@@ -628,15 +678,17 @@ impl TextLayout {
             .map(|(row, text)| (row as u16, text))
     }
 
-    fn from_logical(logical: Vec<LogicalLine>, width: u16) -> Self {
+    fn from_logical(logical: Vec<LogicalLine>, width: u16, preserve_indent: bool) -> Self {
         let width = width.max(/*other*/ 1);
         let mut text = String::new();
         let mut rows = Vec::new();
-        let mut has_source_line = false;
+        let mut source_seen = false;
         for (index, line) in logical.iter().enumerate() {
-            let client_label = line.is_client_label();
-            if has_source_line && !client_label {
-                text.push('\n');
+            if !line.is_decoration() {
+                if source_seen {
+                    text.push('\n');
+                }
+                source_seen = true;
             }
             let start = text.len();
             text.extend(
@@ -663,10 +715,9 @@ impl TextLayout {
                     next.origin.output_provenance != line.origin.output_provenance
                 });
             if !copy_only {
-                rows.extend(layout_line(line, start, width, index));
+                rows.extend(layout_line(line, start, width, index, preserve_indent));
             }
-            has_source_line |= !client_label;
-            if !client_label && let Some(row) = rows.last_mut() {
+            if let Some(row) = rows.last_mut() {
                 row.line_end = Some(text.len());
             }
         }
@@ -675,6 +726,7 @@ impl TextLayout {
             text,
             rows,
             width,
+            preserve_indent,
             separated: false,
             disclosure: false,
             disclosure_controls: Vec::new(),
@@ -690,44 +742,13 @@ fn layout_line(
     text_start: usize,
     width: u16,
     logical_line: usize,
+    preserve_indent: bool,
 ) -> Vec<TextRow> {
     let content_width = width.saturating_sub(logical.right_reserve).max(/*other*/ 1);
-    // Client labels are painted text, not selectable source. Wrap the synthetic text itself,
-    // rather than discarding it as an oversized indentation on narrow terminals.
-    if logical.is_client_label() {
-        let subsequent_indent = if logical.subsequent_indent.width() < usize::from(content_width) {
-            logical.subsequent_indent.clone()
-        } else {
-            Line::default()
-        };
-        return word_wrap_line_with_source(
-            &logical.initial_indent,
-            RtOptions::new(usize::from(content_width)).subsequent_indent(subsequent_indent),
-        )
-        .into_iter()
-        .map(|wrapped| {
-            let mut line =
-                HyperlinkLine::new(crate::render::line_utils::line_to_static(&wrapped.line));
-            let mut source = logical.origin.clone();
-            source.prefix_bytes = line.line.spans.iter().map(|span| span.content.len()).sum();
-            line.source = Some(source);
-            TextRow {
-                logical_line: Some(logical_line),
-                line,
-                source: text_start..text_start,
-                line_end: None,
-                content_width,
-                first_column: 0,
-                prefix_columns: 0,
-                tabs: tabs::TabStops::default(),
-                inline_decoration: None,
-            }
-        })
-        .collect();
-    }
     let mut logical = Cow::Borrowed(logical);
-    if line_width(&logical.initial_indent) >= usize::from(content_width)
-        || line_width(&logical.subsequent_indent) >= usize::from(content_width)
+    if !preserve_indent
+        && (line_width(&logical.initial_indent) >= usize::from(content_width)
+            || line_width(&logical.subsequent_indent) >= usize::from(content_width))
     {
         let logical = logical.to_mut();
         logical.initial_indent = Line::default();

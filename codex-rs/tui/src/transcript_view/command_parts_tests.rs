@@ -216,7 +216,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         Action::Toggle(Port::Output, Panel::Hidden(OutputMode::Raw)),
     );
     let collapsed = render(&mut view, &cells, 104, "neither port");
-    assert!(collapsed.text().is_empty());
+    assert_eq!(collapsed.text(), "Script (bash)");
     assert!(
         collapsed
             .fold_targets()
@@ -400,7 +400,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .find("Code Mode")
             .unwrap();
         let pending = view.current_layout(&code, 0).unwrap();
-        assert!(pending.text().is_empty());
+        assert!(pending.text().starts_with("Code Mode"));
         assert!(!shown.contains("const answer"));
         code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
             ToolInput {
@@ -620,7 +620,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             view.handle_key(KeyCode::Enter.into(), &code);
             tests::render(&mut view, &code, width, 26);
             let collapsed = view.current_layout(&code, 0).unwrap();
-            assert!(collapsed.text().is_empty());
+            assert!(!collapsed.text().contains(script), "{:?}", collapsed.text());
             assert_eq!(collapsed.row_count(), 1);
             let (row, columns, _) = collapsed.fold_position(&outer).unwrap();
             assert_eq!(collapsed.fold_at(row, columns.start), Some(outer.clone()));
@@ -655,7 +655,8 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(view.focus_fold(&code, 0, outer.clone()));
         view.handle_key(KeyCode::Enter.into(), &code);
         tests::render(&mut view, &code, 104, 26);
-        assert!(view.current_layout(&code, 0).unwrap().text().is_empty());
+        let collapsed = view.current_layout(&code, 0).unwrap();
+        assert!(!collapsed.text().contains(script), "{:?}", collapsed.text());
         assert!(view.reveal_call(&code, "read-child"));
         tests::render(&mut view, &code, 104, 26);
         assert!(
@@ -680,7 +681,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 let buffer = tests::render(&mut view, &code, width, 26);
                 assert_eq!(tests::text(&buffer).matches("Code Mode").count(), 1);
                 let collapsed = view.current_layout(&code, 0).unwrap();
-                assert!(collapsed.text().is_empty());
+                assert!(!collapsed.text().contains(script), "{:?}", collapsed.text());
                 assert_eq!(collapsed.row_count(), 1);
             }
             // Late billing rekeys the same disclosure, including its keyboard focus.
@@ -841,7 +842,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         reserved
             .lines
             .iter()
-            .any(|line| line.to_string().contains("[raw]      ]"))
+            .any(|line| line.line.to_string().contains("[raw]      ]"))
     );
     assert!(!reserved.controls.iter().any(|control| matches!(
         control.target,

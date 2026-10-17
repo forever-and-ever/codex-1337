@@ -605,7 +605,9 @@ impl TranscriptView {
             );
             if self.copy_mode.is_some() {
                 // Full-entry selections include final padding; partial ranges stay half-open.
-                let last = if begin == 0 && finish == visible.layout.text().len() {
+                let last = if begin == visible.layout.content_start()
+                    && finish == visible.layout.text().len()
+                {
                     finish
                 } else {
                     finish.saturating_sub(/*rhs*/ 1)
@@ -646,7 +648,7 @@ impl TranscriptView {
                 index: visible.index,
                 offset: visible
                     .layout
-                    .position_at(visible.row, column.saturating_sub(self.area.x)),
+                    .selection_position_at(visible.row, column.saturating_sub(self.area.x)),
                 row_bias: 0,
             },
             Arc::clone(&visible.layout),

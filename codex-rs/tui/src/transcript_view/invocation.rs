@@ -533,11 +533,13 @@ impl Invocations {
         }
         let reserve = strip.width() as u16;
         let mut lines = Vec::new();
+        let label_end;
         let offset = if width > reserve + title.width() as u16 {
             title = crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
                 title,
                 usize::from(width - reserve - 1),
             );
+            label_end = title.width();
             let offset = width - reserve;
             title.push_span(" ".repeat(usize::from(offset) - title.width()));
             title.extend(strip.spans);
@@ -550,6 +552,7 @@ impl Invocations {
                     usize::from(width),
                 ),
             );
+            label_end = lines[0].width();
             if reserve <= width {
                 lines.push(strip);
                 for control in &mut controls {
@@ -587,7 +590,13 @@ impl Invocations {
             line.push_span(super::text::token_figure(label, tokens, 0));
         }
         HeaderRows {
-            lines,
+            lines: lines
+                .into_iter()
+                .enumerate()
+                .map(|(index, line)| {
+                    HeaderRows::label(line, 0..if index == 0 { label_end } else { 0 })
+                })
+                .collect(),
             fold: None,
             controls,
         }
@@ -719,11 +728,7 @@ impl Invocations {
                     control.columns.end += indent;
                     controls.push(control);
                 }
-                lines.extend(header.lines.into_iter().map(|line| {
-                    let mut notice = client_notice(&line.to_string());
-                    notice.line = line;
-                    notice
-                }));
+                lines.extend(header.lines);
             }
             let body_indent = crate::transcript_geometry::ENTRY_INDENT;
             let mut body = if pending {
@@ -759,10 +764,7 @@ impl Invocations {
             lines.push(client_notice(""));
             lines.extend(crate::transcript_geometry::rich_lines(auxiliary));
         }
-        let mut layout = TextLayout::new(lines, width);
-        for control in controls {
-            layout = layout.with_invocation_control(control);
-        }
+        let mut layout = TextLayout::with_invocation_rows(lines, width, controls);
         for part in parts {
             layout = layout.with_part_control(part);
         }

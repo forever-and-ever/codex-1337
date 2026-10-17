@@ -331,6 +331,41 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
     assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);
     assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 2), 0);
     assert_eq!(layout.column_for_offset(/*offset*/ 0), 2);
+    let layout = layout.with_fold_header(super::HeaderRows {
+        lines: vec![
+            super::HeaderRows::label(Line::from("12:34 界 Command [Raw] [Fmt]  123"), 6..16),
+            super::HeaderRows::label(Line::from("[in] [out]"), 0..0),
+        ],
+        fold: None,
+        controls: vec![
+            super::HeaderControl {
+                row: 0,
+                columns: 17..22,
+                target: crate::history_cell::activity_parts::FoldTarget::OutputMode(
+                    crate::history_cell::output_provenance::OutputMode::Raw,
+                ),
+            },
+            super::HeaderControl {
+                row: 0,
+                columns: 23..28,
+                target: crate::history_cell::activity_parts::FoldTarget::OutputMode(
+                    crate::history_cell::output_provenance::OutputMode::Fmt,
+                ),
+            },
+        ],
+    });
+    let expected = format!("界 Command\n{source}");
+    for width in [12, 48, 12] {
+        let resized = layout.rewrap(width);
+        assert_eq!(resized.text(), expected);
+        let mut lines = Vec::new();
+        resized.copy_lines(0..resized.text().len(), "", &mut lines);
+        assert_eq!(
+            crate::markdown_copy::literal_selection(&lines, resized.text()),
+            expected
+        );
+        assert_eq!(resized.position_at(0, 9), 4);
+    }
 }
 
 #[test]
@@ -478,7 +513,9 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
                     cell.activity_parts(/*width*/ 32, /*header_reserve*/ 0, &expanded)
                         .unwrap()
                         .lines,
-                    format!("• Command\n{command}\n\n{output}"),
+                    format!(
+                        "• Command\n{command}\n\nStored result · exact capture unavailable\n{output}"
+                    ),
                 ),
                 (
                     "detailed_command_copy",

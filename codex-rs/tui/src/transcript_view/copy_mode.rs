@@ -121,7 +121,17 @@ impl TranscriptView {
                 continue;
             };
             let mut ranges = if let Some(user) = user {
-                user_ranges(layout.text(), &user.message)
+                user_ranges(&layout.text()[layout.content_start()..], &user.message)
+                    .into_iter()
+                    .map(|(range, label, source)| {
+                        (
+                            range.start + layout.content_start()
+                                ..range.end + layout.content_start(),
+                            label,
+                            source,
+                        )
+                    })
+                    .collect()
             } else if self.mode == crate::history_cell::HistoryRenderMode::Raw {
                 user_ranges(layout.text(), "")
                     .into_iter()
@@ -253,7 +263,8 @@ impl TranscriptView {
         };
         let first = layout.row_for_offset(start.offset);
         // Match block painting: whole-entry highlights include final padding.
-        let finish = if start.offset == 0 && end.offset == layout.text().len() {
+        let finish = if start.offset == layout.content_start() && end.offset == layout.text().len()
+        {
             end.offset
         } else {
             end.offset.saturating_sub(/*rhs*/ 1)
@@ -317,7 +328,7 @@ impl TranscriptView {
         let Some(layout) = self.layout(cells, index) else {
             return false;
         };
-        self.select_copy_range(cells, index, 0..layout.text().len());
+        self.select_copy_range(cells, index, layout.content_start()..layout.text().len());
         true
     }
 }

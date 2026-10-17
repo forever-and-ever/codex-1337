@@ -24,6 +24,7 @@ mod search;
 mod selection;
 mod snapshot;
 mod step_bills;
+mod surface;
 mod text;
 mod tool_output_tokens;
 mod turn_tip;
@@ -280,7 +281,12 @@ impl TranscriptView {
             self.render_disclosure(&activity_ids, &layout, row, row_area, buf);
             if self.highlight == Some(index) && self.selection.is_none() && !self.search.is_active()
             {
-                layout.highlight(0..layout.text().len(), row_area, buf, row);
+                layout.highlight(
+                    layout.content_start()..layout.text().len(),
+                    row_area,
+                    buf,
+                    row,
+                );
             }
             self.visible.push(VisibleRow {
                 index,
@@ -524,7 +530,9 @@ impl TranscriptView {
         self.position = Position::Reading(Anchor {
             key: self.entry_key(cells, index),
             index,
-            offset: 0,
+            offset: self
+                .layout(cells, index)
+                .map_or(0, |layout| layout.content_start()),
             row_bias: 0,
         });
     }
@@ -540,9 +548,12 @@ impl TranscriptView {
         let snapshot = self.snapshot_cells();
         let cells = snapshot.as_deref().unwrap_or(cells);
         if !self.visible.iter().any(|row| {
-            let start = row.layout.position_at(row.row, /*column*/ 0);
+            let start = row
+                .layout
+                .position_at(row.row, /*column*/ 0)
+                .max(row.layout.content_start());
             let end = row.layout.position_at(row.row, self.area.width);
-            row.index == index && !row.layout.text()[start..end].trim().is_empty()
+            row.index == index && start < end && !row.layout.text()[start..end].trim().is_empty()
         }) {
             // Restoring a highlight after pagination must not cancel an explicit Home jump.
             let history = self.history;

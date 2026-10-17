@@ -471,7 +471,7 @@ mod tests {
         drain();
         render(&mut view, &cells, 40, 12);
         let settled = view.current_layout(&cells, 0).unwrap();
-        assert_eq!(settled.text(), source);
+        assert_eq!(settled.text(), format!("Script (python)\n{source}"));
         view.record_tool_input(ToolInput {
             id: "input:other".into(),
             call_id: "other".into(),
@@ -504,7 +504,7 @@ mod tests {
         drain();
         live.sync_live_invocation_tail(80, key(0), &live_cell, Vec::new());
         let settled = Arc::clone(live.live.as_ref().unwrap());
-        assert_eq!(settled.text(), source);
+        assert_eq!(settled.text(), format!("Script (python)\n{source}"));
         live.sync_live_invocation_tail(80, key(1), &live_cell, Vec::new());
         assert!(Arc::ptr_eq(&settled, live.live.as_ref().unwrap()));
     }

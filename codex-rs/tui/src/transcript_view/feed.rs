@@ -840,18 +840,23 @@ impl FeedIndex {
                 (rows.lines, rows.controls)
             } else {
                 (
-                    vec![truncate_line_with_ellipsis_if_overflow(
-                        crate::render::header::paint_work(
-                            call.title(invocations.input(call.id)),
-                            call.is_active(),
-                        ),
-                        title_width,
-                    )],
+                    vec![{
+                        let title = truncate_line_with_ellipsis_if_overflow(
+                            crate::render::header::paint_work(
+                                call.title(invocations.input(call.id)),
+                                call.is_active(),
+                            ),
+                            title_width,
+                        );
+                        let end = title.width();
+                        HeaderRows::label(title, 0..end)
+                    }],
                     Vec::new(),
                 )
             }
         } else {
             let mut title = self.title(cells, header, expanded, width);
+            let label_end = title.width().min(title_width);
             let mut controls = Vec::new();
             if let Title::Owned(index) = header.title
                 && header.disclosure.unfolded()
@@ -873,7 +878,10 @@ impl FeedIndex {
                 }
             }
             (
-                vec![truncate_line_with_ellipsis_if_overflow(title, title_width)],
+                vec![HeaderRows::label(
+                    truncate_line_with_ellipsis_if_overflow(title, title_width),
+                    0..label_end,
+                )],
                 controls,
             )
         };
@@ -882,8 +890,10 @@ impl FeedIndex {
             control.columns.end += TITLE_COLUMN;
         }
         let mut titles = titles.into_iter();
-        let first = titles.next().unwrap_or_default();
-        let used = line_width(&first);
+        let mut first = titles
+            .next()
+            .unwrap_or_else(|| HeaderRows::label(Line::default(), 0..0));
+        let used = first.line.width();
         let mut spans = vec![
             clock.map_or_else(
                 || " ".repeat(usize::from(CLOCK_COLUMNS)).into(),
@@ -891,7 +901,10 @@ impl FeedIndex {
             ),
             " ".repeat(usize::from(TITLE_COLUMN - CLOCK_COLUMNS)).into(),
         ];
-        spans.extend(first.spans);
+        if let Some(source) = &mut first.source {
+            source.prefix_bytes += spans.iter().map(|span| span.content.len()).sum::<usize>();
+        }
+        spans.extend(first.line.spans);
         if let Some(figures) = self.figures(cells, header, bills, output_tokens) {
             spans.push(" ".repeat(title_width - used.min(title_width) + 1).into());
             spans.push(total_span(figures.total));
@@ -907,11 +920,16 @@ impl FeedIndex {
                 spans.push(format!("  {}", figures.notes.join(" · ")).dim());
             }
         }
-        let mut lines = vec![Line::from(spans)];
-        lines.extend(titles.map(|title| {
+        first.line = Line::from(spans);
+        let mut lines = vec![first];
+        lines.extend(titles.map(|mut title| {
             let mut spans = vec![" ".repeat(usize::from(TITLE_COLUMN)).into()];
-            spans.extend(title.spans);
-            Line::from(spans)
+            if let Some(source) = &mut title.source {
+                source.prefix_bytes += usize::from(TITLE_COLUMN);
+            }
+            spans.extend(title.line.spans);
+            title.line = Line::from(spans);
+            title
         }));
         HeaderRows {
             lines,
