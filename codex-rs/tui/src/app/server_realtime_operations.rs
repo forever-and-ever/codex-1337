@@ -250,7 +250,7 @@ impl App {
                 "{} outcome is unknown: {error}. No retry was sent.",
                 operation.label()
             ),
-            SubmissionFailure::TimedOut => format!(
+            SubmissionFailure::TimedOut | SubmissionFailure::Cancelled => format!(
                 "{} acknowledgement timed out; no retry was sent.",
                 operation.label()
             ),

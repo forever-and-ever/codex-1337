@@ -24,6 +24,8 @@ pub(crate) use worker::ACK_TIMEOUT;
 
 #[path = "server_operation_requests.rs"]
 mod requests;
+#[path = "server_ui_requests.rs"]
+pub(in crate::app) mod ui_requests;
 
 pub(in crate::app) use requests::ServerRequestDelivery;
 
@@ -119,6 +121,7 @@ enum LaneState {
     Queued,
     Running(AbortOnDropHandle<()>),
     Uncertain,
+    Applying { followups: usize },
 }
 
 #[derive(Clone)]
@@ -462,6 +465,7 @@ pub(super) enum SubmissionFailure {
     Rejected(TypedRequestError),
     Uncertain(TypedRequestError),
     TimedOut,
+    Cancelled,
 }
 
 impl PendingSubmission {
