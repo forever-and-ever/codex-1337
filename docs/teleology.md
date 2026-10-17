@@ -582,7 +582,6 @@ Upstream files, where merge conflicts arise:
 
 Fork-owned files, absent upstream:
 
-- `codex-rs/tui/src/app_server_session/history/prompt_revert.rs`: fast-ui-thread
 - `codex-rs/tui/src/chatwidget/realtime_split_flap/snapshot.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/working_directory/admission.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/agents_overview_new/admission.rs`: fast-ui-thread
