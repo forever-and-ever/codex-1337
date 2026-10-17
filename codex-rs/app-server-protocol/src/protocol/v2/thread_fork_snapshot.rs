@@ -14,6 +14,10 @@ pub enum ThreadForkSnapshot {
 }
 
 impl ThreadForkSnapshot {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's skip_serializing_if passes the field by reference"
+    )]
     pub(super) fn is_default(&self) -> bool {
         *self == Self::Interrupted
     }
