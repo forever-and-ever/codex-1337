@@ -167,9 +167,11 @@ JSON has `schema_version: 1`, fixed stage names, nanosecond durations and
 child totals overlap: never sum them as disjoint CPU work. `IdleSelect` is
 select polling and waiting, normally idle rather than a handler. A slow
 synchronous select poll cannot be distinguished from ordinary waiting here. Other stages identify coarse dispatcher
-occupancy, key/pre-key painting, frame preparation/painting, invocation
-materialization, and terminal diff/write/flush. Selected inline server awaits
-are `RpcWait`; uninstrumented callees and awaits remain handler occupancy.
+occupancy, key routing, server and delivery completions, frame
+preparation/painting, invocation materialization, and terminal
+diff/write/flush. The output writer thread measures the terminal stages; the UI
+records them when it drains that frame's completion. Retired stage ids
+(`PreKeyPaint`, `RpcWait`) stay reserved and never record.
 A long handler does not prove CPU work or rendering is responsible. The slow
 ring retains the latest 128 completed non-idle spans of at least 8 ms; human
 reports mark 50 ms or more prominently. Ring sequence numbers reveal overwritten
@@ -188,8 +190,7 @@ slow ring, while stages retain the 8 ms threshold. JSON includes reactions in
 `stages` and `recent_slow`. Human dumps show p50 and p99 upper bounds from the
 histogram, capped by the observed maximum. Reset
 discards inputs still waiting for a frame. Empty-diff frames still complete a
-sample; no frame means no completed sample. Pre-key painting cannot acknowledge
-the input being handled. This measures neither physical input arrival nor
+sample; no frame means no completed sample. This measures neither physical input arrival nor
 terminal presentation.
 
 Current top/parent stages are published before work. Last-committed progress
@@ -225,8 +226,7 @@ is no automatic disk stream, saved-report directory or built-in retention policy
 The listener can answer while the UI is synchronously blocked, awaiting a
 server response or blocked on terminal output, provided its own OS thread can
 run. It is not a crash debugger: SIGSTOP, death, process-wide corruption, severe
-resource exhaustion and total CPU starvation can prevent a reply. The recorder
-does not repair the existing queue gate, pre-key paint or inline-RPC debt.
+resource exhaustion and total CPU starvation can prevent a reply.
 
 ## Provider data
 

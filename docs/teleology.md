@@ -416,12 +416,12 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### fast-ui-thread
 
 - Telos: typing, navigation and cancellation remain responsive while agent work, history updates and rendering preparation progress.
-- Holds: required invariant: the UI dispatcher performs bounded state transitions and cached presentation; it does not await server responses or perform unbounded I/O or source preparation. Background completions preserve ordering, input ownership and uncertain outcomes without holding unrelated editing. Sequential parsing, semantic formatting, highlighting and token counting finish before an item is published, outside the input dispatcher when costly. Unchanged source preparation is reused across headers, bodies and cosmetic ticks; animation changes paint rather than rebuilding content. Ordinary editing does not require a full-screen paint, and runtime input does not wait for an entire event backlog to drain.
-- Owners: `codex-rs/tui/src/app/startup.rs`, `codex-rs/tui/src/app/owned_transcript.rs`, `codex-rs/tui/src/transcript_view/invocation.rs`, `codex-rs/tui/src/history_cell/invocation.rs`, `codex-rs/tui/src/history_cell/activity_lifecycle.rs`, `codex-rs/tui/src/transcript_view/layout.rs`, `codex-rs/tui/src/ui_latency.rs` and its endpoint, `codex-rs/cli/src/ui_latency.rs`.
-- Tripwire: `invocation_ports_preserve_sources_across_completion_and_reflow` checks preparation reuse across cosmetic ticks and unrelated call arrivals; `script_panes_settle_off_dispatcher_and_reject_stale_completions` holds the preparation worker while exercising pane controls, then checks stale-width rejection and settled live reuse. Script panes publish highlighted, wrapped copy geometry together, never a half-prepared source. `mcp_file_receipts_share_native_hunks_and_independent_disclosures` checks native projections. No end-to-end latency bound. Existing queue gating, pre-key painting and inline RPC waits do not yet satisfy this invariant.
-- Diagnostics: UI-task-local, fixed-stage wall-time recording publishes current work before execution. Its dedicated worker-local socket thread never depends on dispatcher/server/runtime progress; snapshots are bounded and reset is a lazy reporting epoch, not cancellation. No content, hot-path allocation, logging or disk export. Ordinary idle select is distinct from handler occupancy; timing remains inclusive, not CPU attribution. Operator contract: [UI latency recorder](fork.md#ui-latency-recorder). `independent_dump_survives_blocked_dispatcher_and_pending_rpc` and `publication_reset_race_is_bounded_and_never_accepts_torn_records` witness isolation and bounded publication/reset; they do not establish an end-to-end latency bound.
-- Pressure: upstream event ordering and rendering changes may put preparation or waits back in the dispatcher; asynchronous syntax alone does not keep its input branch running. Keep recorder seams coarse and exclusive to the UI task; never add a second/background writer or completion-only publication.
-- Evidence: owner decision, 2026-10-15.
+- Holds: required invariant: the UI dispatcher performs bounded state transitions and cached presentation; it never awaits server responses or performs unbounded I/O or source preparation. Server, configuration and filesystem work runs as typed continuations: the dispatcher admits the request, and its completion returns the outcome to the UI task. Ordering, input ownership and uncertain outcomes are preserved, unrelated editing is never held, and a request that snapshots settings takes its snapshot behind the settings barrier. Each loop pass drains a finite input batch before frame work and polls terminal input with the UI task's own waker. An output writer thread owns the terminal: frames are latest-wins, controls and barriers keep their order, the next frame paints only after the previous one completes, and a geometry change or clear invalidates the writer's previous frame. Cell layout and streaming Markdown are prepared on background workers and published as immutable revisions; sequential parsing, semantic formatting, highlighting and token counting finish before publication. The screen holds the presented revision until its successor is ready and never re-renders the same content in place; a width change blanks the transcript region rather than showing clipped rows, and the composer always renders. Unchanged source preparation is reused across headers, bodies and cosmetic ticks; animation repaints without rebuilding content. Terminals that confirm bracketed paste skip the paste-burst hold.
+- Owners: `codex-rs/tui/src/app/startup.rs`, `codex-rs/tui/src/app/ui_schedule.rs`, `codex-rs/tui/src/app/server_ui_requests.rs`, `codex-rs/tui/src/app/local_ui_requests.rs`, `codex-rs/tui/src/app/navigation_config.rs`, `codex-rs/tui/src/custom_terminal/output.rs`, `codex-rs/tui/src/transcript_view/presented.rs`, `codex-rs/tui/src/streaming/background.rs`, `codex-rs/tui/src/app/owned_transcript.rs`, `codex-rs/tui/src/transcript_view/invocation.rs`, `codex-rs/tui/src/history_cell/invocation.rs`, `codex-rs/tui/src/history_cell/activity_lifecycle.rs`, `codex-rs/tui/src/transcript_view/layout.rs`, `codex-rs/tui/src/ui_latency.rs` and its endpoint, `codex-rs/cli/src/ui_latency.rs`.
+- Tripwire: `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` stalls the writer, then checks live input, latest-frame delivery, barrier order, and repaint after width changes and clears. `controller_live_view_matches_render_during_interleaved_table_streaming` checks worker-published stream rows against canonical rendering; a setext underline or a late table pipe restyles rows already shown, through a keyed splice. `invocation_ports_preserve_sources_across_completion_and_reflow` checks preparation reuse across cosmetic ticks and unrelated call arrivals. `script_panes_settle_off_dispatcher_and_reject_stale_completions` holds the preparation worker while exercising pane controls, then checks stale-width rejection and settled live reuse. Script panes publish highlighted, wrapped copy geometry together, never a half-prepared source. `mcp_file_receipts_share_native_hunks_and_independent_disclosures` checks native projections. No in-repo latency bound: only an external pty harness checks real terminal input wake-ups and paint.
+- Diagnostics: UI-task-local, fixed-stage wall-time recording publishes current work before execution. Its dedicated worker-local socket thread never depends on dispatcher/server/runtime progress; snapshots are bounded and reset is a lazy reporting epoch, not cancellation. No content, hot-path allocation, logging or disk export. Ordinary idle select is distinct from handler occupancy; timing remains inclusive, not CPU attribution. `ReactionLatency` spans input consumption to the flushed frame. Operator contract: [UI latency recorder](fork.md#ui-latency-recorder). `independent_dump_survives_blocked_and_suspended_dispatcher` and `publication_reset_race_is_bounded_and_never_accepts_torn_records` witness isolation and bounded publication/reset; they do not establish an end-to-end latency bound.
+- Pressure: upstream handlers that await the server, and rendering changes that prepare on the dispatcher, reintroduce stalls; convert them to continuations or worker preparation. Crossterm's event stream latches the waker of the poll that armed its reader, so a noop-waker poll strands the UI task. Only the UI task publishes current recorder work; writer-thread phases enter histograms through drained completions.
+- Evidence: owner decision, 2026-10-15; responsive-ui acceptance, 2026-10-17.
 
 ### attention-gated-painting
 
@@ -535,6 +535,13 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/app/startup.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
+- `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread
+- `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread
+- `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/config_persistence.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_goal_actions.rs`: fast-ui-thread
+- `codex-rs/tui/src/goal_files.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/thread_event_buffer.rs`: durable-approvals-and-queues
@@ -554,7 +561,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/keymap/bindings.rs`: key-doctrine
 - `codex-rs/tui/src/lib.rs`: shared-daemon
 - `codex-rs/tui/src/transcript_view/selection.rs`: key-doctrine
-- `codex-rs/tui/src/tui/frame_requester.rs`: attention-gated-painting
+- `codex-rs/tui/src/tui/frame_requester.rs`: attention-gated-painting, fast-ui-thread
 - `codex-rs/windows-sandbox-rs/Cargo.toml`: removed-stacks
 - `justfile`: hermetic-test-runs
 - `codex-rs/protocol/src/tool_name.rs`: canonical-tool-identity
@@ -572,6 +579,15 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/transcript_view/invocation.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/invocation.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/activity_lifecycle.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/ui_schedule.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/server_ui_requests.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/local_ui_requests.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/navigation_config.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/prompt_revert.rs`: fast-ui-thread
+- `codex-rs/tui/src/custom_terminal/output.rs`: fast-ui-thread
+- `codex-rs/tui/src/transcript_view/presented.rs`: fast-ui-thread
+- `codex-rs/tui/src/live_work/presented.rs`: fast-ui-thread
+- `codex-rs/tui/src/streaming/background.rs`: fast-ui-thread
 - `AGENTS.md`: fullscreen-only, minimal-upstream-delta
 - `codex-rs/app-server-embedding/src/lib.rs`: pipelined-crate-graph
 - `codex-rs/app-server-protocol/src/delegation.rs`: server-hosted-agents
