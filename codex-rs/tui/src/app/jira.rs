@@ -125,6 +125,10 @@ impl App {
         };
         match event {
             TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) => {
+                let size = tui.screen_size_for_event(event)?;
+                if Self::defer_input_frame(tui, event, size) {
+                    return Ok(true);
+                }
                 tui.draw(u16::MAX, |frame| {
                     if let Some(cursor) = browser.render(frame.area(), frame.buffer) {
                         frame.set_cursor_position(cursor);

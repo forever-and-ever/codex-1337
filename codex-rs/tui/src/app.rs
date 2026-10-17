@@ -247,6 +247,7 @@ mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
 mod clipboard;
 mod native_history;
+mod openrouter;
 mod owned_transcript;
 mod pending_interactive_replay;
 mod permission_shortcuts;
@@ -256,7 +257,6 @@ mod plugin_mentions;
 mod presentation;
 mod prompt_order;
 mod provider_models;
-mod openrouter;
 mod transcript_splice;
 pub(crate) use provider_models::ProviderModelChoice;
 pub(crate) use provider_models::ProviderModelEvent;
@@ -1173,6 +1173,9 @@ impl App {
                         tui.clipboard.advance(tui.frame_requester());
                         return Ok(AppRunControl::Continue);
                     }
+                    if Self::defer_input_frame(tui, &event, screen_size) {
+                        return Ok(AppRunControl::Continue);
+                    }
                     let rendered_area = self.render_chat_widget_frame(tui, screen_size)?;
                     if tui.is_owned_screen()
                         && self.transcript_view.history
@@ -1180,7 +1183,7 @@ impl App {
                     {
                         self.request_owned_history(tui, app_server);
                     }
-                    if !had_active_modal
+                    if (!had_active_modal || self.startup_pending_protected_request)
                         && self.chat_widget.has_active_modal()
                         && self.startup_protected_input_boundary
                     {

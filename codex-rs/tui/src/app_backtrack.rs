@@ -349,6 +349,15 @@ impl App {
     /// source of truth for the active cell and its cache invalidation key, and because `App` owns
     /// overlay lifecycle and frame scheduling for animations.
     fn overlay_forward_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
+        if matches!(
+            &event,
+            TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained
+        ) {
+            let size = tui.screen_size_for_event(&event)?;
+            if Self::defer_input_frame(tui, &event, size) {
+                return Ok(());
+            }
+        }
         let width = tui.terminal.last_known_screen_size.width.max(/*other*/ 1);
         let footer = self.prompt_navigation_footer(width.saturating_sub(/*rhs*/ 2));
         if let Some(Overlay::Transcript(overlay)) = &mut self.overlay {

@@ -1,10 +1,7 @@
-//! Limits how frequently frame draw notifications may be emitted.
+//! Paces painting from completed UI frames, never from draw notifications.
 //!
-//! Widgets sometimes call `FrameRequester::schedule_frame()` more frequently than a user can
-//! perceive. This limiter clamps draw notifications to a maximum of 120 FPS to avoid wasted work.
-//!
-//! This is intentionally a small, pure helper so it can be unit-tested in isolation and used by
-//! the async frame scheduler without adding complexity to the app/event loop.
+//! Passive frames rest for at least 8.33 ms or their preceding UI-thread cost, whichever is
+//! longer. Interactive frames rest only for that cost; their input supply is self-limiting.
 
 use std::time::Duration;
 use std::time::Instant;
@@ -12,10 +9,11 @@ use std::time::Instant;
 /// A 120 FPS minimum frame interval (≈8.33ms).
 pub(super) const MIN_FRAME_INTERVAL: Duration = Duration::from_nanos(8_333_334);
 
-/// Remembers the most recent emitted draw, allowing deadlines to be clamped forward.
+/// Keeps the completion and UI-thread cost of the preceding frame.
 #[derive(Debug, Default)]
 pub(super) struct FrameRateLimiter {
-    last_emitted_at: Option<Instant>,
+    last_completed_at: Option<Instant>,
+    last_frame_cost: Duration,
 }
 
 impl FrameRateLimiter {
@@ -29,18 +27,18 @@ impl FrameRateLimiter {
         requested: Instant,
         interval: Duration,
     ) -> Instant {
-        let Some(last_emitted_at) = self.last_emitted_at else {
+        let Some(last_completed_at) = self.last_completed_at else {
             return requested;
         };
-        let min_allowed = last_emitted_at
-            .checked_add(interval)
-            .unwrap_or(last_emitted_at);
+        let min_allowed = last_completed_at
+            .checked_add(interval.max(self.last_frame_cost))
+            .unwrap_or(last_completed_at);
         requested.max(min_allowed)
     }
 
-    /// Records that a draw notification was emitted at `emitted_at`.
-    pub(super) fn mark_emitted(&mut self, emitted_at: Instant) {
-        self.last_emitted_at = Some(emitted_at);
+    pub(super) fn mark_completed(&mut self, started_at: Instant, ended_at: Instant) {
+        self.last_completed_at = Some(ended_at);
+        self.last_frame_cost = ended_at.saturating_duration_since(started_at);
     }
 }
 
@@ -57,14 +55,39 @@ mod tests {
     }
 
     #[test]
-    fn clamps_to_min_interval_since_last_emit() {
+    fn completion_cost_and_requested_deadlines_bound_painting() {
         let t0 = Instant::now();
         let mut limiter = FrameRateLimiter::default();
 
         assert_eq!(limiter.clamp_deadline(t0), t0);
-        limiter.mark_emitted(t0);
+        limiter.mark_completed(t0, t0);
 
         let too_soon = t0 + Duration::from_millis(1);
         assert_eq!(limiter.clamp_deadline(too_soon), t0 + MIN_FRAME_INTERVAL);
+
+        let frame_end = t0 + Duration::from_millis(30);
+        limiter.mark_completed(t0, frame_end);
+        assert_eq!(
+            limiter.clamp_deadline(frame_end),
+            frame_end + Duration::from_millis(30)
+        );
+        let next_end = frame_end + Duration::from_millis(35);
+        limiter.mark_completed(next_end - Duration::from_millis(1), next_end);
+        assert_eq!(
+            limiter.clamp_deadline(next_end),
+            next_end + MIN_FRAME_INTERVAL
+        );
+        assert_eq!(
+            limiter.clamp_deadline(frame_end - Duration::from_millis(20)),
+            next_end + MIN_FRAME_INTERVAL
+        );
+        assert_eq!(
+            limiter.clamp_deadline(next_end + Duration::from_millis(100)),
+            next_end + Duration::from_millis(100)
+        );
+        assert_eq!(
+            limiter.clamp_deadline_with_interval(next_end, Duration::ZERO),
+            next_end + Duration::from_millis(1)
+        );
     }
 }
