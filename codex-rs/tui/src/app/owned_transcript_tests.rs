@@ -277,9 +277,8 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
             width: Some(width),
             reserved: 2,
             item_id: Some("first".into()),
-            body: Box::new(history_cell::AgentMessageCell::new(
-                vec!["provisional".into()],
-                true,
+            content: history_cell::StreamRowContent::Prepared(Box::new(
+                history_cell::AgentMessageCell::new(vec!["provisional".into()], true),
             )),
         }) as Arc<dyn HistoryCell>
     };

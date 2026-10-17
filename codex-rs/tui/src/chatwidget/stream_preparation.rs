@@ -67,7 +67,7 @@ impl ChatWidget {
                     width,
                     reserved: history_cell::agent_prefix(true).width(),
                     item_id: Some(item_id.clone()),
-                    body: Box::new(body),
+                    content: history_cell::StreamRowContent::Prepared(Box::new(body)),
                 });
                 tx.send(AppEvent::PreparedStream(PreparedStream {
                     kind: crate::streaming::completion::RevisionKind::Rewrap,
@@ -103,7 +103,7 @@ impl ChatWidget {
                     width,
                     reserved: 4,
                     item_id: Some(item_id.clone()),
-                    body,
+                    content: history_cell::StreamRowContent::Prepared(body),
                 });
                 tx.send(AppEvent::PreparedStream(PreparedStream {
                     kind: crate::streaming::completion::RevisionKind::Rewrap,

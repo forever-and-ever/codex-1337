@@ -48,9 +48,7 @@ use crate::history_cell::{self};
 use crate::inline_visualization::InlineVisualizationContext;
 use crate::markdown::render_markdown_agent_with_list_spacing;
 use crate::markdown_render::ListSpacing;
-use crate::style::proposed_plan_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use ratatui::prelude::Stylize;
 use ratatui::text::Line;
 use std::path::Path;
 use std::path::PathBuf;
@@ -740,22 +738,31 @@ impl StreamController {
         self.core.set_render_mode(render_mode);
     }
 
-    fn emit(&mut self, lines: Vec<HyperlinkLine>) -> Option<Box<dyn HistoryCell>> {
+    fn emit(&mut self, lines: impl Into<background::Rows>) -> Option<Box<dyn HistoryCell>> {
+        let lines = lines.into();
         if lines.is_empty() {
             return None;
         }
         self.header_emitted |= self.core.has_rewrap_rows();
-        let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, {
-            let header_emitted = self.header_emitted;
-            self.header_emitted = true;
-            !header_emitted
-        });
-        cell.timestamp = self.timestamp;
-        cell.item_id = self.item_id.clone();
-        Some(
-            self.core
-                .wrap(Box::new(cell), history_cell::agent_prefix(true).width()),
-        )
+        let first = !self.header_emitted;
+        self.header_emitted = true;
+        Some(match lines {
+            background::Rows::Inline(lines) => {
+                let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, first);
+                cell.timestamp = self.timestamp;
+                cell.item_id = self.item_id.clone();
+                Box::new(cell)
+            }
+            background::Rows::Shared(rows) => self.core.wrap_rows(
+                rows,
+                history_cell::RowProjection::Agent {
+                    first,
+                    timestamp: self.timestamp,
+                },
+                self.item_id.clone(),
+                history_cell::agent_prefix(true).width(),
+            ),
+        })
     }
 }
 // ---------------------------------------------------------------------------
@@ -890,23 +897,38 @@ impl PlanStreamController {
 
     fn emit(
         &mut self,
-        lines: Vec<HyperlinkLine>,
+        lines: impl Into<background::Rows>,
         include_bottom_padding: bool,
     ) -> Option<Box<dyn HistoryCell>> {
+        let lines = lines.into();
         if lines.is_empty() && !include_bottom_padding {
             return None;
         }
-
         self.header_emitted |= self.core.has_rewrap_rows();
         self.top_padding_emitted |= self.core.has_rewrap_rows();
-        let is_stream_continuation = self.header_emitted;
-        let out_lines = self.render_display_lines(lines, include_bottom_padding);
+        let first = !self.header_emitted;
+        let top = !self.top_padding_emitted;
+        let cell = match lines {
+            background::Rows::Inline(lines) => {
+                let out = self.render_display_lines(lines, include_bottom_padding);
+                let mut cell = history_cell::new_proposed_plan_stream(out, !first);
+                cell.item_id = self.item_id.clone();
+                Box::new(cell) as Box<dyn HistoryCell>
+            }
+            background::Rows::Shared(rows) => self.core.wrap_rows(
+                rows,
+                history_cell::RowProjection::Plan {
+                    first,
+                    top,
+                    bottom: include_bottom_padding,
+                },
+                self.item_id.clone(),
+                4,
+            ),
+        };
         self.header_emitted = true;
         self.top_padding_emitted = true;
-
-        let mut cell = history_cell::new_proposed_plan_stream(out_lines, is_stream_continuation);
-        cell.item_id = self.item_id.clone();
-        Some(self.core.wrap(Box::new(cell), 4))
+        Some(cell)
     }
 
     fn render_display_lines(
@@ -914,30 +936,12 @@ impl PlanStreamController {
         lines: Vec<HyperlinkLine>,
         include_bottom_padding: bool,
     ) -> Vec<HyperlinkLine> {
-        let mut out_lines: Vec<HyperlinkLine> = Vec::with_capacity(/*capacity*/ 4);
-        if !self.header_emitted {
-            out_lines.push(HyperlinkLine::new(
-                vec!["• ".dim(), "Proposed Plan".bold()].into(),
-            ));
-            out_lines.push(HyperlinkLine::new(Line::from(" ")));
-        }
-
-        let mut plan_lines: Vec<HyperlinkLine> = Vec::with_capacity(/*capacity*/ 4);
-        if !self.top_padding_emitted {
-            plan_lines.push(HyperlinkLine::new(Line::from(" ")));
-        }
-        plan_lines.extend(lines);
-        if include_bottom_padding {
-            plan_lines.push(HyperlinkLine::new(Line::from(" ")));
-        }
-
-        let plan_style = proposed_plan_style();
-        let plan_lines = history_cell::prefix_proposed_plan_lines(plan_lines)
-            .into_iter()
-            .map(|line| line.style(plan_style))
-            .collect::<Vec<_>>();
-        out_lines.extend(plan_lines);
-        out_lines
+        history_cell::render_plan_rows(
+            lines,
+            !self.header_emitted,
+            !self.top_padding_emitted,
+            include_bottom_padding,
+        )
     }
 }
 
@@ -2085,6 +2089,35 @@ mod tests {
                 assert_eq!(published.hyperlinks, finalized.hyperlinks);
             }
         }
+        let chunk_source = "Immutable worker chunks preserve prefix sums and row order without moving individual rows on the UI thread. ".repeat(3);
+        let mut chunks =
+            stream_controller(Some(32)).with_background(crate::tui::FrameRequester::test_dummy());
+        for word in chunk_source.split_inclusive(' ') {
+            chunks.push(word);
+            chunks.core.settle().await;
+        }
+        let (cell, _) = chunks.on_commit_tick_batch(usize::MAX);
+        let cell = cell.expect("one emission transfers every completed chunk");
+        let shared = cell
+            .as_any()
+            .downcast_ref::<history_cell::StreamRowsCell>()
+            .unwrap();
+        let history_cell::StreamRowContent::Shared { rows, .. } = &shared.content else {
+            panic!("background emission retains shared worker chunks");
+        };
+        let mut expected = crate::markdown::render_markdown_agent_with_list_spacing(
+            &chunk_source,
+            Some(32),
+            Some(&test_cwd()),
+            None,
+            ListSpacing::AfterMultiline,
+        );
+        expected.pop();
+        assert!(rows.len() > 3);
+        assert_eq!(
+            hyperlink_lines_to_plain_strings(&rows.materialize()),
+            hyperlink_lines_to_plain_strings(&expected)
+        );
         for suffix in [
             "| Value\n|---|---|\n| item | data |\n\nFollowing block.\n",
             "\n---\n\n",

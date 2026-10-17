@@ -16,6 +16,36 @@ pub(crate) type Rewrap =
     Arc<dyn Fn(Vec<HyperlinkLine>, Option<usize>, HistoryRenderMode) + Send + Sync>;
 use std::time::{Duration, Instant};
 
+pub(super) enum Rows {
+    Inline(Vec<HyperlinkLine>),
+    Shared(crate::history_cell::SharedRows),
+}
+impl Rows {
+    pub(super) fn is_empty(&self) -> bool {
+        match self {
+            Self::Inline(rows) => rows.is_empty(),
+            Self::Shared(rows) => rows.is_empty(),
+        }
+    }
+}
+impl From<Vec<HyperlinkLine>> for Rows {
+    fn from(rows: Vec<HyperlinkLine>) -> Self {
+        Self::Inline(rows)
+    }
+}
+#[cfg(test)]
+impl IntoIterator for Rows {
+    type Item = HyperlinkLine;
+    type IntoIter = std::vec::IntoIter<HyperlinkLine>;
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::Inline(rows) => rows,
+            Self::Shared(rows) => rows.materialize(),
+        }
+        .into_iter()
+    }
+}
+
 pub(super) enum Core {
     Inline(Box<StreamCore>),
     Background(Background),
@@ -45,7 +75,7 @@ impl Command {
 
 thread_local! { static STREAMS: RefCell<HashMap<u64, (StreamCore, super::immutable_rows::Publication)>> = RefCell::default(); }
 struct Ready {
-    rows: VecDeque<HyperlinkLine>,
+    rows: Arc<[HyperlinkLine]>,
     tail: Option<Vec<HyperlinkLine>>,
     rewrapped: Option<usize>,
     width: Option<usize>,
@@ -61,7 +91,7 @@ enum Work {
 pub(crate) struct Background {
     work: Work,
     commands: Vec<Command>,
-    lines: VecDeque<VecDeque<HyperlinkLine>>,
+    lines: VecDeque<crate::history_cell::RowChunk>,
     queued: usize,
     tail: Vec<HyperlinkLine>,
     lane: Lane,
@@ -98,7 +128,7 @@ impl Background {
             });
             Ready {
                 rewrapped: None,
-                rows: VecDeque::new(),
+                rows: Arc::from([]),
                 tail: Some(Vec::new()),
                 width,
                 mode,
@@ -132,7 +162,10 @@ impl Background {
                 }
                 self.queued += lines.rows.len();
                 if !lines.rows.is_empty() {
-                    self.lines.push_back(lines.rows);
+                    self.lines.push_back(crate::history_cell::RowChunk {
+                        range: 0..lines.rows.len(),
+                        rows: lines.rows,
+                    });
                 }
                 if let Some(tail) = lines.tail {
                     self.tail = tail;
@@ -195,25 +228,30 @@ impl Background {
         self.commands.push(command);
         self.poll();
     }
-    fn drain(&mut self, max: usize) -> Vec<HyperlinkLine> {
+    fn drain(&mut self, max: usize) -> crate::history_cell::SharedRows {
         self.poll();
-        let mut lines = Vec::new();
-        while lines.len() < max {
+        let mut rows = crate::history_cell::SharedRows::default();
+        while rows.len() < max {
             let Some(chunk) = self.lines.front_mut() else {
                 break;
             };
-            let count = (max - lines.len()).min(chunk.len());
-            lines.extend(chunk.drain(..count));
-            self.queued -= count;
-            if chunk.is_empty() {
-                self.lines.pop_front();
+            let count = (max - rows.len()).min(chunk.range.len());
+            if count == chunk.range.len() {
+                rows.push(self.lines.pop_front().expect("front chunk"));
+            } else {
+                rows.push(crate::history_cell::RowChunk {
+                    rows: Arc::clone(&chunk.rows),
+                    range: chunk.range.start..chunk.range.start + count,
+                });
+                chunk.range.start += count;
             }
+            self.queued -= count;
         }
-        self.emitted += lines.len();
+        self.emitted += rows.len();
         if self.is_idle() {
             self.oldest = None;
         }
-        lines
+        rows
     }
     fn discard_lines(&mut self) {
         let lines = std::mem::take(&mut self.lines);
@@ -297,7 +335,10 @@ impl Core {
                     }
                     background.queued += ready.rows.len();
                     if !ready.rows.is_empty() {
-                        background.lines.push_back(ready.rows);
+                        background.lines.push_back(crate::history_cell::RowChunk {
+                            range: 0..ready.rows.len(),
+                            rows: ready.rows,
+                        });
                     }
                     if let Some(tail) = ready.tail {
                         background.tail = tail;
@@ -312,21 +353,23 @@ impl Core {
         matches!(self, Self::Background(background) if background.rewrapped)
     }
 
-    pub(super) fn wrap(
+    pub(super) fn wrap_rows(
         &self,
-        body: Box<dyn crate::history_cell::HistoryCell>,
+        rows: crate::history_cell::SharedRows,
+        projection: crate::history_cell::RowProjection,
+        item_id: Option<String>,
         reserved: usize,
     ) -> Box<dyn crate::history_cell::HistoryCell> {
-        match self {
-            Self::Inline(_) => body,
-            Self::Background(core) => Box::new(crate::history_cell::StreamRowsCell {
-                mode: core.mode,
-                width: core.width,
-                reserved,
-                item_id: crate::history_cell::streaming_item_id(body.as_ref()).map(str::to_owned),
-                body,
-            }),
-        }
+        let Self::Background(core) = self else {
+            unreachable!("shared rows belong to prepared streams");
+        };
+        Box::new(crate::history_cell::StreamRowsCell {
+            mode: core.mode,
+            width: core.width,
+            reserved,
+            item_id,
+            content: crate::history_cell::StreamRowContent::Shared { rows, projection },
+        })
     }
 
     pub(super) fn inline(&self) -> Option<&StreamCore> {
@@ -363,17 +406,17 @@ impl Core {
         }
     }
 
-    pub(super) fn tick(&mut self) -> Vec<HyperlinkLine> {
+    pub(super) fn tick(&mut self) -> Rows {
         match self {
-            Self::Inline(core) => core.tick(),
-            Self::Background(core) => core.drain(1),
+            Self::Inline(core) => Rows::Inline(core.tick()),
+            Self::Background(core) => Rows::Shared(core.drain(1)),
         }
     }
 
-    pub(super) fn tick_batch(&mut self, max: usize) -> Vec<HyperlinkLine> {
+    pub(super) fn tick_batch(&mut self, max: usize) -> Rows {
         match self {
-            Self::Inline(core) => core.tick_batch(max),
-            Self::Background(core) => core.drain(max),
+            Self::Inline(core) => Rows::Inline(core.tick_batch(max)),
+            Self::Background(core) => Rows::Shared(core.drain(max)),
         }
     }
 
