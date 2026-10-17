@@ -98,6 +98,7 @@ pub(crate) async fn make_test_app() -> App {
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
         active_export: None,
+        pending_revert: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -165,7 +166,7 @@ pub(super) async fn settle_frontend_requests(
     events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
 ) -> color_eyre::Result<()> {
     tokio::time::timeout(Duration::from_secs(10), async {
-        while app.active_export.is_some()
+        while app.active_export.is_some() || app.pending_revert.is_some()
             || app.pending_thread_switch_resets != 0 || !events.is_empty()
         {
             tokio::select! {

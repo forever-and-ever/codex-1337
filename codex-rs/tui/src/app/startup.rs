@@ -937,6 +937,7 @@ See the Codex keymap documentation for supported actions and examples."
             agents_overview,
             side_threads: HashMap::new(),
             active_export: None,
+            pending_revert: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,

@@ -270,6 +270,7 @@ mod context_inventory;
 mod context_role;
 pub(crate) mod live_work;
 mod mouse_paste;
+pub(crate) mod prompt_revert;
 mod realtime_delivery;
 mod realtime_settings;
 mod reasoning_replay;
@@ -698,6 +699,7 @@ pub(crate) struct App {
     #[cfg(test)]
     _test_codex_home: Option<tempfile::TempDir>,
     active_export: Option<transcript_export::ActiveExport>,
+    pending_revert: Option<prompt_revert::PendingRevert>,
 }
 
 struct PendingMcpLoginStart {

@@ -6642,6 +6642,7 @@ async fn make_test_app() -> Box<App> {
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
         active_export: None,
+        pending_revert: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -6766,6 +6767,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             agents_overview: Default::default(),
             side_threads: HashMap::new(),
             active_export: None,
+            pending_revert: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -9088,6 +9090,15 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
     )
     .await?;
     let control = Box::pin(app.handle_event(&mut tui, &mut app_server, selection)).await?;
+    assert!(app.pending_revert.is_some());
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("Reverting"));
+    super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
+    .await?;
 
     while let Ok(event) = app_event_rx.try_recv() {
         match event {
@@ -9193,6 +9204,13 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
             prompt: "retained prompt".into(),
         },
     ))
+    .await?;
+    super::test_support::settle_frontend_requests(
+        &mut app,
+        &mut tui,
+        &mut app_server,
+        &mut app_event_rx,
+    )
     .await?;
     while let Ok(event) = app_event_rx.try_recv() {
         if matches!(event, AppEvent::FinishPromptRevert { .. }) {

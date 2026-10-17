@@ -145,6 +145,7 @@ impl App {
         }) {
             self.cancel_transcript_export();
         }
+        self.sync_prompt_revert();
     }
 
     pub(super) fn cancel_transcript_export(&mut self) {

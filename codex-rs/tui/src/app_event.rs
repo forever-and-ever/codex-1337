@@ -684,7 +684,21 @@ pub(crate) enum AppEvent {
     },
     FinishPromptRevert {
         thread_id: ThreadId,
-        nth_user_message: usize,
+        selected_cell: Arc<dyn HistoryCell>,
+    },
+    ReconcilePromptRevert {
+        id: uuid::Uuid,
+    },
+    PromptRevertPrepared {
+        id: uuid::Uuid,
+        result: Result<crate::app::prompt_revert::RevertSelection, String>,
+    },
+    PromptRevertFinished {
+        id: uuid::Uuid,
+        result: Result<
+            codex_app_server_protocol::ThreadRevertResponse,
+            crate::app::prompt_revert::RevertFailure,
+        >,
     },
 
     /// Request to exit the application.
