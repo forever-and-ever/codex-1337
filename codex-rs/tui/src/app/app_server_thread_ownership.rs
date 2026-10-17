@@ -7,12 +7,11 @@ use super::App;
 use crate::app_server_session::AppServerSession;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
-use codex_app_server_protocol::ClientRequest;
+use crate::app_server_session::typed_requests::AppServerRequestHandleExt;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::ThreadReadParams;
-use codex_app_server_protocol::ThreadReadResponse;
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::SubAgentSource;
 use std::sync::Arc;
@@ -32,13 +31,13 @@ async fn read_mcp_subagent_parent_thread_id(
         let mut retry_delay = Duration::from_millis(50);
         loop {
             match handle
-                .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
-                    request_id: RequestId::String(uuid::Uuid::new_v4().to_string()),
-                    params: ThreadReadParams {
+                .thread_read(
+                    RequestId::String(uuid::Uuid::new_v4().to_string()),
+                    ThreadReadParams {
                         thread_id: thread_id.to_string(),
                         include_turns: false,
                     },
-                })
+                )
                 .await
             {
                 Ok(response) => return Some(response),

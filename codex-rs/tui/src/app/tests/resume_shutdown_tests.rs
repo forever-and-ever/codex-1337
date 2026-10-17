@@ -1,7 +1,8 @@
+//! A delayed close must not shut down a thread that has already been reloaded.
+
+#[path = "resume_shutdown_tests/verification.rs"]
 mod verification;
 use verification::finish_close_verification;
-
-//! A delayed close must not shut down a thread that has already been reloaded.
 
 use super::disconnect::serve_reconnect_requests;
 use super::*;

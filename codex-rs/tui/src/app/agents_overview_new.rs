@@ -1,5 +1,6 @@
 //! Creates empty sessions from the command center without interrupting other agents.
 
+#[path = "agents_overview_new/admission.rs"]
 mod admission;
 
 use super::*;
