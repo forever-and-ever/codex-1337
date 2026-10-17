@@ -89,7 +89,6 @@ impl ChatWidget {
         if match cmd {
             SlashCommand::Goal => self.reject_invalid_goal_command(&args),
             SlashCommand::ContextRole => self.reject_invalid_context_role_command(&args),
-            SlashCommand::Pets => self.reject_invalid_pet_command(&args),
             _ => false,
         } {
             return;
@@ -577,10 +576,6 @@ impl ChatWidget {
             SlashCommand::Skills => {
                 self.open_skills_menu();
             }
-            SlashCommand::Import => {
-                self.app_event_tx
-                    .send(AppEvent::OpenExternalAgentConfigMigration);
-            }
             SlashCommand::Hooks => {
                 self.add_hooks_output();
             }
@@ -621,9 +616,6 @@ impl ChatWidget {
                     self.open_usage_menu();
                 }
             }
-            SlashCommand::Ide => {
-                self.handle_ide_command();
-            }
             SlashCommand::DebugConfig => {
                 self.add_debug_config_output();
             }
@@ -635,9 +627,6 @@ impl ChatWidget {
             }
             SlashCommand::Theme => {
                 self.open_theme_picker();
-            }
-            SlashCommand::Pets => {
-                self.open_pets_picker();
             }
             SlashCommand::Shimmer => {
                 let picker = crate::shimmers::picker(
@@ -918,9 +907,6 @@ impl ChatWidget {
                 }),
                 _ => self.add_error_message("Usage: /voice [settings|mute|stop]".to_string()),
             },
-            SlashCommand::Ide => {
-                self.handle_ide_command_args(trimmed);
-            }
             SlashCommand::Mcp => {
                 if trimmed.eq_ignore_ascii_case("verbose") {
                     self.add_mcp_output(McpServerStatusDetail::Full);
@@ -1076,7 +1062,6 @@ impl ChatWidget {
                 self.app_event_tx
                     .send(AppEvent::ResumeSessionByIdOrName(args));
             }
-            SlashCommand::Pets if !trimmed.is_empty() => self.dispatch_pet_command(trimmed),
             _ => self.dispatch_command_from_source(cmd, source),
         }
         if source == SlashCommandDispatchSource::Live && cmd != SlashCommand::Goal {
@@ -1233,8 +1218,7 @@ impl ChatWidget {
             return QueueDrain::Stop;
         }
         match cmd {
-            SlashCommand::Ide
-            | SlashCommand::Status
+            SlashCommand::Status
             | SlashCommand::Context
             | SlashCommand::Comms
             | SlashCommand::ContextRole
@@ -1301,12 +1285,10 @@ impl ChatWidget {
             | SlashCommand::Logout
             | SlashCommand::Mention
             | SlashCommand::Skills
-            | SlashCommand::Import
             | SlashCommand::Hooks
             | SlashCommand::Title
             | SlashCommand::Statusline
             | SlashCommand::Theme
-            | SlashCommand::Pets
             | SlashCommand::Shimmer => QueueDrain::Stop,
         }
     }

@@ -119,7 +119,6 @@ mod effective_plugin_change;
 mod embedding;
 mod error_code;
 mod extensions;
-mod external_agent_migration;
 mod external_auth;
 mod filters;
 mod fs_watch;

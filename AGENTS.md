@@ -17,6 +17,7 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - Merge conflict: apply fork intent to upstream's new code; never delete upstream code until tree compiles
 - macOS and Windows code kept only to shrink merges: never validated or repaired; delete only for another reason
 - Most-broken doctrine rule here: exclusive states are one enum; no flag or `Option` restates a fact another value owns
+- Realtime voice: maintenance only; keep compiling, no further fork investment
 - No inline-renderer parity; keep upstream legacy code where it eases merges; legacy-only presentation tests not release gates
 - Shared rendering contracts, headless `codex exec`, server behavior, model-visible output stay supported and correct
 - Transcript: events → owned reducer → immutable cells; never mutate emitted cells by index; replace only via `App::commit_transcript_splice`

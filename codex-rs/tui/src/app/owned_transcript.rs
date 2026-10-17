@@ -47,7 +47,7 @@ impl App {
 
     fn sync_owned_transcript(&mut self, width: u16) -> bool {
         let chat_widget = &self.chat_widget;
-        let transcript_width = chat_widget.history_wrap_width(width);
+        let transcript_width = width.max(1);
         let view = &mut self.transcript_view;
         view.mouse_scroll_speed = self.local_settings.tui.mouse_scroll_speed.unwrap_or(1.0);
         view.primary_selection = cfg!(target_os = "linux");
@@ -137,7 +137,7 @@ impl App {
             "esc latest"
         };
         self.sync_owned_transcript(screen_size.width);
-        let transcript_width = self.chat_widget.history_wrap_width(screen_size.width);
+        let transcript_width = screen_size.width.max(1);
         let composer_hint = self.composer_hint(transcript_width);
         let now = Instant::now();
         let turn_tip = self.turn_tip(transcript_width, now, &tui.frame_requester());

@@ -183,9 +183,7 @@ impl App {
         }
 
         let mut retained_lines = buffer.retained_lines.into_iter().collect::<Vec<_>>();
-        let width = self
-            .chat_widget
-            .history_wrap_width(tui.terminal.last_known_screen_size.width);
+        let width = tui.terminal.last_known_screen_size.width.max(1);
         self.prepend_scrollback_history_notice(&mut retained_lines, buffer.was_truncated, width);
         let retained_rows = retained_lines.len();
         tui.insert_history_hyperlink_lines_with_wrap_policy(
@@ -527,7 +525,7 @@ impl App {
             tui.frame_requester().schedule_frame();
             return Ok(terminal_width);
         }
-        let width = self.chat_widget.history_wrap_width(terminal_width.0);
+        let width = terminal_width.0.max(1);
         if self.transcript_cells.is_empty() {
             // Drop any queued pre-resize/pre-consolidation inserts before rebuilding from cells.
             tui.clear_pending_history_lines();
@@ -620,7 +618,7 @@ impl App {
             return Ok(());
         }
         self.native_history.replayed();
-        let width = self.chat_widget.history_wrap_width(terminal_width.0);
+        let width = terminal_width.0.max(1);
         let reflowed_lines = if self.transcript_cells.is_empty() {
             self.reset_history_emission_state();
             Vec::new()

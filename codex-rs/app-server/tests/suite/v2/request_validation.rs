@@ -97,6 +97,34 @@ async fn legacy_permission_profile_requests_fail_closed() -> Result<()> {
         assert_eq!(actual, expected, "unexpected response for {method}");
     }
 
+    for (method, params) in [
+        ("externalAgentConfig/detect", json!({})),
+        (
+            "externalAgentConfig/import",
+            json!({ "migrationItems": [] }),
+        ),
+        (
+            "externalAgentConfig/import/recordHistory",
+            json!({
+                "providerId": "claude",
+                "itemTypeResults": []
+            }),
+        ),
+        ("externalAgentConfig/import/readHistories", json!(null)),
+    ] {
+        let request_id = mcp.send_raw_request(method, Some(params)).await?;
+        let actual: JSONRPCError = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_stream_until_error_message(RequestId::Integer(request_id)),
+        )
+        .await??;
+        assert_eq!(actual.error.code, -32600, "{method}");
+        assert_eq!(
+            actual.error.message, "External agent import is unsupported",
+            "{method}"
+        );
+    }
+
     let request_id = mcp
         .send_thread_loaded_list_request(ThreadLoadedListParams::default())
         .await?;

@@ -173,7 +173,6 @@ pub(crate) use footer::GoalStatusIndicator;
 pub(crate) use footer::goal_status_indicator_line;
 pub(crate) use list_selection_view::ColumnWidthMode;
 pub(crate) use list_selection_view::ListSelectionView;
-pub(crate) use list_selection_view::OnSelectionChangedCallback;
 pub(crate) use list_selection_view::PickerSurface;
 pub(crate) use list_selection_view::SelectionDescriptionLayout;
 pub(crate) use list_selection_view::SelectionRowDisplay;
@@ -608,11 +607,6 @@ impl BottomPane {
 
     pub fn set_goal_status_indicator(&mut self, indicator: Option<GoalStatusIndicator>) {
         self.composer.set_goal_status_indicator(indicator);
-        self.request_redraw();
-    }
-
-    pub fn set_ide_context_active(&mut self, active: bool) {
-        self.composer.set_ide_context_active(active);
         self.request_redraw();
     }
 
@@ -2377,7 +2371,6 @@ impl BottomPane {
             let composer: RenderableItem<'_> = if let Some(questions) = question_editor {
                 RenderableItem::Borrowed(questions.as_ref())
             } else if options.max_height.is_none()
-                && options.textarea_right_reserve == 0
                 && options.prompt_cache == PromptCacheGlyphs::default()
                 && options.warning_count == 0
                 && options.footer.is_none()

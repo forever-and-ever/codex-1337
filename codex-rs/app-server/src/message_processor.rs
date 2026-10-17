@@ -15,8 +15,6 @@ use crate::error_code::method_not_found;
 use crate::extensions::ThreadExtensionDependencies;
 use crate::extensions::app_server_extension_event_sink;
 use crate::extensions::thread_extensions;
-use crate::external_agent_migration::ExternalAgentConfigRequestProcessor;
-use crate::external_agent_migration::ExternalAgentConfigRequestProcessorArgs;
 use crate::fs_watch::FsWatchManager;
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
@@ -157,7 +155,6 @@ pub(crate) struct MessageProcessor {
     process_exec_processor: ProcessExecRequestProcessor,
     config_processor: ConfigRequestProcessor,
     environment_processor: EnvironmentRequestProcessor,
-    external_agent_config_processor: ExternalAgentConfigRequestProcessor,
     feedback_processor: FeedbackRequestProcessor,
     fs_processor: FsRequestProcessor,
     git_processor: GitRequestProcessor,
@@ -535,7 +532,7 @@ impl MessageProcessor {
             auth_manager.clone(),
             Arc::clone(&thread_manager),
             outgoing.clone(),
-            arg0_paths.clone(),
+            arg0_paths,
             Arc::clone(&config),
             config_manager.clone(),
             Arc::clone(&thread_store),
@@ -544,7 +541,7 @@ impl MessageProcessor {
             thread_watch_manager.clone(),
             Arc::clone(&thread_list_state_permit),
             thread_goal_processor.clone(),
-            state_db.clone(),
+            state_db,
             log_db,
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
@@ -561,7 +558,7 @@ impl MessageProcessor {
             auth_manager,
             Arc::clone(&thread_manager),
             outgoing.clone(),
-            analytics_events_client.clone(),
+            analytics_events_client,
             Arc::clone(&config),
             config_manager.clone(),
             pending_thread_unloads,
@@ -590,18 +587,6 @@ impl MessageProcessor {
                     Some(on_effective_plugins_changed),
                 );
         }
-        let external_agent_config_processor =
-            ExternalAgentConfigRequestProcessor::new(ExternalAgentConfigRequestProcessorArgs {
-                outgoing: outgoing.clone(),
-                thread_manager: Arc::clone(&thread_manager),
-                thread_store: Arc::clone(&thread_store),
-                config_manager: config_manager.clone(),
-                config_processor: config_processor.clone(),
-                state_db,
-                analytics_events_client,
-                arg0_paths,
-                codex_home: config.codex_home.to_path_buf(),
-            });
         let environment_processor =
             EnvironmentRequestProcessor::new(thread_manager.environment_manager());
         let fs_processor = FsRequestProcessor::new(
@@ -632,7 +617,6 @@ impl MessageProcessor {
             process_exec_processor,
             config_processor,
             environment_processor,
-            external_agent_config_processor,
             feedback_processor,
             fs_processor,
             git_processor,
@@ -1203,26 +1187,12 @@ impl MessageProcessor {
                     .windows_sandbox_readiness(&request_id)
                     .await
             }
-            ClientRequest::ExternalAgentConfigDetect { params, .. } => self
-                .external_agent_config_processor
-                .detect(params)
-                .await
-                .map(|response| Some(response.into())),
-            ClientRequest::ExternalAgentConfigImport { params, .. } => self
-                .external_agent_config_processor
-                .import(request_id.clone(), params)
-                .await
-                .map(|()| None),
-            ClientRequest::ExternalAgentConfigImportHistoryRecord { params, .. } => self
-                .external_agent_config_processor
-                .record_import_history(params)
-                .await
-                .map(|response| Some(response.into())),
-            ClientRequest::ExternalAgentConfigImportHistoriesRead { .. } => self
-                .external_agent_config_processor
-                .read_import_histories()
-                .await
-                .map(|response| Some(response.into())),
+            ClientRequest::ExternalAgentConfigDetect { .. }
+            | ClientRequest::ExternalAgentConfigImport { .. }
+            | ClientRequest::ExternalAgentConfigImportHistoryRecord { .. }
+            | ClientRequest::ExternalAgentConfigImportHistoriesRead { .. } => {
+                Err(invalid_request("External agent import is unsupported"))
+            }
             ClientRequest::ConfigValueWrite { params, .. } => {
                 self.config_processor.value_write(params).await.map(Some)
             }

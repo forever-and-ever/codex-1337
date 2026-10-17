@@ -15,7 +15,6 @@ use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
 use crate::app_server_session::turn_permissions_overrides;
 use crate::config_update::format_config_error;
-use crate::external_agent_config_migration::flow::ExternalAgentConfigMigrationFlowOutcome;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::session_resume::cwds_differ;
 use codex_app_server_protocol::ThreadGoalStatus;
@@ -396,41 +395,6 @@ impl App {
             }
             AppEvent::OpenResumePicker => {
                 self.pending_open_resume_picker = true;
-            }
-            AppEvent::OpenExternalAgentConfigMigration => {
-                let cwd = if self.chat_widget.thread_id().is_some()
-                    || !app_server.uses_remote_workspace()
-                {
-                    Some(self.chat_widget.config_ref().cwd.to_path_buf())
-                } else {
-                    app_server.remote_cwd_override().map(Path::to_path_buf)
-                };
-                match crate::external_agent_config_migration::flow::handle_external_agent_config_migration_prompt(
-                    tui,
-                    app_server,
-                    cwd.as_deref(),
-                )
-                .await
-                {
-                    Ok(ExternalAgentConfigMigrationFlowOutcome::Started(lines)) => {
-                        self.chat_widget.add_plain_history_lines(lines);
-                    }
-                    Ok(ExternalAgentConfigMigrationFlowOutcome::NoItems) => {
-                        self.chat_widget.add_info_message(
-                            crate::external_agent_config_migration::flow::EXTERNAL_AGENT_CONFIG_MIGRATION_NO_ITEMS_MESSAGE
-                                .to_string(),
-                            /*hint*/ None,
-                        );
-                    }
-                    Ok(ExternalAgentConfigMigrationFlowOutcome::Cancelled) => {}
-                    Ok(ExternalAgentConfigMigrationFlowOutcome::TerminalError(err)) => {
-                        return Err(err.into());
-                    }
-                    Err(error_message) => {
-                        self.chat_widget.add_error_message(error_message);
-                    }
-                }
-                tui.frame_requester().schedule_frame();
             }
             AppEvent::ResumeSessionByIdOrName(id_or_name) => {
                 match crate::lookup_session_target_with_app_server(
@@ -965,30 +929,6 @@ impl App {
             }
             AppEvent::OpenDesktopThread { thread_id } => {
                 self.open_desktop_thread(thread_id);
-            }
-            AppEvent::PetSelected { pet_id } => {
-                self.handle_pet_selected(tui, pet_id);
-            }
-            AppEvent::PetDisabled => {
-                self.handle_pet_disabled(tui).await;
-            }
-            AppEvent::PetPreviewRequested { pet_id } => {
-                self.chat_widget.start_pet_picker_preview(pet_id);
-            }
-            AppEvent::PetPreviewLoaded { request_id, result } => {
-                self.handle_pet_preview_loaded(tui, request_id, result);
-            }
-            AppEvent::PetSelectionLoaded {
-                request_id,
-                pet_id,
-                result,
-            } => {
-                return self
-                    .handle_pet_selection_loaded(tui, request_id, pet_id, result)
-                    .await;
-            }
-            AppEvent::ConfiguredPetLoaded { pet_id, result } => {
-                self.handle_configured_pet_loaded(tui, pet_id, result);
             }
             AppEvent::RefreshConnectors { force_refetch } => {
                 self.chat_widget.refresh_connectors(force_refetch);

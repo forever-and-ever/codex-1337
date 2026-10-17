@@ -134,7 +134,7 @@ impl ChatComposer {
             /*top*/ 1 + voice_rows,
             LIVE_PREFIX_COLS,
             /*bottom*/ 1,
-            /*right*/ 1u16.saturating_add(options.textarea_right_reserve),
+            /*right*/ 1,
         ));
         let remote_images_height = self
             .attachments
@@ -207,8 +207,7 @@ impl ChatComposer {
     ) -> u16 {
         let footer_hint_height = self.footer_hint_height(width, options);
         const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 1;
-        let inner_width =
-            width.saturating_sub(COLS_WITH_MARGIN.saturating_add(options.textarea_right_reserve));
+        let inner_width = width.saturating_sub(COLS_WITH_MARGIN);
         let remote_images_height: u16 = self
             .attachments
             .remote_image_lines()

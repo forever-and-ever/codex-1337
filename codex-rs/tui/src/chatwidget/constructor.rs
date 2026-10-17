@@ -85,17 +85,6 @@ impl ChatWidget {
             .as_ref()
             .map(|keymap| keymap.chat.clone())
             .unwrap_or_else(|| default_keymap.chat.clone());
-        let pet_http_client = codex_http_client::RouteAwareClientPool::new(
-            config.http_client_factory(),
-            codex_http_client::ClientRouteClass::Other,
-        );
-        pets::start_configured_pet_load_if_needed(
-            &local_settings,
-            /*ambient_pet_missing*/ true,
-            frame_requester.clone(),
-            app_event_tx.clone(),
-            pet_http_client.clone(),
-        );
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
             daybreak_enabled: false,
@@ -202,7 +191,6 @@ impl ChatWidget {
             mcp_startup_pending_next_round: HashMap::new(),
             mcp_startup_pending_next_round_saw_starting: false,
             connectors: ConnectorsState::default(),
-            ide_context: IdeContextState::default(),
             plugins_cache: PluginsCacheState::default(),
             plugins_fetch_state: PluginListFetchState::default(),
             plugin_remote_sections_loading: false,
@@ -219,15 +207,6 @@ impl ChatWidget {
             status_state: StatusState::default(),
             review: ReviewState::default(),
             active_hook_cell: None,
-            pet_http_client,
-            ambient_pet: None,
-            pet_picker_preview_state: crate::pets::PetPickerPreviewState::default(),
-            pet_picker_preview_pet: None,
-            pet_picker_preview_request_id: 0,
-            pet_picker_preview_image_visible: std::cell::Cell::new(/*value*/ false),
-            pet_selection_load_request_id: 0,
-            #[cfg(test)]
-            pet_image_support_override: None,
             thread_id: None,
             session_draft: None,
             thread_name: None,

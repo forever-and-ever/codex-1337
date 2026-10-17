@@ -5,7 +5,6 @@
 
 pub(crate) mod typed_requests;
 mod account;
-mod external_agent_config;
 pub(crate) mod fork_preparation;
 pub(crate) mod fs;
 mod history;
@@ -121,7 +120,6 @@ use color_eyre::eyre::WrapErr;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use std::time::Instant;
@@ -130,7 +128,6 @@ use uuid::Uuid;
 const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INVALID_PARAMS: i64 = -32602;
-pub(crate) const EXTERNAL_AGENT_CONFIG_IMPORT_IN_PROGRESS_MESSAGE: &str = "A previous external agent import is still running. Wait for it to finish before importing again.";
 const THREAD_SETTINGS_UPDATE_METHOD: &str = "thread/settings/update";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -304,7 +301,6 @@ pub(crate) struct AppServerSession {
     default_model: Option<String>,
     available_models: Vec<ModelPreset>,
     managed_new_thread_defaults: Option<NewThreadModelDefaults>,
-    external_agent_config_import_id: Mutex<Option<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -407,7 +403,6 @@ impl AppServerSession {
             default_model: None,
             available_models: Vec::new(),
             managed_new_thread_defaults: None,
-            external_agent_config_import_id: Mutex::default(),
         }
     }
     pub(crate) fn with_remote_cwd_override(mut self, remote_cwd_override: Option<PathBuf>) -> Self {

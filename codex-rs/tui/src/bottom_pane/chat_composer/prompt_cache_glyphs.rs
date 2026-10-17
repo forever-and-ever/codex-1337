@@ -60,17 +60,14 @@ impl PromptCacheGlyphs {
 }
 
 impl ChatComposer {
-    /// Right-aligned beside the ambient pet's reserve; skipped when the row would clip it.
+    /// Right-aligned in the bottom padding row; skipped when the row would clip it.
     pub(super) fn render_bottom_row_indicators(
         &self,
         composer: Rect,
         options: ComposerRenderOptions<'_>,
         buf: &mut Buffer,
     ) {
-        let right = composer
-            .right()
-            .saturating_sub(1)
-            .saturating_sub(options.textarea_right_reserve);
+        let right = composer.right().saturating_sub(1);
         let available = usize::from(
             right.saturating_sub(
                 composer
