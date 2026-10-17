@@ -1244,6 +1244,7 @@ fn thread_fork_last_turn_id_round_trips() {
     .expect("thread/fork params deserialize");
 
     assert_eq!(params.last_turn_id, Some("turn-2".to_string()));
+    assert_eq!(params.snapshot, ThreadForkSnapshot::Interrupted);
     let serialized = serde_json::to_value(params).expect("thread/fork params serialize");
     assert_eq!(serialized["lastTurnId"], json!("turn-2"));
 
@@ -1256,6 +1257,14 @@ fn thread_fork_last_turn_id_round_trips() {
         omitted["lastTurnId"],
         serde_json::Value::Null,
         "optional lastTurnId should serialize as null when omitted"
+    );
+    assert!(omitted.get("snapshot").is_none());
+    let side: ThreadForkParams =
+        serde_json::from_value(json!({ "threadId": "thread-1", "snapshot": "side" })).unwrap();
+    assert_eq!(side.snapshot, ThreadForkSnapshot::Side);
+    assert_eq!(
+        serde_json::to_value(side).unwrap()["snapshot"],
+        json!("side")
     );
 }
 

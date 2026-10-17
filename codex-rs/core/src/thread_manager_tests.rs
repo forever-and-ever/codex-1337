@@ -2831,6 +2831,31 @@ fn interrupted_fork_snapshot_appends_interrupt_boundary() {
         ])
         .expect("serialize expected interrupted empty history"),
     );
+    // Side forks close only the copied turn, irrespective of the source's marker policy.
+    for marker in [
+        InterruptedTurnHistoryMarker::ContextualUser,
+        InterruptedTurnHistoryMarker::Developer,
+        InterruptedTurnHistoryMarker::Disabled,
+    ] {
+        let side = fork_history_from_snapshot(
+            ForkSnapshot::Side,
+            InitialHistory::Forked(vec![RolloutItem::ResponseItem(user_msg("hello").into())]),
+            marker,
+        );
+        assert!(matches!(
+            side.get_rollout_items(),
+            [
+                RolloutItem::ResponseItem(_),
+                RolloutItem::EventMsg(EventMsg::TurnAborted(_))
+            ]
+        ));
+        assert!(
+            !serde_json::to_string(side.get_rollout_items())
+                .unwrap()
+                .contains("<turn_aborted>")
+        );
+        assert!(!snapshot_turn_state(&side).ends_mid_turn);
+    }
 }
 
 #[test]
@@ -3188,7 +3213,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
         .fork_legacy_thread(
             ForkSnapshot::Interrupted,
             crate::StartThreadOptions::new(config.clone()),
-            source_path,
+            source_path.clone(),
         )
         .await
         .expect("fork interrupted snapshot");
@@ -3219,6 +3244,27 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
             })) if turn_id == "turn-explicit"
         )
     }));
+    let side = manager
+        .fork_legacy_thread(
+            ForkSnapshot::Side,
+            crate::StartThreadOptions::new(config),
+            source_path.clone(),
+        )
+        .await
+        .expect("fork side snapshot");
+    let side_history = RolloutRecorder::get_rollout_history(&side.thread.rollout_path().unwrap())
+        .await
+        .unwrap();
+    assert!(
+        !serde_json::to_string(side_history.get_rollout_items())
+            .unwrap()
+            .contains("<turn_aborted>")
+    );
+    assert!(!snapshot_turn_state(&side_history).ends_mid_turn);
+    let source_history = RolloutRecorder::get_rollout_history(&source_path)
+        .await
+        .unwrap();
+    assert!(snapshot_turn_state(&source_history).ends_mid_turn);
 }
 
 #[tokio::test]

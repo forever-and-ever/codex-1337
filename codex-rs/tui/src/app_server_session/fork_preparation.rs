@@ -84,6 +84,14 @@ impl AppServerSession {
             self.session_config_with_effective_service_tier(&config)
         };
         let mut params = ThreadForkParams {
+            snapshot: match presentation {
+                ForkPresentation::Regular => {
+                    codex_app_server_protocol::ThreadForkSnapshot::Interrupted
+                }
+                ForkPresentation::SideConversation => {
+                    codex_app_server_protocol::ThreadForkSnapshot::Side
+                }
+            },
             name: name.as_ref().map(|name| name.name.clone()),
             conflict_thread_ids: name.map(|name| name.conflict_thread_ids),
             last_turn_id,

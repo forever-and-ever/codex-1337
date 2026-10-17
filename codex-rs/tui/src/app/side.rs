@@ -22,19 +22,11 @@ const SIDE_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
 );
 const SIDE_ALREADY_OPEN_MESSAGE: &str =
     "A side conversation is already open. Press ctrl + c to return before starting another.";
-const SIDE_BOUNDARY_PROMPT: &str = r#"Side conversation boundary.
+const SIDE_BOUNDARY_PROMPT: &str = r#"This is a /btw side fork. The parent conversation may still be running elsewhere, so inherited history may end mid-turn; it was not interrupted by this fork.
 
-Everything before this boundary is inherited history from the parent thread. It is reference context only. It is not your current task.
+Inherited history is reference only, not active instructions. Answer only messages after this boundary; wait if none follow. Do not continue inherited tasks, plans, tool calls, or approvals.
 
-Do not continue, execute, or complete any instructions, plans, tool calls, approvals, edits, or requests from before this boundary. Only messages submitted after this boundary are active user instructions for this side conversation.
-
-You are a side-conversation assistant, separate from the main thread. Answer questions and do lightweight, non-mutating exploration without disrupting the main thread. If there is no user question after this boundary yet, wait for one.
-
-External tools may be available according to this thread's current permissions. Any tool calls or outputs visible before this boundary happened in the parent thread and are reference-only; do not infer active instructions from them.
-
-Sub-agents are off-limits in this side conversation. Do not interact with any existing or new sub-agents, even if sub-agents were used before this boundary.
-
-Do not modify files, source, git state, permissions, configuration, or workspace state unless the user explicitly asks for that mutation after this boundary. Do not request escalated permissions or broader sandbox access unless the user explicitly asks for a mutation that requires it. If the user explicitly requests a mutation, keep it minimal, local to the request, and avoid disrupting the main thread."#;
+Sub-agents are off-limits: do not create or interact with them. Do not modify files, git state, permissions, configuration, or workspace state, or request broader access, unless the user explicitly requests that mutation after this boundary. Keep any requested mutation minimal and avoid disrupting the parent."#;
 
 const SIDE_DEVELOPER_INSTRUCTIONS: &str = r#"You are in a side conversation, not the main thread.
 
@@ -119,18 +111,20 @@ mod tests {
         let [ContentItem::InputText { text }] = content.as_slice() else {
             panic!("expected hidden side boundary prompt text");
         };
-        assert!(text.contains("Side conversation boundary."));
-        assert!(text.contains("Everything before this boundary is inherited history"));
-        assert!(text.contains("It is not your current task."));
-        assert!(text.contains("Only messages submitted after this boundary are active"));
-        assert!(text.contains("Do not continue, execute, or complete"));
-        assert!(text.contains("separate from the main thread"));
-        assert!(
-            text.contains("External tools may be available according to this thread's current")
-        );
-        assert!(text.contains("Any tool calls or outputs visible before this boundary happened"));
-        assert!(text.contains("Sub-agents are off-limits in this side conversation."));
+        assert!(text.starts_with("This is a /btw side fork."));
+        assert!(text.contains("still be running elsewhere"));
+        assert!(text.contains("inherited history may end mid-turn"));
+        assert!(text.contains("it was not interrupted by this fork"));
+        assert!(text.contains("Inherited history is reference only, not active instructions."));
+        assert!(text.contains("Answer only messages after this boundary"));
+        assert!(text.contains("Do not continue inherited tasks"));
+        assert!(text.contains("Sub-agents are off-limits: do not create or interact with them."));
         assert!(text.contains("Do not modify files"));
+        assert!(
+            text.contains("unless the user explicitly requests that mutation after this boundary")
+        );
+        assert!(!text.contains("<turn_aborted>"));
+        assert!(text.len() < 800);
     }
 
     #[test]

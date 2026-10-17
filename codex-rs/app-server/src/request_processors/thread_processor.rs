@@ -4881,6 +4881,7 @@ impl ThreadRequestProcessor {
         let _name_permit = self.acquire_thread_list_state_permit().await?;
         let ThreadForkParams {
             thread_id,
+            snapshot,
             name,
             conflict_thread_ids,
             last_turn_id,
@@ -5241,12 +5242,16 @@ impl ThreadRequestProcessor {
         };
         let new_thread = if let Some(prepared_fork) = prepared_fork {
             self.thread_manager
-                .fork_prepared_thread(fork_options, prepared_fork)
+                .fork_prepared_thread_with_snapshot(
+                    thread_fork::snapshot_from_request(snapshot),
+                    fork_options,
+                    prepared_fork,
+                )
                 .await
         } else {
             self.thread_manager
                 .fork_thread_from_history(
-                    ForkSnapshot::Interrupted,
+                    thread_fork::snapshot_from_request(snapshot),
                     fork_options,
                     InitialHistory::Resumed(ResumedHistory {
                         history_revision: None,

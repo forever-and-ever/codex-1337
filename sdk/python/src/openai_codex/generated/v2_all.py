@@ -5943,6 +5943,11 @@ class ThreadFarmResponse(BaseModel):
     child_thread_id: Annotated[str, Field(alias="childThreadId")]
 
 
+class ThreadForkSnapshot(Enum):
+    interrupted = "interrupted"
+    side = "side"
+
+
 class ThreadGoalClearResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11408,6 +11413,12 @@ class ThreadForkParams(BaseModel):
     ] = None
     sandbox: SandboxMode | None = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+    snapshot: Annotated[
+        ThreadForkSnapshot | None,
+        Field(
+            description="How to close an inherited unfinished turn; omission retains interruption semantics."
+        ),
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     thread_source: Annotated[
         ThreadSource | None,
