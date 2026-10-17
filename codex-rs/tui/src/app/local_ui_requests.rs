@@ -40,13 +40,14 @@ impl App {
     ) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(10), async {
             while !self.server_operations.is_empty() {
-                let completion = self
-                    .server_operations
-                    .control_rx
-                    .recv()
-                    .await
-                    .expect("server completion");
-                Box::pin(self.handle_server_completion(tui, server, completion)).await?;
+                tokio::select! {
+                    completion = self.server_operations.control_rx.recv() => {
+                        Box::pin(self.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
+                    }
+                    completion = self.thread_delivery.completion_rx.recv() => {
+                        Box::pin(self.handle_local_thread_completion(server, completion.expect("thread completion"))).await?;
+                    }
+                }
             }
             Ok(())
         })

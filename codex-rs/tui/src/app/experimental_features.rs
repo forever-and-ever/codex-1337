@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 impl App {
     pub(super) async fn enable_feature_for_new_threads(
         &mut self,
-        tui: &mut tui::Tui,
+        _tui: &mut tui::Tui,
         app_server: &AppServerSession,
         feature: Feature,
     ) {
@@ -29,33 +29,28 @@ impl App {
                 /*enabled*/ true,
             ));
         }
-        let notice: Box<dyn HistoryCell> = match crate::config_update::write_config_batch(
-            app_server.request_handle(),
-            edits,
-        )
-        .await
-        {
-            Ok(response) if response.status == WriteStatus::Ok => {
-                Box::new(history_cell::new_warning_event(format!(
-                    "{label} setting saved on the server for new threads. This thread is unchanged. Project or task settings may override it."
-                )))
-            }
-            Ok(response) => {
-                self.transcript_view.jump_to_latest();
-                Box::new(history_cell::new_error_event(format!(
-                    "{label} setting was saved but is overridden: {}",
-                    overridden_write_message(&response)
-                )))
-            }
-            Err(err) => {
-                self.transcript_view.jump_to_latest();
-                Box::new(history_cell::new_error_event(format!(
-                    "Failed to save {label} setting: {}",
-                    crate::config_update::format_config_error(&err)
-                )))
-            }
-        };
-        self.insert_history_cell(tui, notice);
+
+        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+        self.request_server(app_server, UiRequestScope::Connection, UiRequestKind::Mutation,
+            "Save feature for new threads",
+            move |handle| crate::config_update::write_config_batch_typed(handle, edits),
+            move |app, _, result| {
+                let notice: Box<dyn HistoryCell> = match result {
+                    Ok(response) if response.status == WriteStatus::Ok => Box::new(history_cell::new_warning_event(format!(
+                        "{label} setting saved on the server for new threads. This thread is unchanged. Project or task settings may override it."
+                    ))),
+                    Ok(response) => {
+                        app.app_event_tx.send(AppEvent::FollowTranscript);
+                        Box::new(history_cell::new_error_event(format!("{label} setting was saved but is overridden: {}", overridden_write_message(&response))))
+                    },
+                    Err(error) => {
+                        app.app_event_tx.send(AppEvent::FollowTranscript);
+                        Box::new(history_cell::new_error_event(format!("Failed to save {label} setting: {}", super::model_defaults::request_failure_message(error))))
+                    },
+                };
+                app.app_event_tx.send(AppEvent::InsertHistoryCell(notice));
+                Ok(())
+            });
     }
 
     pub(super) fn fetch_experimental_features(

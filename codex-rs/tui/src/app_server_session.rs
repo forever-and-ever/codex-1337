@@ -68,7 +68,6 @@ use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::GetAccountResponse;
 use codex_app_server_protocol::JSONRPCErrorError;
 use codex_app_server_protocol::LogoutAccountResponse;
-use codex_app_server_protocol::MemoryResetResponse;
 use codex_app_server_protocol::Model as ApiModel;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -83,13 +82,6 @@ use codex_app_server_protocol::ThreadDeleteParams;
 use codex_app_server_protocol::ThreadDeleteResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
-use codex_app_server_protocol::ThreadGoalClearParams;
-use codex_app_server_protocol::ThreadGoalClearResponse;
-use codex_app_server_protocol::ThreadGoalGetParams;
-use codex_app_server_protocol::ThreadGoalGetResponse;
-use codex_app_server_protocol::ThreadGoalSetParams;
-use codex_app_server_protocol::ThreadGoalSetResponse;
-use codex_app_server_protocol::ThreadGoalStatus;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
@@ -97,9 +89,6 @@ use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
 use codex_app_server_protocol::ThreadLoadedListParams;
 use codex_app_server_protocol::ThreadLoadedListResponse;
-use codex_app_server_protocol::ThreadMemoryMode;
-use codex_app_server_protocol::ThreadMemoryModeSetParams;
-use codex_app_server_protocol::ThreadMemoryModeSetResponse;
 use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateResponse;
@@ -1169,95 +1158,6 @@ impl AppServerSession {
             )),
             None => Ok(requested_name),
         }
-    }
-
-    pub(crate) async fn thread_memory_mode_set(
-        &mut self,
-        thread_id: ThreadId,
-        mode: ThreadMemoryMode,
-    ) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: ThreadMemoryModeSetResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadMemoryModeSet {
-                request_id,
-                params: ThreadMemoryModeSetParams {
-                    thread_id: thread_id.to_string(),
-                    mode,
-                },
-            })
-            .await
-            .wrap_err("thread/memoryMode/set failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn memory_reset(&mut self) -> Result<()> {
-        let request_id = self.next_request_id();
-        let _: MemoryResetResponse = self
-            .client
-            .request_typed(ClientRequest::MemoryReset {
-                request_id,
-                params: None,
-            })
-            .await
-            .wrap_err("memory/reset failed in TUI")?;
-        Ok(())
-    }
-
-    pub(crate) async fn thread_goal_get(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<ThreadGoalGetResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadGoalGet {
-                request_id,
-                params: ThreadGoalGetParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/goal/get failed in TUI")
-    }
-
-    pub(crate) async fn thread_goal_set(
-        &mut self,
-        thread_id: ThreadId,
-        objective: Option<String>,
-        status: Option<ThreadGoalStatus>,
-        token_budget: Option<Option<i64>>,
-    ) -> Result<ThreadGoalSetResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadGoalSet {
-                request_id,
-                params: ThreadGoalSetParams {
-                    origin: Some(codex_app_server_protocol::ThreadGoalMutationOrigin::User),
-                    thread_id: thread_id.to_string(),
-                    objective,
-                    status,
-                    token_budget,
-                },
-            })
-            .await
-            .wrap_err("thread/goal/set failed in TUI")
-    }
-
-    pub(crate) async fn thread_goal_clear(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> Result<ThreadGoalClearResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadGoalClear {
-                request_id,
-                params: ThreadGoalClearParams {
-                    origin: Some(codex_app_server_protocol::ThreadGoalMutationOrigin::User),
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/goal/clear failed in TUI")
     }
 
     pub(crate) async fn logout_account(&mut self, thread_id: Option<ThreadId>) -> Result<()> {

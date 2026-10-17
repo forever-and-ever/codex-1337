@@ -124,6 +124,7 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
             .find(|event| matches!(event, AppEvent::PersistDaybreakSelection { .. }))
             .expect("Daybreak selection event");
         app.handle_event(&mut tui, &mut server, selection).await?;
+        app.settle_server_ui_requests(&mut tui, &mut server).await?;
         confirmations.push(next_history_message(&mut events));
         assert_eq!(
             server
@@ -144,6 +145,7 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
     app.active_thread_id = Some(missing_thread_id);
     app.persist_daybreak_selection(&mut server, missing_thread_id, /*enabled*/ true)
         .await;
+    app.settle_server_ui_requests(&mut tui, &mut server).await?;
     assert!(next_history_message(&mut events).contains("Failed to read the thread"));
     assert!(!app.chat_widget.daybreak_enabled);
     assert!(!app.config.daybreak_enabled);

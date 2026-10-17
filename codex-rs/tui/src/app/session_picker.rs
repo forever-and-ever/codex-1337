@@ -57,8 +57,16 @@ impl App {
             SessionSelection::Exit
             | SessionSelection::StartFresh
             | SessionSelection::AgentsOverview => {
-                self.refresh_in_memory_config_from_disk_best_effort("closing the session picker")
-                    .await;
+                let frames = tui.frame_requester();
+                self.queue_config_refresh("closing the session picker", move |app, _, _result| {
+                    if app.server_operations.preview(None).navigation.is_none() {
+                        app.chat_widget.maybe_send_next_queued_input();
+                    }
+                    frames.schedule_frame();
+                    Ok(())
+                });
+                tui.frame_requester().schedule_frame();
+                return Ok(AppRunControl::Continue);
             }
             SessionSelection::Fork(_) => {}
         }

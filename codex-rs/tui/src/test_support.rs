@@ -9,6 +9,50 @@ pub(crate) use codex_utils_absolute_path::test_support::test_path_buf;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub(crate) async fn thread_goal_get(
+    server: &crate::app_server_session::AppServerSession,
+    thread_id: codex_protocol::ThreadId,
+) -> color_eyre::Result<codex_app_server_protocol::ThreadGoalGetResponse> {
+    use codex_app_server_protocol::ClientRequest;
+    use codex_app_server_protocol::RequestId;
+    use codex_app_server_protocol::ThreadGoalGetParams;
+    Ok(server
+        .request_handle()
+        .request_typed(ClientRequest::ThreadGoalGet {
+            request_id: RequestId::String(format!("test-goal-read-{}", uuid::Uuid::new_v4())),
+            params: ThreadGoalGetParams {
+                thread_id: thread_id.to_string(),
+            },
+        })
+        .await?)
+}
+
+pub(crate) async fn thread_goal_set(
+    server: &crate::app_server_session::AppServerSession,
+    thread_id: codex_protocol::ThreadId,
+    objective: Option<String>,
+    status: Option<codex_app_server_protocol::ThreadGoalStatus>,
+    token_budget: Option<Option<i64>>,
+) -> color_eyre::Result<codex_app_server_protocol::ThreadGoalSetResponse> {
+    use codex_app_server_protocol::ClientRequest;
+    use codex_app_server_protocol::RequestId;
+    use codex_app_server_protocol::ThreadGoalMutationOrigin;
+    use codex_app_server_protocol::ThreadGoalSetParams;
+    Ok(server
+        .request_handle()
+        .request_typed(ClientRequest::ThreadGoalSet {
+            request_id: RequestId::String(format!("test-goal-set-{}", uuid::Uuid::new_v4())),
+            params: ThreadGoalSetParams {
+                thread_id: thread_id.to_string(),
+                objective,
+                status,
+                token_budget,
+                origin: Some(ThreadGoalMutationOrigin::User),
+            },
+        })
+        .await?)
+}
+
 pub(crate) static TEST_MODEL_PRESETS: LazyLock<Vec<ModelPreset>> = LazyLock::new(|| {
     let mut response = bundled_models_response()
         .unwrap_or_else(|err| panic!("bundled models.json should parse: {err}"));

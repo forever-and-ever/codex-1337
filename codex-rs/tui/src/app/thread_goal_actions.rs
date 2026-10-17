@@ -15,6 +15,15 @@ use codex_app_server_protocol::ThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus;
 use codex_protocol::ThreadId;
 
+use super::model_defaults::request_failure_message;
+use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+use codex_app_server_client::{AppServerRequestHandle, TypedRequestError};
+use codex_app_server_protocol::{
+    ClientRequest, RequestId, ThreadGoalClearParams, ThreadGoalClearResponse, ThreadGoalGetParams,
+    ThreadGoalGetResponse, ThreadGoalMutationOrigin, ThreadGoalSetParams, ThreadGoalSetResponse,
+};
+use uuid::Uuid;
+
 const EPHEMERAL_THREAD_GOAL_ERROR_MESSAGE: &str = concat!(
     "Goals need a saved session. This session is temporary.\n",
     "Run `codex` to start a saved session, or `codex resume` / `/resume` to reopen one.",
@@ -26,29 +35,28 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        let result = app_server.thread_goal_get(thread_id).await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-
-        let response = match result {
-            Ok(response) => response,
-            Err(err) => {
-                self.chat_widget
-                    .add_error_message(thread_goal_error_message("read", &err));
-                return;
-            }
-        };
-
-        let Some(goal) = response.goal else {
-            self.chat_widget.add_info_message(
-                GOAL_USAGE.to_string(),
-                Some("No goal is currently set.".to_string()),
-            );
-            return;
-        };
-
-        self.chat_widget.show_goal_summary(goal);
+        self.request_server(
+            app_server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::ReadOnly,
+            "Read goal",
+            move |handle| get_goal(handle, thread_id),
+            move |app, _, result| {
+                match result {
+                    Ok(response) => match response.goal {
+                        Some(goal) => app.chat_widget.show_goal_summary(goal),
+                        None => app.chat_widget.add_info_message(
+                            GOAL_USAGE.to_string(),
+                            Some("No goal is currently set.".to_string()),
+                        ),
+                    },
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(goal_request_error("read", error)),
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn maybe_prompt_resume_paused_goal_after_resume(
@@ -59,30 +67,36 @@ impl App {
         if self.chat_widget.has_misalignment_policy_violation() {
             return;
         }
-
-        let result = app_server.thread_goal_get(thread_id).await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-
-        let response = match result {
-            Ok(response) => response,
-            Err(err) => {
-                tracing::warn!("failed to read thread goal after resume: {err}");
-                return;
-            }
-        };
-
-        let Some(goal) = response.goal else {
-            return;
-        };
-        if matches!(
-            goal.status,
-            ThreadGoalStatus::Paused | ThreadGoalStatus::Blocked | ThreadGoalStatus::UsageLimited
-        ) {
-            self.chat_widget
-                .show_resume_paused_goal_prompt(thread_id, goal.objective);
-        }
+        self.request_server(
+            app_server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::ReadOnly,
+            "Read resumed goal",
+            move |handle| get_goal(handle, thread_id),
+            move |app, _, result| {
+                match result {
+                    Ok(response) => {
+                        if let Some(goal) = response.goal
+                            && matches!(
+                                goal.status,
+                                ThreadGoalStatus::Paused
+                                    | ThreadGoalStatus::Blocked
+                                    | ThreadGoalStatus::UsageLimited
+                            )
+                            && !app.chat_widget.has_misalignment_policy_violation()
+                        {
+                            app.chat_widget
+                                .show_resume_paused_goal_prompt(thread_id, goal.objective);
+                        }
+                    }
+                    Err(error) => tracing::warn!(
+                        "failed to read thread goal after resume: {}",
+                        request_failure_message(error)
+                    ),
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn open_thread_goal_editor(
@@ -94,39 +108,49 @@ impl App {
             self.show_no_thread_goal_to_edit();
             return;
         };
-
-        let result = app_server.thread_goal_get(thread_id).await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-
-        let response = match result {
-            Ok(response) => response,
-            Err(err) => {
-                self.chat_widget
-                    .add_error_message(thread_goal_error_message("read", &err));
-                return;
-            }
-        };
-
-        let Some(mut goal) = response.goal else {
-            self.show_no_thread_goal_to_edit();
-            return;
-        };
-
         let codex_home = app_server.codex_home_path(&self.config.codex_home);
-        match goal_files::objective_text_for_edit(app_server, codex_home.as_ref(), &goal.objective)
-            .await
-        {
-            Ok(objective) => goal.objective = objective,
-            Err(err) => {
-                self.chat_widget.add_error_message(err.to_string());
-            }
-        }
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-        self.chat_widget.show_goal_edit_prompt(thread_id, goal);
+        let fs = app_server.file_system();
+        self.request_server(
+            app_server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::ReadOnly,
+            "Read goal for editing",
+            move |handle| async move {
+                let response = get_goal(handle, thread_id).await?;
+                let Some(mut goal) = response.goal else {
+                    return Ok(None);
+                };
+                let error = match goal_files::objective_text_for_edit(
+                    &fs,
+                    codex_home.as_ref(),
+                    &goal.objective,
+                )
+                .await
+                {
+                    Ok(objective) => {
+                        goal.objective = objective;
+                        None
+                    }
+                    Err(error) => Some(error.to_string()),
+                };
+                Ok(Some((goal, error)))
+            },
+            move |app, _, result| {
+                match result {
+                    Ok(Some((goal, error))) => {
+                        if let Some(error) = error {
+                            app.chat_widget.add_error_message(error);
+                        }
+                        app.chat_widget.show_goal_edit_prompt(thread_id, goal);
+                    }
+                    Ok(None) => app.show_no_thread_goal_to_edit(),
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(goal_request_error("read", error)),
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn set_thread_goal_draft(
@@ -136,98 +160,104 @@ impl App {
         draft: goal_files::GoalDraft,
         mode: ThreadGoalSetMode,
     ) {
-        let codex_home = app_server.codex_home_path(&self.config.codex_home);
-        let mode = if matches!(mode, ThreadGoalSetMode::ConfirmIfExists) {
-            let result = app_server.thread_goal_get(thread_id).await;
-            if self.current_displayed_thread_id() != Some(thread_id) {
-                return;
-            }
-
-            match result {
-                Ok(response) => match response.goal.as_ref() {
-                    Some(goal) if should_confirm_before_replacing_goal(goal) => {
-                        self.show_replace_thread_goal_confirmation(thread_id, draft);
-                        return;
+        if matches!(mode, ThreadGoalSetMode::ConfirmIfExists) {
+            self.request_server(
+                app_server,
+                UiRequestScope::DisplayedThread(thread_id),
+                UiRequestKind::ReadOnly,
+                "Read goal before replacing",
+                move |handle| get_goal(handle, thread_id),
+                move |app, server, result| {
+                    match result {
+                        Ok(response) => match response.goal.as_ref() {
+                            Some(goal) if should_confirm_before_replacing_goal(goal) => {
+                                app.show_replace_thread_goal_confirmation(thread_id, draft)
+                            }
+                            existing => app.enqueue_goal_draft(
+                                server,
+                                thread_id,
+                                draft,
+                                if existing.is_some() {
+                                    ThreadGoalSetMode::ReplaceExisting
+                                } else {
+                                    mode
+                                },
+                            ),
+                        },
+                        Err(error) => app
+                            .chat_widget
+                            .add_error_message(goal_request_error("read", error)),
                     }
-                    Some(_) => ThreadGoalSetMode::ReplaceExisting,
-                    None => mode,
+                    Ok(())
                 },
-                Err(err) => {
-                    self.chat_widget
-                        .add_error_message(thread_goal_error_message("read", &err));
-                    return;
-                }
-            }
+            );
         } else {
-            mode
-        };
+            self.enqueue_goal_draft(app_server, thread_id, draft, mode);
+        }
+    }
 
-        let (objective, output_dir) = match goal_files::materialize_goal_draft(
-            app_server,
-            codex_home.as_ref(),
-            draft,
-        )
-        .await
-        {
-            Ok(materialized) => materialized,
-            Err(err) => {
-                if self.current_displayed_thread_id() == Some(thread_id) {
-                    self.chat_widget.add_error_message(err.to_string());
-                }
-                return;
-            }
-        };
-
+    fn enqueue_goal_draft(
+        &mut self,
+        server: &AppServerSession,
+        thread_id: ThreadId,
+        draft: goal_files::GoalDraft,
+        mode: ThreadGoalSetMode,
+    ) {
+        let codex_home = server.codex_home_path(&self.config.codex_home);
+        let fs = server.file_system();
         let replacing_goal = matches!(mode, ThreadGoalSetMode::ReplaceExisting);
-        if replacing_goal {
-            let result = app_server.thread_goal_clear(thread_id).await;
-
-            if let Err(err) = result {
-                cleanup_materialized_goal_files(app_server, output_dir).await;
-                if self.current_displayed_thread_id() != Some(thread_id) {
-                    return;
+        self.request_server(
+            server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::Mutation,
+            "Save goal",
+            move |handle| async move {
+                let (objective, output_dir) =
+                    match goal_files::materialize_goal_draft(&fs, codex_home.as_ref(), draft).await
+                    {
+                        Ok(value) => value,
+                        Err(error) => return Ok(Err(error.to_string())),
+                    };
+                let result = async {
+                    if replacing_goal {
+                        clear_goal(handle.clone(), thread_id).await?;
+                    }
+                    let (status, token_budget) = match mode {
+                        ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::ReplaceExisting => {
+                            (ThreadGoalStatus::Active, None)
+                        }
+                        ThreadGoalSetMode::UpdateExisting {
+                            status,
+                            token_budget,
+                        } => (status, Some(token_budget)),
+                    };
+                    set_goal(handle, thread_id, Some(objective), status, token_budget).await
                 }
-                self.chat_widget
-                    .add_error_message(thread_goal_error_message("replace", &err));
-                return;
-            }
-        }
-
-        let (status, token_budget) = match mode {
-            ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::ReplaceExisting => {
-                (ThreadGoalStatus::Active, None)
-            }
-            ThreadGoalSetMode::UpdateExisting {
-                status,
-                token_budget,
-            } => (status, Some(token_budget)),
-        };
-
-        let result = app_server
-            .thread_goal_set(thread_id, Some(objective), Some(status), token_budget)
-            .await;
-
-        match result {
-            Ok(response) => {
-                if self.current_displayed_thread_id() != Some(thread_id) {
-                    return;
+                .await;
+                // Only a definitive rejection permits deleting files: an uncertain set may refer to them.
+                if matches!(&result, Err(TypedRequestError::Server { .. })) {
+                    cleanup_materialized_goal_files(&fs, output_dir).await;
                 }
-                self.chat_widget.add_info_message(
-                    format!("Goal {}", goal_status_label(response.goal.status)),
-                    Some(goal_usage_summary(&response.goal)),
-                );
-                self.chat_widget.maybe_send_next_queued_input();
-            }
-            Err(err) => {
-                cleanup_materialized_goal_files(app_server, output_dir).await;
-                if self.current_displayed_thread_id() != Some(thread_id) {
-                    return;
+                result.map(Ok)
+            },
+            move |app, _, result| {
+                match result {
+                    Ok(Ok(response)) => {
+                        app.chat_widget.add_info_message(
+                            format!("Goal {}", goal_status_label(response.goal.status)),
+                            Some(goal_usage_summary(&response.goal)),
+                        );
+                        app.chat_widget.maybe_send_next_queued_input();
+                    }
+                    Ok(Err(error)) => app.chat_widget.add_error_message(error),
+                    Err(error) => app.chat_widget.add_error_message(goal_request_error(
+                        if replacing_goal { "replace" } else { "set" },
+                        error,
+                    )),
                 }
-                let action = if replacing_goal { "replace" } else { "set" };
-                self.chat_widget
-                    .add_error_message(thread_goal_error_message(action, &err));
-            }
-        }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn set_thread_goal_status(
@@ -236,27 +266,25 @@ impl App {
         thread_id: ThreadId,
         status: ThreadGoalStatus,
     ) {
-        let result = app_server
-            .thread_goal_set(
-                thread_id,
-                /*objective*/ None,
-                Some(status),
-                /*token_budget*/ None,
-            )
-            .await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-
-        match result {
-            Ok(response) => self.chat_widget.add_info_message(
-                format!("Goal {}", goal_status_label(response.goal.status)),
-                Some(goal_usage_summary(&response.goal)),
-            ),
-            Err(err) => self
-                .chat_widget
-                .add_error_message(thread_goal_error_message("update", &err)),
-        }
+        self.request_server(
+            app_server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::Mutation,
+            "Update goal",
+            move |handle| set_goal(handle, thread_id, None, status, None),
+            move |app, _, result| {
+                match result {
+                    Ok(response) => app.chat_widget.add_info_message(
+                        format!("Goal {}", goal_status_label(response.goal.status)),
+                        Some(goal_usage_summary(&response.goal)),
+                    ),
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(goal_request_error("update", error)),
+                }
+                Ok(())
+            },
+        );
     }
 
     pub(super) async fn clear_thread_goal(
@@ -264,27 +292,28 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        let result = app_server.thread_goal_clear(thread_id).await;
-        if self.current_displayed_thread_id() != Some(thread_id) {
-            return;
-        }
-
-        match result {
-            Ok(response) => {
-                if response.cleared {
-                    self.chat_widget
-                        .add_info_message("Goal cleared".to_string(), /*hint*/ None);
-                } else {
-                    self.chat_widget.add_info_message(
+        self.request_server(
+            app_server,
+            UiRequestScope::DisplayedThread(thread_id),
+            UiRequestKind::Mutation,
+            "Clear goal",
+            move |handle| clear_goal(handle, thread_id),
+            move |app, _, result| {
+                match result {
+                    Ok(response) if response.cleared => app
+                        .chat_widget
+                        .add_info_message("Goal cleared".to_string(), None),
+                    Ok(_) => app.chat_widget.add_info_message(
                         "No goal to clear".to_string(),
                         Some("This thread does not currently have a goal.".to_string()),
-                    );
+                    ),
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(goal_request_error("clear", error)),
                 }
-            }
-            Err(err) => self
-                .chat_widget
-                .add_error_message(thread_goal_error_message("clear", &err)),
-        }
+                Ok(())
+            },
+        );
     }
 
     pub(super) fn show_replace_thread_goal_confirmation(
@@ -339,14 +368,71 @@ impl App {
 }
 
 async fn cleanup_materialized_goal_files(
-    app_server: &mut AppServerSession,
+    app_server: &crate::app_server_session::fs::AppServerFileSystem,
     output_dir: Option<goal_files::GoalFilePath>,
 ) {
     if let Some(output_dir) = output_dir
-        && let Err(err) = app_server.file_system().fs_remove_path(&output_dir).await
+        && let Err(err) = app_server.fs_remove_path(&output_dir).await
     {
         tracing::warn!("failed to clean up materialized goal files at {output_dir}: {err}");
     }
+}
+
+async fn get_goal(
+    handle: AppServerRequestHandle,
+    thread_id: ThreadId,
+) -> Result<ThreadGoalGetResponse, TypedRequestError> {
+    handle
+        .request_typed(ClientRequest::ThreadGoalGet {
+            request_id: RequestId::String(format!("tui-goal-read-{}", Uuid::new_v4())),
+            params: ThreadGoalGetParams {
+                thread_id: thread_id.to_string(),
+            },
+        })
+        .await
+}
+
+async fn clear_goal(
+    handle: AppServerRequestHandle,
+    thread_id: ThreadId,
+) -> Result<ThreadGoalClearResponse, TypedRequestError> {
+    handle
+        .request_typed(ClientRequest::ThreadGoalClear {
+            request_id: RequestId::String(format!("tui-goal-clear-{}", Uuid::new_v4())),
+            params: ThreadGoalClearParams {
+                thread_id: thread_id.to_string(),
+                origin: Some(ThreadGoalMutationOrigin::User),
+            },
+        })
+        .await
+}
+
+async fn set_goal(
+    handle: AppServerRequestHandle,
+    thread_id: ThreadId,
+    objective: Option<String>,
+    status: ThreadGoalStatus,
+    token_budget: Option<Option<i64>>,
+) -> Result<ThreadGoalSetResponse, TypedRequestError> {
+    handle
+        .request_typed(ClientRequest::ThreadGoalSet {
+            request_id: RequestId::String(format!("tui-goal-set-{}", Uuid::new_v4())),
+            params: ThreadGoalSetParams {
+                thread_id: thread_id.to_string(),
+                origin: Some(ThreadGoalMutationOrigin::User),
+                objective,
+                status: Some(status),
+                token_budget,
+            },
+        })
+        .await
+}
+
+fn goal_request_error(action: &str, error: &super::turn_submissions::SubmissionFailure) -> String {
+    thread_goal_error_message(
+        action,
+        &color_eyre::eyre::eyre!(request_failure_message(error)),
+    )
 }
 
 fn thread_goal_error_message(action: &str, err: &color_eyre::Report) -> String {

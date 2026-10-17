@@ -96,6 +96,10 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     };
     app.enable_feature_for_new_threads(&mut tui, &server, Feature::Collab)
         .await;
+    app.settle_server_ui_requests(&mut tui, &mut server).await?;
+    while let Ok(event) = events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
     insta::assert_snapshot!("subagents_enable_notice", notice_text(&app));
     std::fs::write(
         &selected,
@@ -106,6 +110,10 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     )?;
     app.enable_feature_for_new_threads(&mut tui, &server, Feature::MemoryTool)
         .await;
+    app.settle_server_ui_requests(&mut tui, &mut server).await?;
+    while let Ok(event) = events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
     insta::assert_snapshot!("memories_enable_notice", notice_text(&app));
     let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&selected)?)?;
     assert_eq!(saved["features"]["multi_agent"].as_bool(), Some(true));
@@ -122,6 +130,10 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
     std::fs::write(&managed, "[features]\nmulti_agent = false\n")?;
     app.enable_feature_for_new_threads(&mut tui, &server, Feature::Collab)
         .await;
+    app.settle_server_ui_requests(&mut tui, &mut server).await?;
+    while let Ok(event) = events.try_recv() {
+        Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+    }
     insta::assert_snapshot!(
         "subagents_enable_overridden",
         notice_text(&app).replace(managed.display().to_string().as_str(), "<managed config>")

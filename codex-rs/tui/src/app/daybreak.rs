@@ -9,6 +9,11 @@ impl App {
         thread_id: ThreadId,
         enabled: bool,
     ) {
+        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+        use codex_app_server_protocol::{
+            ThreadMetadataUpdateParams, ThreadMetadataUpdateResponse, ThreadReadParams,
+            ThreadReadResponse,
+        };
         if !self
             .chat_widget
             .config_ref()
@@ -27,18 +32,36 @@ impl App {
             );
             return;
         }
-        match app_server
-            .thread_read(thread_id, /*include_turns*/ false)
-            .await
-        {
-            Ok(thread) if !thread.ephemeral => {
-                let request_id = app_server.next_request_id();
-                let response: Result<codex_app_server_protocol::ThreadMetadataUpdateResponse, _> =
-                    app_server
-                        .request_handle()
+        let store = self
+            .thread_event_channels
+            .get(&thread_id)
+            .map(|channel| Arc::clone(&channel.store));
+        self.request_server(
+            app_server,
+            UiRequestScope::Thread(thread_id),
+            UiRequestKind::Mutation,
+            "Save thread Daybreak",
+            move |handle| async move {
+                let response: ThreadReadResponse = handle
+                    .request_typed(ClientRequest::ThreadRead {
+                        request_id: codex_app_server_protocol::RequestId::String(format!(
+                            "tui-daybreak-read-{}",
+                            uuid::Uuid::new_v4()
+                        )),
+                        params: ThreadReadParams {
+                            thread_id: thread_id.to_string(),
+                            include_turns: false,
+                        },
+                    })
+                    .await?;
+                if !response.thread.ephemeral {
+                    let _: ThreadMetadataUpdateResponse = handle
                         .request_typed(ClientRequest::ThreadMetadataUpdate {
-                            request_id,
-                            params: codex_app_server_protocol::ThreadMetadataUpdateParams {
+                            request_id: codex_app_server_protocol::RequestId::String(format!(
+                                "tui-daybreak-save-{}",
+                                uuid::Uuid::new_v4()
+                            )),
+                            params: ThreadMetadataUpdateParams {
                                 thread_id: thread_id.to_string(),
                                 daybreak_enabled: Some(enabled),
                                 project_id: None,
@@ -46,79 +69,91 @@ impl App {
                                 comms: None,
                             },
                         })
-                        .await;
-                if let Err(error) = response {
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to save Daybreak for this thread: {error}"
-                    ));
-                    return;
+                        .await?;
                 }
-            }
-            Ok(_) => {}
-            Err(error) => {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to read the thread to save Daybreak: {error}"
-                ));
-                return;
-            }
-        }
-        self.chat_widget.set_daybreak_enabled(enabled);
-        if self.primary_thread_id == Some(thread_id)
-            && let Some(session) = self.primary_session_configured.as_mut()
-        {
-            session.daybreak_enabled = enabled;
-        }
-        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let mut store = channel.store.lock().await;
-            if let Some(session) = store.session.as_mut() {
-                session.daybreak_enabled = enabled;
-            }
-        }
-        self.refresh_status_line();
-        let edits = vec![crate::config_update::replace_config_value(
-            "daybreak",
-            serde_json::json!(enabled),
-        )];
-        match self
-            .persist_model_defaults(
-                app_server.request_handle(),
-                edits,
-                "default Daybreak preference",
-            )
-            .await
-        {
-            Ok(()) => match crate::config_update::read_effective_config(
-                app_server.request_handle(),
-                self.chat_widget
+                if let Some(store) = store
+                    && let Some(session) = store.lock().await.session.as_mut()
+                {
+                    session.daybreak_enabled = enabled;
+                }
+                Ok(())
+            },
+            move |app, server, result| {
+                if let Err(error) = result {
+                    app.chat_widget.add_error_message(format!(
+                        "Failed to read the thread or save Daybreak: {}",
+                        super::model_defaults::request_failure_message(error)
+                    ));
+                    return Ok(());
+                }
+                if app.primary_thread_id == Some(thread_id)
+                    && let Some(session) = app.primary_session_configured.as_mut()
+                {
+                    session.daybreak_enabled = enabled;
+                }
+                if app.active_thread_id == Some(thread_id) {
+                    app.chat_widget.set_daybreak_enabled(enabled);
+                    app.refresh_status_line();
+                    app.chat_widget.add_info_message(
+                        format!(
+                            "Daybreak {}. Applies to new turns.",
+                            if enabled { "on" } else { "off" }
+                        ),
+                        None,
+                    );
+                }
+                let cwd = app
+                    .chat_widget
                     .config_ref()
                     .cwd
                     .to_string_lossy()
-                    .into_owned(),
-            )
-            .await
-            {
-                Ok(response) => {
-                    self.config.daybreak_enabled = response
-                        .config
-                        .additional
-                        .get("daybreak")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                }
-                Err(error) => self.chat_widget.add_error_message(format!(
-                    "Failed to read the default Daybreak preference: {error}"
-                )),
+                    .into_owned();
+                app.queue_model_defaults(
+                    server,
+                    vec![crate::config_update::replace_config_value(
+                        "daybreak",
+                        serde_json::json!(enabled),
+                    )],
+                    "default Daybreak preference",
+                    move |app, server, result| {
+                        if let Err(error) = result {
+                            app.chat_widget.add_error_message(format!(
+                                "Failed to save the default Daybreak preference: {}",
+                                super::model_defaults::request_failure_message(error)
+                            ));
+                        } else {
+                            app.request_server(
+                                server,
+                                UiRequestScope::Connection,
+                                UiRequestKind::ReadOnly,
+                                "Read default Daybreak preference",
+                                move |handle| {
+                                    crate::config_update::read_effective_config_typed(handle, cwd)
+                                },
+                                |app, _, result| {
+                                    match result {
+                                        Ok(response) => {
+                                            app.config.daybreak_enabled = response
+                                                .config
+                                                .additional
+                                                .get("daybreak")
+                                                .and_then(serde_json::Value::as_bool)
+                                                .unwrap_or(false)
+                                        }
+                                        Err(error) => app.chat_widget.add_error_message(format!(
+                                            "Failed to read the default Daybreak preference: {}",
+                                            super::model_defaults::request_failure_message(error)
+                                        )),
+                                    }
+                                    Ok(())
+                                },
+                            );
+                        }
+                        Ok(())
+                    },
+                );
+                Ok(())
             },
-            Err(error) => self.chat_widget.add_error_message(format!(
-                "Failed to save the default Daybreak preference: {error}"
-            )),
-        }
-        self.chat_widget.add_info_message(
-            format!(
-                "Daybreak {}. Applies to new turns.",
-                if enabled { "on" } else { "off" }
-            ),
-            /*hint*/ None,
         );
     }
 }
