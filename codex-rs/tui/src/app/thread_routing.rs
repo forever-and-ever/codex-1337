@@ -43,9 +43,12 @@ impl App {
     }
 
     pub(super) fn ensure_thread_channel(&mut self, thread_id: ThreadId) -> &mut ThreadEventChannel {
+        let epoch = self.reconnect.connection_epoch;
         self.thread_event_channels
             .entry(thread_id)
-            .or_insert_with(|| ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY))
+            .or_insert_with(|| {
+                ThreadEventChannel::for_connection_epoch(THREAD_EVENT_CHANNEL_CAPACITY, epoch)
+            })
     }
 
     pub(super) async fn set_thread_active(&mut self, thread_id: ThreadId, active: bool) {
@@ -1430,10 +1433,13 @@ impl App {
             thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
         );
+        let epoch = self.reconnect.connection_epoch;
         let channel = self.ensure_thread_channel(thread_id);
         {
             let mut store = channel.store.lock().await;
-            store.set_session(session.clone(), turns.clone());
+            store
+                .at_connection_epoch(epoch)
+                .set_session(session.clone(), turns.clone());
         }
         self.activate_thread_channel(thread_id).await;
         self.chat_widget
@@ -1553,7 +1559,9 @@ impl App {
         let AppServerStartedThread { session, turns, .. } = started;
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
-            store.set_session(session.clone(), turns.clone());
+            store
+                .at_connection_epoch(self.reconnect.connection_epoch)
+                .set_session(session.clone(), turns.clone());
             store.rebase_buffer_after_session_refresh();
             snapshot.active_reasoning_item = store.active_reasoning_item.clone();
         }

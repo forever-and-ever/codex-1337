@@ -458,7 +458,9 @@ impl App {
             self.recover_prompt_revert(&mut pending).await;
             let mut store = pending.store.lock().await;
             store.buffer.clear();
-            store.set_session(session, retained_turns);
+            store
+                .at_connection_epoch(self.reconnect.connection_epoch)
+                .set_session(session, retained_turns);
             return Ok(());
         }
         self.chat_widget.restore_thread_input_state(

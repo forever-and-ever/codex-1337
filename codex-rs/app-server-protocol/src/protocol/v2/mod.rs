@@ -41,6 +41,8 @@ mod review;
 mod rollout;
 mod thought;
 mod thread;
+mod thread_fork_snapshot;
+pub use thread_fork_snapshot::ThreadForkSnapshot;
 mod thread_attachment;
 mod thread_data;
 mod thread_farm;

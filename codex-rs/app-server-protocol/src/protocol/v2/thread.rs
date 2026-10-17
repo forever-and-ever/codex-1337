@@ -586,6 +586,9 @@ impl From<ThreadTurnsListResponse> for TurnsPage {
 /// Prefer using thread_id whenever possible.
 pub struct ThreadForkParams {
     pub thread_id: String,
+    /// How to close an inherited unfinished turn; omission retains interruption semantics.
+    #[serde(default, skip_serializing_if = "super::ThreadForkSnapshot::is_default")]
+    pub snapshot: super::ThreadForkSnapshot,
     /// Explicit name for the new conversation; omission allocates a fork name.
     #[ts(optional = nullable)]
     pub name: Option<String>,

@@ -5,6 +5,7 @@ import type { JsonValue } from "../serde_json/JsonValue";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { SandboxMode } from "./SandboxMode";
+import type { ThreadForkSnapshot } from "./ThreadForkSnapshot";
 import type { ThreadSource } from "./ThreadSource";
 
 /**
@@ -18,6 +19,9 @@ import type { ThreadSource } from "./ThreadSource";
  * Prefer using thread_id whenever possible.
  */
 export type ThreadForkParams = {threadId: string, /**
+ * How to close an inherited unfinished turn; omission retains interruption semantics.
+ */
+snapshot?: ThreadForkSnapshot, /**
  * Explicit name for the new conversation; omission allocates a fork name.
  */
 name?: string | null, /**

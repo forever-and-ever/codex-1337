@@ -5797,7 +5797,8 @@ async fn side_thread_snapshot_hides_forked_parent_transcript() {
     };
     let parent_turn = test_turn(
         "parent-turn",
-        TurnStatus::Completed,
+        // The copied turn's internal close must not become a visible interruption notice.
+        TurnStatus::Interrupted,
         vec![ThreadItem::UserMessage {
             source_response_item_id: None,
             id: "parent-user".to_string(),

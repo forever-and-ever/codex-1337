@@ -1993,6 +1993,42 @@ async fn assert_thread_fork_freezes_active_paginated_turn_as_interrupted(
         ) && aborted.turn_id.as_deref() == Some("active-turn")
     ));
 
+    let side_snapshot = codex_app_server_protocol::ThreadForkSnapshot::Side;
+    let ThreadForkResponse {
+        thread: side_ephemeral,
+        ..
+    } = mcp
+        .request(|request_id| ClientRequest::ThreadFork {
+            request_id,
+            params: ThreadForkParams {
+                thread_id: source_thread_id.clone(),
+                snapshot: side_snapshot,
+                ephemeral: true,
+                exclude_turns: true,
+                ..Default::default()
+            },
+        })
+        .await?;
+    assert!(side_ephemeral.turns.is_empty());
+    let ThreadForkResponse {
+        thread: side_persistent,
+        ..
+    } = mcp
+        .request(|request_id| ClientRequest::ThreadFork {
+            request_id,
+            params: ThreadForkParams {
+                thread_id: source_thread_id.clone(),
+                snapshot: side_snapshot,
+                exclude_turns: true,
+                ..Default::default()
+            },
+        })
+        .await?;
+    let side_rollout = std::fs::read_to_string(side_persistent.path.expect("side rollout path"))?;
+    assert!(!side_rollout.contains("<turn_aborted>"));
+    assert!(side_rollout.contains("turn_aborted"));
+    assert!(!std::fs::read_to_string(&source_path)?.contains("turn_aborted"));
+
     append_rollout_item_to_path(source_path.as_path(), &user_response_item("after-fork")).await?;
     append_rollout_item_to_path(
         source_path.as_path(),
@@ -2013,6 +2049,40 @@ async fn assert_thread_fork_freezes_active_paginated_turn_as_interrupted(
         })),
     )
     .await?;
+
+    let _: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: side_ephemeral.id,
+                input: vec![UserInput::Text {
+                    text: "Question in a side fork".into(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+    let requests = server
+        .received_requests()
+        .await
+        .expect("side response requests");
+    let side_input = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("side model request")
+        .body_json::<Value>()?["input"]
+        .clone();
+    let side_input = serde_json::to_string(&side_input)?;
+    assert!(side_input.contains("before-fork model input"));
+    assert!(!side_input.contains("after-fork model input"));
+    assert!(!side_input.contains("<turn_aborted>"));
 
     let _: TurnStartResponse = mcp
         .request(|request_id| ClientRequest::TurnStart {

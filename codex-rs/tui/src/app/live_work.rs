@@ -267,6 +267,11 @@ impl LiveWorkState {
 }
 
 impl App {
+    pub(super) fn retire_work_connection(&mut self) {
+        self.reconnect.connection_epoch.advance();
+        self.live_work.scope = None;
+    }
+
     pub(super) fn prepare_live_work(&mut self) {
         let Some(thread) = self.active_thread_id.filter(|_| !self.reconnect.offline) else {
             self.live_work.scope = None;
@@ -276,11 +281,13 @@ impl App {
             .thread_event_channels
             .get(&thread)
             .map_or(Some(Vec::new()), |channel| {
-                channel
-                    .store
-                    .try_lock()
-                    .ok()
-                    .map(|store| store.operations.rows(thread))
+                channel.store.try_lock().ok().map(|store| {
+                    if store.connection_epoch == self.reconnect.connection_epoch {
+                        store.operations.rows(thread)
+                    } else {
+                        Vec::new()
+                    }
+                })
             });
         if !self.chat_widget.no_modal_or_popup_active()
             || self.chat_widget.is_external_writer_view()

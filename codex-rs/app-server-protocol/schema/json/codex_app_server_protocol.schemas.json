@@ -24968,6 +24968,14 @@
               "null"
             ]
           },
+          "snapshot": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/v2/ThreadForkSnapshot"
+              }
+            ],
+            "description": "How to close an inherited unfinished turn; omission retains interruption semantics."
+          },
           "threadId": {
             "type": "string"
           },
@@ -25067,6 +25075,23 @@
         ],
         "title": "ThreadForkResponse",
         "type": "object"
+      },
+      "ThreadForkSnapshot": {
+        "oneOf": [
+          {
+            "enum": [
+              "interrupted"
+            ],
+            "type": "string"
+          },
+          {
+            "description": "Retain an unfinished prefix without telling the model that its source was interrupted.",
+            "enum": [
+              "side"
+            ],
+            "type": "string"
+          }
+        ]
       },
       "ThreadGoal": {
         "properties": {

@@ -197,7 +197,24 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
             let view = app.agents_overview_view(Vec::new(), /*selected_thread_id*/ None);
             app.chat_widget.show_bottom_pane_view(Box::new(view));
         }
+        let background_id = ThreadId::new();
+        for work_thread in [id, background_id] {
+            let mut store = app.ensure_thread_channel(work_thread).store.lock().await;
+            store.push_notification(ServerNotification::ItemStarted(
+                codex_app_server_protocol::ItemStartedNotification {
+                    thread_id: work_thread.to_string(),
+                    turn_id: "interrupted".into(),
+                    started_at_ms: 1,
+                    item: ThreadItem::ContextCompaction {
+                        id: "pending-work".into(),
+                    },
+                },
+            ));
+            assert_eq!(store.operations.rows(work_thread).len(), 1);
+        }
+        let expired_epoch = app.reconnect.connection_epoch;
         app.begin_reconnect();
+        assert_ne!(app.reconnect.connection_epoch, expired_epoch);
         if deferred_notice {
             assert_eq!(
                 app.agents_overview
@@ -282,6 +299,14 @@ async fn reconnect_restores_history_permissions_and_resumes_unsent_input() -> Re
         }
 
         assert!(!app.reconnect.offline);
+        for work_thread in [id, background_id] {
+            let store = app.thread_event_channels[&work_thread].store.lock().await;
+            assert_eq!(store.connection_epoch, app.reconnect.connection_epoch);
+            assert!(
+                store.operations.rows(work_thread).is_empty(),
+                "dead-connection Work must not survive in foreground or cached threads"
+            );
+        }
         assert!(!app.thread_unavailable(id));
         assert_eq!(app.last_subagent_backfill_attempt, None);
         assert!(

@@ -10,6 +10,17 @@ use codex_protocol::ThreadId;
 use codex_protocol::protocol::W3cTraceContext;
 use std::sync::Arc;
 
+pub(super) fn snapshot_from_request(
+    snapshot: codex_app_server_protocol::ThreadForkSnapshot,
+) -> codex_core::ForkSnapshot {
+    match snapshot {
+        codex_app_server_protocol::ThreadForkSnapshot::Interrupted => {
+            codex_core::ForkSnapshot::Interrupted
+        }
+        codex_app_server_protocol::ThreadForkSnapshot::Side => codex_core::ForkSnapshot::Side,
+    }
+}
+
 pub(super) enum ThreadForkOrigin {
     Client(ConnectionRequestId),
     Coordination,

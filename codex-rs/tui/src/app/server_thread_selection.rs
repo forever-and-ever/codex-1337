@@ -534,6 +534,7 @@ impl App {
             self.store_active_thread_receiver().await;
         }
         self.agents_overview.activity.remove(&thread_id);
+        let epoch = self.reconnect.connection_epoch;
         let channel = self.ensure_thread_channel(thread_id);
         if live_attached {
             channel.mark_live();
@@ -543,7 +544,7 @@ impl App {
             channel.mark_replay_only();
         }
         let mut store = channel.store.lock().await;
-        store.set_session(session, turns);
+        store.at_connection_epoch(epoch).set_session(session, turns);
         store.rebase_buffer_after_session_refresh();
     }
 

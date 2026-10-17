@@ -16,6 +16,7 @@ pub(super) enum ReconnectPresentation {
 #[derive(Default)]
 pub(super) struct ReconnectState {
     pub(super) offline: bool,
+    pub(super) connection_epoch: super::thread_events::ConnectionEpoch,
     pub(super) failed: bool,
     pub(super) presentation: ReconnectPresentation,
     pub(super) seen_version_notice: Option<String>,
@@ -194,6 +195,7 @@ impl App {
             return false;
         }
         if !self.reconnect.offline {
+            self.retire_work_connection();
             if self.chat_widget.session_draft.is_some() {
                 self.config = self.chat_widget.config_ref().clone();
                 self.config.model = Some(self.chat_widget.current_model().to_owned());
@@ -391,7 +393,10 @@ impl App {
         // Move cached UI state into fresh channels. Old producers retain the old sender/store,
         // so their late requests cannot leak into recovery. Background threads attach on selection.
         for channel in self.thread_event_channels.values_mut() {
-            let mut replacement = ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY);
+            let mut replacement = ThreadEventChannel::for_connection_epoch(
+                THREAD_EVENT_CHANNEL_CAPACITY,
+                self.reconnect.connection_epoch,
+            );
             if channel.attachment() == ThreadEventAttachment::ExternalWriter {
                 replacement.mark_external_writer();
             } else {
@@ -401,6 +406,7 @@ impl App {
                 &mut *channel.store.lock().await,
                 ThreadEventStore::new(THREAD_EVENT_CHANNEL_CAPACITY),
             );
+            store.at_connection_epoch(self.reconnect.connection_epoch);
             store.pending_interactive_replay = Default::default();
             store.unresolved_requests.clear();
             store.pending_interrupt_turn_id = None;
@@ -453,7 +459,10 @@ impl App {
             if started.blocks_direct_input {
                 self.agent_navigation.mark_parent_owned(id);
             }
-            let channel = ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY);
+            let channel = ThreadEventChannel::for_connection_epoch(
+                THREAD_EVENT_CHANNEL_CAPACITY,
+                self.reconnect.connection_epoch,
+            );
             {
                 let mut store = channel.store.lock().await;
                 store.set_session(started.session, started.turns);

@@ -581,6 +581,7 @@ export type { ThreadFarmParams } from "./ThreadFarmParams";
 export type { ThreadFarmResponse } from "./ThreadFarmResponse";
 export type { ThreadForkParams } from "./ThreadForkParams";
 export type { ThreadForkResponse } from "./ThreadForkResponse";
+export type { ThreadForkSnapshot } from "./ThreadForkSnapshot";
 export type { ThreadGoal } from "./ThreadGoal";
 export type { ThreadGoalClearParams } from "./ThreadGoalClearParams";
 export type { ThreadGoalClearResponse } from "./ThreadGoalClearResponse";

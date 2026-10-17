@@ -104,10 +104,16 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
         }))
         .unwrap(),
     );
-    let EventMsg::CodeModeOwned(assessment) = service.transcript.wrap(assessment, None) else {
-        panic!("auto-review command start must carry its Code Mode owner");
+    session.send_event(&turn, assessment).await;
+    let assessment = events.recv().await.unwrap();
+    assert_eq!(assessment.id, turn.sub_id);
+    let EventMsg::CodeModeOwned(assessment) = assessment.msg else {
+        panic!("auto-review must leave the emitting session with its Code Mode owner");
     };
     assert_eq!(assessment.owner, owner);
+    assert!(
+        matches!(assessment.payload().as_ref(), EventMsg::GuardianAssessment(event) if event.target_item_id.as_deref() == Some("wait-1"))
+    );
     // Cancellation releases only its own wait; the tracker owns ordered completion.
     scope.capture_alias("wait-2".into(), &turn);
     let target = CodeModeOwner {

@@ -299,6 +299,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::GuardianAssessment(assessment) => {
+            crate::command_lifecycle::note_review(&assessment, &thread_state).await;
             let pending_command_execution = match build_item_from_guardian_event(
                 &assessment,
                 CommandExecutionStatus::InProgress,
@@ -1458,35 +1459,34 @@ async fn start_command_execution_item(
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) -> bool {
-    let first_start = {
-        let mut state = thread_state.lock().await;
-        state
-            .turn_summary
-            .command_execution_started
-            .insert(item_id.clone())
+    let notification = ItemStartedNotification {
+        thread_id: conversation_id.to_string(),
+        turn_id,
+        started_at_ms: now_unix_timestamp_ms(),
+        item: ThreadItem::CommandExecution {
+            id: item_id,
+            model_context,
+            sandbox_type: None,
+            plugin_id,
+            script_path,
+            command,
+            cwd,
+            process_id: None,
+            source,
+            status: CommandExecutionStatus::InProgress,
+            command_actions,
+            aggregated_output: None,
+            exit_code: None,
+            duration_ms: None,
+        },
     };
+    let first_start = thread_state
+        .lock()
+        .await
+        .turn_summary
+        .command_execution_started
+        .register(&notification, outgoing);
     if first_start {
-        let notification = ItemStartedNotification {
-            thread_id: conversation_id.to_string(),
-            turn_id,
-            started_at_ms: now_unix_timestamp_ms(),
-            item: ThreadItem::CommandExecution {
-                id: item_id,
-                model_context,
-                sandbox_type: None,
-                plugin_id,
-                script_path,
-                command,
-                cwd,
-                process_id: None,
-                source,
-                status: CommandExecutionStatus::InProgress,
-                command_actions,
-                aggregated_output: None,
-                exit_code: None,
-                duration_ms: None,
-            },
-        };
         outgoing
             .send_server_notification(ServerNotification::ItemStarted(notification))
             .await;
@@ -1547,8 +1547,12 @@ async fn find_and_remove_turn_summary(
     _conversation_id: ThreadId,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) -> TurnSummary {
-    let mut state = thread_state.lock().await;
-    std::mem::take(&mut state.turn_summary)
+    let mut summary = {
+        let mut state = thread_state.lock().await;
+        std::mem::take(&mut state.turn_summary)
+    };
+    summary.command_execution_started.drain().await;
+    summary
 }
 
 async fn handle_turn_complete(
@@ -2100,6 +2104,8 @@ async fn on_command_execution_request_approval_response(
             )
         }
     };
+
+    crate::command_lifecycle::note_decision(&thread_state, &item_id, &completion_status).await;
 
     let suppress_subcommand_completion_item = {
         // For regular shell/unified_exec approvals, approval_id is null.
@@ -2921,6 +2927,56 @@ mod tests {
         }
 
         assert!(rx.try_recv().is_err(), "no extra messages expected");
+
+        guardian_context
+            .apply_guardian_assessment_event(guardian_command_assessment(
+                "cmd-guardian-pending",
+                "turn-guardian-approved",
+                GuardianAssessmentStatus::InProgress,
+            ))
+            .await;
+        assert!(matches!(
+            command_notification(recv_broadcast_notification(&mut rx).await?),
+            ServerNotification::ItemStarted(_)
+        ));
+        assert!(matches!(
+            recv_broadcast_notification(&mut rx).await?,
+            ServerNotification::ItemGuardianApprovalReviewStarted(_)
+        ));
+
+        // Approval can succeed without a canonical start: interruption may win
+        // before command launch. The synthetic start still needs its own terminal.
+        handle_turn_interrupted(
+            conversation_id,
+            "turn-guardian-approved".to_owned(),
+            turn_aborted_event("turn-guardian-approved"),
+            &outgoing,
+            &thread_state,
+        )
+        .await;
+        for (expected_id, expected_status) in [
+            ("cmd-guardian-approved", CommandExecutionStatus::Failed),
+            ("cmd-guardian-pending", CommandExecutionStatus::Declined),
+        ] {
+            let terminal = recv_broadcast_notification(&mut rx).await?;
+            assert!(
+                matches!(terminal, ServerNotification::CodeModeOwned(_)),
+                "command terminal must precede TurnCompleted: {terminal:?}"
+            );
+            let ServerNotification::ItemCompleted(terminal) = command_notification(terminal) else {
+                bail!("interrupted command must complete before its turn");
+            };
+            let ThreadItem::CommandExecution { id, status, .. } = terminal.item else {
+                bail!("expected a command terminal");
+            };
+            assert_eq!(id, expected_id);
+            assert_eq!(status, expected_status);
+        }
+        assert!(matches!(
+            recv_broadcast_notification(&mut rx).await?,
+            ServerNotification::TurnCompleted(_)
+        ));
+        assert!(rx.try_recv().is_err(), "one terminal per synthesized start");
         conversation.shutdown_and_wait().await?;
         Ok(())
     }
