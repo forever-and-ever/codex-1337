@@ -128,8 +128,8 @@ impl ThreadRequestProcessor {
                 Ok(permit) => permit,
                 Err(_) => return Ok(()),
             };
-            if self.thread_manager.get_thread(root).await.is_err() {
-                if let Err(error) = self
+            if self.thread_manager.get_thread(root).await.is_err()
+                && let Err(error) = self
                     .thread_resume(
                         ThreadResumeTarget::Server(ServerResume::DaemonRecovery(None)),
                         ThreadResumeParams {
@@ -142,10 +142,9 @@ impl ThreadRequestProcessor {
                         ClientMcpExtensions::default(),
                     )
                     .await
-                {
-                    defer_recipient(retries, root, recipient, &error.message);
-                    continue;
-                }
+            {
+                defer_recipient(retries, root, recipient, &error.message);
+                continue;
             }
             // Core restores descendants through the recorded family and current authority.
             // Neither an absent client nor a successful resume supplies approval.

@@ -23,7 +23,7 @@ pub(crate) struct CommandStarts(BTreeMap<String, Start>);
 
 enum Start {
     Native,
-    Synthesized(CommandSentinel),
+    Synthesized(Box<CommandSentinel>),
 }
 
 enum Review {
@@ -62,11 +62,11 @@ impl CommandStarts {
         let Entry::Vacant(slot) = self.0.entry(notification.item.id().to_owned()) else {
             return false;
         };
-        slot.insert(Start::Synthesized(CommandSentinel {
+        slot.insert(Start::Synthesized(Box::new(CommandSentinel {
             notification: notification.clone(),
             outgoing: outgoing.clone(),
             review: Review::Pending,
-        }));
+        })));
         true
     }
 
