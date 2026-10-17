@@ -18,6 +18,27 @@ impl App {
         if cwd.is_none() && self.restore_parked_session_draft(tui, app_server).await? {
             return Ok(AppRunControl::Continue);
         }
+        if !self.server_operations.is_empty() {
+            let source = self.current_displayed_thread_id();
+            self.request_server_prepared(
+                app_server,
+                super::turn_submissions::ui_requests::UiRequestScope::Connection,
+                super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+                "Waiting to start a session",
+                move |app, _| {
+                    let current = app.current_displayed_thread_id() == source;
+                    move |_| async move { Ok(current) }
+                },
+                move |app, _, ready| {
+                    if matches!(ready, Ok(true)) && app.current_displayed_thread_id() == source {
+                        app.app_event_tx
+                            .send(AppEvent::NewAgentsOverviewSession { cwd });
+                    }
+                    Ok(())
+                },
+            );
+            return Ok(AppRunControl::Continue);
+        }
         if !self.pumped_configuration_ready() {
             return Ok(AppRunControl::Continue);
         }

@@ -426,6 +426,11 @@ impl App {
         }
         let id = active.id;
         let epoch = active.epoch;
+        if let SubmissionRequest::Operation(operation) = &active.request
+            && let Some(request) = operation.ui_request()
+        {
+            request.prepare(self, server);
+        }
         let request = active.worker_request();
         let handle = server.request_handle();
         let origin = active.origin.clone();

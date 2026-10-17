@@ -38,6 +38,7 @@ async fn builtin_permission_selection_adopts_server_settings() -> Result<()> {
         },
     )
     .await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
         before,
@@ -154,6 +155,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     let before = RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref());
     app.select_permission_profile(&mut server, selection.clone())
         .await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
         before
@@ -198,6 +200,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
         },
     )
     .await;
+    app.settle_turn_submissions(&mut server).await?;
     let settings = next_thread_settings_updated(&mut server, thread_id).await;
     assert!(matches!(
         settings.thread_settings.sandbox_policy,
@@ -215,6 +218,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
     // Unchanged re-selection is accepted without requiring a notification.
     app.select_permission_profile(&mut server, selection.clone())
         .await;
+    app.settle_turn_submissions(&mut server).await?;
     assert!(!app.reject_pending_permission_change());
     let confirmed = RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref());
     let confirmed_config = app.config.clone();
@@ -226,6 +230,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
         },
     )
     .await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         RuntimePermissionProfileOverride::from_config(app.chat_widget.config_ref()),
         confirmed
@@ -338,6 +343,7 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
             },
         )
         .await;
+        app.settle_turn_submissions(&mut server).await?;
         assert!(
             app.agents_overview
                 .requested_permission_profiles

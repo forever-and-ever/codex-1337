@@ -1764,6 +1764,7 @@ pub(crate) enum AppEvent {
     LocalShellRequest(crate::local_shell::LocalShellRequest),
     LocalShellUpdate(crate::local_shell::LocalShellUpdate),
     OpenRouter(crate::openrouter::Event),
+    VerifiedServerNotification(Box<crate::app::VerifiedServerNotification>),
 }
 
 /// Named profile selection to apply after any required UI guardrails complete.

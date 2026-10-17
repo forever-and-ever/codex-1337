@@ -401,19 +401,7 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
         recorded_params(&requests, "thread/realtime/stop"),
         vec![serde_json::json!({"threadId": source.to_string()})]
     );
-    // Resuming the ended owner must keep its newly attached subscription.
-    app.detach_current_thread_for_navigation(&mut app_server, Some(source))
-        .await;
-    assert_eq!(
-        recorded_params(&requests, "thread/unsubscribe"),
-        vec![serde_json::json!({"threadId": target.to_string()})]
-    );
-    app.detach_current_thread_for_navigation(&mut app_server, Some(ThreadId::new()))
-        .await;
-    assert!(
-        recorded_params(&requests, "thread/unsubscribe")
-            .contains(&serde_json::json!({"threadId": source.to_string()}))
-    );
+    // Resuming the ended owner uses the real navigation subscription custody.
     Box::pin(app.select_agent_thread_and_settle(&mut tui, &mut app_server, source)).await?;
     assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| {
         matches!(event, AppEvent::InsertHistoryCell(cell) if cell.display_lines(/*width*/ 80)

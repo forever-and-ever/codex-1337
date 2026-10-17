@@ -24,6 +24,46 @@ pub(super) struct AccountUi {
 }
 
 impl App {
+    pub(super) fn request_logout(&mut self, server: &AppServerSession) {
+        use super::turn_submissions::ui_requests::{UiRequestKind, UiRequestScope};
+        let thread_id = self.current_displayed_thread_id();
+        self.request_server(
+            server,
+            UiRequestScope::Connection,
+            UiRequestKind::Mutation,
+            "Logging out",
+            move |handle| async move {
+                handle
+                    .request_typed::<codex_app_server_protocol::LogoutAccountResponse>(
+                        ClientRequest::LogoutAccount {
+                            request_id: codex_app_server_protocol::RequestId::String(
+                                uuid::Uuid::new_v4().to_string(),
+                            ),
+                            params: thread_id.map(|id| {
+                                codex_app_server_protocol::AccountScopeParams {
+                                    thread_id: Some(id.to_string()),
+                                }
+                            }),
+                        },
+                    )
+                    .await
+            },
+            |app, _, result| {
+                match result {
+                    Ok(_) => app
+                        .app_event_tx
+                        .send(AppEvent::Exit(ExitMode::ShutdownFirst)),
+                    Err(error) => {
+                        tracing::error!(%error, "failed to logout");
+                        app.chat_widget
+                            .add_error_message(format!("Logout failed: {error}"));
+                    }
+                }
+                Ok(())
+            },
+        );
+    }
+
     pub(super) fn cancel_claude_login(&mut self, server: &mut AppServerSession, login_id: String) {
         if self.account_ui.claude_login.as_ref() != Some(&login_id) {
             return;

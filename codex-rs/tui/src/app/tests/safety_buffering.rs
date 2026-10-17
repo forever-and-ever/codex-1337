@@ -938,6 +938,7 @@ goals = true
             },
         )
         .await;
+        app.settle_turn_submissions(&mut app_server).await?;
     }
 
     Box::pin(app.retry_safety_buffered_turn_and_settle(

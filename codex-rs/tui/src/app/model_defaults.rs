@@ -19,7 +19,8 @@ impl App {
         model: String,
         effort: Option<ReasoningEffort>,
     ) {
-        let model_changed = self.chat_widget.current_model() != model
+        let model_changed = self.chat_widget.automatic_model_switch_pending()
+            || self.chat_widget.current_model() != model
             || self.chat_widget.current_collaboration_mode().model() != model;
         if model_changed
             && self
@@ -29,6 +30,7 @@ impl App {
         {
             return;
         }
+        self.model_selection_generation.advance();
         let in_plan_mode = self.chat_widget.effective_collaboration_mode().mode == ModeKind::Plan;
         let ultra = effort == Some(ReasoningEffort::Ultra);
         let clear_default_ultra = self

@@ -89,7 +89,9 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut server).await?;
 
+        app.settle_turn_submissions(&mut server).await?;
         let actual_mode = app.chat_widget.effective_collaboration_mode();
         assert_eq!(actual_mode, expected_mode);
         assert_eq!(app.chat_widget.current_service_tier(), None);
@@ -139,6 +141,7 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
             .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         app.chat_widget.update_backend_banner(&response);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert!(
             !render_bottom_popup(&app.chat_widget, /*width*/ 72)
                 .contains("Selected model usage exhausted")
@@ -147,6 +150,7 @@ async fn backend_banner_fallback_updates_task_settings_and_keeps_notice() -> Res
         healthy.rate_limit_upsell = None;
         app.chat_widget.update_backend_banner(&healthy);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), "gpt-5.6-terra");
         assert_eq!(requests.lock().unwrap().len(), 1);
         assert!(
@@ -207,6 +211,7 @@ async fn backend_banner_fallback_uses_current_task_and_accepted_generation() -> 
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut server).await?;
         if generation == read_generation {
             assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
             assert!(requests.lock().unwrap().is_empty());
@@ -238,6 +243,7 @@ async fn backend_banner_fallback_keeps_existing_recovery_without_candidate() -> 
         response.rate_limit_upsell.as_mut().unwrap()["fallback_model_slugs"] = replacement;
         app.chat_widget.update_backend_banner(&response);
         app.apply_backend_banner_fallback(&mut server).await;
+        app.settle_turn_submissions(&mut server).await?;
         assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
         let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 72);
         assert_eq!(rendered.contains("View usage"), expect_legacy_banner);
@@ -251,6 +257,7 @@ async fn backend_banner_fallback_keeps_existing_recovery_without_candidate() -> 
     app.chat_widget.set_model("gpt-5.6-terra");
     app.chat_widget.update_backend_banner(&fallback_response());
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(app.chat_widget.current_model(), "gpt-5.6-terra");
     assert!(
         render_bottom_popup(&app.chat_widget, /*width*/ 72)
@@ -273,7 +280,7 @@ async fn backend_banner_fallback_handles_settings_failure_and_queued_manual_sele
         .into_iter()
         .flat_map(|reserve| [Some(-32601), Some(-32603), None].map(|error| (reserve, error)))
     {
-        let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+        let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
         let id = ThreadId::new();
         app.active_thread_id = Some(id);
         app.chat_widget
@@ -352,34 +359,51 @@ async fn backend_banner_fallback_handles_settings_failure_and_queued_manual_sele
         };
         app.chat_widget.update_backend_banner(&response);
         app.apply_backend_banner_fallback(&mut server).await;
-        let queued = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
-        let switch_notices = queued
-            .iter()
-            .filter(|event| match event {
-                AppEvent::InsertHistoryCell(cell) => {
-                    lines_to_single_string(&cell.display_lines(/*width*/ 80))
-                        .contains("Automatically switched")
-                }
-                _ => false,
-            })
-            .count();
-        assert_eq!(switch_notices, usize::from(error_code.is_none()));
         if error_code.is_none() {
-            assert_eq!(
-                app.chat_widget.current_model(),
-                if use_reserve {
-                    "gpt-reserve"
-                } else {
-                    "gpt-5.6-terra"
+            // Typing remains live while the automatic write is pending. This
+            // prompt has no model settings until the final accepted selection.
+            if !use_reserve {
+                app.chat_widget
+                    .restore_user_message_to_composer(UserMessage::from("during fallback"));
+                app.chat_widget
+                    .handle_key_event(KeyEvent::from(KeyCode::Enter));
+                assert_eq!(
+                    app.chat_widget.queued_user_message_texts(),
+                    vec!["during fallback"]
+                );
+            }
+            let mut preserved = Vec::new();
+            let manual_selection = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let event = events.recv().await.expect("manual selection queued");
+                    if matches!(event, AppEvent::UpdateModel(_)) {
+                        break event;
+                    }
+                    preserved.push(event);
                 }
-            );
-            let manual_selection = queued
-                .into_iter()
-                .find(|event| matches!(event, AppEvent::UpdateModel(_)))
-                .unwrap();
+            })
+            .await?;
             let mut tui = crate::tui::test_support::make_test_tui()?;
             app.handle_event(&mut tui, &mut server, manual_selection)
                 .await?;
+            for event in preserved {
+                app.app_event_tx.send(event);
+            }
+        }
+        app.settle_turn_submissions(&mut server).await?;
+        let queued = std::iter::from_fn(|| events.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            !queued.iter().any(|event| match event {
+                AppEvent::InsertHistoryCell(cell) =>
+                    lines_to_single_string(&cell.display_lines(80))
+                        .contains("Automatically switched"),
+                _ => false,
+            }),
+            "a superseded automatic receipt must not apply"
+        );
+        if error_code.is_none() && !use_reserve {
+            assert_matches!(next_user_turn_op(&mut ops), AppCommand::UserTurn {model, ..}
+                if model == "gpt-5.5");
         }
         assert_eq!(app.chat_widget.current_model(), "gpt-5.5");
         assert!(!render_bottom_popup(&app.chat_widget, /*width*/ 72).contains("View usage"));
@@ -402,6 +426,7 @@ async fn backend_banner_fallback_handles_settings_failure_and_queued_manual_sele
             let mut tui = crate::tui::test_support::make_test_tui()?;
             app.handle_event(&mut tui, &mut server, pending_turn.unwrap())
                 .await?;
+            app.settle_turn_submissions(&mut server).await?;
             assert_eq!(
                 app.chat_widget.queued_user_message_texts(),
                 vec!["queued before usage reply"]
@@ -478,6 +503,7 @@ async fn backend_banner_fallback_preserves_permissions_for_first_eligible_cyber_
     ]);
     app.chat_widget.update_backend_banner(&response);
     app.apply_backend_banner_fallback(&mut server).await;
+    app.settle_turn_submissions(&mut server).await?;
     assert_eq!(app.chat_widget.current_model(), cyber_model.model);
     let settings = next_thread_settings_updated(&mut server, thread_id)
         .await

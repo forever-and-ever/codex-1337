@@ -29,6 +29,7 @@ pub(super) struct InputQueueFrontend {
     pub(super) server_previews: Vec<String>,
     pub(super) suppress_queue_autosend: bool,
     pub(super) transcript_copy: std::sync::Weak<crate::copy_input_guard::CopyInputGuard>,
+    pub(super) automatic_model_switch_pending: bool,
 }
 
 impl InputQueueFrontend {

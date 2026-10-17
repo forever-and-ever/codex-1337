@@ -3296,6 +3296,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         },
     )
     .await;
+    app.settle_turn_submissions(&mut app_server).await?;
 
     let control = Box::pin(app.handle_start_side(
         &mut tui,
@@ -3360,6 +3361,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         },
     )
     .await;
+    app.settle_turn_submissions(&mut app_server).await?;
     app.select_agent_thread_and_settle(&mut tui, &mut app_server, side_thread_id)
         .await?;
     let settings = next_thread_settings_updated(&mut app_server, parent_thread_id).await;
@@ -3600,6 +3602,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
     };
     app.select_permission_profile(&mut server, selection.clone())
         .await;
+    app.settle_turn_submissions(&mut server).await?;
     insta::assert_snapshot!(
         next_history_message(&mut events),
         @"■ Wait for the task to connect before selecting permissions."
@@ -3614,6 +3617,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
     while events.try_recv().is_ok() {}
     app.select_permission_profile(&mut server, selection.clone())
         .await;
+    app.settle_turn_submissions(&mut server).await?;
     insta::assert_snapshot!(
         next_history_message(&mut events),
         @"• Permission selection requested: server-only"
@@ -3650,6 +3654,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         },
     )
     .await;
+    app.settle_turn_submissions(&mut server).await?;
     let settings = next_thread_settings_updated(&mut server, thread_id).await;
     app.enqueue_thread_notification(
         thread_id,
@@ -3706,6 +3711,7 @@ async fn server_only_profile_selection_keeps_turns_on_the_selected_profile() -> 
         display_label: "server-only".into(),
     };
     app.select_permission_profile(&mut server, selection).await;
+    app.settle_turn_submissions(&mut server).await?;
     insta::assert_snapshot!(
         next_history_message(&mut events),
         @"• Permission selection requested: server-only"
@@ -6633,6 +6639,7 @@ async fn make_test_app() -> Box<App> {
         background_voice_error: None,
         temporary_structured_requests: HashMap::new(),
         pending_thread_titles: HashMap::new(),
+        model_selection_generation: Default::default(),
         thread_event_listener_tasks: HashMap::new(),
         agent_navigation: AgentNavigationState::default(),
         pending_server_profiles: HashMap::new(),
@@ -6756,6 +6763,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             background_voice_error: None,
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashMap::new(),
+        model_selection_generation: Default::default(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             pending_server_profiles: HashMap::new(),
@@ -9017,6 +9025,7 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
         AppEvent::UpdateModel("gpt-5.4".into()),
     ))
     .await?;
+    app.settle_turn_submissions(&mut app_server).await?;
     app.app_server_target = crate::AppServerTarget::Remote {
         endpoint: crate::RemoteAppServerEndpoint::WebSocket {
             websocket_url: "ws://127.0.0.1:4500".to_string(),
@@ -9835,6 +9844,7 @@ async fn selecting_cyber_model_defaults_active_thread_to_auto_review() {
         .await
         .expect("model selection should succeed");
 
+        app.settle_turn_submissions(&mut app_server).await.expect("settings receipt");
         assert!(app.pending_server_profiles.contains_key(&thread_id));
         assert!(
             !app.agents_overview
@@ -9966,6 +9976,7 @@ async fn changing_cyber_model_reasoning_preserves_selected_permissions() {
                 .expect("reasoning selection should succeed");
             }
 
+            app.settle_turn_submissions(&mut app_server).await.expect("settings receipt");
             let settings = next_thread_settings_updated(&mut app_server, thread_id)
                 .await
                 .thread_settings;

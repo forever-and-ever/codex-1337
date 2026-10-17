@@ -210,10 +210,12 @@ impl ChatWidget {
         self.refresh_backend_banner_visibility();
     }
 
-    /// A composer submission can already be in the app queue when a Reserve switch fails.
+    /// A composer submission can already be in the app queue when a model switch starts.
     /// Reuse the retained prompt/steer rather than sending it on the blocked model.
-    pub(crate) fn defer_pending_turn_for_luna_reserve(&mut self) -> bool {
-        if !self.waiting_for_luna_reserve() {
+    pub(crate) fn defer_pending_turn_for_model_settings(&mut self) -> bool {
+        if !self.waiting_for_luna_reserve()
+            && !self.input_queue_frontend.automatic_model_switch_pending
+        {
             return false;
         }
         if self.input_queue.turn.is_pending()
@@ -228,18 +230,20 @@ impl ChatWidget {
     }
 
     /// Commit a successfully applied task setting and keep its recovery notice visible together.
-    pub(crate) fn finish_backend_banner_fallback(&mut self, mode: CollaborationMode) {
-        let previous_model = self.current_model().to_string();
+    pub(crate) fn finish_backend_banner_fallback(
+        &mut self,
+        mode: CollaborationMode,
+        previous_model: String,
+        previous_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
+    ) {
         let reserve_return = (mode.model() == LUNA_RESERVE_MODEL)
             .then(|| self.backend_banner_state.account_id.clone())
             .flatten()
             .map(|account_id| ReserveReturnModel {
                 account_id,
                 model: previous_model.clone(),
-                effort: self.current_reasoning_effort(),
+                effort: previous_effort,
             });
-        let involves_reserve =
-            mode.model() == LUNA_RESERVE_MODEL || previous_model == LUNA_RESERVE_MODEL;
         self.set_model(mode.model());
         self.set_reasoning_effort(mode.reasoning_effort());
         if mode.mode == ModeKind::Plan {
@@ -248,7 +252,7 @@ impl ChatWidget {
         self.set_effective_collaboration_mode(mode);
         self.automatic_model_switch_state = AutomaticModelSwitchState {
             reserve_return,
-            replaced_model: involves_reserve.then_some(previous_model),
+            replaced_model: Some(previous_model),
         };
         // Showing the post-switch notice is distinct from having seen the original blocked state.
         self.backend_banner_state.shown = false;
@@ -262,7 +266,7 @@ impl ChatWidget {
     }
 
     /// A queued command may have been composed before the account read switched this task.
-    pub(crate) fn apply_reserve_fallback_to_pending_turn(&self, op: &mut AppCommand) {
+    pub(crate) fn apply_automatic_model_switch_to_pending_turn(&self, op: &mut AppCommand) {
         let AppCommand::UserTurn {
             model,
             effort,

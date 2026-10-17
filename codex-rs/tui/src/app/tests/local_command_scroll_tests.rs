@@ -269,6 +269,7 @@ async fn settings_confirmations_reveal_their_history_output() -> Result<()> {
         }
         let previous_cells = app.transcript_cells.len();
         app.handle_event(&mut tui, &mut server, event).await?;
+        app.settle_turn_submissions(&mut server).await?;
         while let Ok(event) = events.try_recv() {
             app.handle_event(&mut tui, &mut server, event).await?;
         }

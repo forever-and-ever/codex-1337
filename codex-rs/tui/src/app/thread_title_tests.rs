@@ -145,6 +145,7 @@ async fn automatic_thread_title_respects_origin_metadata_after_switching() -> co
             },
         )
         .await?;
+        app.settle_turn_submissions(&mut app_server).await?;
         let expected_name = Some(manual_name.unwrap_or("Generated title").to_string());
         assert_eq!(
             app_server
@@ -395,6 +396,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         }
     }
 
+    app.settle_turn_submissions(&mut app_server).await?;
     if automatic {
         let expected_name = if cancel {
             "Keep this title"
