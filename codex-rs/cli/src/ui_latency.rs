@@ -141,6 +141,27 @@ fn display(report: Report, json: bool) -> anyhow::Result<()> {
         "Inclusive wall time; totals overlap. IdleSelect includes polling/wait; RPC waits are not CPU work."
     );
     for stats in &report.stages {
+        if stats.stage == "ReactionLatency" {
+            let percentile_upper = |percentile: u128| {
+                let rank = (u128::from(stats.count) * percentile).div_ceil(100);
+                let mut cumulative = 0_u128;
+                stats
+                    .histogram
+                    .iter()
+                    .zip(report.histogram_upper_ns)
+                    .find_map(|(count, upper)| {
+                        cumulative += u128::from(*count);
+                        (cumulative >= rank).then_some(upper.min(stats.max_ns))
+                    })
+                    .unwrap_or(stats.max_ns) as f64
+                    / 1e6
+            };
+            println!(
+                "Consumed input → first post-handler frame flush: p50 ≤{:.3} ms, p99 ≤{:.3} ms (histogram bounds; inputs coalesced per frame)",
+                percentile_upper(50),
+                percentile_upper(99),
+            );
+        }
         println!(
             "{}: {} spans, total {:.3} ms, max {:.3} ms{}",
             stats.stage,

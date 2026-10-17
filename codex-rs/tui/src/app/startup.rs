@@ -1364,7 +1364,7 @@ See the Codex keymap documentation for supported actions and examples."
                         drop(select_stage);
                         let _handler_stage = enter(Stage::TerminalEvent);
                         if let Some(event) = event {
-                            crate::ui_latency::input_consumed(&event);
+                            let input_stamp = crate::ui_latency::input_consumed(&event);
                             if !matches!(event, TuiEvent::Draw | TuiEvent::FocusLost) {
                                 idle_restart.postpone();
                             }
@@ -1388,7 +1388,11 @@ See the Codex keymap documentation for supported actions and examples."
                             {
                                 app.startup_protected_input_boundary = false;
                             }
-                            match app.handle_tui_event(tui, &mut app_server, event).await {
+                            let result = app.handle_tui_event(tui, &mut app_server, event).await;
+                            if let Some(stamp) = input_stamp {
+                                crate::ui_latency::input_handled(stamp);
+                            }
+                            match result {
                                 Ok(control) => control,
                                 Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
                             Err(err) => break Err(err),
