@@ -512,12 +512,7 @@ impl App {
             let presentation = ThreadAttachPresentation::FreshWithDraft;
             if !previous_running_thread_ids.is_empty() {
                 for side_thread_id in Vec::from_iter(self.side_threads.keys().copied()) {
-                    let discarded = startup_draft
-                        .run_until(tui, self.discard_side_thread(app_server, side_thread_id))
-                        .await?;
-                    if !discarded {
-                        return Ok(AppRunControl::Continue);
-                    }
+                    self.discard_side_thread(app_server, side_thread_id).await;
                 }
             }
             for (thread_id, requests) in previous_pending_requests {

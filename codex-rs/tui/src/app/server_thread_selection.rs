@@ -603,7 +603,6 @@ impl App {
         server: &AppServerSession,
         thread_id: ThreadId,
     ) {
-        self.abandoned_side_threads.insert(thread_id);
         let channel = self.ensure_thread_channel(thread_id);
         let store = Arc::clone(&channel.store);
         let replay_only = channel.attachment() == ThreadEventAttachment::ReplayOnly;
