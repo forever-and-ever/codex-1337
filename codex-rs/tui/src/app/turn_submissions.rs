@@ -468,6 +468,22 @@ pub(super) enum SubmissionFailure {
     Cancelled,
 }
 
+impl std::fmt::Display for SubmissionFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rejected(error) => write!(formatter, "{error}"),
+            Self::Uncertain(error) => {
+                write!(formatter, "{error}. Outcome unknown; no retry was sent.")
+            }
+            Self::TimedOut => formatter
+                .write_str("Acknowledgement timed out. Outcome unknown; no retry was sent."),
+            Self::Cancelled => formatter.write_str(
+                "Local request cancelled. A remote mutation may still complete; no retry was sent.",
+            ),
+        }
+    }
+}
+
 impl PendingSubmission {
     fn preview(&self) -> SubmissionPreviewEntry {
         match &self.request {
