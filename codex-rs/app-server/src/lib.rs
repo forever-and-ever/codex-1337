@@ -106,6 +106,7 @@ mod auth_mode;
 mod bespoke_event_handling;
 mod code_mode_host;
 mod command_exec;
+mod command_lifecycle;
 mod config_layer;
 mod config_manager;
 mod config_manager_service;

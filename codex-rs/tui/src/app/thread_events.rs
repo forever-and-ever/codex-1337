@@ -5,8 +5,10 @@
 //! pending interactive request replay state, active-turn tracking, and saved composer state close
 //! together with the replay behavior that consumes them.
 
+mod work_connection;
 use super::*;
 use std::borrow::Cow;
+pub(super) use work_connection::ConnectionEpoch;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
@@ -86,6 +88,7 @@ pub(super) struct ThreadEventStore {
     delegated_turns: VecDeque<String>,
     recap_progress: recap::RecapProgress,
     pub(super) operations: crate::live_work::operations::Operations,
+    pub(super) connection_epoch: ConnectionEpoch,
 }
 
 impl ThreadEventStore {
@@ -134,6 +137,7 @@ impl ThreadEventStore {
             delegated_turns: VecDeque::new(),
             recap_progress: recap::RecapProgress::default(),
             operations: crate::live_work::operations::Operations::new(capacity),
+            connection_epoch: ConnectionEpoch::default(),
         }
     }
 
@@ -630,14 +634,9 @@ pub(super) struct ThreadEventChannel {
 }
 
 impl ThreadEventChannel {
+    #[cfg(test)]
     pub(super) fn new(capacity: usize) -> Self {
-        let (sender, receiver) = mpsc::channel(capacity);
-        Self {
-            sender,
-            receiver: Some(receiver),
-            store: Arc::new(Mutex::new(ThreadEventStore::new(capacity))),
-            attachment: ThreadEventAttachment::Live,
-        }
+        Self::for_connection_epoch(capacity, ConnectionEpoch::default())
     }
 
     pub(super) fn mark_live(&mut self) {

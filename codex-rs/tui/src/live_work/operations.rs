@@ -1,5 +1,7 @@
-//! A disposable projection of thread snapshots and runtime lifecycle notifications.
-//! Nothing here executes work, owns a runtime, or changes transcript captures.
+//! Disposable Work projection: one entry per item identity within the attached thread.
+//! Custody belongs to a turn or a Code Mode execution; owned events re-parent, never duplicate.
+//! Item terminals end either custody, owner terminals reap their members, and refresh rebuilds
+//! pending state. Nothing here executes work, owns a runtime, or changes transcript captures.
 
 use super::Action;
 use super::Key;
@@ -39,7 +41,7 @@ pub(crate) struct Operations {
     active_turn: Option<String>,
     closed_turns: VecDeque<String>,
     capacity: usize,
-    direct: BTreeMap<(String, String), Revision>,
+    items: BTreeMap<String, Revision>,
     executions: BTreeMap<String, Execution>,
 }
 
@@ -57,31 +59,58 @@ enum Pending {
     Call(String),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Custody {
+    Turn(String),
+    Execution(String),
+}
+
 #[derive(Debug)]
 enum Revision {
-    Pending { source: Source, work: Pending },
+    Pending {
+        custody: Custody,
+        source: Source,
+        work: Pending,
+    },
     Terminal(Instant),
 }
 
 impl Revision {
-    fn admit(slot: &mut Self, work: Option<Pending>, source: Source) {
-        if matches!(slot, Self::Terminal(_))
-            || (source == Source::Historical
-                && work.is_some()
-                && matches!(
-                    slot,
-                    Self::Pending {
-                        source: Source::Live,
-                        ..
-                    }
-                ))
+    fn admit(slot: &mut Self, work: Option<Pending>, source: Source, custody: Custody) {
+        if matches!(slot, Self::Terminal(_)) {
+            return;
+        }
+        if work.is_none() {
+            *slot = Self::Terminal(Instant::now());
+            return;
+        }
+        if let Self::Pending {
+            custody: previous, ..
+        } = slot
+            && matches!(custody, Custody::Execution(_))
+        {
+            *previous = custody;
+        }
+        if source == Source::Historical
+            && matches!(
+                slot,
+                Self::Pending {
+                    source: Source::Live,
+                    ..
+                }
+            )
         {
             return;
         }
-        *slot = work.map_or_else(
-            || Self::Terminal(Instant::now()),
-            |work| Self::Pending { source, work },
-        );
+        if let Self::Pending {
+            source: previous_source,
+            work: previous_work,
+            ..
+        } = slot
+        {
+            *previous_source = source;
+            *previous_work = work.expect("pending revision");
+        }
     }
 }
 
@@ -89,7 +118,6 @@ impl Revision {
 struct Execution {
     owner: CodeModeOwner,
     facts: Vec<CodeModeItem>,
-    children: BTreeMap<String, Revision>,
 }
 
 impl Operations {
@@ -99,7 +127,7 @@ impl Operations {
             active_turn: None,
             closed_turns: Default::default(),
             capacity,
-            direct: BTreeMap::new(),
+            items: BTreeMap::new(),
             executions: BTreeMap::new(),
         }
     }
@@ -110,10 +138,9 @@ impl Operations {
         }
         if let Some(previous) = self.active_turn.take() {
             self.close_turn(&previous);
+            self.reap(&Custody::Turn(previous));
         }
         self.active_turn = turn;
-        self.direct
-            .retain(|(turn, _), _| self.active_turn.as_ref() == Some(turn));
     }
 
     fn close_turn(&mut self, turn: &str) {
@@ -125,10 +152,17 @@ impl Operations {
         }
     }
 
+    fn reap(&mut self, owner: &Custody) {
+        for revision in self.items.values_mut() {
+            if matches!(revision, Revision::Pending { custody, .. } if custody == owner) {
+                *revision = Revision::Terminal(Instant::now());
+            }
+        }
+    }
+
     fn trim(&mut self) {
-        trim_revisions(&mut self.direct, self.capacity);
+        trim_revisions(&mut self.items, self.capacity);
         for execution in self.executions.values_mut() {
-            trim_revisions(&mut execution.children, self.capacity);
             let completed = execution
                 .facts
                 .iter()
@@ -160,10 +194,18 @@ impl Operations {
         }
     }
 
+    pub(crate) fn reap_connection(&mut self) {
+        self.items
+            .retain(|_, revision| matches!(revision, Revision::Terminal(_)));
+        self.executions.retain(|_, execution| execution.finished());
+        self.active_turn = None;
+    }
+
     pub(crate) fn refresh(&mut self, thread_id: ThreadId, turns: &[Turn]) {
         if !matches!(self.stage, Stage::Attached(id) | Stage::Closed(id) if id == thread_id) {
             *self = Self::new(self.capacity);
         }
+        self.reap_connection();
         self.stage = Stage::Attached(thread_id);
         self.active_turn = turns
             .iter()
@@ -176,8 +218,6 @@ impl Operations {
         {
             self.close_turn(&turn.id);
         }
-        self.direct
-            .retain(|(turn, _), _| self.active_turn.as_ref() == Some(turn));
 
         // Reconcile terminal facts before older starts, without retaining the transcript's terminals.
         let finished = turns
@@ -273,15 +313,14 @@ impl Operations {
         }
         match native {
             ServerNotification::TurnStarted(n) if !self.closed_turns.contains(&n.turn.id) => {
-                self.active_turn = Some(n.turn.id.clone());
-                self.direct.retain(|(turn, _), _| turn == &n.turn.id);
+                self.reconcile_turn(Some(n.turn.id.clone()));
                 for item in &n.turn.items {
                     self.direct_item(&n.turn.id, item, Source::Historical, None);
                 }
             }
             ServerNotification::TurnCompleted(n) => {
                 self.close_turn(&n.turn.id);
-                self.direct.retain(|(turn, _), _| turn != &n.turn.id);
+                self.reap(&Custody::Turn(n.turn.id.clone()));
                 if self.active_turn.as_ref() == Some(&n.turn.id) {
                     self.active_turn = None;
                 }
@@ -297,23 +336,14 @@ impl Operations {
             }
             ServerNotification::StreamItemsDiscarded(n) => {
                 for id in &n.item_ids {
-                    self.direct.insert(
-                        (n.turn_id.clone(), id.clone()),
-                        Revision::Terminal(Instant::now()),
-                    );
-                    for execution in self.executions.values_mut() {
-                        if execution.children.contains_key(id) {
-                            execution
-                                .children
-                                .insert(id.clone(), Revision::Terminal(Instant::now()));
-                        }
-                    }
+                    self.items
+                        .insert(id.clone(), Revision::Terminal(Instant::now()));
                 }
             }
             ServerNotification::ThreadClosed(_) => {
                 self.stage = Stage::Closed(thread_id);
                 self.active_turn = None;
-                self.direct.clear();
+                self.items.clear();
                 self.executions.clear();
             }
             _ => {}
@@ -336,22 +366,45 @@ impl Operations {
         source: Source,
         started: Option<bool>,
     ) {
+        if pending(item, started) == Some(true) && !self.accepts_turn(turn) {
+            return;
+        }
+        self.item(Custody::Turn(turn.to_owned()), item, source, started);
+    }
+
+    fn item(&mut self, custody: Custody, item: &ThreadItem, source: Source, started: Option<bool>) {
         if let Some(call) = output_call(item) {
-            finish_call(&mut self.direct, &(turn.to_owned(), call.to_owned()));
-            return;
+            finish_call(&mut self.items, &call.to_owned());
+        } else if let Some(pending) = pending(item, started) {
+            admit(
+                &mut self.items,
+                item.id().to_owned(),
+                pending.then(|| Pending::Item(Box::new(item.clone()))),
+                source,
+                custody,
+            );
         }
-        let Some(pending) = pending(item, started) else {
-            return;
-        };
-        if pending && !self.accepts_turn(turn) {
-            return;
+    }
+
+    fn call(&mut self, custody: Custody, id: String, name: String, source: Source) {
+        match self.items.entry(id) {
+            Entry::Vacant(slot) => {
+                slot.insert(Revision::Pending {
+                    custody,
+                    source,
+                    work: Pending::Call(name),
+                });
+            }
+            Entry::Occupied(mut slot) => {
+                if let Revision::Pending {
+                    custody: previous, ..
+                } = slot.get_mut()
+                    && matches!(custody, Custody::Execution(_))
+                {
+                    *previous = custody;
+                }
+            }
         }
-        admit(
-            &mut self.direct,
-            (turn.to_owned(), item.id().to_owned()),
-            pending.then(|| Pending::Item(Box::new(item.clone()))),
-            source,
-        );
     }
 
     fn raw_call(&mut self, turn: &str, item: &ResponseItem) {
@@ -371,22 +424,21 @@ impl Operations {
                 if self.executions.contains_key(call_id) {
                     return;
                 }
-                self.direct
-                    .entry((turn.to_owned(), call_id.clone()))
-                    .or_insert_with(|| Revision::Pending {
-                        source: Source::Live,
-                        work: Pending::Call(namespace.as_ref().map_or_else(
-                            || name.clone(),
-                            |namespace| format!("{namespace}.{name}"),
-                        )),
-                    });
+                self.call(
+                    Custody::Turn(turn.to_owned()),
+                    call_id.clone(),
+                    namespace
+                        .as_ref()
+                        .map_or_else(|| name.clone(), |namespace| format!("{namespace}.{name}")),
+                    Source::Live,
+                );
             }
             ResponseItem::FunctionCallOutput {
                 call_id: Some(call),
                 ..
             }
             | ResponseItem::CustomToolCallOutput { call_id: call, .. } => {
-                finish_call(&mut self.direct, &(turn.to_owned(), call.clone()));
+                finish_call(&mut self.items, call);
             }
             _ => {}
         }
@@ -405,7 +457,6 @@ impl Operations {
             .or_insert_with(|| Execution {
                 owner: owner.clone(),
                 facts: Vec::new(),
-                children: BTreeMap::new(),
             });
         if execution.owner.started_at_ms != owner.started_at_ms
             || execution
@@ -434,40 +485,39 @@ impl Operations {
             {
                 return;
             }
-            if let CodeModeEvent::ToolCall { call_id } = &fact.event {
-                execution
-                    .children
-                    .entry(call_id.clone())
-                    .or_insert_with(|| Revision::Pending {
-                        source,
-                        work: Pending::Call("Tool call".to_owned()),
-                    });
-            }
-            if let CodeModeEvent::WaitCompleted { call_id, .. } = &fact.event {
-                finish_call(&mut execution.children, call_id);
-            }
             if !matches!(fact.event, CodeModeEvent::ToolCall { .. }) {
                 insert_code_mode_fact(&mut execution.facts, fact.clone());
             }
-            // Work follows the invocation; surviving processes have their own inventory.
-            if execution.finished() {
-                for revision in execution.children.values_mut() {
-                    *revision = Revision::Terminal(Instant::now());
+            let finished = execution.finished();
+            let custody = Custody::Execution(owner.exec_call_id.clone());
+            match &fact.event {
+                CodeModeEvent::ToolCall { call_id } => {
+                    if finished {
+                        self.items
+                            .insert(call_id.clone(), Revision::Terminal(Instant::now()));
+                    } else {
+                        self.call(custody, call_id.clone(), "Tool call".to_owned(), source);
+                    }
                 }
+                CodeModeEvent::WaitCompleted { call_id, .. } => {
+                    finish_call(&mut self.items, call_id);
+                }
+                _ => {}
+            }
+            if finished {
+                self.reap(&Custody::Execution(owner.exec_call_id.clone()));
             }
             // The typed execution supersedes the provider call, without deleting its capture.
-            self.direct.retain(|(_, id), _| id != &owner.exec_call_id);
-        } else if let Some(call) = output_call(item) {
-            finish_call(&mut execution.children, &call.to_owned());
-        } else if let Some(pending) = pending(item, started) {
-            if execution.finished() && pending {
-                return;
-            }
-            admit(
-                &mut execution.children,
-                item.id().to_owned(),
-                pending.then(|| Pending::Item(Box::new(item.clone()))),
+            finish_call(&mut self.items, &owner.exec_call_id);
+        } else if execution.finished() && pending(item, started) == Some(true) {
+            self.items
+                .insert(item.id().to_owned(), Revision::Terminal(Instant::now()));
+        } else {
+            self.item(
+                Custody::Execution(owner.exec_call_id.clone()),
+                item,
                 source,
+                started,
             );
         }
     }
@@ -477,9 +527,16 @@ impl Operations {
             return Vec::new();
         }
         let mut rows = self
-            .direct
+            .items
             .iter()
-            .filter_map(|((turn, id), revision)| {
+            .filter_map(|(id, revision)| {
+                let Revision::Pending {
+                    custody: Custody::Turn(turn),
+                    ..
+                } = revision
+                else {
+                    return None;
+                };
                 if !self.accepts_turn(turn) {
                     return None;
                 }
@@ -497,7 +554,7 @@ impl Operations {
         rows.extend(
             self.executions
                 .values()
-                .flat_map(|execution| execution.rows()),
+                .flat_map(|execution| execution.rows(&self.items)),
         );
         rows
     }
@@ -510,12 +567,12 @@ impl Execution {
             .any(|fact| matches!(fact.event, CodeModeEvent::Finished { .. }))
     }
 
-    fn rows(&self) -> Vec<Row> {
+    fn rows(&self, items: &BTreeMap<String, Revision>) -> Vec<Row> {
         let owner = &self.owner;
         let finished = self.finished();
-        let mut children = self
-            .children
+        let mut children = items
             .iter()
+            .filter(|(_, revision)| matches!(revision, Revision::Pending { custody: Custody::Execution(id), .. } if id == &owner.exec_call_id))
             .filter_map(|(id, revision)| {
                 revision_row(
                     owner.thread_id,
@@ -594,13 +651,23 @@ impl Execution {
     }
 }
 
-fn admit<K: Ord>(items: &mut BTreeMap<K, Revision>, key: K, work: Option<Pending>, source: Source) {
+fn admit(
+    items: &mut BTreeMap<String, Revision>,
+    key: String,
+    work: Option<Pending>,
+    source: Source,
+    custody: Custody,
+) {
     match items.entry(key) {
-        Entry::Occupied(mut slot) => Revision::admit(slot.get_mut(), work, source),
+        Entry::Occupied(mut slot) => Revision::admit(slot.get_mut(), work, source, custody),
         Entry::Vacant(slot) => {
             slot.insert(work.map_or_else(
                 || Revision::Terminal(Instant::now()),
-                |work| Revision::Pending { source, work },
+                |work| Revision::Pending {
+                    custody,
+                    source,
+                    work,
+                },
             ));
         }
     }

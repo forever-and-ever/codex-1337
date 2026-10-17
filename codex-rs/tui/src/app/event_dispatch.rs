@@ -608,8 +608,9 @@ impl App {
                 self.retain_realtime_replay_state_before_replace();
                 self.forget_realtime_replay_thread(thread_id);
                 self.chat_widget.reset_after_prompt_revert(reverted.thread.path, &retained_turns);
+                let epoch = self.reconnect.connection_epoch;
                 self.ensure_thread_channel(thread_id).store.lock().await
-                    .set_session(session, retained_turns);
+                    .at_connection_epoch(epoch).set_session(session, retained_turns);
                 self.activate_thread_channel(thread_id).await;
                 // Apply the trim after any transcript inserts produced by shutdown notifications.
                 // The existing reset barrier keeps terminal input blocked until then.

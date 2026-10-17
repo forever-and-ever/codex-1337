@@ -71,6 +71,61 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             script: Some("await tool()".to_owned()),
         },
     );
+    // The old daemon emitted an unowned review start but owned canonical events.
+    // Identity, not the envelope, must own the row and its terminal obligation.
+    for terminal in [
+        Some(owned(command("completed"))),
+        Some(command("completed")),
+        None,
+    ] {
+        let mut reviewed = ThreadEventStore::new_with_session(
+            8,
+            session.clone(),
+            vec![test_turn("review-turn", TurnStatus::InProgress, Vec::new())],
+        );
+        reviewed.push_notification(event(thread_id, "review-turn", command("inProgress"), true));
+        reviewed.push_notification(event(
+            thread_id,
+            "review-turn",
+            owned(command("inProgress")),
+            true,
+        ));
+        let rows = reviewed.operations.rows(thread_id);
+        assert_eq!(
+            rows.len(),
+            1,
+            "owned start re-parents the review placeholder"
+        );
+        assert_eq!(rows[0].children.len(), 1);
+        if let Some(terminal) = terminal {
+            reviewed.push_notification(event(thread_id, "review-turn", terminal, false));
+            assert!(
+                reviewed.operations.rows(thread_id).is_empty(),
+                "either envelope terminates the item"
+            );
+        }
+        reviewed.push_notification(event(
+            thread_id,
+            "review-turn",
+            fact(
+                "review-finished",
+                CodeModeEvent::Finished {
+                    status: CodeModeStatus::Completed,
+                },
+            ),
+            false,
+        ));
+        assert!(
+            reviewed.operations.rows(thread_id).is_empty(),
+            "the execution reaps a missing item terminal"
+        );
+        reviewed.push_notification(event(thread_id, "review-turn", command("inProgress"), true));
+        assert!(
+            reviewed.operations.rows(thread_id).is_empty(),
+            "late duplicate starts cannot resurrect an item"
+        );
+    }
+
     // A yielded cell and its command belong to their original owner, not the current turn.
     let turns = vec![
         test_turn(
@@ -312,10 +367,14 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     };
     let other_owned =
         |item| ThreadItem::CodeModeOwned(CodeModeOwned::new(other_owner.clone(), Box::new(item)));
+    let mut other_command = command("inProgress");
+    if let ThreadItem::CommandExecution { id, .. } = &mut other_command {
+        *id = "other-command".to_owned();
+    }
     store.push_notification(event(
         thread_id,
         "turn-3",
-        other_owned(command("inProgress")),
+        other_owned(other_command.clone()),
         true,
     ));
     store.push_notification(event(thread_id, "turn-3", command("inProgress"), true));
@@ -328,11 +387,14 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     );
     store.push_notification(event(thread_id, "turn-3", finished.clone(), false));
     store.push_notification(event(thread_id, "turn-1", started.clone(), false));
-    assert_eq!(store.operations.rows(thread_id).len(), 2);
+    assert_eq!(store.operations.rows(thread_id).len(), 1);
+    if let ThreadItem::CommandExecution { status, .. } = &mut other_command {
+        *status = codex_app_server_protocol::CommandExecutionStatus::Completed;
+    }
     store.push_notification(event(
         thread_id,
         "turn-3",
-        other_owned(command("completed")),
+        other_owned(other_command),
         false,
     ));
     store.push_notification(event(thread_id, "turn-3", command("completed"), false));
