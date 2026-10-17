@@ -412,6 +412,7 @@ use self::status_state::StatusState;
 use self::status_state::TerminalTitleStatusKind;
 mod status_controls;
 mod status_surfaces;
+mod stream_preparation;
 mod streaming;
 use self::status_surfaces::CachedProjectRootName;
 mod thread_title_status;

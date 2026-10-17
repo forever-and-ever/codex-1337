@@ -575,6 +575,7 @@ impl App {
             AppEvent::DiscardStreamItems(item_ids) => {
                 self.discard_stream_items(tui, &item_ids);
             }
+            AppEvent::PreparedStream(prepared) => self.handle_prepared_stream(tui, prepared)?,
             AppEvent::ConsolidateAgentMessage {
                 source,
                 item_id,

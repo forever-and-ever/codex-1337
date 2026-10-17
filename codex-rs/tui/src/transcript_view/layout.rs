@@ -360,6 +360,19 @@ impl TranscriptView {
         };
         // Session information belongs before all history, including pages not loaded yet.
         // Pinned displayed revisions above remain visible; hidden headers never enter the cache.
+        if let Some(rows) = cell
+            .as_any()
+            .downcast_ref::<crate::history_cell::StreamRowsCell>()
+        {
+            let content = crate::transcript_geometry::content_width(width, self.mode) as usize;
+            let expected = crate::width::usable_content_width(content, rows.reserved).unwrap_or(1);
+            if rows.mode != self.mode || rows.width.is_some_and(|prepared| prepared != expected) {
+                return None;
+            }
+        }
+        if cell.as_any().is::<crate::history_cell::StreamAnchorCell>() {
+            return Some(Arc::new(TextLayout::new(Vec::new(), width)));
+        }
         if self.history.has_unloaded_history()
             && cell.as_any().is::<crate::history_cell::SessionInfoCell>()
         {
@@ -666,7 +679,10 @@ impl TranscriptView {
                     .as_any()
                     .downcast_ref::<ReasoningSummaryCell>()
                     .is_some_and(ReasoningSummaryCell::is_transcript_only);
-            if self.elides_cell(cells, previous)
+            if cells[previous]
+                .as_any()
+                .is::<crate::history_cell::StreamAnchorCell>()
+                || self.elides_cell(cells, previous)
                 || transcript_only
                 || !self.feed_seat(cells, previous).is_visible()
             {

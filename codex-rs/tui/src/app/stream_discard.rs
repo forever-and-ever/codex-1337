@@ -2,15 +2,11 @@ use super::transcript_splice::TranscriptSplice;
 use super::*;
 
 fn source_item_id(cell: &dyn HistoryCell) -> Option<&str> {
-    let cell = cell.as_any();
-    if let Some(cell) = cell.downcast_ref::<history_cell::AgentMessageCell>() {
-        cell.item_id.as_deref()
-    } else if let Some(cell) = cell.downcast_ref::<history_cell::ProposedPlanStreamCell>() {
-        cell.item_id.as_deref()
-    } else {
-        cell.downcast_ref::<history_cell::AgentMarkdownCell>()
+    history_cell::streaming_item_id(cell).or_else(|| {
+        cell.as_any()
+            .downcast_ref::<history_cell::AgentMarkdownCell>()
             .and_then(|cell| cell.item_id.as_deref())
-    }
+    })
 }
 
 impl App {

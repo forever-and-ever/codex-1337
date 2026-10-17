@@ -57,6 +57,9 @@ pub(crate) struct FrameRequest {
     interactive: bool,
 }
 
+#[path = "background_preparation.rs"]
+mod background_preparation;
+
 /// A requester for scheduling future frame draws on the TUI event loop.
 ///
 /// This is the handler side of an actor/handler pair with `FrameScheduler`, which coalesces
@@ -70,6 +73,7 @@ pub struct FrameRequester {
     mode: Arc<AtomicU8>,
     dirty: Arc<AtomicBool>,
     paint_admitted: Arc<AtomicBool>,
+    background_preparation: Arc<AtomicBool>,
 }
 
 impl FrameRequester {
@@ -87,6 +91,7 @@ impl FrameRequester {
             mode,
             dirty,
             paint_admitted: Arc::new(AtomicBool::new(true)),
+            background_preparation: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -214,6 +219,7 @@ impl FrameRequester {
             mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
             dirty: Arc::new(AtomicBool::new(false)),
             paint_admitted: Arc::new(AtomicBool::new(true)),
+            background_preparation: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -373,6 +379,7 @@ mod tests {
                     mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
                     dirty: Arc::new(AtomicBool::new(false)),
                     paint_admitted: Arc::new(AtomicBool::new(true)),
+                    background_preparation: Arc::new(AtomicBool::new(false)),
                 },
                 rx,
             )

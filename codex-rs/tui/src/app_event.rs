@@ -1294,6 +1294,7 @@ pub(crate) enum AppEvent {
     /// Emitted by `ChatWidget::on_plan_item_completed` after plan stream
     /// finalization.
     ConsolidateProposedPlan(String),
+    PreparedStream(crate::streaming::completion::PreparedStream),
 
     StartCommitAnimation,
     StopCommitAnimation,

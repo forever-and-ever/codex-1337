@@ -139,7 +139,13 @@ mod hook_cell;
 mod markdown_render_cache;
 mod mcp;
 mod messages;
+mod stream_anchor;
+mod stream_rows;
 pub(crate) use failed_turn::FailedTurnCell;
+pub(crate) use stream_anchor::{StreamAnchorCell, streaming_item_id};
+pub(crate) use stream_rows::{
+    RowChunk, RowProjection, SharedRows, StreamRowContent, StreamRowsCell, render_plan_rows,
+};
 
 mod image_generation;
 mod notices;
