@@ -323,8 +323,7 @@ impl ClaudeHooksEngine {
                 }
                 self.handlers.push(ConfiguredHandler {
                     builtin: true,
-                    selection: HookSelection::compile(event_name, None)
-                        .expect("unfiltered executor hook"),
+                    selection: HookSelection::unfiltered(event_name),
                     timeout_sec: timeout_sec.unwrap_or(5).max(1),
                     status_message,
                     additional_context_limit: Default::default(),

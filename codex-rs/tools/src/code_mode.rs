@@ -111,7 +111,7 @@ pub fn collect_code_mode_exec_prompt_tool_definitions<'a>(
 ) -> Vec<CodeModeToolDefinition> {
     let mut tool_definitions = specs
         .into_iter()
-        .flat_map(|spec| code_mode_tool_definitions_for_spec(spec))
+        .flat_map(code_mode_tool_definitions_for_spec)
         .filter(|definition| codex_code_mode::is_code_mode_nested_tool(&definition.name))
         .collect::<Vec<_>>();
     tool_definitions.sort_by(|left, right| left.name.cmp(&right.name));

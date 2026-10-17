@@ -20,6 +20,10 @@ use std::sync::Arc;
 use tracing::warn;
 
 impl LocalAgentControl {
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "retirement must wait for runtime-owned acceptance; commit only publishes an actor submission and never waits for retirement or reacquires lifecycle"
+    )]
     pub(super) async fn submit_accepted_agent_mail(
         &self,
         recipient: ThreadId,
@@ -55,6 +59,10 @@ impl LocalAgentControl {
         })?
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "acceptance order must include durable commit and actor publication; this path never reacquires acceptance or waits for actor processing"
+    )]
     async fn commit_accepted_agent_mail_submission(
         &self,
         recipient: ThreadId,
