@@ -137,14 +137,14 @@ async fn check_fork_dispatch(mode: ThreadParamsMode) -> Result<()> {
                 .input_states
                 .contains_key(&source_thread_id)
             {
-                let completion = app
-                    .server_operations
-                    .control_rx
-                    .recv()
-                    .await
-                    .expect("fork receipt");
-                app.handle_server_completion(&mut tui, &mut server, completion)
-                    .await?;
+                tokio::select! {
+                    completion = app.thread_delivery.completion_rx.recv() => {
+                        app.handle_local_thread_completion(&mut server, completion.expect("fork settings receipt")).await?;
+                    }
+                    completion = app.server_operations.control_rx.recv() => {
+                        app.handle_server_completion(&mut tui, &mut server, completion.expect("fork receipt")).await?;
+                    }
+                }
             }
             Ok::<_, color_eyre::Report>(())
         })

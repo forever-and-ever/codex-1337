@@ -176,7 +176,15 @@ sandbox = "unelevated"
         Ok::<_, color_eyre::Report>(())
     })
     .await??;
-    let (next, _) = app.load_new_session_config(&server).await?;
+    let cwd = app.chat_widget.config_ref().cwd.to_path_buf();
+    let defaults =
+        crate::config_update::read_effective_config_if_supported(server.request_handle(), &cwd)
+            .await?;
+    let projected = app
+        .capture_config_rebuild(cwd.clone(), Some(&cwd))
+        .run()
+        .await?;
+    let (next, _) = app.project_new_session_config(&server, *projected, defaults)?;
     assert_eq!(
         next.permissions.permission_profile(),
         &PermissionProfile::workspace_write()

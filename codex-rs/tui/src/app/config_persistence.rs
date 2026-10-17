@@ -7,19 +7,19 @@
 use super::*;
 use codex_config::ConfigLayerSource;
 
-async fn build_config_on_runtime_worker(
+pub(super) async fn build_config_on_runtime_worker(
     builder: ConfigBuilder,
     application_network_policy: codex_http_client::NetworkPolicy,
     error_context: String,
 ) -> Result<Config> {
     // Tokio stores the task output inline even when it boxes the future. Keep the large
     // Config off the caller's stack while Tokio allocates the task during session switches.
-    match tokio::spawn(async move {
+    match tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
         builder.build().await.map(|mut config| {
             config.application_network_policy = application_network_policy;
             Box::new(config)
         })
-    })
+    }))
     .await
     {
         Ok(build_result) => build_result.map(|config| *config).wrap_err(error_context),
@@ -95,7 +95,7 @@ impl App {
         permission_overrides
     }
 
-    fn config_builder_for_cwd(&self, cwd: PathBuf) -> ConfigBuilder {
+    pub(super) fn config_builder_for_cwd(&self, cwd: PathBuf) -> ConfigBuilder {
         let mut overrides = self.harness_overrides.clone();
         overrides.cwd = Some(cwd);
         ConfigBuilder::default()
@@ -524,7 +524,7 @@ impl App {
         self.adopt_server_permissions();
     }
 
-    fn install_refreshed_config(&mut self, mut config: Config) -> Result<()> {
+    pub(super) fn install_refreshed_config(&mut self, mut config: Config) -> Result<()> {
         self.apply_runtime_policy_overrides(&mut config, RuntimePolicyOverrideScope::All)?;
         self.local_settings = self.local_settings.reloaded(&config);
         self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
@@ -591,23 +591,6 @@ impl App {
         }
     }
 
-    pub(super) async fn refresh_in_memory_config_from_disk(&mut self) -> Result<()> {
-        let config = self
-            .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.to_path_buf())
-            .await?;
-        self.install_refreshed_config(config)
-    }
-
-    pub(super) async fn refresh_in_memory_config_from_disk_best_effort(&mut self, action: &str) {
-        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
-            tracing::warn!(
-                error = %err,
-                action,
-                "failed to refresh config before thread transition; continuing with current in-memory config"
-            );
-        }
-    }
-
     pub(super) fn read_effective_config_after_overridden_write<A>(
         &mut self,
         server: &AppServerSession,
@@ -637,32 +620,6 @@ impl App {
                 }
             },
         );
-    }
-
-    pub(super) async fn rebuild_config_for_resume_or_fallback(
-        &mut self,
-        current_cwd: &Path,
-        resume_cwd: PathBuf,
-    ) -> Result<(Config, crate::local_settings::LocalSettings)> {
-        match self.rebuild_config_for_cwd(resume_cwd.clone()).await {
-            Ok(config) => {
-                let local_settings = self.local_settings.reloaded(&config);
-                Ok((config, local_settings))
-            }
-            Err(err) => {
-                if crate::session_resume::cwds_differ(current_cwd, &resume_cwd) {
-                    Err(err)
-                } else {
-                    let resume_cwd_display = resume_cwd.display().to_string();
-                    tracing::warn!(
-                        error = %err,
-                        cwd = %resume_cwd_display,
-                        "failed to rebuild config for same-cwd resume; using current in-memory config"
-                    );
-                    Ok((self.config.clone(), self.local_settings.clone()))
-                }
-            }
-        }
     }
 
     pub(super) fn apply_runtime_policy_overrides(
@@ -1983,7 +1940,7 @@ mod tests {
 
         assert_eq!(app_enabled_in_effective_config(&app.config, &app_id), None);
 
-        app.refresh_in_memory_config_from_disk().await?;
+        app.refresh_test_config().await?;
 
         assert_eq!(
             app_enabled_in_effective_config(&app.config, &app_id),
@@ -2042,7 +1999,7 @@ enabled = false
 
         // This is the fallible reload that the best-effort `/new`, `/clear`,
         // `/fork`, side-conversation, and session-picker paths wrap.
-        app.refresh_in_memory_config_from_disk().await?;
+        app.refresh_test_config().await?;
 
         assert_eq!(
             app_enabled_in_effective_config(&app.config, app_id),
@@ -2074,7 +2031,7 @@ enabled = false
         };
         assert!(controller.publish(controller.policy().revision(), denied.clone()));
         app.config.application_network_policy = controller.policy();
-        let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+        let mut app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .respond_with(ResponseTemplate::new(200))
@@ -2082,8 +2039,11 @@ enabled = false
             .mount(&server)
             .await;
 
-        app.refresh_in_memory_config_from_disk().await?;
-        let (new_config, _) = app.load_new_session_config(&app_server).await?;
+        app.refresh_test_config().await?;
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.start_fresh_session_and_settle(&mut tui, &mut app_server, None, None, None)
+            .await;
+        let new_config = app.config.clone();
         let permission_config = app
             .rebuild_config_for_permission_profile(":workspace")
             .await?;
@@ -2133,8 +2093,11 @@ enabled = false
         std::fs::write(codex_home.path().join("config.toml"), "[broken")?;
         let original_config = app.config.clone();
 
-        app.refresh_in_memory_config_from_disk_best_effort("starting a new thread")
+        let result = app
+            .capture_config_rebuild(app.chat_widget.config_ref().cwd.to_path_buf(), None)
+            .run()
             .await;
+        app.apply_navigation_config_refresh(result, "starting a new thread");
 
         assert_eq!(app.config, original_config);
         Ok(())
@@ -2175,7 +2138,7 @@ enabled = false
         assert_eq!(app.chat_widget.config_ref().cwd.to_path_buf(), next_cwd);
         assert_eq!(app.config.cwd, original_cwd);
 
-        app.refresh_in_memory_config_from_disk().await?;
+        app.refresh_test_config().await?;
 
         assert_eq!(app.config.cwd, app.chat_widget.config_ref().cwd);
         Ok(())
@@ -2197,7 +2160,7 @@ theme = "dracula"
 "#,
         )?;
 
-        app.refresh_in_memory_config_from_disk().await?;
+        app.refresh_test_config().await?;
 
         assert_eq!(
             app.local_settings.terminal_resize_reflow().max_rows,
@@ -2251,18 +2214,21 @@ theme = "dracula"
     #[tokio::test]
     async fn new_thread_keeps_live_settings_after_failed_reload() -> Result<()> {
         let mut app = make_test_app().await;
-        let server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+        let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
         let home = tempdir()?;
         app.config.codex_home = home.path().to_path_buf().abs();
         let config_path = home.path().join("config.toml");
         std::fs::write(&config_path, "[tui]\ntheme = 'dracula'\n")?;
-        app.refresh_in_memory_config_from_disk().await?;
+        app.refresh_test_config().await?;
         // A live setting can be newer than the last successful disk load.
         app.local_settings.tui.rendering.math = false;
         std::fs::write(config_path, "[broken")?;
 
-        let (_, settings) = app.load_new_session_config(&server).await?;
-        assert_eq!(settings, app.local_settings);
+        let expected = app.local_settings.clone();
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.start_fresh_session_and_settle(&mut tui, &mut server, None, None, None)
+            .await;
+        assert_eq!(app.local_settings, expected);
         server.shutdown().await?;
         Ok(())
     }
@@ -2279,10 +2245,11 @@ theme = "dracula"
         let current_cwd = current_config.cwd.clone();
 
         let resume_config = app
-            .rebuild_config_for_resume_or_fallback(&current_cwd, current_cwd.to_path_buf())
+            .capture_config_rebuild(current_cwd.to_path_buf(), Some(&current_cwd))
+            .run()
             .await?;
 
-        assert_eq!(resume_config, (current_config, app.local_settings.clone()));
+        assert_eq!(*resume_config, (current_config, app.local_settings.clone()));
         Ok(())
     }
 
@@ -2297,7 +2264,8 @@ theme = "dracula"
         let next_cwd = next_cwd_tmp.path().to_path_buf();
 
         let result = app
-            .rebuild_config_for_resume_or_fallback(&current_cwd, next_cwd)
+            .capture_config_rebuild(next_cwd, Some(&current_cwd))
+            .run()
             .await;
 
         assert!(result.is_err());

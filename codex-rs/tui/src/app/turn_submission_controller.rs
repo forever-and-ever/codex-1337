@@ -1239,6 +1239,11 @@ impl App {
                 .lanes
                 .get(&OperationLane::Connection)
                 .is_some_and(|lane| matches!(lane.state, LaneState::Running(_)))
+                || self.server_operations.lanes.values().any(|lane| {
+                    matches!(lane.state, LaneState::Running(_))
+                        && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
+                            if operation.ui_request().is_some())
+                })
                 || self.server_operations.navigation.has_running()
                 || !self.server_operations.control_rx.is_empty()
             {

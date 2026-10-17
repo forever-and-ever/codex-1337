@@ -107,6 +107,7 @@ impl ForkStage {
 }
 
 enum ForkEffect {
+    Refresh(Box<super::navigation_config::ConfigRebuild>),
     Begin,
     Interrupt {
         thread_id: ThreadId,
@@ -117,6 +118,7 @@ enum ForkEffect {
     Detach(detach::DetachPlan),
 }
 enum ForkOutcome {
+    Refreshed(Result<Box<(Config, crate::local_settings::LocalSettings)>>),
     Begin,
     Interrupted(std::result::Result<(), TypedRequestError>),
     History(PreparedSafetyHistory),
@@ -172,30 +174,61 @@ impl App {
         let Some(thread_id) = self.chat_widget.thread_id() else {
             return;
         };
-        let input = ForkInput {
-            origin: OperationOrigin::Thread {
-                thread_id,
-                store: Arc::clone(&self.ensure_thread_channel(thread_id).store),
-            },
-            permissions: PermissionAuthority::capture(
-                self.chat_widget.config_ref(),
-                self.selected_server_profile(thread_id),
-            ),
-            purpose: ForkPurpose::Ordinary {
-                name: name.map(|name| ForkName {
-                    name,
-                    conflict_thread_ids,
-                }),
-                from_locked_thread: self.chat_widget.is_external_writer_view(),
-                from_agents_overview,
-                source_turn_running: self.chat_widget.is_agent_turn_running(),
-            },
+        self.supersede_pending_navigation();
+        let generation = self.server_operations.navigation.generation();
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
+        let purpose = ForkPurpose::Ordinary {
+            name: name.map(|name| ForkName {
+                name,
+                conflict_thread_ids,
+            }),
+            from_locked_thread: self.chat_widget.is_external_writer_view(),
+            from_agents_overview,
+            source_turn_running: self.chat_widget.is_agent_turn_running(),
         };
-        self.enqueue_navigation(
+        self.request_server_prepared(
             server,
-            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+            super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
+            super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+            "Preparing fork settings",
+            move |app, _| {
+                let current = app.current_displayed_thread_id() == Some(thread_id)
+                    && app.chat_widget.thread_id() == Some(thread_id)
+                    && app.server_operations.navigation.generation() == generation
+                    && app
+                        .thread_event_channels
+                        .get(&thread_id)
+                        .is_some_and(|channel| Arc::ptr_eq(&channel.store, &store));
+                let input = current.then(|| ForkInput {
+                    origin: OperationOrigin::Thread { thread_id, store },
+                    permissions: PermissionAuthority::capture(
+                        app.chat_widget.config_ref(),
+                        app.selected_server_profile(thread_id),
+                    ),
+                    purpose,
+                });
+                move |_| async move { Ok(input) }
+            },
+            move |app, server, result| {
+                if app.server_operations.navigation.generation() != generation {
+                    return Ok(());
+                }
+                match result {
+                    Ok(Some(input)) if app.current_displayed_thread_id() == Some(thread_id) => {
+                        app.enqueue_navigation(
+                            server,
+                            NavigationIntent::Fork(ForkStage::Admitted(Box::new(input))),
+                        );
+                        app.chat_widget.fork_in_progress = true;
+                    }
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(format!("Failed to prepare fork settings: {error}")),
+                    _ => {}
+                }
+                Ok(())
+            },
         );
-        self.chat_widget.fork_in_progress = true;
     }
 
     pub(in crate::app) async fn enqueue_safety_fork(
@@ -243,8 +276,15 @@ impl App {
         else {
             unreachable!("fork dispatch requires admission");
         };
+        let effect = if matches!(input.purpose, ForkPurpose::Safety(_)) {
+            ForkEffect::Begin
+        } else {
+            ForkEffect::Refresh(
+                self.capture_config_rebuild(self.chat_widget.config_ref().cwd.to_path_buf(), None),
+            )
+        };
         operation.intent = NavigationIntent::Fork(ForkStage::Config(input));
-        self.spawn_fork_effect(operation, server.request_handle(), ForkEffect::Begin);
+        self.spawn_fork_effect(operation, server.request_handle(), effect);
     }
 
     fn spawn_fork_effect(
@@ -264,6 +304,7 @@ impl App {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match effect {
                     ForkEffect::Begin => ForkOutcome::Begin,
+                    ForkEffect::Refresh(plan) => ForkOutcome::Refreshed(plan.run().await),
                     ForkEffect::Interrupt { thread_id, turn_id } => ForkOutcome::Interrupted(
                         preparation::request::<api::TurnInterruptResponse>(
                             RequestPolicy::Interactive,
@@ -699,7 +740,10 @@ impl App {
         };
         let ForkReceipt { handle, outcome } = receipt;
         match (stage, outcome) {
-            (ForkStage::Config(mut input), ForkOutcome::Begin) if matching => {
+            (
+                ForkStage::Config(mut input),
+                outcome @ (ForkOutcome::Begin | ForkOutcome::Refreshed(_)),
+            ) if matching => {
                 if !self.fork_authority_matches(&input).await {
                     self.fork_failure(
                         &mut input,
@@ -708,10 +752,11 @@ impl App {
                     );
                     return Ok(());
                 }
+                if let ForkOutcome::Refreshed(result) = outcome {
+                    self.apply_navigation_config_refresh(result, "forking the thread");
+                }
                 let config = match input.purpose {
                     ForkPurpose::Ordinary { .. } => {
-                        self.refresh_in_memory_config_from_disk_best_effort("forking the thread")
-                            .await;
                         let mut config = if self.chat_widget.is_parent_owned_thread() {
                             let mut config = self.chat_widget.config_ref().clone();
                             config.service_tier =

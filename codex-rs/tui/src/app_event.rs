@@ -253,6 +253,11 @@ pub(crate) struct AgentPickerThreadRefresh {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    DirectoryChangeAdmitted {
+        thread_id: ThreadId,
+        cwd: AbsolutePathBuf,
+        generation: u64,
+    },
     SubagentTextInput {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,

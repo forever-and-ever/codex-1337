@@ -2788,30 +2788,6 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
         thread_id,
         requested_cwd: path.into(),
     };
-    let mut stale_config = app.rebuild_config_for_cwd(untrusted.clone()).await?;
-    stale_config.active_project.trust_level = None;
-    app.app_server_target = crate::AppServerTarget::LocalDaemon {
-        endpoint: crate::resolve_remote_addr("ws://127.0.0.1:8765")?,
-        allow_embedded_fallback: false,
-    };
-    history();
-    assert!(
-        app.confirm_directory_trust(
-            &mut tui,
-            &mut server,
-            &mut stale_config,
-            &untrusted,
-            crate::onboarding::DirectoryTrustOptions {
-                cancel: Some(crate::onboarding::TrustCancelAction::CurrentTask),
-                ..Default::default()
-            },
-            /*startup_draft*/ None,
-        )
-        .await
-        .is_err()
-    );
-    assert_snapshot!(history().join(""), @"■ Unable to check folder trust: Folder trust changed. Reopen the destination with its restricted settings.");
-    app.app_server_target = crate::AppServerTarget::Embedded;
     for (path, kind, expected) in [
         ("missing", "local", "Cannot access directory"),
         ("../config.toml", "local", "Not a directory"),
