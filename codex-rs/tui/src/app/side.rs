@@ -20,7 +20,7 @@ const SIDE_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
     "'/side' is unavailable until the current conversation has started. ",
     "Send a message first, then try /side again."
 );
-const SIDE_ALREADY_OPEN_MESSAGE: &str =
+pub(super) const SIDE_ALREADY_OPEN_MESSAGE: &str =
     "A side conversation is already open. Press ctrl + c to return before starting another.";
 const SIDE_BOUNDARY_PROMPT: &str = r#"This is a /btw side fork. The parent conversation may still be running elsewhere, so inherited history may end mid-turn; it was not interrupted by this fork.
 
@@ -565,20 +565,7 @@ impl App {
                 .add_error_message("Wait for permissions to update before forking.".into());
             return Ok(AppRunControl::Continue);
         }
-        if self
-            .side_threads
-            .values()
-            .any(|state| state.parent_thread_id != parent_thread_id)
-        {
-            self.restore_side_user_message(user_message.take());
-            self.sync_side_thread_ui();
-            self.chat_widget
-                .add_error_message(SIDE_ALREADY_OPEN_MESSAGE.into());
-            return Ok(AppRunControl::Continue);
-        }
-        self.session_telemetry
-            .counter("codex.thread.side", 1, &[("source", "slash_command")]);
-        self.enqueue_side_fork(app_server, parent_thread_id, user_message);
-        Ok(AppRunControl::Continue)
+
+        self.start_side_fork(app_server, parent_thread_id, user_message)
     }
 }

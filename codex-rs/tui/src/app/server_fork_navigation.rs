@@ -144,6 +144,29 @@ impl ForkReceipt {
 }
 
 impl App {
+    pub(in crate::app) fn start_side_fork(
+        &mut self,
+        app_server: &AppServerSession,
+        parent_thread_id: ThreadId,
+        mut user_message: Option<crate::chatwidget::UserMessage>,
+    ) -> Result<AppRunControl> {
+        if self
+            .side_threads
+            .values()
+            .any(|state| state.parent_thread_id != parent_thread_id)
+        {
+            self.restore_side_user_message(user_message.take());
+            self.sync_side_thread_ui();
+            self.chat_widget
+                .add_error_message(crate::app::side::SIDE_ALREADY_OPEN_MESSAGE.into());
+            return Ok(AppRunControl::Continue);
+        }
+        self.session_telemetry
+            .counter("codex.thread.side", 1, &[("source", "slash_command")]);
+        self.enqueue_side_fork(app_server, parent_thread_id, user_message);
+        Ok(AppRunControl::Continue)
+    }
+
     pub(in crate::app) fn enqueue_side_fork(
         &mut self,
         server: &AppServerSession,

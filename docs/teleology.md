@@ -479,6 +479,9 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/app/transcript_export.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/thread_settings.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/app_server_events.rs`: fast-ui-thread
+- `codex-rs/tui/src/app_server_session/history.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/resume_config.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/side.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/app_server_thread_ownership.rs`: fast-ui-thread
 - `codex-rs/tui/src/chatwidget/backend_banners.rs`: fast-ui-thread
 - `codex-rs/tui/src/chatwidget/transcript_export.rs`: fast-ui-thread
