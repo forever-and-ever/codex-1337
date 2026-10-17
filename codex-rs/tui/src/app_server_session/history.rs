@@ -208,7 +208,6 @@ pub(crate) struct ThreadHistoryPagination {
 }
 
 impl AppServerSession {
-
     pub(crate) fn apply_prompt_revert(
         &mut self,
         thread_id: ThreadId,
@@ -314,22 +313,6 @@ impl AppServerSession {
             &self.request_handle(),
             thread_id,
             turn_id,
-            cursor,
-            limit,
-        )
-        .await
-    }
-
-    pub(crate) async fn thread_turns_page(
-        &mut self,
-        thread_id: ThreadId,
-        cursor: Option<String>,
-        limit: u32,
-    ) -> Result<ThreadTurnsListResponse> {
-        preparation::thread_turns_page(
-            super::session_preparation::RequestPolicy::Unbounded,
-            &self.request_handle(),
-            thread_id,
             cursor,
             limit,
         )

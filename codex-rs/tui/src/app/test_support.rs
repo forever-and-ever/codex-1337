@@ -193,3 +193,13 @@ pub(super) async fn settle_frontend_requests(
     }).await??;
     Ok(())
 }
+
+impl App {
+    pub(in crate::app) async fn refresh_test_config(&mut self) -> Result<()> {
+        let projected = self
+            .capture_config_rebuild(self.chat_widget.config_ref().cwd.to_path_buf(), None)
+            .run()
+            .await?;
+        self.install_refreshed_config(projected.0)
+    }
+}

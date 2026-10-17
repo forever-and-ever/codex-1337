@@ -12,7 +12,6 @@ use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
 
 // Leave time for side-thread cleanup and unsubscribe inside the two-second exit budget.
-const REALTIME_STOP_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 1);
 
 use super::turn_submissions::CatalogRequest;
 use super::turn_submissions::ConnectionMutation;
@@ -20,32 +19,6 @@ use super::turn_submissions::ServerOperation;
 use super::turn_submissions::ThreadMutation;
 
 impl App {
-    pub(super) async fn stop_realtime_conversation(&mut self, app_server: &mut AppServerSession) {
-        let thread_id = self
-            .background_voice
-            .as_mut()
-            .and_then(|owner| owner.reset_realtime_conversation())
-            .or_else(|| self.chat_widget.reset_realtime_conversation());
-        self.retire_background_voice();
-        let Some(thread_id) = thread_id else {
-            return;
-        };
-        match tokio::time::timeout(
-            REALTIME_STOP_TIMEOUT,
-            app_server.thread_realtime_stop(thread_id),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::warn!(%thread_id, %error, "failed to stop voice conversation");
-            }
-            Err(_) => {
-                tracing::warn!(%thread_id, "timed out stopping voice conversation");
-            }
-        }
-    }
-
     pub(super) async fn shutdown_side_threads(&mut self, app_server: &mut AppServerSession) {
         let side_thread_ids: Vec<ThreadId> = self.side_threads.keys().copied().collect();
         for side_thread_id in side_thread_ids {

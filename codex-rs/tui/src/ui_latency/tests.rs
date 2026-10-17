@@ -3,15 +3,15 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 // This is a control-plane failure witness, not a counter accessor test: the UI
-// thread is first synchronously blocked, then suspended in an unfinished RPC.
+// task is first synchronously blocked, then suspended awaiting its next event.
 #[tokio::test(flavor = "current_thread")]
-async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
+async fn independent_dump_survives_blocked_and_suspended_dispatcher() {
     let shared = Arc::new(Shared::new());
     let endpoint = endpoint::Endpoint::start(Arc::clone(&shared)).expect("listener");
     let pid = std::process::id();
     let (entered, observer) = mpsc::channel();
     let (resume, resumed) = mpsc::channel();
-    let (rpc_done, rpc_pending) = tokio::sync::oneshot::channel();
+    let (idle_done, idle_pending) = tokio::sync::oneshot::channel();
     let reader = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -31,14 +31,14 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
         resume.send(()).expect("resume UI");
         observer
             .recv_timeout(Duration::from_secs(5))
-            .expect("RPC stage entered");
+            .expect("idle stage entered");
         runtime.block_on(async {
-            let report = query(pid, false).await.expect("pending RPC dump");
-            assert_eq!(report.current.expect("current").stage, Some("RpcWait"));
+            let report = query(pid, false).await.expect("pending idle dump");
+            assert_eq!(report.current.expect("current").stage, Some("IdleSelect"));
             assert!(!report.reset_pending);
             assert!(report.stages.iter().all(|stage| stage.stage != "AppEvent"));
         });
-        rpc_done.send(()).expect("finish RPC");
+        idle_done.send(()).expect("finish idle");
     });
     WRITER
         .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
@@ -53,9 +53,9 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
                 let _not_ui = enter(Stage::FramePaint);
             });
             {
-                let _rpc = enter(Stage::RpcWait);
-                entered.send(()).expect("notify RPC observer");
-                rpc_pending.await.expect("RPC release");
+                let _idle = enter(Stage::IdleSelect);
+                entered.send(()).expect("notify idle observer");
+                idle_pending.await.expect("idle release");
             }
             unrelated.await.expect("background task");
         })
@@ -72,8 +72,8 @@ async fn independent_dump_survives_blocked_dispatcher_and_pending_rpc() {
         report
             .stages
             .iter()
-            .find(|stage| stage.stage == "RpcWait")
-            .expect("RPC completion")
+            .find(|stage| stage.stage == "IdleSelect")
+            .expect("idle completion")
             .count,
         1
     );

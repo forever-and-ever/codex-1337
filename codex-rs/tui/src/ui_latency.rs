@@ -55,10 +55,10 @@ stages! {
     TerminalEvent = 5, ServerCompletion = 6, DeliveryCompletion = 7, ServerEvent = 8,
     Reconnect = 9, Timer = 10, KeyRouting = 11,
     FramePreparation = 13, FramePaint = 14, InvocationPreparation = 15,
-    TerminalDiff = 16, TerminalWrite = 17, TerminalFlush = 18, RpcWait = 19,
+    TerminalDiff = 16, TerminalWrite = 17, TerminalFlush = 18,
     ReactionLatency = 20,
     }
-    retired { PreKeyPaint = 12 }
+    retired { PreKeyPaint = 12, RpcWait = 19 }
 }
 const STAGES: usize = STAGE_NAMES.len();
 
@@ -362,11 +362,6 @@ pub(crate) async fn scope<F: Future>(future: F) -> F::Output {
 }
 
 pub use endpoint::Report;
-
-pub(crate) async fn rpc<F: Future>(future: F) -> F::Output {
-    let _wait = enter(Stage::RpcWait);
-    future.await
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u64)]

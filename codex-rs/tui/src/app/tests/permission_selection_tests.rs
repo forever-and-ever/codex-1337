@@ -307,7 +307,7 @@ async fn custom_permission_selection_uses_server_definition_and_preserves_state_
 
 #[tokio::test]
 async fn accepted_permissions_survive_directory_change_before_notification() -> Result<()> {
-    for preserve_history in [false, true] {
+    for (preserve_history, fork) in [(false, false), (true, false), (true, true)] {
         let (mut app, mut events, _ops) = make_test_app_with_channels().await;
         app.config.ephemeral = false;
         app.config
@@ -343,13 +343,38 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
             },
         )
         .await;
-        app.settle_turn_submissions(&mut server).await?;
-        assert!(
-            app.agents_overview
-                .requested_permission_profiles
-                .contains_key(&source),
-            "selection must be unconfirmed"
-        );
+        if fork {
+            // Fork admission must wait for permission acknowledgement before it
+            // captures source authority, even without a settings notification.
+            let mut tui = crate::tui::test_support::make_test_tui()?;
+            app.fork_current_thread(&mut tui, &mut server, None, Vec::new(), false)
+                .await?;
+            assert_eq!(app.chat_widget.thread_id(), Some(source));
+            app.settle_navigation(&mut tui, &mut server).await?;
+            assert_ne!(app.chat_widget.thread_id(), Some(source));
+            assert_eq!(
+                app.chat_widget
+                    .config_ref()
+                    .permissions
+                    .permission_profile(),
+                &PermissionProfile::read_only()
+            );
+            assert_eq!(
+                app.chat_widget.config_ref().approvals_reviewer,
+                ApprovalsReviewer::User
+            );
+            server.shutdown().await?;
+            continue;
+        }
+        if preserve_history {
+            app.settle_turn_submissions(&mut server).await?;
+            assert!(
+                app.agents_overview
+                    .requested_permission_profiles
+                    .contains_key(&source),
+                "selection must be unconfirmed"
+            );
+        }
         // Destination constraints belong to the client; the server's result is authoritative.
         let requirements = app.config.codex_home.join("client-requirements.toml");
         std::fs::write(&requirements, "allowed_approval_policies = [\"never\"]")?;
@@ -357,6 +382,15 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
         let mut tui = crate::tui::test_support::make_test_tui()?;
         app.change_working_directory(&mut tui, &mut server, destination.clone())
             .await;
+        if !preserve_history {
+            // /cd must capture the profile after the preceding settings receipt.
+            assert_eq!(app.chat_widget.thread_id(), Some(source));
+            app.settle_turn_submissions(&mut server).await?;
+            let admitted = std::iter::from_fn(|| events.try_recv().ok())
+                .find(|event| matches!(event, AppEvent::DirectoryChangeAdmitted { .. }))
+                .expect("directory change is released by its settings barrier");
+            app.handle_event(&mut tui, &mut server, admitted).await?;
+        }
         if preserve_history {
             // A confirmation can arrive while /cd is preparing its replacement. Retiring
             // the pending selection must not revoke the unchanged permission authority.

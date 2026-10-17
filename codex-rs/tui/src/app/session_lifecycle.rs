@@ -780,28 +780,6 @@ impl App {
         Ok(())
     }
 
-    pub(super) async fn backfill_loaded_subagent_threads(
-        &mut self,
-        server: &mut AppServerSession,
-    ) -> bool {
-        let Some(root) = self.primary_thread_id else {
-            return false;
-        };
-        match crate::app_server_session::session_preparation::loaded_observations(
-            crate::app_server_session::session_preparation::RequestPolicy::Unbounded,
-            &server.request_handle(),
-            root,
-        )
-        .await
-        {
-            Ok(observations) => self.apply_loaded_subagent_observations(root, observations),
-            Err(error) => {
-                tracing::warn!(%error, "failed to list loaded threads for subagent backfill");
-                false
-            }
-        }
-    }
-
     pub(super) async fn resume_target_session(
         &mut self,
         tui: &mut tui::Tui,

@@ -1177,6 +1177,9 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     tokio::time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "thread/fork").len() == forks_before {
             tokio::select! {
+                completion = app.thread_delivery.completion_rx.recv() => {
+                    app.handle_local_thread_completion(&mut server, completion.expect("fork settings snapshot receipt")).await?;
+                }
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation")).await?;
                 }

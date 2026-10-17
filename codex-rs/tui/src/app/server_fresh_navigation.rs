@@ -33,7 +33,6 @@ pub(super) enum FreshStage {
     Admitted(FreshInput),
     Defaults {
         input: FreshInput,
-        cwd: PathBuf,
     },
     Starting(Box<FreshContext>),
     Naming(Box<FreshReady>),
@@ -59,7 +58,16 @@ impl FreshReceipt {
 }
 
 enum FreshOutcome {
-    Defaults(Result<Option<crate::config_update::EffectiveConfig>, String>),
+    Defaults(
+        Result<
+            Box<(
+                Option<crate::config_update::EffectiveConfig>,
+                Config,
+                LocalSettings,
+            )>,
+            String,
+        >,
+    ),
     Started(PreparedSession),
     Named(Result<String, String>),
     Detached(detach::DetachReceipt),
@@ -67,9 +75,15 @@ enum FreshOutcome {
 }
 
 enum FreshEffect {
-    Defaults(PathBuf),
+    Defaults {
+        cwd: PathBuf,
+        config: Box<super::navigation_config::ConfigRebuild>,
+    },
     Start(StartPreparation),
-    Name { thread_id: ThreadId, name: String },
+    Name {
+        thread_id: ThreadId,
+        name: String,
+    },
     Detach(detach::DetachPlan),
 }
 
@@ -171,11 +185,14 @@ impl App {
                 .unwrap_or(Path::new("."))
                 .to_path_buf(),
         };
-        operation.intent = NavigationIntent::Fresh(FreshStage::Defaults { input, cwd });
+        operation.intent = NavigationIntent::Fresh(FreshStage::Defaults { input });
         self.spawn_fresh_effect(
             operation,
             server.request_handle(),
-            FreshEffect::Defaults(defaults_cwd),
+            FreshEffect::Defaults {
+                cwd: defaults_cwd,
+                config: self.capture_config_rebuild(cwd.clone(), Some(&cwd)),
+            },
         );
     }
 
@@ -195,8 +212,8 @@ impl App {
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
             let outcome = std::panic::AssertUnwindSafe(async {
                 match effect {
-                    FreshEffect::Defaults(cwd) => FreshOutcome::Defaults(
-                        tokio::time::timeout(
+                    FreshEffect::Defaults { cwd, config } => {
+                        let defaults = tokio::time::timeout(
                             ACK_TIMEOUT,
                             crate::config_update::read_effective_config_if_supported(
                                 handle.clone(),
@@ -205,8 +222,20 @@ impl App {
                         )
                         .await
                         .map_err(|_| "New-session defaults read timed out".to_string())
-                        .and_then(|result| result.map_err(|error| error.to_string())),
-                    ),
+                        .and_then(|result| result.map_err(|error| error.to_string()));
+                        let result = match defaults {
+                            Ok(defaults) => config
+                                .run()
+                                .await
+                                .map(|projected| {
+                                    let (config, settings) = *projected;
+                                    Box::new((defaults, config, settings))
+                                })
+                                .map_err(|error| error.to_string()),
+                            Err(error) => Err(error),
+                        };
+                        FreshOutcome::Defaults(result)
+                    }
                     FreshEffect::Start(plan) => FreshOutcome::Started(plan.run().await),
                     FreshEffect::Name { thread_id, name } => {
                         let result = tokio::time::timeout(
@@ -338,13 +367,16 @@ impl App {
                     self.commit_parked_session_draft(tui, server).await?;
                 }
             }
-            (FreshStage::Defaults { mut input, cwd }, FreshOutcome::Defaults(result)) => {
+            (FreshStage::Defaults { mut input }, FreshOutcome::Defaults(result)) => {
                 if !matching {
                     self.recover_fresh_input(&mut input);
                     return Ok(());
                 }
                 let result = match result {
-                    Ok(defaults) => self.project_new_session_config(server, cwd, defaults).await,
+                    Ok(projected) => {
+                        let (defaults, config, settings) = *projected;
+                        self.project_new_session_config(server, (config, settings), defaults)
+                    }
                     Err(error) => Err(color_eyre::eyre::eyre!(error)),
                 };
                 let (mut config, settings) = match result {

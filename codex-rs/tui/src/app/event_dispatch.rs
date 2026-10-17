@@ -140,6 +140,13 @@ impl App {
             event => (event, None),
         };
         match event {
+            AppEvent::DirectoryChangeAdmitted { thread_id, cwd, generation } => {
+                if self.navigation_generation() == generation
+                    && self.current_displayed_thread_id() == Some(thread_id)
+                {
+                    self.change_working_directory(tui, app_server, cwd).await;
+                }
+            }
             AppEvent::VerifiedServerNotification(verified) => {
                 self.finish_verified_server_notification(app_server, *verified).await;
             }

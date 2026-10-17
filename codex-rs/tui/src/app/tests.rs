@@ -2980,22 +2980,22 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
             );
         }
 
-        app.agent_navigation
-            .record_sub_agent_activity(SubAgentActivityDisplay {
-                thread_id: child_thread_ids[0],
-                agent_path: "/root/child-0".to_string(),
-                is_running_hint: true,
-            });
         app.thread_event_channels.remove(&child_thread_ids[1]);
-        let backfill = app.backfill_loaded_subagent_threads(&mut app_server).await;
-        assert!(backfill);
+        let mut tui = crate::tui::test_support::make_test_tui()?;
+        app.resume_target_session(&mut tui, &mut app_server, SessionTarget {
+            path: None,
+            thread_id: root_thread_id,
+            cwd: Some(app.config.cwd.to_path_buf()),
+            history_mode: None,
+        }).await?;
+        app.settle_navigation(&mut tui, &mut app_server).await?;
         assert!(child_thread_ids.iter().all(|id| app.agent_navigation.get(id).is_some()));
         assert_eq!(
             app.agent_navigation.get(&child_thread_ids[0]),
             Some(&AgentPickerThreadEntry {
                 agent_nickname: Some("child-0".to_string()),
                 agent_role: Some("worker".to_string()),
-                agent_path: Some("/root/child-0".to_string()),
+                agent_path: None,
                 is_running: false,
                 is_closed: false,
             })
@@ -3003,7 +3003,6 @@ fn selected_and_resumed_threads_use_server_capability_for_v1_and_v2_children() -
         assert!(!app.agent_navigation.is_parent_owned(child_thread_ids[0]));
         assert!(app.agent_navigation.is_parent_owned(child_thread_ids[1]));
 
-        let mut tui = crate::tui::test_support::make_test_tui()?;
         app.select_agent_thread_and_settle(&mut tui, &mut app_server, child_thread_ids[0])
             .await?;
         while app_event_rx.try_recv().is_ok() {}

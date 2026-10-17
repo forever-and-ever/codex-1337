@@ -130,30 +130,18 @@ impl App {
         } else {
             thread.cwd.to_path_buf()
         };
-        let (config, settings) = match self
-            .rebuild_config_for_resume_or_fallback(&current_cwd, config_cwd)
-            .await
-        {
-            Ok(config) => config,
-            Err(error) => {
-                self.add_agents_overview_error(format!("Failed to load task settings: {error}"));
-                return Ok(AppRunControl::Continue);
-            }
-        };
-        let context = Box::new(ResumeContext {
+        let plan = self.capture_config_rebuild(config_cwd, Some(&current_cwd));
+        self.start_resume_config_rebuild(
+            server,
+            operation,
             target,
-            settings,
-            purpose: ResumePurpose::from_source(
-                ResumeSource::Overview {
-                    thread: Box::new(thread.clone()),
-                    after,
-                },
-                &config,
-            ),
-            config,
-        });
-        self.begin_resume_trust(server, operation, context, Some(&thread))
-            .await
+            ResumeSource::Overview {
+                thread: Box::new(thread),
+                after,
+            },
+            plan,
+        );
+        Ok(AppRunControl::Continue)
     }
 
     pub(super) async fn retain_overview_origin(&mut self) {

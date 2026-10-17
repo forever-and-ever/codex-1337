@@ -83,16 +83,9 @@ use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
-use codex_app_server_protocol::ThreadLoadedListParams;
-use codex_app_server_protocol::ThreadLoadedListResponse;
-use codex_app_server_protocol::ThreadNameMode;
 
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
-use codex_app_server_protocol::ThreadSetNameParams;
-use codex_app_server_protocol::ThreadSetNameResponse;
-use codex_app_server_protocol::ThreadSettingsUpdateParams;
-use codex_app_server_protocol::ThreadSettingsUpdateResponse;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
@@ -102,8 +95,6 @@ use codex_app_server_protocol::ThreadUnarchiveResponse;
 use codex_app_server_protocol::ThreadUnsubscribeParams;
 use codex_app_server_protocol::ThreadUnsubscribeResponse;
 use codex_app_server_protocol::Turn;
-use codex_app_server_protocol::TurnInterruptParams;
-use codex_app_server_protocol::TurnInterruptResponse;
 #[cfg(test)]
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
@@ -769,62 +760,6 @@ impl AppServerSession {
 
     #[expect(
         clippy::too_many_arguments,
-        reason = "fork position and named permissions are independent"
-    )]
-    pub(crate) async fn fork_thread_at(
-        &mut self,
-        local_settings: &LocalSettings,
-        config: Config,
-        thread_id: ThreadId,
-        last_turn_id: Option<String>,
-        before_turn_id: Option<String>,
-        goal_continuation: ForkGoalContinuation,
-        selected_profile: Option<&PermissionProfileSelection>,
-        name: Option<ForkName>,
-    ) -> Result<AppServerStartedThread> {
-        let prepared = self
-            .prepare_fork_thread(
-                session_preparation::RequestPolicy::Unbounded,
-                local_settings,
-                config,
-                thread_id,
-                last_turn_id,
-                before_turn_id,
-                goal_continuation,
-                selected_profile,
-                name,
-            )
-            .run()
-            .await;
-        self.apply_session_observations(prepared.observations);
-        prepared.result
-    }
-
-    pub(crate) async fn fork_side_thread(
-        &mut self,
-        local_settings: &LocalSettings,
-        config: Config,
-        thread_id: ThreadId,
-        selected_profile: Option<&PermissionProfileSelection>,
-    ) -> Result<AppServerStartedThread> {
-        self.fork_thread_at_with_presentation(
-            local_settings,
-            config,
-            thread_id,
-            /*last_turn_id*/ None,
-            /*before_turn_id*/ None,
-            ForkGoalContinuation::StartIfIdle,
-            ForkPresentation::SideConversation,
-            selected_profile,
-            ForkPermissionMode::InheritSaved,
-            ForkConfigSource::Session,
-            /*name*/ None,
-        )
-        .await
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
         reason = "keep local preferences separate while the legacy Config parameter is still required"
     )]
     async fn fork_thread_at_with_presentation(
@@ -894,22 +829,6 @@ impl AppServerSession {
         session_config
     }
 
-    /// Lists thread ids that the app server currently holds in memory.
-    ///
-    /// Used by `App::backfill_loaded_subagent_threads` to discover subagent threads that were
-    /// spawned before the TUI connected. The caller then fetches full metadata per thread via
-    /// `thread_read` and walks the spawn tree.
-    pub(crate) async fn thread_loaded_list(
-        &mut self,
-        params: ThreadLoadedListParams,
-    ) -> Result<ThreadLoadedListResponse> {
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadLoadedList { request_id, params })
-            .await
-            .wrap_err("failed to list loaded threads from app server")
-    }
-
     pub(crate) async fn thread_read(
         &mut self,
         thread_id: ThreadId,
@@ -969,61 +888,6 @@ impl AppServerSession {
         Ok(response.thread)
     }
 
-    pub(crate) async fn thread_settings_update(
-        &mut self,
-        params: ThreadSettingsUpdateParams,
-    ) -> Result<bool> {
-        if !self.thread_settings_update_supported {
-            return Ok(false);
-        }
-        let request_id = self.next_request_id();
-        match self
-            .client
-            .request_typed::<ThreadSettingsUpdateResponse>(ClientRequest::ThreadSettingsUpdate {
-                request_id,
-                params,
-            })
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(TypedRequestError::Server { source, .. })
-                if is_thread_settings_update_unsupported(&source) =>
-            {
-                // Older remote app servers can reject this experimental method as
-                // method-not-found, experimental-capability-gated, or an unknown
-                // request variant. Treat those as a session-level capability
-                // downgrade so local TUI setting changes stay best-effort instead
-                // of showing an error every time the user changes model, effort, or mode.
-                self.thread_settings_update_supported = false;
-                Ok(false)
-            }
-            Err(err) => Err(err).wrap_err("thread/settings/update failed in TUI"),
-        }
-    }
-
-    pub(crate) async fn thread_inject_items(
-        &mut self,
-        thread_id: ThreadId,
-        items: Vec<ResponseItem>,
-    ) -> Result<ThreadInjectItemsResponse> {
-        let items = items
-            .into_iter()
-            .map(serde_json::to_value)
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .wrap_err("failed to encode thread/inject_items payload")?;
-        let request_id = self.next_request_id();
-        self.client
-            .request_typed(ClientRequest::ThreadInjectItems {
-                request_id,
-                params: ThreadInjectItemsParams {
-                    thread_id: thread_id.to_string(),
-                    items,
-                },
-            })
-            .await
-            .wrap_err("thread/inject_items failed during TUI side conversation setup")
-    }
-
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn turn_start(
@@ -1066,66 +930,6 @@ impl AppServerSession {
             .request_typed(ClientRequest::TurnStart { request_id, params })
             .await
             .wrap_err("turn/start failed in TUI")
-    }
-
-    pub(crate) async fn turn_interrupt(
-        &mut self,
-        thread_id: ThreadId,
-        turn_id: String,
-    ) -> std::result::Result<(), TypedRequestError> {
-        let request_id = self.next_request_id();
-        let _: TurnInterruptResponse = self
-            .client
-            .request_typed(ClientRequest::TurnInterrupt {
-                request_id,
-                params: TurnInterruptParams {
-                    thread_id: thread_id.to_string(),
-                    turn_id,
-                },
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub(crate) async fn startup_interrupt(
-        &mut self,
-        thread_id: ThreadId,
-    ) -> std::result::Result<(), TypedRequestError> {
-        self.turn_interrupt(thread_id, String::new()).await
-    }
-
-    pub(crate) async fn thread_set_name(
-        &mut self,
-        thread_id: ThreadId,
-        name: String,
-    ) -> Result<String> {
-        self.thread_allocate_name(ThreadSetNameParams {
-            thread_id: thread_id.to_string(),
-            name,
-            naming_mode: Some(ThreadNameMode::Explicit),
-            conflict_thread_ids: None,
-        })
-        .await
-    }
-
-    pub(crate) async fn thread_allocate_name(
-        &mut self,
-        params: ThreadSetNameParams,
-    ) -> Result<String> {
-        let generated = params.naming_mode == Some(ThreadNameMode::Generated);
-        let requested_name = params.name.clone();
-        let request_id = self.next_request_id();
-        let response: ThreadSetNameResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadSetName { request_id, params })
-            .await?;
-        match response.thread_name {
-            Some(name) => Ok(name),
-            None if generated => Err(color_eyre::eyre::eyre!(
-                "The connected server does not return allocated names. Upgrade the server to enable automatic titles."
-            )),
-            None => Ok(requested_name),
-        }
     }
 
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {

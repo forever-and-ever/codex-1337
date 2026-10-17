@@ -244,6 +244,7 @@ mod model_defaults;
 mod local_ui_requests;
 pub(crate) use turn_submissions::ui_requests::UiReply;
 mod new_session;
+mod navigation_config;
 mod turn_tips;
 mod ui_reload;
 pub(crate) use new_session::has_launch_setting;
