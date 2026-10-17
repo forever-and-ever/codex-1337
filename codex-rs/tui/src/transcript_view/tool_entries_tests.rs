@@ -1238,7 +1238,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             &cwd,
             [
                 wait_item(CollabAgentToolCallStatus::InProgress, None),
-                wait_item(status.clone(), None),
+                wait_item(status, None),
             ],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,

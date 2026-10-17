@@ -518,24 +518,6 @@ pub(crate) struct AgentMarkdownCell {
     spoken_artifacts: bool,
 }
 
-impl Clone for AgentMarkdownCell {
-    fn clone(&self) -> Self {
-        Self {
-            timestamp: self.timestamp,
-            item_id: self.item_id.clone(),
-            markdown_source: self.markdown_source.clone(),
-            copy_source: self.copy_source.clone(),
-            cwd: self.cwd.clone(),
-            inline_visualization_context: self.inline_visualization_context.clone(),
-            rendered_lines: self
-                .rendered_lines
-                .as_ref()
-                .map(|_| MarkdownRenderCache::default()),
-            spoken_artifacts: self.spoken_artifacts,
-        }
-    }
-}
-
 impl AgentMarkdownCell {
     pub(crate) fn with_copy_source(mut self, source: Option<String>) -> Self {
         self.copy_source = source;
@@ -861,3 +843,5 @@ pub(crate) fn split_reasoning_summary_parts(reasoning_parts: &[String]) -> (Stri
 
     (leading_empty_part_header.unwrap_or_default(), content)
 }
+
+mod snapshot;

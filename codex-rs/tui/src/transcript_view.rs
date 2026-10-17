@@ -111,16 +111,13 @@ pub(crate) struct TranscriptView {
     turn_tip_key: Option<EntryKey>,
     cache: LayoutCache,
     presented: Option<presented::Presented>,
-    presented_cells: Option<Arc<[Arc<dyn HistoryCell>]>>,
-    inflight_cells: Option<(u16, Arc<[Arc<dyn HistoryCell>]>)>,
+    presented_cells: Option<presented::Cells>,
+    inflight_cells: Option<(u16, presented::Cells)>,
     deferred_scroll: Option<presented::Scroll>,
     deferred_focus: Option<crossterm::event::KeyEvent>,
     layout_source: presented::LayoutSource,
-    deferred_folds: std::collections::VecDeque<(
-        Arc<[Arc<dyn HistoryCell>]>,
-        usize,
-        crate::keymap::ListAction,
-    )>,
+    deferred_folds:
+        std::collections::VecDeque<(presented::Cells, usize, crate::keymap::ListAction)>,
     live_preparation: live_preparation::LivePreparation,
     live: Option<Arc<TextLayout>>,
     live_separated: Option<Arc<TextLayout>>,
@@ -228,18 +225,7 @@ impl TranscriptView {
         let resized = self.area.width != area.width || self.area.bottom() != area.bottom();
         self.prepare_width(area.width);
         self.area = area;
-        // Synchronous rendering presents at once; background presentation commits in presented.rs.
-        if self.cache.frames.is_none()
-            && self.presented_cells.as_ref().is_none_or(|presented| {
-                presented.len() != cells.len()
-                    || presented
-                        .iter()
-                        .zip(cells)
-                        .any(|(previous, current)| !Arc::ptr_eq(previous, current))
-            })
-        {
-            self.presented_cells = Some(Arc::from(cells));
-        }
+        self.retain_synchronous_cells(cells);
         self.normalize_selection(cells);
         if resized {
             self.reveal_copy_context(cells);
@@ -335,13 +321,12 @@ impl TranscriptView {
             });
             row += 1;
         }
-        if !self.cache.waiting
-            && !self.live_preparation.is_pending()
+        if self.selection_prepared()
             && let Some(pointer) = self
-                .selection
-                .as_ref()
-                .filter(|selection| selection.dragging && selection.moved)
-                .and_then(|selection| selection.pointer)
+            .selection
+            .as_ref()
+            .filter(|selection| selection.dragging && selection.moved)
+            .and_then(|selection| selection.pointer)
         {
             self.extend_selection(pointer.x, pointer.y);
         }

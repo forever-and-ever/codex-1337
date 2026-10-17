@@ -329,10 +329,7 @@ fn restore_common(
     keyboard_restore: KeyboardRestore,
     handoff: TerminalHandoff,
 ) -> Result<()> {
-    let mut first_error = output::restoration_barrier().err();
-    if let Err(error) = ensure_virtual_terminal_processing() {
-        first_error.get_or_insert(error);
-    }
+    let mut first_error = output::begin_restoration(ensure_virtual_terminal_processing);
 
     let screen_result = match handoff {
         TerminalHandoff::KeepScreen if ALTERNATE_SCREEN.is_active() => {
@@ -368,9 +365,7 @@ fn restore_common(
     ) {
         first_error.get_or_insert(err);
     }
-    if let Err(error) = output::restoration_barrier() {
-        first_error.get_or_insert(error);
-    }
+    output::finish_restoration(&mut first_error);
     match first_error {
         Some(err) => Err(err),
         None => Ok(()),
@@ -610,8 +605,7 @@ fn probe_windows_default_colors() {
 fn set_panic_hook() {
     let hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
-        output::prepare_panic();
-        let _ = output::barrier();
+        output::panic_barrier();
         let _ = restore_after_exit(); // ignore any errors as we are already failing
         hook(panic_info);
     }));

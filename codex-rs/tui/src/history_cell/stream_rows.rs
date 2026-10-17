@@ -123,7 +123,7 @@ impl HistoryCell for StreamRowsCell {
         self.with_projection(|body| body.transcript_hyperlink_lines(width))
     }
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        self.with_projection(|body| body.raw_lines())
+        self.with_projection(HistoryCell::raw_lines)
     }
     fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
         match &self.content {

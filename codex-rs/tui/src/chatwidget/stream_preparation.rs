@@ -1,6 +1,7 @@
 //! Live UI streams transfer source ownership to the shared preparation pool.
 
 use super::*;
+use crate::markdown_render::ListSpacing;
 use crate::streaming::completion::PreparedStream;
 
 impl ChatWidget {
@@ -48,6 +49,10 @@ impl ChatWidget {
             && item_id.is_some()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission requires an origin thread and item identity."
+    )]
     pub(super) fn enable_answer_preparation(
         &self,
         controller: StreamController,
@@ -78,6 +83,10 @@ impl ChatWidget {
             }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission requires an origin and item; nonempty prepared rows always emit a plan cell."
+    )]
     pub(super) fn enable_plan_preparation(
         &self,
         controller: PlanStreamController,
@@ -114,6 +123,10 @@ impl ChatWidget {
             }))
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An admitted background stream retains its origin thread and item identity until consumed."
+    )]
     pub(super) fn prepare_answer_stream(
         &mut self,
         controller: StreamController,
@@ -165,6 +178,10 @@ impl ChatWidget {
         None
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "An admitted background stream retains its origin thread and item identity until consumed."
+    )]
     pub(super) fn prepare_plan_stream(
         &mut self,
         controller: PlanStreamController,
@@ -199,5 +216,94 @@ impl ChatWidget {
         });
         assert!(result.is_ok(), "background stream was checked");
         None
+    }
+}
+
+impl ChatWidget {
+    pub(super) fn take_prepared_plan_stream(
+        &mut self,
+        completed: Option<String>,
+    ) -> Option<PlanStreamController> {
+        let controller = self.plan_stream_controller.take()?;
+        self.prepare_plan_stream(controller, completed)
+    }
+
+    pub(super) fn take_prepared_answer_stream(
+        &mut self,
+        completed: Option<&str>,
+    ) -> Option<StreamController> {
+        let controller = self.stream_controller.take()?;
+        self.prepare_answer_stream(controller, completed)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission was checked against this controller item identity."
+    )]
+    pub(super) fn start_prepared_plan_stream(&mut self) {
+        let mut controller = PlanStreamController::new(
+            self.current_stream_width(/*reserved_cols*/ 4),
+            &self.config.cwd,
+            self.history_render_mode(),
+        )
+        .with_list_spacing(if self.local_settings.transcript_mode.is_owned() {
+            ListSpacing::Compact
+        } else {
+            ListSpacing::AfterMultiline
+        });
+        controller.item_id = self.transcript.streaming_plan_item.clone();
+        if self.background_stream_enabled(&controller.item_id) {
+            self.add_to_history(history_cell::StreamAnchorCell {
+                item_id: controller.item_id.clone().expect("stream item"),
+            });
+            controller = self.enable_plan_preparation(controller);
+        }
+        self.plan_stream_controller = Some(controller);
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "Background admission was checked against this controller item identity."
+    )]
+    pub(super) fn prepare_new_answer_stream(
+        &mut self,
+        mut controller: StreamController,
+    ) -> StreamController {
+        if self.background_stream_enabled(&controller.item_id) {
+            self.add_to_history(history_cell::StreamAnchorCell {
+                item_id: controller.item_id.clone().expect("stream item"),
+            });
+            controller = self.enable_answer_preparation(controller);
+        }
+        controller
+    }
+
+    pub(super) fn finish_prepared_answer(
+        &mut self,
+        item: &AgentMessageItem,
+        message: &str,
+        from_replay: bool,
+    ) -> bool {
+        if !from_replay && self.background_stream_enabled(&Some(item.id.clone())) {
+            if self.stream_controller.is_none() {
+                self.handle_streaming_delta(String::new());
+            }
+            if self
+                .stream_controller
+                .as_ref()
+                .is_some_and(StreamController::is_background)
+            {
+                self.finalize_completed_assistant_message(Some(message));
+                self.transcript.agent_timestamp = None;
+                self.status_state.pending_status_indicator_restore = item.questions.is_some()
+                    || match item.phase {
+                        Some(MessagePhase::FinalAnswer) => self.input_queue.pending_steer.is_some(),
+                        Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) | None => true,
+                    };
+                self.maybe_restore_status_indicator_after_stream_idle();
+                return true;
+            }
+        }
+        false
     }
 }

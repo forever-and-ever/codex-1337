@@ -1,6 +1,7 @@
 //! Pinned revisions and search results use the same off-thread width preparation.
 
 use super::*;
+use std::sync::Weak;
 
 pub(super) struct Rewrap {
     source: Weak<TextLayout>,

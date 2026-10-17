@@ -119,6 +119,10 @@ thread_local! {
     static IS_WRITER: Cell<bool> = const { Cell::new(false) };
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 fn active() -> Option<Arc<Shared>> {
     ACTIVE
         .lock()
@@ -139,10 +143,7 @@ fn check(state: &State) -> io::Result<()> {
 }
 
 fn enqueue(shared: &Shared, job: Job) -> io::Result<u64> {
-    let mut state = shared
-        .state
-        .lock()
-        .expect("terminal output mailbox poisoned");
+    let mut state = shared.state.lock().map_err(mailbox_poisoned)?;
     check(&state)?;
     state.sequence += 1;
     let sequence = state.sequence;
@@ -157,6 +158,10 @@ struct Owner {
 }
 
 impl Drop for Owner {
+    #[expect(
+        clippy::expect_used,
+        reason = "The owned terminal writer must complete without panicking before its owner is released."
+    )]
     fn drop(&mut self) {
         let _ = enqueue(&self.shared, Job::Stop);
         if let Some(worker) = self.worker.take() {
@@ -185,7 +190,9 @@ impl Output {
         #[cfg(not(test))]
         {
             let shared = Arc::new(Shared::default());
-            let mut registry = ACTIVE.lock().expect("terminal output registry poisoned");
+            let mut registry = ACTIVE
+                .lock()
+                .map_err(|_| io::Error::other("terminal output registry poisoned"))?;
             assert!(
                 registry.as_ref().and_then(Weak::upgrade).is_none(),
                 "terminal output already owned"
@@ -218,21 +225,13 @@ impl Output {
             return io::stdout().sync_update(|_| f(self));
         };
         drain_completions();
-        check(
-            &shared
-                .state
-                .lock()
-                .expect("terminal output mailbox poisoned"),
-        )?;
+        check(&*shared.state.lock().map_err(mailbox_poisoned)?)?;
         // A nested update shares its outer frame's atomic handoff.
-        if CAPTURE.with_borrow(|capture| capture.is_some()) {
+        if CAPTURE.with_borrow(Option::is_some) {
             return Ok(f(self));
         }
         let id = {
-            let mut state = shared
-                .state
-                .lock()
-                .expect("terminal output mailbox poisoned");
+            let mut state = shared.state.lock().map_err(mailbox_poisoned)?;
             state.next_frame += 1;
             FrameId(state.next_frame)
         };
@@ -265,10 +264,7 @@ impl Write for Output {
             return Ok(bytes.len());
         }
         if let Some(shared) = active() {
-            let mut state = shared
-                .state
-                .lock()
-                .expect("terminal output mailbox poisoned");
+            let mut state = shared.state.lock().map_err(mailbox_poisoned)?;
             check(&state)?;
             if let Some(Envelope {
                 job: Job::Control(pending),
@@ -296,12 +292,7 @@ impl Write for Output {
             return io::stdout().flush();
         }
         if let Some(shared) = active() {
-            check(
-                &shared
-                    .state
-                    .lock()
-                    .expect("terminal output mailbox poisoned"),
-            )
+            check(&*shared.state.lock().map_err(mailbox_poisoned)?)
         } else {
             io::stdout().flush()
         }
@@ -330,6 +321,10 @@ impl CaptureGuard {
         self.publish()
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The exclusively locked queue still contains the pending frame selected immediately above."
+    )]
     fn publish(&self) -> io::Result<()> {
         let Some(Capture { id, mut operations }) = CAPTURE.with_borrow_mut(Option::take) else {
             return Ok(());
@@ -349,11 +344,7 @@ impl CaptureGuard {
             return Ok(());
         }
         let mut stamp = ui_latency::frame_submitted();
-        let mut state = self
-            .shared
-            .state
-            .lock()
-            .expect("terminal output mailbox poisoned");
+        let mut state = self.shared.state.lock().map_err(mailbox_poisoned)?;
         check(&state)?;
         state.submitted = Some(id);
         // Controls keep their place; only an explicit flush fence protects an older frame.
@@ -461,6 +452,10 @@ pub(crate) fn query(fallback: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 pub(crate) fn bind(requester: FrameRequester) {
     if let Some(shared) = active() {
         let mut state = shared
@@ -474,6 +469,10 @@ pub(crate) fn bind(requester: FrameRequester) {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 pub(crate) fn completion_events() -> Option<tokio::sync::broadcast::Receiver<()>> {
     let shared = active()?;
     let state = shared
@@ -484,12 +483,11 @@ pub(crate) fn completion_events() -> Option<tokio::sync::broadcast::Receiver<()>
 }
 
 pub(crate) async fn next_completion(receiver: &mut Option<tokio::sync::broadcast::Receiver<()>>) {
-    match receiver {
-        Some(channel) => match channel.recv().await {
+    if let Some(channel) = receiver {
+        match channel.recv().await {
             Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => return,
             Err(tokio::sync::broadcast::error::RecvError::Closed) => *receiver = None,
-        },
-        None => {}
+        }
     }
     std::future::pending::<()>().await;
 }
@@ -507,6 +505,10 @@ pub(crate) fn submitted_frame() -> Option<FrameId> {
         .submitted
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 pub(crate) fn presented_frame() -> Option<FrameId> {
     active()?
         .state
@@ -515,6 +517,10 @@ pub(crate) fn presented_frame() -> Option<FrameId> {
         .presented
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 pub(crate) fn paint_ready() -> bool {
     drain_completions();
     let Some(shared) = active() else { return true };
@@ -528,6 +534,10 @@ pub(crate) fn paint_ready() -> bool {
     ready
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 fn drain_completions() {
     let Some(shared) = active() else { return };
     let completed = std::mem::take(
@@ -542,6 +552,10 @@ fn drain_completions() {
     }
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "A prior panic while mutating output ordering state makes the shared mailbox unusable."
+)]
 pub(crate) fn completion_received() {
     drain_completions();
     let Some(shared) = active() else { return };
@@ -598,16 +612,10 @@ pub(crate) fn barrier() -> io::Result<()> {
     }
     .publish()?;
     let target = enqueue(&shared, Job::Barrier)?;
-    let mut state = shared
-        .state
-        .lock()
-        .expect("terminal output mailbox poisoned");
+    let mut state = shared.state.lock().map_err(mailbox_poisoned)?;
     while state.completed_sequence < target {
         check(&state)?;
-        state = shared
-            .changed
-            .wait(state)
-            .expect("terminal output mailbox poisoned");
+        state = shared.changed.wait(state).map_err(mailbox_poisoned)?;
     }
     check(&state)?;
     drop(state);
@@ -659,6 +667,10 @@ fn write_snapshot<B: Backend<Error = io::Error> + Write>(
     ])
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "The writer owns an unpoisoned mailbox and removes work only after its queue is nonempty."
+)]
 fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal: Terminal<B>) {
     IS_WRITER.set(true);
     loop {
@@ -751,6 +763,71 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
             break;
         }
     }
+}
+
+impl<B> super::Terminal<B>
+where
+    B: ratatui::backend::Backend<Error = io::Error> + Write,
+{
+    pub(super) fn capture_output_frame(
+        &mut self,
+        screen_size: Size,
+        cursor_position: Option<Position>,
+        cursor_style: SetCursorStyle,
+    ) -> bool {
+        let invalidate = self.output_invalidation.take();
+        if capture_frame(
+            self.current_buffer(),
+            invalidate,
+            screen_size,
+            cursor_position,
+            cursor_style,
+        ) {
+            self.last_known_cursor_pos = cursor_position.unwrap_or(self.last_known_cursor_pos);
+            self.hidden_cursor = cursor_position.is_none();
+            self.swap_buffers();
+            return true;
+        }
+
+        false
+    }
+
+    pub(super) fn output_cursor_position(&mut self) -> io::Result<Position> {
+        if is_active() {
+            return crate::terminal_probe::cursor_position(crate::terminal_probe::DEFAULT_TIMEOUT)?
+                .ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::TimedOut, "terminal cursor query timed out")
+                });
+        }
+        self.backend.get_cursor_position()
+    }
+}
+
+pub(super) fn is_painted_column(x: u16, left: u16, last_nonblank: u16) -> bool {
+    x - left <= last_nonblank
+}
+
+pub(crate) fn begin_restoration(restore: impl FnOnce() -> io::Result<()>) -> Option<io::Error> {
+    let mut first_error = restoration_barrier().err();
+    if let Err(error) = restore() {
+        first_error.get_or_insert(error);
+    }
+    first_error
+}
+
+pub(crate) fn finish_restoration(first_error: &mut Option<io::Error>) {
+    if let Err(error) = restoration_barrier() {
+        first_error.get_or_insert(error);
+    }
+}
+
+pub(crate) fn panic_barrier() {
+    prepare_panic();
+    let _ = barrier();
+}
+
+fn mailbox_poisoned<T>(_: std::sync::PoisonError<T>) -> io::Error {
+    io::Error::other("terminal output mailbox poisoned")
 }
 
 #[cfg(test)]
