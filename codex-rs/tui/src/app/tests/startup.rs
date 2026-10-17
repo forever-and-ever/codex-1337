@@ -383,6 +383,8 @@ fn startup_waiting_gate_not_applied_for_resume_or_fork_session_selection() {
 
 #[tokio::test]
 async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> Result<()> {
+    use crate::app::startup::ui_schedule;
+
     for user_input in [false, true] {
         let (mut app, mut app_event_rx, mut op_rx) = make_test_app_with_channels().await;
         app.startup_protected_input_boundary = true;
@@ -402,6 +404,9 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         assert!(pending_startup_draft.is_none());
         assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
         assert!(!app.has_queued_startup_protected_request());
+        assert!(ui_schedule::input_admitted(
+            &app, false, false, false, false
+        ));
 
         let request = if user_input {
             request_user_input_request(thread_id, "turn-1", "call-1")
@@ -423,6 +428,11 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
             "a queued protected startup request must be handled before terminal input"
         );
         assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
+        let mut schedule = ui_schedule::UiSchedule::new();
+        schedule.receive(Some(TuiEvent::Paste("held paste".into())));
+        let admitted = ui_schedule::input_admitted(&app, false, false, false, false);
+        assert!(!admitted);
+        assert!(schedule.next_input(admitted).is_none());
         while let Ok(op) = op_rx.try_recv() {
             assert!(
                 !matches!(
@@ -447,6 +457,33 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         );
         assert!(app.startup_protected_input_boundary);
         assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
+        let tui = crate::tui::test_support::make_test_tui()?;
+        app.request_modal_frame(tui.frame_requester());
+        assert!(app.startup_pending_protected_request);
+        assert!(!ui_schedule::input_admitted(
+            &app, false, false, false, false
+        ));
+        // A queued paste was typed before the approval appeared. It cannot answer that view.
+        schedule.quarantine();
+        assert!(schedule.next_input(true).is_none());
+
+        schedule.receive(Some(TuiEvent::Paste("typeahead".into())));
+        schedule.receive(Some(TuiEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))));
+        schedule.receive(Some(TuiEvent::Paste("after Ctrl+C".into())));
+        assert!(schedule.next_input(false).is_none());
+        assert!(
+            matches!(schedule.next_input(true), Some(TuiEvent::Paste(text)) if text == "after Ctrl+C"),
+            "Ctrl+C clears earlier typing without discarding later input"
+        );
+        schedule.receive(Some(TuiEvent::Paste("survives suspend".into())));
+        schedule.receive(Some(TuiEvent::Resume));
+        assert!(matches!(schedule.next_input(false), Some(TuiEvent::Resume)));
+        assert!(
+            matches!(schedule.next_input(true), Some(TuiEvent::Paste(text)) if text == "survives suspend")
+        );
 
         app.startup_protected_input_boundary = false;
         app.enqueue_primary_thread_request(exec_approval_request(

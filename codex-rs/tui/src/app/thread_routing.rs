@@ -2102,12 +2102,7 @@ impl App {
             && self.chat_widget.has_active_modal()
             && self.startup_protected_input_boundary
         {
-            self.chat_widget.pre_draw_tick();
-            self.render_chat_widget_frame(tui, tui.terminal.last_known_screen_size)?;
-            if tui.presentation_mode() != crate::tui::PresentationMode::Frozen {
-                tui.discard_pending_input_before_interactive_screen()?;
-                self.startup_pending_protected_request = false;
-            }
+            self.request_modal_frame(tui.frame_requester());
         }
         if self.backtrack_render_pending {
             tui.frame_requester().schedule_frame();

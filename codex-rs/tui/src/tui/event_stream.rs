@@ -27,7 +27,6 @@ use std::task::Context;
 use std::task::Poll;
 
 use crossterm::event::Event;
-use crossterm::event::MouseEventKind;
 use tokio::sync::broadcast;
 use tokio::sync::watch;
 use tokio_stream::Stream;
@@ -38,7 +37,7 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use super::TuiEvent;
 use super::size_monitor::SizeMonitor;
 
-const MAX_WHEEL_EVENTS_BETWEEN_DRAWS: u8 = 32;
+const MAX_INPUT_EVENTS_BETWEEN_DRAWS: u8 = 32;
 
 /// Result type produced by an event source.
 pub type EventResult = std::io::Result<Event>;
@@ -180,7 +179,7 @@ pub struct TuiEventStream<S: EventSource + Default + Unpin = CrosstermEventSourc
     resume_stream: WatchStream<()>,
     terminal_focused: Arc<AtomicBool>,
     poll_draw_first: bool,
-    wheel_events_since_draw: u8,
+    input_events_since_draw: u8,
     #[cfg(unix)]
     suspend_context: crate::tui::job_control::SuspendContext,
     #[cfg(unix)]
@@ -202,7 +201,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
             resume_stream,
             terminal_focused,
             poll_draw_first: false,
-            wheel_events_since_draw: 0,
+            input_events_since_draw: 0,
             #[cfg(unix)]
             suspend_context,
             #[cfg(unix)]
@@ -263,19 +262,21 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
 
     /// Poll the draw broadcast stream for the next draw event. Draw events are used to trigger a redraw of the TUI.
     pub fn poll_draw_event(&mut self, cx: &mut Context<'_>) -> Poll<Option<TuiEvent>> {
-        match Pin::new(&mut self.draw_stream).poll_next(cx) {
-            Poll::Ready(Some(Ok(())))
-            | Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
-                let event = self
-                    .broker
-                    .size_monitor
-                    .as_ref()
-                    .and_then(SizeMonitor::take_resize)
-                    .map_or(TuiEvent::Draw, TuiEvent::Resize);
-                Poll::Ready(Some(event))
+        loop {
+            match Pin::new(&mut self.draw_stream).poll_next(cx) {
+                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => continue,
+                Poll::Ready(Some(Ok(()))) => {
+                    let event = self
+                        .broker
+                        .size_monitor
+                        .as_ref()
+                        .and_then(SizeMonitor::take_resize)
+                        .map_or(TuiEvent::Draw, TuiEvent::Resize);
+                    return Poll::Ready(Some(event));
+                }
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
             }
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
         }
     }
 
@@ -340,20 +341,13 @@ impl<S: EventSource + Default + Unpin> Stream for TuiEventStream<S> {
             }
         };
         if let Poll::Ready(Some(event)) = &next {
-            // Drain ready wheel input before repainting, preserving FIFO order and bounding
-            // repaint starvation. Empty input falls through to the draw stream immediately.
-            if matches!(event, TuiEvent::Mouse(mouse) if matches!(mouse.kind,
-                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                    | MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight))
-            {
-                self.wheel_events_since_draw =
-                    self.wheel_events_since_draw.saturating_add(/*rhs*/ 1);
-                self.poll_draw_first =
-                    self.wheel_events_since_draw >= MAX_WHEEL_EVENTS_BETWEEN_DRAWS;
+            // Nested screens also receive finite input batches, never a full paint per key.
+            self.input_events_since_draw = if matches!(event, TuiEvent::Draw) {
+                0
             } else {
-                self.wheel_events_since_draw = 0;
-                self.poll_draw_first = !matches!(event, TuiEvent::Draw);
-            }
+                self.input_events_since_draw.saturating_add(1)
+            };
+            self.poll_draw_first = self.input_events_since_draw >= MAX_INPUT_EVENTS_BETWEEN_DRAWS;
         }
         next
     }
@@ -368,6 +362,7 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use crossterm::event::MouseEvent;
     use crossterm::event::MouseEventKind;
+    use futures::FutureExt;
     use pretty_assertions::assert_eq;
     use std::task::Context;
     use std::task::Poll;
@@ -548,8 +543,12 @@ mod tests {
         let expected_key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
         let _ = draw_tx.send(());
         handle.send(Ok(Event::Key(expected_key)));
+        let trailing_key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE);
+        handle.send(Ok(Event::Key(trailing_key)));
 
         let first = stream.next().await.unwrap();
+        assert!(matches!(&first, TuiEvent::Key(key) if *key == expected_key));
+        assert!(matches!(stream.next().await, Some(TuiEvent::Key(key)) if key == trailing_key));
         let second = stream.next().await.unwrap();
 
         let mut saw_draw = false;
@@ -576,7 +575,7 @@ mod tests {
             tokio::task::yield_now().await;
             let (broker, handle, draw_tx, draw_rx, terminal_focused) = setup();
             let mut stream = make_stream(broker, draw_rx, terminal_focused);
-            let wheels = (0..u16::from(MAX_WHEEL_EVENTS_BETWEEN_DRAWS) * 2 + 3)
+            let wheels = (0..u16::from(MAX_INPUT_EVENTS_BETWEEN_DRAWS) * 2 + 3)
                 .map(|column| MouseEvent {
                     kind: [
                         MouseEventKind::ScrollUp,
@@ -597,7 +596,7 @@ mod tests {
             }
             draw_tx.send(()).unwrap();
             for (index, expected) in wheels.into_iter().enumerate() {
-                if index != 0 && index % usize::from(MAX_WHEEL_EVENTS_BETWEEN_DRAWS) == 0 {
+                if index != 0 && index % usize::from(MAX_INPUT_EVENTS_BETWEEN_DRAWS) == 0 {
                     assert!(matches!(stream.next().await, Some(TuiEvent::Draw)));
                     draw_tx.send(()).unwrap();
                 }
@@ -629,6 +628,10 @@ mod tests {
 
         let first = stream.next().await;
         assert!(matches!(first, Some(TuiEvent::Draw)));
+        assert!(
+            stream.next().now_or_never().is_none(),
+            "a lag is one demand, not two draws"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
