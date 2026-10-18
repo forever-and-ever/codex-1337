@@ -79,7 +79,7 @@ pub(crate) fn compact_tool_summary(purpose: &str) -> String {
                 match summary.rfind(' ') {
                     Some(boundary) => summary.truncate(boundary),
                     None => {
-                        summary.pop();
+                        let _ = summary.pop();
                     }
                 }
             }

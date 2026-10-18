@@ -58,7 +58,7 @@ impl SqliteQueueStore {
         let mut tx = self.pool.begin().await?;
         // The write reserves SQLite's writer before reading the existing identity.
         // AUTOINCREMENT preserves acceptance order even after payload/tombstone cleanup.
-        sqlx::query(
+        let _ = sqlx::query(
             "INSERT INTO agent_mail
              (id, root_thread_id, sender_thread_id, recipient_thread_id, origin,
               payload_sha256, state, payload_json)
@@ -160,7 +160,7 @@ impl SqliteQueueStore {
     pub async fn cancel_agent_mail_recipients(&self, recipients: &[ThreadId]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         for recipient in recipients {
-            sqlx::query(
+            let _ = sqlx::query(
                 "UPDATE agent_mail SET state = 'cancelled', payload_json = NULL
                  WHERE recipient_thread_id = ? AND state = 'pending'",
             )
@@ -175,7 +175,7 @@ impl SqliteQueueStore {
     pub(super) async fn delete_thread_agent_mail(&self, thread: ThreadId) -> Result<()> {
         // Explicit conversation deletion cancels its pending obligations and identities.
         // Retirement keeps originating histories, so it only cancels recipient obligations.
-        sqlx::query(
+        let _ = sqlx::query(
             "DELETE FROM agent_mail
              WHERE sender_thread_id = ? OR recipient_thread_id = ? OR root_thread_id = ?",
         )

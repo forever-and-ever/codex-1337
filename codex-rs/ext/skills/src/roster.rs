@@ -174,7 +174,7 @@ impl Digest {
             body,
             SKILLS_INSTRUCTIONS_CLOSE_TAG,
         ] {
-            hasher.update(part.as_bytes());
+            let _ = hasher.update(part.as_bytes());
         }
         Self(hasher.finalize().to_hex().to_string())
     }
@@ -289,13 +289,13 @@ impl Section {
                 body,
             )
         };
-        let (_, full) = self.render(PreviousWorldStateSection::Absent);
+        let (_, full) = self.render(&PreviousWorldStateSection::Absent);
         let current = match full {
             Post::Nothing => None,
             Post::News(body) | Post::Reminder(body) => Some(fragment(body)),
         };
         WorldStateSectionContribution::new(self.voice.id, move |previous| {
-            let (shown, post) = self.render(previous);
+            let (shown, post) = self.render(&previous);
             let body = match post {
                 Post::Nothing => None,
                 Post::News(body) => {
@@ -309,11 +309,11 @@ impl Section {
         .with_instruction_amendments(current)
     }
 
-    fn render(&self, previous: PreviousWorldStateSection<'_>) -> (Shown, Post) {
+    fn render(&self, previous: &PreviousWorldStateSection<'_>) -> (Shown, Post) {
         let prior = match previous {
             PreviousWorldStateSection::Absent => Prior::Absent,
             PreviousWorldStateSection::Unknown => Prior::Unknown,
-            PreviousWorldStateSection::Known(previous) => match Snapshot::deserialize(previous) {
+            PreviousWorldStateSection::Known(previous) => match Snapshot::deserialize(*previous) {
                 Ok(snapshot)
                     if snapshot.include_instructions == self.include_instructions
                         && snapshot.enabled == self.enabled =>

@@ -125,7 +125,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         codex_core::test_support::construct_model_info_offline("mock-model", &config);
     parent_model.multi_agent_version = Some(MultiAgentVersion::V2);
     let mut child_model = parent_model.clone();
-    child_model.slug = "farm-model".to_owned();
+    "farm-model".clone_into(&mut child_model.slug);
     child_model.supported_reasoning_levels =
         vec![codex_protocol::openai_models::ReasoningEffortPreset {
             effort: codex_protocol::openai_models::ReasoningEffort::High,
@@ -161,15 +161,16 @@ async fn farm_spawns_and_replays_without_steering_parent(
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
     if !matches!(parent_state, ParentState::Pristine) {
-        app.start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: parent.id.clone(),
-            input: vec![UserInput::Text {
-                text: BACKGROUND.to_owned(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
+        let _ = app
+            .start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: parent.id.clone(),
+                input: vec![UserInput::Text {
+                    text: BACKGROUND.to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            })
+            .await?;
     }
     let active_turn = if matches!(parent_state, ParentState::Active) {
         // A gated parent inference must not become a spawn lock.
@@ -446,7 +447,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
 
         // A real allocation precedes this failed pointer write. NULL is not proof
         // of nonallocation, and removing the fault cannot authorize another child.
-        sqlx::query("CREATE TRIGGER farm_pointer_fault BEFORE UPDATE OF child_thread_id ON thread_farm_requests WHEN NEW.agent_path = '/root/farm_pointer_fault' BEGIN SELECT RAISE(ABORT, 'farm pointer fault'); END").execute(&pool).await?;
+        let _ = sqlx::query("CREATE TRIGGER farm_pointer_fault BEFORE UPDATE OF child_thread_id ON thread_farm_requests WHEN NEW.agent_path = '/root/farm_pointer_fault' BEGIN SELECT RAISE(ABORT, 'farm pointer fault'); END").execute(&pool).await?;
         next.request_id = uuid::Uuid::new_v4().to_string();
         next.task_name = Some("farm_pointer_fault".into());
         let fault = app
@@ -455,7 +456,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         let fault = app
             .read_stream_until_error_message(RequestId::Integer(fault))
             .await?;
-        sqlx::query("DROP TRIGGER farm_pointer_fault")
+        let _ = sqlx::query("DROP TRIGGER farm_pointer_fault")
             .execute(&pool)
             .await?;
         assert_eq!(
@@ -483,7 +484,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         pool.close().await;
     }
     // A farm must leave the loaded parent able to accept work and resume.
-    timeout(
+    let _ = timeout(
         Duration::from_secs(/*secs*/ 10),
         app.start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: parent.id.clone(),
@@ -517,7 +518,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         })
         .await?;
     assert_eq!(retired.thread_ids, vec![receipt.child_thread_id.clone()]);
-    app.shutdown_gracefully().await?;
+    let _ = app.shutdown_gracefully().await?;
     app = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
@@ -564,7 +565,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
             json!({"farmOutcome": "identityMismatch", "requestId": mismatch.request_id, "childThreadId": receipt.child_thread_id, "agentPath": receipt.agent_path})
         )
     );
-    app.shutdown_gracefully().await?;
+    let _ = app.shutdown_gracefully().await?;
     server.shutdown().await;
     Ok(())
 }
@@ -573,6 +574,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
 #[test_case::test_case(ThreadFarmMode::Automatic; "automatic_global_fallback_is_fresh")]
 #[tokio::test]
 async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode) -> Result<()> {
+    const BACKGROUND: &str = "Private inherited parent context must not cross providers.";
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).enable_feature(Feature::MultiAgentV2)
@@ -584,8 +586,12 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
         codex_core::test_support::construct_model_info_offline("mock-model", &config);
     parent_model.multi_agent_version = Some(MultiAgentVersion::V2);
     let mut child_model = parent_model.clone();
-    child_model.slug = "farm-model".to_owned();
-    write_models_cache_with_models(home.path(), vec![parent_model]).await?;
+    "farm-model".clone_into(&mut child_model.slug);
+    Box::pin(write_models_cache_with_models(
+        home.path(),
+        vec![parent_model],
+    ))
+    .await?;
     Mock::given(method("GET"))
         .and(path("/other-models"))
         .respond_with(
@@ -598,16 +604,16 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
         .build_initialized()
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
-    const BACKGROUND: &str = "Private inherited parent context must not cross providers.";
-    app.start_turn_and_wait_for_completion(TurnStartParams {
-        thread_id: parent.id.clone(),
-        input: vec![UserInput::Text {
-            text: BACKGROUND.to_owned(),
-            text_elements: Vec::new(),
-        }],
-        ..Default::default()
-    })
-    .await?;
+    let _ = app
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: parent.id.clone(),
+            input: vec![UserInput::Text {
+                text: BACKGROUND.to_owned(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
     let mut params = ThreadFarmParams {
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -749,7 +755,8 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
                 |request| request.body_json::<Value>().expect("response request")["model"]
                     == "farm-model"
             )
-            .count(), usize::from(mode == ThreadFarmMode::Automatic)
+            .count(),
+        usize::from(mode == ThreadFarmMode::Automatic)
     );
     // Simulate interruption immediately after durable claim. Reconciliation is not
     // permission to start a fresh child, even if current executor validation differs.
@@ -770,13 +777,14 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
             core_input
         ))?)
     );
-    db.claim_farm_request(
-        ThreadId::from_string(&parent.id)?,
-        &params.request_id,
-        &payload_sha256,
-        "/root/interrupted_farm",
-    )
-    .await?;
+    let _ = db
+        .claim_farm_request(
+            ThreadId::from_string(&parent.id)?,
+            &params.request_id,
+            &payload_sha256,
+            "/root/interrupted_farm",
+        )
+        .await?;
     db.close().await;
     // Replay must use the original requested mode before looking at today's
     // routing defaults; an uncertain claim is never permission to resend.
@@ -784,7 +792,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
     let mut changed: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
     changed["wrangler"]["farm"]["model"] = toml_edit::value("unavailable-after-claim");
     std::fs::write(config_path, changed.to_string())?;
-    app.shutdown_gracefully().await?;
+    let _ = app.shutdown_gracefully().await?;
     let mut restarted = TestAppServer::builder()
         .with_codex_home(home.path())
         .build_initialized()
@@ -822,8 +830,9 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
                 |request| request.body_json::<Value>().expect("response request")["model"]
                     == "farm-model"
             )
-            .count(), usize::from(mode == ThreadFarmMode::Automatic)
+            .count(),
+        usize::from(mode == ThreadFarmMode::Automatic)
     );
-    restarted.shutdown_gracefully().await?;
+    let _ = restarted.shutdown_gracefully().await?;
     Ok(())
 }

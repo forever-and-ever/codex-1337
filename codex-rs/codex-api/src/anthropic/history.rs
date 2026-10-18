@@ -163,7 +163,7 @@ impl<'a> Encoder<'a> {
                         "Anthropic assistant interrupts incomplete tool result batch",
                     ));
                 }
-                self.calls.insert(id.clone());
+                let _ = self.calls.insert(id.clone());
                 self.pending.push((id, kind));
                 self.append(ASSISTANT, vec![tool_use]);
             }
@@ -191,7 +191,7 @@ impl<'a> Encoder<'a> {
                     (ResultKind::Function, CallKind::Function)
                     | (ResultKind::Custom, CallKind::Custom) => {}
                 }
-                self.pending.remove(index);
+                let _ = self.pending.remove(index);
                 self.append(USER, vec![result]);
                 if self.pending.is_empty() {
                     for Message { role, content } in std::mem::take(&mut self.deferred) {

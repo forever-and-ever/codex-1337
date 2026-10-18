@@ -29,7 +29,7 @@ impl AnthropicModelCapabilities {
             ReasoningEffort::Medium => 8192,
             ReasoningEffort::High => 24576,
             ReasoningEffort::XHigh => 32768,
-            ReasoningEffort::Max => 128000,
+            ReasoningEffort::Max => 128_000,
             ReasoningEffort::None
             | ReasoningEffort::Ultra
             | ReasoningEffort::Persistent

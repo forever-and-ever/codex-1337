@@ -69,7 +69,7 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
         category: JiraCategory::Feature,
         slug: "fast-input".into(),
     };
-    store.execute(JiraAction::Save {
+    let _ = store.execute(JiraAction::Save {
         previous: Some(original.revision.clone()),
         key: renamed.clone(),
         body: body.into(),
@@ -102,13 +102,13 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
     );
     assert_eq!(store.read(&renamed)?.body, "external edit");
     let current = store.read(&renamed)?;
-    store.execute(JiraAction::Delete {
+    let _ = store.execute(JiraAction::Delete {
         revision: current.revision,
     })?;
     assert!(path.parent().is_some_and(Path::exists));
     assert!(!path.exists());
     // Category-wide uniqueness includes root/epic entries, but not other categories.
-    store.execute(JiraAction::Save {
+    let _ = store.execute(JiraAction::Save {
         previous: None,
         key: key.clone(),
         body: body.into(),
@@ -118,7 +118,7 @@ fn mutations_preserve_epic_and_bytes_block_collisions_and_stale_revisions() -> R
         category: JiraCategory::Feature,
         slug: key.slug,
     };
-    store.execute(JiraAction::Save {
+    let _ = store.execute(JiraAction::Save {
         previous: None,
         key: other,
         body: body.into(),
@@ -160,7 +160,7 @@ fn recursive_namespaces_keep_paged_keys_and_mutations_in_their_project() -> Resu
         })
         .collect();
     for key in &keys {
-        scope
+        let _ = scope
             .store(key.project.as_ref())?
             .execute(JiraAction::Save {
                 previous: None,
@@ -174,7 +174,7 @@ fn recursive_namespaces_keep_paged_keys_and_mutations_in_their_project() -> Resu
     fs::create_dir_all(sibling.join(".git")).map_err(|error| error.to_string())?;
     let sibling_scope = scope::Scope::open(&sibling, &state, /*expected*/ None)?;
     let sibling_store = sibling_scope.store(/*project*/ None)?;
-    sibling_store.execute(JiraAction::Save {
+    let _ = sibling_store.execute(JiraAction::Save {
         previous: None,
         key: keys[0].clone(),
         body: "unrelated".into(),
@@ -198,7 +198,7 @@ fn recursive_namespaces_keep_paged_keys_and_mutations_in_their_project() -> Resu
     let mut cursor = None;
     loop {
         let JiraResult::List { data, next_cursor } =
-            scope.list(cursor, Some(2), /*recursive*/ true)?
+            scope.list(cursor.as_deref(), Some(2), /*recursive*/ true)?
         else {
             unreachable!()
         };
@@ -220,7 +220,7 @@ fn recursive_namespaces_keep_paged_keys_and_mutations_in_their_project() -> Resu
             })
             .is_err()
     );
-    child_store.execute(JiraAction::Delete {
+    let _ = child_store.execute(JiraAction::Delete {
         revision: old.revision,
     })?;
     assert_eq!(default.read(&keys[0])?.body, "original");

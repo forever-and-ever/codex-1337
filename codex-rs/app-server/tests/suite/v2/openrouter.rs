@@ -40,7 +40,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 async fn openrouter_saved_model_routes_spend_and_key_quota() -> Result<()> {
     let home = TempDir::new()?;
     let server = MockServer::start().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
         let key_path = home.path().join("openrouter.key");
         std::fs::write(&key_path, "sk-or-test\n")?;
         let config_path = home.path().join("config.toml");
@@ -86,7 +86,7 @@ request_max_retries = 0
             .and(path("/model/moonshotai/kimi-test"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {
                 "id": "moonshotai/kimi-test", "name": "MoonshotAI: Kimi Test",
-                "context_length": 262144, "architecture": {"input_modalities": ["text"]},
+                "context_length": 262_144, "architecture": {"input_modalities": ["text"]},
                 "supported_parameters": ["tools"], "pricing": {"prompt": "0.0000003", "completion": "0.000002"}
             }})))
             .mount(&server)
@@ -95,7 +95,7 @@ request_max_retries = 0
             .and(path("/models/moonshotai/kimi-test/endpoints"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [{
                 "tag": "moonshotai/turbo", "provider_name": "Moonshot AI",
-                "quantization": "fp8", "service_tier": "priority", "context_length": 131072,
+                "quantization": "fp8", "service_tier": "priority", "context_length": 131_072,
                 "pricing": {"prompt": "0.0000003", "completion": "0.000002"},
                 "uptime_last_30m": 99.5, "status": 0
             }]}})))
@@ -295,5 +295,5 @@ request_max_retries = 0
         assert_eq!(completed.turn.status, TurnStatus::Failed);
         assert_eq!(wire.requests().len(), 4);
         Ok(())
-    }).await
+    })).await
 }

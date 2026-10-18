@@ -80,6 +80,7 @@ impl ThreadCoordinationService {
         &self,
         name: &str,
     ) -> Result<(String, String), JSONRPCErrorError> {
+        const MAX_CANDIDATES: usize = 50;
         let name = name.trim();
         if name.is_empty() {
             return Err(invalid_request("threadName must not be empty"));
@@ -116,7 +117,6 @@ impl ThreadCoordinationService {
                 let mut error =
                     invalid_request("threadName is ambiguous; use a candidate threadId instead");
                 // Historical collisions can exceed the model output budget.
-                const MAX_CANDIDATES: usize = 50;
                 error.data = Some(json!({
                     "type": "threadNameAmbiguous",
                     "candidateThreadIds": owners.iter().take(MAX_CANDIDATES)
@@ -178,7 +178,7 @@ impl ThreadCoordinationService {
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
         // Do not allocate lifecycle state for arbitrary model-supplied UUIDs.
         if self.threads.thread_manager.get_thread(id).await.is_err() {
-            self.read(thread_id).await?;
+            let _ = self.read(thread_id).await?;
         }
         let lease = self.threads.thread_state_manager.lease_runtime(id).await;
         let deadline =
@@ -203,20 +203,19 @@ impl ThreadCoordinationService {
         {
             return Ok((thread, lease));
         }
-        self.read(thread_id).await?;
-        self.threads
-            .thread_resume(
-                ThreadResumeTarget::Server(ServerResume::Coordination),
-                ThreadResumeParams {
-                    thread_id: thread_id.to_owned(),
-                    exclude_turns: true,
-                    ..Default::default()
-                },
-                /*app_server_client_name*/ None,
-                /*app_server_client_version*/ None,
-                ClientMcpExtensions::default(),
-            )
-            .await?;
+        let _ = self.read(thread_id).await?;
+        let _ = Box::pin(self.threads.thread_resume(
+            ThreadResumeTarget::Server(ServerResume::Coordination),
+            ThreadResumeParams {
+                thread_id: thread_id.to_owned(),
+                exclude_turns: true,
+                ..Default::default()
+            },
+            /*app_server_client_name*/ None,
+            /*app_server_client_version*/ None,
+            ClientMcpExtensions::default(),
+        ))
+        .await?;
         self.threads
             .thread_manager
             .get_thread(id)
@@ -231,7 +230,7 @@ impl ThreadCoordinationService {
         output: TurnToolOutput,
         model: Option<String>,
     ) -> Result<(), JSONRPCErrorError> {
-        let (thread, _lease) = self.load(thread_id).await?;
+        let (thread, _lease) = Box::pin(self.load(thread_id)).await?;
         // Server ownership does not grant direct input to parent-owned V2 agents.
         ensure_direct_input_allowed(thread.as_ref()).await?;
         self.threads
@@ -346,7 +345,7 @@ impl ThreadCoordinationService {
         }
         // Inherit sampling settings, not whichever renderer happens to be attached.
         if let Some(effort) = snapshot.reasoning_effort {
-            params.config.get_or_insert_default().insert(
+            let _ = params.config.get_or_insert_default().insert(
                 "model_reasoning_effort".into(),
                 serde_json::to_value(effort).map_err(|err| internal_error(err.to_string()))?,
             );
@@ -359,7 +358,8 @@ impl ThreadCoordinationService {
             })
             .transpose()?;
         if let Some(name) = &name {
-            self.threads
+            let _ = self
+                .threads
                 .release_confirmed_name_owners(
                     name, /*claimant*/ None, /*confirmed_ids*/ None,
                 )

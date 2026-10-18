@@ -1,4 +1,6 @@
 //! One lossless documentation projection of the executable schemas.
+use std::fmt::Write as _;
+
 use std::collections::BTreeSet;
 
 use serde_json::Value;
@@ -9,10 +11,11 @@ use crate::normalize_code_mode_identifier;
 
 pub(crate) fn render(tool: &ToolDefinition) -> String {
     let mut text = tool.description.trim().to_owned();
-    text.push_str(&format!(
+    let _ = write!(
+        text,
         "\n\nCall: await tools.{}(",
         normalize_code_mode_identifier(&tool.name)
-    ));
+    );
     text.push_str(match tool.kind {
         CodeModeToolKind::Function => "args).",
         CodeModeToolKind::Freeform => "input). Input is a raw string, not a JSON envelope.",
@@ -100,8 +103,8 @@ impl Renderer {
         };
         let mut line = format!("{pad}{name}: {kind}");
         if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
-            line.push_str(&format!("; see {reference}"));
-            self.references.insert(reference.to_owned());
+            let _ = write!(line, "; see {reference}");
+            let _ = self.references.insert(reference.to_owned());
         }
         if let Some(description) = object.get("description").and_then(Value::as_str) {
             line.push_str(". ");
@@ -147,7 +150,7 @@ impl Renderer {
                     "maxProperties" => "maximum fields",
                     _ => key,
                 };
-                line.push_str(&format!("; {meaning}: {constraint}"));
+                let _ = write!(line, "; {meaning}: {constraint}");
             }
         }
         self.lines.push(line);

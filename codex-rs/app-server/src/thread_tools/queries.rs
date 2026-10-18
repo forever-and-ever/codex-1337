@@ -135,7 +135,10 @@ pub(super) async fn wait(
         if same_thread(&target.thread_id, caller) {
             return Err("wait_threads cannot wait on the calling task".to_string());
         }
-        let canonical_id = ThreadId::from_string(&target.thread_id).map_or_else(|_| target.thread_id.clone(), |thread_id| thread_id.to_string());
+        let canonical_id = ThreadId::from_string(&target.thread_id).map_or_else(
+            |_| target.thread_id.clone(),
+            |thread_id| thread_id.to_string(),
+        );
         if !unique_targets.insert(canonical_id) {
             return Err("wait_threads received duplicate target tasks".to_string());
         }
@@ -161,7 +164,9 @@ pub(super) async fn wait(
             let now = Instant::now();
             let target_deadline = now
                 + snapshot_deadline.saturating_duration_since(now)
-                    / (arguments.targets.len() - index) as u32;
+                    / u32::try_from(arguments.targets.len() - index).unwrap_or_else(|_| {
+                        unreachable!("thread wait target count is bounded by request validation")
+                    });
             match tokio::time::timeout_at(target_deadline, service.read(&target.thread_id)).await {
                 Ok(Ok(thread)) => {
                     let turns_page = tokio::time::timeout_at(
@@ -238,7 +243,7 @@ pub(super) async fn wait(
                                     "turnId": turn.id
                                 }))
                             }
-                            (ThreadStatus::Idle, Some(_)) => None,
+
                             (ThreadStatus::Idle, None)
                             | (ThreadStatus::NotLoaded | ThreadStatus::SystemError, _) => {
                                 Some(json!({
@@ -254,7 +259,9 @@ pub(super) async fn wait(
                                     "reason": "actionableStatus"
                                 }))
                             }
-                            (ThreadStatus::Active { .. }, _) => None,
+                            (ThreadStatus::Idle, Some(_)) | (ThreadStatus::Active { .. }, _) => {
+                                None
+                            }
                         };
                     }
                     let latest_assistant_message = latest_turn.as_ref().and_then(|turn| {

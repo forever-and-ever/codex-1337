@@ -53,7 +53,7 @@ fn defer_recipient(
 ) {
     match retries.entry((root, recipient)) {
         Entry::Vacant(entry) => {
-            entry.insert(RecoveryBackoff::new(&error));
+            let _ = entry.insert(RecoveryBackoff::new(&error));
             tracing::error!(%root, %recipient, %error, "accepted-mail recovery is blocked; inbox retained; unload/reload or resume recipient after repairing storage; retrying with capped backoff");
         }
         Entry::Occupied(mut entry) => {
@@ -78,14 +78,11 @@ impl ThreadRequestProcessor {
             let mut recipients = HashMap::new();
             let mut inbox_retry: Option<RecoveryBackoff> = None;
             loop {
-                tick.tick().await;
+                let _ = tick.tick().await;
                 if inbox_retry.as_ref().is_some_and(RecoveryBackoff::waiting) {
                     continue;
                 }
-                match processor
-                    .recover_accepted_mail(&admission, &mut recipients)
-                    .await
-                {
+                match Box::pin(processor.recover_accepted_mail(&admission, &mut recipients)).await {
                     Ok(()) => inbox_retry = None,
                     Err(error) => {
                         if let Some(retry) = &mut inbox_retry {
@@ -124,38 +121,37 @@ impl ThreadRequestProcessor {
             {
                 continue;
             }
-            let _permit = match admission.admit() {
-                Ok(permit) => permit,
-                Err(_) => return Ok(()),
+            let Ok(_permit) = admission.admit() else {
+                return Ok(());
             };
             if self.thread_manager.get_thread(root).await.is_err()
-                && let Err(error) = self
-                    .thread_resume(
-                        ThreadResumeTarget::Server(ServerResume::DaemonRecovery(None)),
-                        ThreadResumeParams {
-                            thread_id: root.to_string(),
-                            exclude_turns: true,
-                            ..Default::default()
-                        },
-                        None,
-                        None,
-                        ClientMcpExtensions::default(),
-                    )
-                    .await
+                && let Err(error) = Box::pin(self.thread_resume(
+                    ThreadResumeTarget::Server(ServerResume::DaemonRecovery(None)),
+                    ThreadResumeParams {
+                        thread_id: root.to_string(),
+                        exclude_turns: true,
+                        ..Default::default()
+                    },
+                    None,
+                    None,
+                    ClientMcpExtensions::default(),
+                ))
+                .await
             {
                 defer_recipient(retries, root, recipient, &error.message);
                 continue;
             }
             // Core restores descendants through the recorded family and current authority.
             // Neither an absent client nor a successful resume supplies approval.
-            if let Err(error) = self
-                .thread_manager
-                .recover_accepted_agent_mail(root, recipient)
-                .await
+            if let Err(error) = Box::pin(
+                self.thread_manager
+                    .recover_accepted_agent_mail(root, recipient),
+            )
+            .await
             {
                 defer_recipient(retries, root, recipient, error);
             } else {
-                retries.remove(&(root, recipient));
+                let _ = retries.remove(&(root, recipient));
             }
         }
         Ok(())

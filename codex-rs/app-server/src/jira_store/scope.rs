@@ -1,7 +1,18 @@
 //! Browse stored namespaces, not checkout trees. A selector remains bound to the
 //! server cwd; neither a stale view nor a forged key may move a mutation outside it.
 
-use super::*;
+use super::BTreeMap;
+use super::Digest;
+use super::JiraKey;
+use super::JiraResult;
+use super::LegacyAppPathString;
+use super::Path;
+use super::PathBuf;
+use super::Sha256;
+use super::Store;
+use super::checked;
+use super::fs;
+use super::project_identity;
 use std::path::Component;
 
 pub(super) struct Scope {
@@ -15,7 +26,7 @@ impl Scope {
     pub(super) fn open(cwd: &Path, state: &Path, expected: Option<&str>) -> Result<Self, String> {
         let default_project = project_identity(cwd).map_err(|error| error.to_string())?;
         let cwd = cwd.canonicalize().map_err(|error| error.to_string())?;
-        cwd.to_str().ok_or("Browsing directory is not UTF-8")?;
+        let _ = cwd.to_str().ok_or("Browsing directory is not UTF-8")?;
         let mut hash = Sha256::new();
         // Old servers ignore project selectors. Reject their cached scope rather
         // than accidentally applying a descendant edit to the default project.
@@ -74,7 +85,7 @@ impl Scope {
 
     pub(super) fn list(
         &self,
-        cursor: Option<String>,
+        cursor: Option<&str>,
         limit: Option<u32>,
         recursive: bool,
     ) -> Result<JiraResult, String> {
@@ -119,7 +130,7 @@ impl Scope {
                         .ok_or("Stored project namespace is not UTF-8")?,
                 );
                 for (name, location) in self.store(Some(&project))?.catalog()? {
-                    all.insert(format!("{}\0{name}", project.as_str()), location.key);
+                    let _ = all.insert(format!("{}\0{name}", project.as_str()), location.key);
                 }
             }
         }
@@ -128,7 +139,7 @@ impl Scope {
             .clamp(/*min*/ 1, /*max*/ 100) as usize;
         let mut remaining = all
             .into_iter()
-            .filter(|(key, _)| cursor.as_ref().is_none_or(|cursor| key > cursor));
+            .filter(|(key, _)| cursor.is_none_or(|cursor| key.as_str() > cursor));
         let page: Vec<_> = remaining.by_ref().take(limit).collect();
         let next_cursor = if remaining.next().is_some() {
             page.last().map(|(key, _)| key.clone())

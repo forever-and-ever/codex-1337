@@ -78,7 +78,9 @@ impl ServerNotification {
             Self::FileChangeOutputDelta(item) => Some(item.thread_id.as_str()),
             Self::FileChangePatchUpdated(item) => Some(item.thread_id.as_str()),
             Self::McpToolCallProgress(item) => Some(item.thread_id.as_str()),
-            Self::CodeModeOwned(_) => panic!("nested Code Mode ownership is forbidden"),
+            Self::CodeModeOwned(_) => {
+                unreachable!("ownership ingress rejects nested Code Mode owners")
+            }
             _ => None,
         };
         if thread_id.is_some_and(|thread_id| thread_id == owner.thread_id.to_string()) {

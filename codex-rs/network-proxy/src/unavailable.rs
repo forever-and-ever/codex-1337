@@ -27,6 +27,12 @@ pub enum ManagedProxyRouting {
 #[derive(Clone, Default)]
 pub struct NetworkProxyBuilder;
 
+#[expect(
+    clippy::needless_pass_by_value,
+    clippy::unused_async,
+    clippy::unused_async_trait_impl,
+    reason = "The inert builder preserves the removed upstream proxy API, including owned arguments and futures"
+)]
 impl NetworkProxyBuilder {
     pub fn state(self, state: Arc<NetworkProxyState>) -> Self {
         let _ = state;
@@ -84,6 +90,12 @@ pub struct PreparedManagedNetwork {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NetworkProxy {}
 
+#[expect(
+    clippy::needless_pass_by_value,
+    clippy::unused_async,
+    clippy::unused_async_trait_impl,
+    reason = "The uninhabited stub preserves upstream proxy call signatures"
+)]
 #[allow(
     unused_variables,
     reason = "Compatibility signatures for an uninhabited runtime"
@@ -194,6 +206,11 @@ impl NetworkProxy {
 #[derive(Debug)]
 pub enum NetworkProxyHandle {}
 
+#[expect(
+    clippy::unused_async,
+    clippy::unused_async_trait_impl,
+    reason = "The uninhabited stub preserves the upstream async shutdown signature"
+)]
 impl NetworkProxyHandle {
     pub async fn shutdown(self) -> Result<()> {
         match self {}

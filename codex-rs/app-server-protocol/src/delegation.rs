@@ -1,5 +1,7 @@
 //! Sender attribution is captured at send time and retained with the tool output.
 
+use std::fmt::Write as _;
+
 pub const MAX_SENDER_NAME_CHARS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,18 +52,20 @@ impl DelegatedMessage {
             escape(&self.source_thread_id)
         );
         if let Some(name) = &self.source_thread_name {
-            output.push_str(&format!(
+            let _ = write!(
+                output,
                 "\n  <source_thread_name>{}</source_thread_name>",
                 escape(name)
-            ));
+            );
         }
         if let Some(sent_at) = self.sent_at {
-            output.push_str(&format!("\n  <sent_at>{sent_at}</sent_at>"));
+            let _ = write!(output, "\n  <sent_at>{sent_at}</sent_at>");
         }
-        output.push_str(&format!(
+        let _ = write!(
+            output,
             "\n  <input>{}</input>\n</codex_delegation>",
             escape(&self.input)
-        ));
+        );
         output
     }
 

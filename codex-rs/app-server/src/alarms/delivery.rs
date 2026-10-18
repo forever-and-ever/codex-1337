@@ -27,7 +27,7 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         .and_then(std::sync::Weak::upgrade)
         .ok_or_else(|| "alarm host is unavailable".to_string())?;
     // Cold restoration takes the thread-list permit, which archive holds before mutation.
-    let loaded = service.load(&alarm.thread_id.to_string()).await;
+    let loaded = Box::pin(service.load(&alarm.thread_id.to_string())).await;
     let _mutation = alarms.0.mutate().await;
     let store = alarms.store()?;
     let saved = store
@@ -39,8 +39,8 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         .find(|saved| saved.id == alarm.id);
     let Some(saved) = saved else {
         let mut registry = alarms.0.registry();
-        registry.alarms.remove(&alarm.id);
-        registry.watches.remove(&alarm.id);
+        let _ = registry.alarms.remove(&alarm.id);
+        let _ = registry.watches.remove(&alarm.id);
         drop(registry);
         alarms.publish(alarm.thread_id, None);
         return Ok(Delivery::Done);
@@ -66,8 +66,8 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         .await
         .map_err(|err| err.to_string())?;
     let mut registry = alarms.0.registry();
-    registry.alarms.remove(&alarm.id);
-    registry.watches.remove(&alarm.id);
+    let _ = registry.alarms.remove(&alarm.id);
+    let _ = registry.watches.remove(&alarm.id);
     drop(registry);
     alarms.publish(alarm.thread_id, None);
     Ok(Delivery::Done)
@@ -212,7 +212,7 @@ pub(super) async fn run(alarms: Alarms, mut sounds: mpsc::UnboundedReceiver<(i64
                 (id, Pending::Sound(cause), result)
             }
             Next::Deliver(alarm) => {
-                let result = match deliver(&alarms, &alarm).await {
+                let result = match Box::pin(deliver(&alarms, &alarm)).await {
                     Ok(Delivery::Draining) => return,
                     Ok(Delivery::Done) => Ok(()),
                     Err(error) => Err(error),
@@ -236,11 +236,11 @@ pub(super) async fn run(alarms: Alarms, mut sounds: mpsc::UnboundedReceiver<(i64
         };
         match result {
             Ok(()) => {
-                retries.remove(&id);
+                let _ = retries.remove(&id);
             }
             Err(error) => {
                 tracing::warn!(alarm = id, %error, "alarm scheduler will retry");
-                retries.insert(
+                let _ = retries.insert(
                     id,
                     Retry {
                         at: Instant::now() + Duration::from_secs(60),

@@ -1,5 +1,9 @@
 //! Retirement affects agent-family membership, not the saved conversation.
-use super::*;
+use super::JSONRPCErrorError;
+use super::Result;
+use super::ThreadId;
+use super::ThreadRequestProcessor;
+use super::invalid_request;
 use codex_app_server_protocol::ThreadRetireParams;
 use codex_app_server_protocol::ThreadRetireResponse;
 

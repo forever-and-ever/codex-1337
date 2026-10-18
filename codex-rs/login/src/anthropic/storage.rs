@@ -36,9 +36,10 @@ struct RecordWire {
 
 impl AccountStore {
     #[must_use]
-    pub fn new(codex_home: PathBuf) -> Self {
+    pub fn new(mut codex_home: PathBuf) -> Self {
+        codex_home.extend(["anthropic", "accounts"]);
         Self {
-            directory: codex_home.join("anthropic").join("accounts"),
+            directory: codex_home,
         }
     }
 
@@ -89,11 +90,11 @@ impl AccountStore {
     pub(super) async fn lock(&self, id: &AccountId) -> io::Result<File> {
         std::fs::create_dir_all(&self.directory)?;
         let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
+        let _ = options.read(true).write(true).create(true).truncate(false);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
+            let _ = options.mode(0o600);
         }
         let file = options.open(self.directory.join(format!("{id}.lock")))?;
         tokio::time::timeout(Duration::from_secs(/*secs*/ 60), async {
@@ -116,7 +117,7 @@ impl AccountStore {
 
     pub(super) fn load(&self, id: &AccountId) -> io::Result<Record> {
         let mut bytes = Vec::new();
-        File::open(self.directory.join(format!("{id}.json")))?
+        let _ = File::open(self.directory.join(format!("{id}.json")))?
             .take((MAX_ACCOUNT_BYTES + 1) as u64)
             .read_to_end(&mut bytes)?;
         if bytes.len() > MAX_ACCOUNT_BYTES {
@@ -151,7 +152,8 @@ impl AccountStore {
         file.write_all(&bytes)?;
         file.flush()?;
         file.as_file().sync_all()?;
-        file.persist(self.directory.join(format!("{id}.json")))
+        let _ = file
+            .persist(self.directory.join(format!("{id}.json")))
             .map_err(|error| error.error)?;
         #[cfg(unix)]
         File::open(&self.directory)?.sync_all()?;

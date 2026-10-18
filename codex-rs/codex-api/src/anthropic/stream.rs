@@ -33,7 +33,7 @@ pub(super) fn spawn_stream(
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
     let (tx, rx_event) = mpsc::channel(32);
-    tokio::spawn(async move {
+    drop(tokio::spawn(async move {
         let result = timeout(
             MAX_RESPONSE_DURATION,
             process(response, &request, &tx, idle_timeout, telemetry),
@@ -47,7 +47,7 @@ pub(super) fn spawn_stream(
         if let Err(error) = result {
             let _ = timeout(idle_timeout, tx.send(Err(error))).await;
         }
-    });
+    }));
     ResponseStream {
         rx_event,
         upstream_request_id,

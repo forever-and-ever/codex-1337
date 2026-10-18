@@ -82,10 +82,14 @@ fn native<'s>(
     v8::FunctionTemplate::new(scope, callback).get_function(scope)
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "V8 requires this callback ABI, whose argument handle only exposes borrowed access"
+)]
 fn print_callback(
     scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments,
-    _retval: v8::ReturnValue<v8::Value>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _retval: v8::ReturnValue<'_, v8::Value>,
 ) {
     let settled = args.get(0);
     let Ok(calls) = v8::Local::<v8::Array>::try_from(settled) else {
@@ -140,10 +144,14 @@ fn settle(
     }
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "V8 requires this callback ABI, whose argument handle only exposes borrowed access"
+)]
 fn hold_callback(
     scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments,
-    mut retval: v8::ReturnValue<v8::Value>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut retval: v8::ReturnValue<'_, v8::Value>,
 ) {
     let call = args.get(0);
     let Ok(promise) = v8::Local::<v8::Promise>::try_from(call) else {

@@ -53,11 +53,11 @@ impl SandboxCommand {
         )
         .await?;
         #[cfg(target_os = "linux")]
-        codex_cli::run_command_under_landlock(
+        Box::pin(codex_cli::run_command_under_landlock(
             sandbox_cli,
             arg0_paths.codex_linux_sandbox_exe,
             loader_overrides,
-        )
+        ))
         .await?;
         #[cfg(target_os = "windows")]
         codex_cli::run_command_under_windows_sandbox(

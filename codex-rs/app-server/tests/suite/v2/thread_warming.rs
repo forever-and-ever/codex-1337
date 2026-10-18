@@ -87,7 +87,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
         );
 
         for (index, (read, write)) in usage.into_iter().enumerate() {
-            let before = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+            let before = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
             let request = app
                 .send_turn_start_request(TurnStartParams {
                     thread_id: thread_id.clone(),
@@ -99,7 +99,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
                 })
                 .await?;
             let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-            timeout(
+            let _ = timeout(
                 READ_TIMEOUT,
                 app.read_stream_until_notification_message("turn/completed"),
             )
@@ -136,7 +136,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
                 let PromptCacheEstimate::Warm { expires_at } = attached.estimate else {
                     panic!("OpenAI cache usage should establish warmth: {attached:?}");
                 };
-                let after = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+                let after = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
                 assert!((before + 1800..=after + 1800).contains(&expires_at));
             } else {
                 assert_eq!(attached.estimate, PromptCacheEstimate::Cold);
@@ -144,7 +144,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
             assert_eq!(attached.warming, PromptCacheWarming::Off);
         }
 
-        timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
+        let _ = timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
         let mut app = TestAppServer::builder()
             .with_codex_home(home.path())
             .build_initialized_with_timeout(READ_TIMEOUT)
@@ -164,7 +164,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
         // Resume checkpoints settings, not cache evidence: no request lease survives in metadata.
         assert_eq!(restored.estimate, PromptCacheEstimate::Cold);
         assert_eq!(restored.warming, PromptCacheWarming::Off);
-        timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
+        let _ = timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
     }
     Ok(())
 }

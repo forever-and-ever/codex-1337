@@ -161,8 +161,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for CoordinationTool {
             let arguments = serde_json::from_str(call.function_arguments()?).map_err(|err| {
                 FunctionCallError::RespondToModel(format!("invalid arguments: {err}"))
             })?;
-            let result = self
-                .execute(&service, &call.turn_id, arguments)
+            let result = Box::pin(self.execute(&service, &call.turn_id, arguments))
                 .await
                 .map_err(|err| {
                     let message = match err {
@@ -217,8 +216,7 @@ impl CoordinationTool {
                     .map_err(error)?;
                 let output =
                     delegated_output(service, &caller, &self.function.name, args.prompt).await?;
-                service
-                    .send(&thread_id, output, args.model)
+                Box::pin(service.send(&thread_id, output, args.model))
                     .await
                     .map_err(error)?;
                 let mut receipt = json!({"threadId": thread_id});
@@ -243,8 +241,7 @@ impl CoordinationTool {
                     .await
                     .map_err(error)?;
                 let thread_id = started.thread.id;
-                service
-                    .send(&thread_id, output, /*model*/ None)
+                Box::pin(service.send(&thread_id, output, /*model*/ None))
                     .await
                     .map_err(error)?;
                 Ok(json!({"threadId": thread_id}))

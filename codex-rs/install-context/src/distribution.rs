@@ -88,7 +88,7 @@ impl Distribution {
             return Ok(None);
         };
         let mut manifest = String::new();
-        match std::fs::File::open(bundle.join(MANIFEST_FILENAME)) {
+        let _ = match std::fs::File::open(bundle.join(MANIFEST_FILENAME)) {
             Ok(file) => file.take(MANIFEST_LIMIT).read_to_string(&mut manifest)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),

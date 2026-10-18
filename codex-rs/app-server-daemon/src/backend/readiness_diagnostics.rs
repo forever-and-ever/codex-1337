@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use std::path::Path;
 
 use tokio::fs;
@@ -29,12 +31,13 @@ pub(crate) async fn readiness_failure_context(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => "missing".to_string(),
         Err(err) => format!("unavailable: {err}"),
     };
-    context.push_str(&format!(
+    let _ = write!(
+        context,
         "\n\nReadiness failure snapshot:\n  PID record ({}): {pid_state}\n  stderr ({}): {stderr_state}\n  socket ({}): {socket_state}",
         pid_file.display(),
         stderr_path.display(),
-        socket_path.display(),
-    ));
+        socket_path.display()
+    );
     super::super::append_stderr_log_tail_context(pid_file, &mut context).await;
     context
 }

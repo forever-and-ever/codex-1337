@@ -14,6 +14,10 @@ use codex_utils_cli::SharedCliOptions;
 use std::path::PathBuf;
 
 // TELOS(explicit-command-verbs): a missing or unknown verb cannot start a task.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent command-line switches are orthogonal and clap populates their boolean parser fields"
+)]
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Cli {
@@ -153,7 +157,9 @@ fn exec_shared_id(id: &str) -> &'static str {
         "bypass_hook_trust" => "exec_bypass_hook_trust",
         "cwd" => "exec_cwd",
         "add_dir" => "exec_add_dir",
-        _ => panic!("shared CLI argument has no exec parser scope: {id}"),
+        _ => unreachable!(
+            "shared CLI schema contains an argument without an exec parser scope: {id}"
+        ),
     }
 }
 

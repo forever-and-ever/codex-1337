@@ -25,6 +25,10 @@ use tempfile::TempDir;
 use tokio::time::timeout;
 
 #[tokio::test]
+#[expect(
+    clippy::used_underscore_binding,
+    reason = "The test probes the upstream RAII field to verify headless coordination; production retains it for lifetime ownership"
+)]
 async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let home = TempDir::new()?;
@@ -61,14 +65,13 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     .into_iter()
     .enumerate()
     {
-        processor
-            .process_request(
-                TEST_CONNECTION_ID,
-                serde_json::from_value(request)?,
-                &AppServerTransport::Stdio,
-                Arc::clone(&session),
-            )
-            .await;
+        Box::pin(processor.process_request(
+            TEST_CONNECTION_ID,
+            serde_json::from_value(request)?,
+            &AppServerTransport::Stdio,
+            Arc::clone(&session),
+        ))
+        .await;
         if !session.initialized() {
             anyhow::bail!("test connection did not initialize");
         }
@@ -83,21 +86,20 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     }
     let started: ThreadStartResponse = read_response(&mut outgoing, /*request_id*/ 2).await;
     let service = &processor._thread_coordination;
-    let (stopped, lease) = service
-        .load(&started.thread.id)
+    let (stopped, lease) = Box::pin(service.load(&started.thread.id))
         .await
         .map_err(|error| anyhow::anyhow!("{}", error.message))?;
     let original = stopped.config_snapshot().await;
     // Upstream starts speculative threads without a rollout. Complete a real
     // turn before shutdown so this fixture exercises durable stopped recovery.
-    processor.process_request(
+    Box::pin(processor.process_request(
         TEST_CONNECTION_ID,
         serde_json::from_value(json!({"id": 3, "method": "turn/start", "params": {
             "threadId": started.thread.id, "input": [{"type": "text", "text": "Persist this destination"}]
         }}))?,
         &AppServerTransport::Stdio,
         Arc::clone(&session),
-    ).await;
+    )).await;
     timeout(Duration::from_secs(10), async {
         loop {
             let envelope = outgoing
@@ -131,7 +133,7 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     processor
         .connection_closed(TEST_CONNECTION_ID, session.as_ref())
         .await;
-    stopped.submit(Op::Shutdown).await?;
+    let _ = stopped.submit(Op::Shutdown).await?;
     timeout(Duration::from_secs(10), async {
         while stopped.agent_status().await != AgentStatus::Shutdown {
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -139,8 +141,7 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     })
     .await
     .context("stopping destination: waiting for AgentStatus::Shutdown")?;
-    let (restarted, lease) = service
-        .load(&started.thread.id)
+    let (restarted, lease) = Box::pin(service.load(&started.thread.id))
         .await
         .map_err(|error| anyhow::anyhow!("{}", error.message))?;
     assert!(

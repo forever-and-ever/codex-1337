@@ -42,8 +42,7 @@ impl SearchExecutor {
     ) -> Result<(SharedModelProvider, String), FunctionCallError> {
         match self {
             Self::Own(provider) => Ok((provider.clone(), model.to_owned())),
-            Self::ChatgptDelegate(delegate) => delegate
-                .resolve()
+            Self::ChatgptDelegate(delegate) => Box::pin(delegate.resolve())
                 .await
                 .map_err(|error| FunctionCallError::RespondToModel(error.to_string())),
         }

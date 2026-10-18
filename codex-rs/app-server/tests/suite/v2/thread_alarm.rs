@@ -154,7 +154,7 @@ impl AlarmApp {
     }
 }
 
-fn alarm_call(call_id: &str, arguments: Value) -> Value {
+fn alarm_call(call_id: &str, arguments: &Value) -> Value {
     responses::ev_function_call_with_namespace(call_id, "alarm", "set", &arguments.to_string())
 }
 
@@ -296,7 +296,7 @@ async fn clock_alarm_starts_a_turn_without_client_submission() -> Result<()> {
                     "arm",
                     vec![alarm_call(
                         "clock",
-                        json!({"after_seconds": 1, "note": "return to the work"}),
+                        &json!({"after_seconds": 1, "note": "return to the work"}),
                     )],
                 ),
                 done("armed"),
@@ -345,14 +345,14 @@ async fn terminal_model(server: &MockServer, scenario: TerminalScenario) {
                 1 => {
                     let request: Value = request.body_json().expect("Responses body");
                     let item = request["input"].as_array().expect("Responses input").iter().find(|item| item["call_id"] == "terminal" && item["type"] == "function_call_output").expect("native exec output");
-                    let ResponseItem::FunctionCallOutput { output, .. } = serde_json::from_value(item.clone()).expect("exec output item") else { panic!("function output") };
+                    let output = match serde_json::from_value(item.clone()).expect("exec output item") { ResponseItem::FunctionCallOutput { output, .. } => Some(output), _ => None }.expect("function output");
                     let output = output.body.to_text().expect("text exec output");
                     let session_id: i32 = output.lines().find_map(|line| line.strip_prefix("Running (session ").and_then(|session| session.strip_suffix(')'))).expect("background session ID").parse().expect("numeric session ID");
                     let items = if matches!(scenario, TerminalScenario::Restart) {
-                        vec![alarm_call("watch", json!({"session_id": session_id, "note": "watch survives as lost"})), alarm_call("clock", json!({"after_seconds": 3, "note": "clock survives restart"}))]
+                        vec![alarm_call("watch", &json!({"session_id": session_id, "note": "watch survives as lost"})), alarm_call("clock", &json!({"after_seconds": 3, "note": "clock survives restart"}))]
                     } else {
                         assert!(output.contains("warming"), "expected initial native output: {output}");
-                        vec![alarm_call("watch", json!({"session_id": session_id, "pattern": "^ready$", "note": "terminal is ready"}))]
+                        vec![alarm_call("watch", &json!({"session_id": session_id, "pattern": "^ready$", "note": "terminal is ready"}))]
                     };
                     response("arm", items)
                 }

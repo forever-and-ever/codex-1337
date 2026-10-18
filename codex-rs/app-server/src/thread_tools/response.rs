@@ -122,10 +122,10 @@ fn truncate_content(value: &mut Value, limit: usize, shorten_titles: bool) {
                 }
             }
             if truncated {
-                object.insert("truncated".to_string(), Value::Bool(true));
+                let _ = object.insert("truncated".to_string(), Value::Bool(true));
             }
             if title_truncated {
-                object.insert("titleTruncated".to_string(), Value::Bool(true));
+                let _ = object.insert("titleTruncated".to_string(), Value::Bool(true));
             }
         }
         Value::Array(values) => {

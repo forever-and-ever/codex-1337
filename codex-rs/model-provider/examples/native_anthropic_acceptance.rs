@@ -308,16 +308,16 @@ impl Driver {
 
 fn private_file(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
+    let _ = options.create_new(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        let _ = options.mode(0o600);
     }
     Ok(options.open(path)?)
 }
 
-fn user(text: String) -> Result<ResponseItem> {
+fn user(text: &str) -> Result<ResponseItem> {
     Ok(serde_json::from_value(
         json!({"type":"message","role":"user",
         "content":[{"type":"input_text","text":text}]}),
@@ -372,7 +372,7 @@ fn prefix(run: &str, arm: &str) -> Result<Vec<ResponseItem>> {
         )?;
     }
     ensure!(text.len() < 64 * 1024, "synthetic prefix exceeds bound");
-    Ok(vec![user(text)?, user("Reply exactly OK.".into())?])
+    Ok(vec![user(&text)?, user("Reply exactly OK.")?])
 }
 
 fn haiku_stage<'a>(name: &'static str, model: &'a ModelInfo, ttl: AnthropicCacheTtl) -> Stage<'a> {
@@ -400,7 +400,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
     }
     let mut token = String::new();
-    std::io::stdin()
+    let _ = std::io::stdin()
         .take(/*limit*/ 65537)
         .read_to_string(&mut token)
         .map_err(|_| anyhow::anyhow!("invalid bearer input"))?;
@@ -565,7 +565,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         ensure!(warm.read > 0, "parent warm cache miss");
         parent.extend(cold.items);
         parent.push(user(
-            "Call echo_fixture exactly once with {}. Do not write text first.".into(),
+            "Call echo_fixture exactly once with {}. Do not write text first.",
         )?);
         let call = driver
             .send(haiku_stage("parent.tool", &haiku, one_hour), &parent)
@@ -577,7 +577,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         let result = echo_result(&call.items, &driver.tools[0])?;
         parent.extend(call.items);
         parent.push(result);
-        driver
+        let _ = driver
             .send(haiku_stage("parent.tool_result", &haiku, one_hour), &parent)
             .await?;
         let parent = driver.persist("parent-history.json", &parent)?;
@@ -634,9 +634,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         "signed prefix did not reach cache admission threshold"
     );
     history.extend(ordinary.items);
-    history.push(user(
-        "Preserve the fixture value OK in the checkpoint.".into(),
-    )?);
+    history.push(user("Preserve the fixture value OK in the checkpoint.")?);
     let history = driver.persist("signed-history.json", &history)?;
     let checkpoint = driver
         .send(
@@ -665,7 +663,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
     );
     let mut resumed = driver.persist("signed-checkpoint.json", &checkpoints)?;
     resumed.push(user(
-        "Call echo_fixture exactly once with {}. Do not write text first.".into(),
+        "Call echo_fixture exactly once with {}. Do not write text first.",
     )?);
     let resumed_receipt = driver
         .send(
@@ -681,7 +679,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
     resumed.extend(resumed_receipt.items);
     resumed.push(result);
     let resumed = driver.persist("signed-tool-history.json", &resumed)?;
-    driver
+    let _ = driver
         .send(
             signed_stage("signed.tool_result", AnthropicOperation::Inference),
             &resumed,

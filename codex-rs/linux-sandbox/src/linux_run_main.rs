@@ -1002,7 +1002,7 @@ fn register_synthetic_mount_targets(
                 let marker_file = marker_dir.join(std::process::id().to_string());
                 let contents = mountpoint_reaper::marker(
                     synthetic_mount_marker_contents(&target),
-                    mountpoint_reaper::forge(&target),
+                    mountpoint_reaper::forge(&target).as_ref(),
                 );
                 fs::write(&marker_file, contents).unwrap_or_else(|err| {
                     panic!(

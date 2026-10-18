@@ -94,6 +94,10 @@ pub fn is_managed_proxy_env_var(key: &str, value: &str) -> bool {
     }
 }
 
+#[expect(
+    clippy::implicit_hasher,
+    reason = "The upstream credential-marker helper requires HashMap with its standard hasher"
+)]
 pub fn strip_managed_proxy_env(env: &mut HashMap<String, String>) {
     let brokered_credential_dummy_env_keys =
         crate::credential_broker::marked_credential_dummy_env_keys(env);
@@ -115,8 +119,8 @@ pub const DEFAULT_NO_PROXY_VALUE: &str = concat!(
 #[cfg(target_os = "macos")]
 pub const CODEX_PROXY_GIT_SSH_COMMAND_MARKER: &str = "CODEX_PROXY_GIT_SSH_COMMAND=1 ";
 
-pub fn proxy_url_env_value<'a>(
-    env: &'a HashMap<String, String>,
+pub fn proxy_url_env_value<'a, S: std::hash::BuildHasher>(
+    env: &'a HashMap<String, String, S>,
     canonical_key: &str,
 ) -> Option<&'a str> {
     if let Some(value) = env.get(canonical_key) {
@@ -127,7 +131,7 @@ pub fn proxy_url_env_value<'a>(
 }
 
 #[must_use]
-pub fn has_proxy_url_env_vars(env: &HashMap<String, String>) -> bool {
+pub fn has_proxy_url_env_vars<S: std::hash::BuildHasher>(env: &HashMap<String, String, S>) -> bool {
     PROXY_URL_ENV_KEYS
         .iter()
         .any(|key| proxy_url_env_value(env, key).is_some_and(|value| !value.trim().is_empty()))

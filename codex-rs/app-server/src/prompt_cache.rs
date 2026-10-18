@@ -116,8 +116,7 @@ impl Entry {
             } if refreshed.age() < lore.lifetime() => PromptCacheEstimate::Warm {
                 expires_at: unix_seconds(refreshed.wall() + lore.lifetime()),
             },
-            Cache::Warm { .. } => PromptCacheEstimate::Cold,
-            Cache::Cold => PromptCacheEstimate::Cold,
+            Cache::Warm { .. } | Cache::Cold => PromptCacheEstimate::Cold,
         };
         let warming = match self.warming {
             Warming::Off => PromptCacheWarming::Off,
@@ -404,7 +403,7 @@ impl Shared {
             Ok(Some(sent)) => Ok(sent),
             Err(error) => Err(error),
         };
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             let Cache::Warm {
                 refreshed,
                 replay: Some(retained),
@@ -463,7 +462,7 @@ impl PromptCacheObserver for Shared {
     }
 
     fn fact(&self, thread: ThreadId, fact: PromptCacheFact) {
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             match fact {
                 PromptCacheFact::HumanTurn => {
                     if let Warming::On { until } = &mut entry.warming {
@@ -487,7 +486,7 @@ impl PromptCacheObserver for Shared {
             usage,
             replay,
         } = request;
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             if epoch != entry.epoch {
                 return Vec::new();
             }

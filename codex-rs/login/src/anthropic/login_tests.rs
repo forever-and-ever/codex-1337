@@ -40,7 +40,7 @@ async fn callback(attempt: &LoginAttempt, target: &str) {
         .await
         .unwrap();
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).await.unwrap();
+    let _ = stream.read_to_end(&mut response).await.unwrap();
 }
 
 async fn endpoints(server: &MockServer, account: &str, access: &str) {
@@ -198,7 +198,7 @@ async fn timeout_and_profile_failure_never_create_account_files() {
     }));
     let invalid_profile =
         ResponseTemplate::new(/*s*/ 200).set_body_json(json!({"account":{"uuid":""}}));
-    let oversized = ResponseTemplate::new(/*s*/ 200).set_body_string("x".repeat(/*n*/ 1048577));
+    let oversized = ResponseTemplate::new(/*s*/ 200).set_body_string("x".repeat(/*n*/ 1_048_577));
     let redirect = ResponseTemplate::new(/*s*/ 307)
         .insert_header("Location", format!("{}/sink", server.uri()));
     for (token_response, profile_response) in [
