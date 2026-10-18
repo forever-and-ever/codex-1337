@@ -2,58 +2,93 @@
 source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\")"
 ---
-counted expanded=false
-  HH:MM [+]   • Thought · Summary  1300
+counted closed
+  HH:MM     Response                                [cot]
 
 
 
 
 
-counted expanded=true
-  HH:MM [-]   • Thought · Summary  1300
-                First block
+counted open width=64
+  HH:MM     Response                                [cot]
+              First block Ω
 
-                Second block
-
-
-unknown expanded=false
-  HH:MM [+]   • Thought · Summary
+              Second block
 
 
 
 
+counted open width=32
+  HH:MM     Respon… [cot]
+              First block Ω
 
-unknown expanded=true
-  HH:MM [-]   • Thought · Summary
-                Readable summary
-
-
-
-
-encrypted-only expanded=false
-  HH:MM       • Thought  1300
+              Second block
 
 
 
 
+counted open width=64
+  HH:MM     Response                                [cot]
+              First block Ω
 
-encrypted-only narrow
-  HH:MM       • T...
-opaque-unknown expanded=false
-  HH:MM       • Thought
+              Second block
+
+
+
+
+unknown closed
+  HH:MM     Response                                [cot]
 
 
 
 
 
-opaque-unknown narrow
-  HH:MM       • T...
-hidden expanded=false
-  HH:MM       • Thought  1300
+unknown open width=64
+  HH:MM     Response                                [cot]
+              First block Ω
 
 
 
 
 
-hidden narrow
-  HH:MM       • T...
+
+unknown open width=32
+  HH:MM     Respon… [cot]
+              First block Ω
+
+
+
+
+
+
+unknown open width=64
+  HH:MM     Response                                [cot]
+              First block Ω
+
+
+
+
+
+
+summary-only closed
+
+
+
+
+
+
+encrypted-only closed
+
+
+
+
+
+
+opaque-unknown closed
+
+
+
+
+
+
+blank closed

@@ -188,16 +188,6 @@ fn append_thread_items(
     let inline_visualization_context = config.and_then(|config| {
         thread_id.and_then(|thread_id| InlineVisualizationContext::from_config(config, thread_id))
     });
-    let thought_visibility = if config.is_some_and(|config| config.hide_agent_reasoning) {
-        crate::history_cell::ThoughtTextVisibility::Hidden
-    } else {
-        match raw_reasoning_visibility {
-            RawReasoningVisibility::Hidden => crate::history_cell::ThoughtTextVisibility::Summary,
-            RawReasoningVisibility::Visible => {
-                crate::history_cell::ThoughtTextVisibility::SummaryAndContent
-            }
-        }
-    };
     let mut pending: Option<crate::history_cell::ComputerActivityCell> = None;
     for item in items {
         if let ThreadItem::CodeModeOwned(scope) = item {
@@ -265,7 +255,6 @@ fn append_thread_items(
                 cwd,
                 raw_reasoning_visibility,
                 inline_visualization_context.clone(),
-                thought_visibility,
                 metadata,
             ) {
                 group.group.push_detail(cell);
@@ -309,7 +298,6 @@ fn append_thread_items(
                     cwd,
                     raw_reasoning_visibility,
                     inline_visualization_context.clone(),
-                    thought_visibility,
                     metadata,
                 );
                 if !projected.is_empty() {
@@ -355,13 +343,12 @@ fn item_to_cells(
     cwd: &AbsolutePathBuf,
     raw_reasoning_visibility: RawReasoningVisibility,
     inline_visualization_context: Option<InlineVisualizationContext>,
-    thought_visibility: crate::history_cell::ThoughtTextVisibility,
     metadata: &dyn Fn(ThreadId) -> crate::multi_agents::AgentMetadata,
 ) -> TranscriptCells {
     let mut cells: TranscriptCells = Vec::new();
     match item {
         item @ ThreadItem::Thought { .. } => cells.push(Arc::new(
-            crate::history_cell::ThoughtCell::from_item(item, cwd.as_path(), thought_visibility),
+            crate::history_cell::ThoughtCell::from_item(item, cwd.as_path()),
         )),
         item @ ThreadItem::Preamble { .. } => {
             cells.push(Arc::new(crate::history_cell::PreambleCell::from_item(item)));
@@ -550,7 +537,6 @@ pub(crate) fn scoped_item_cells(
         cwd,
         RawReasoningVisibility::Hidden,
         /*inline_visualization_context*/ None,
-        crate::history_cell::ThoughtTextVisibility::Hidden,
         metadata,
     )
 }

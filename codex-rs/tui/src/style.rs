@@ -7,6 +7,7 @@ mod speaker_backgrounds;
 pub(crate) use speaker_backgrounds::context_message_style;
 pub(crate) use speaker_backgrounds::history_prompt_style;
 pub(crate) use speaker_backgrounds::history_response_style;
+pub(crate) use speaker_backgrounds::reasoning_style;
 pub(crate) use speaker_backgrounds::subagent_message_style;
 
 use crate::color::blend;

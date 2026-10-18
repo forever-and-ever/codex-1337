@@ -6,7 +6,6 @@
 use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
-use crate::history_cell::ThoughtTextVisibility;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Panel;
 use crate::history_cell::invocation::Port;
@@ -34,12 +33,11 @@ fn thought(response: &str) -> Arc<dyn HistoryCell> {
             id: format!("thought:{response}"),
             response_id: response.into(),
             completed_at_ms: CLOCK_MS,
-            summary: vec!["Considering the failure".into()],
-            content: Vec::new(),
+            summary: Vec::new(),
+            content: vec!["Considering the failure".into()],
             reported_reasoning_tokens: None,
         },
         std::path::Path::new("/tmp"),
-        ThoughtTextVisibility::Summary,
     ))
 }
 
@@ -360,6 +358,44 @@ fn steps_fold_under_one_header_with_their_figures() {
     };
     let fresh = screen(&mut view, "unfolded");
     assert!(fresh.contains("[+] Injection"));
+    assert_eq!(fresh.matches("[cot]").count(), 2);
+    assert!(!fresh.contains("Thought") && !fresh.contains("Considering the failure"));
+    // Reasoning belongs to its response, not the tool it called. Opening it must not
+    // reveal a sibling response or acquire a permanently visible child heading.
+    // Narrow port strips wrap independently of reasoning; paint and hit targets must agree.
+    for width in [32, 104] {
+        for open in [true, false] {
+            let rendered = crate::transcript_view::tests::text(
+                &crate::transcript_view::tests::render(&mut view, &cells, width, 80),
+            );
+            let (row, line) = rendered
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains("[cot]"))
+                .unwrap();
+            let column = line[..line.find("[cot]").unwrap()].chars().count();
+            assert!(view.toggle_disclosure_at(
+                &cells,
+                u16::try_from(column).unwrap(),
+                u16::try_from(row).unwrap()
+            ));
+            assert_eq!(view.disclosure.expanded.contains("thought:resp-1"), open);
+        }
+    }
+    let cot = FoldTarget::Thought(vec!["thought:resp-1".into()]);
+    let source = (0..cells.len())
+        .find(|index| {
+            view.current_layout(&cells, *index)
+                .is_some_and(|layout| layout.fold_position(&cot).is_some())
+        })
+        .unwrap();
+    assert!(view.focus_fold(&cells, source, cot.clone()));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    let opened = screen(&mut view, "reasoning opened");
+    assert_eq!(opened.matches("Considering the failure").count(), 1);
+    assert!(!opened.contains("Thought"));
+    assert!(view.focus_fold(&cells, source, cot));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     assert!(
         fresh
             .lines()

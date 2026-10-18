@@ -188,7 +188,6 @@ pub(crate) use separators::*;
 pub(crate) use session::*;
 pub(crate) use startup_warnings::StartupWarningsCell;
 pub(crate) use thought::ThoughtCell;
-pub(crate) use thought::ThoughtTextVisibility;
 pub(crate) use timestamp::HistoryTimestamp;
 pub(crate) use timestamp::agent_prefix;
 pub(crate) use tool_output::ToolOutputCell;

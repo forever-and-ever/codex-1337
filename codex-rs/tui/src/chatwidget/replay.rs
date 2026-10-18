@@ -367,11 +367,10 @@ impl ChatWidget {
             }
             ThreadItem::Plan { text, .. } => self.on_plan_item_completed(text),
             item @ ThreadItem::Thought { .. } => {
-                self.add_to_history(history_cell::ThoughtCell::from_item(
-                    item,
-                    &self.config.cwd,
-                    history_cell::ThoughtTextVisibility::from(&self.config),
-                ))
+                // Reasoning has no live row; its disclosure owns formatting, not insertion probes.
+                self.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                    history_cell::ThoughtCell::from_item(item, &self.config.cwd),
+                )));
             }
             item @ ThreadItem::Preamble { .. } => {
                 self.add_to_history(history_cell::PreambleCell::from_item(item));

@@ -15,6 +15,8 @@ pub(crate) enum OutputProvenance {
     #[default]
     Unspecified,
     Captured,
+    /// Readable provider reasoning, never an encrypted continuation payload.
+    Reasoning,
     Formatted,
     Client,
     /// Human-only diff paint is semantic, not a captured-content background.
@@ -172,6 +174,11 @@ pub(crate) fn context_sources(
 
 pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<HyperlinkLine> {
     let any = cell.as_any();
+    if any.is::<super::ThoughtCell>() {
+        let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.raw_lines());
+        mark_lines(&mut lines, OutputProvenance::Reasoning);
+        return lines;
+    }
     let members = any
         .downcast_ref::<super::CodeModeCell>()
         .map(super::CodeModeCell::members)
@@ -206,7 +213,6 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
     {
         Some(ContextAuthor::Assistant)
     } else {
-        // Thought's raw projection is only a generated heading, not its reasoning body.
         None
     };
     let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.live_raw_lines());
@@ -227,6 +233,7 @@ impl OutputProvenance {
     fn style(self) -> Style {
         match self {
             Self::Unspecified | Self::ClientDiff => Style::default(),
+            Self::Reasoning => crate::style::reasoning_style(),
             Self::Captured | Self::Definitions(OutputMode::Raw) => {
                 crate::style::context_message_style()
             }

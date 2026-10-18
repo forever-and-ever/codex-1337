@@ -517,6 +517,12 @@ impl TranscriptView {
                 } else {
                     match content {
                         Content::Hidden => TextLayout::new(Vec::new(), width),
+                        Content::Thought => TextLayout::new(
+                            crate::transcript_geometry::rich_lines(
+                                cell.expanded_hyperlink_lines(content_width),
+                            ),
+                            width,
+                        ),
                         Content::Body => {
                             let parts = feed::entry_body(
                                 cell.as_ref(),

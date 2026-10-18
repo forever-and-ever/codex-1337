@@ -228,9 +228,9 @@ impl Item {
     /// Whether the member draws rows of its own.
     fn shows(&self, member: &Membership, unfolded: bool) -> bool {
         match member.contribution {
-            Contribution::Silent => false,
+            Contribution::Silent | Contribution::Thought => false,
             Contribution::Message => unfolded || self.kind == Kind::Steps { calls: true },
-            Contribution::Activity | Contribution::Thought => unfolded,
+            Contribution::Activity => unfolded,
         }
     }
 }
@@ -249,6 +249,8 @@ pub(super) enum Content {
     Hidden,
     /// The cell's own rows, under its item's header.
     Own,
+    /// Raw reasoning explicitly opened from its response header.
+    Thought,
     /// The cell's rows after its first, which its item's header shows as its title; its
     /// details when nothing else remains.
     Beheaded,
@@ -463,7 +465,7 @@ impl FeedIndex {
         true
     }
 
-    fn rebuild<'b>(&mut self, cells: &[Arc<dyn HistoryCell>], bills: &'b StepBills, frame: u64) {
+    fn rebuild<'b>(&mut self, cells: &'b [Arc<dyn HistoryCell>], bills: &'b StepBills, frame: u64) {
         let mut names: Vec<&str> = Vec::new();
         let mut nodes: HashMap<&str, usize> = HashMap::new();
         let mut parent: Vec<usize> = Vec::new();
@@ -632,7 +634,14 @@ impl FeedIndex {
             unfolded,
             elided,
         );
-        let content = if !item.shows(member, unfolded) {
+        let content = if member.contribution == Contribution::Thought {
+            let ids = cells[index].activity_ids();
+            if ids.iter().any(|id| expanded.contains(id)) {
+                Content::Thought
+            } else {
+                Content::Hidden
+            }
+        } else if !item.shows(member, unfolded) {
             Content::Hidden
         } else if plans.iter().any(|plan| plan.title == Title::Owned(index)) {
             Content::Beheaded
@@ -656,6 +665,14 @@ impl FeedIndex {
     ) -> bool {
         if let Kind::Entry { initial_disclosure } = item.kind {
             return initial_disclosure != HeaderDisclosure::FixedOpen;
+        }
+        if matches!(item.kind, Kind::Steps { .. })
+            && !item.segments.iter().flatten().any(|index| {
+                matches!(self.roles.get(*index), Some(Role::Member(member))
+                    if matches!(member.contribution, Contribution::Activity | Contribution::Message))
+            })
+        {
+            return false;
         }
         if !matches!(item.kind, Kind::Steps { calls: true }) || item.steps.len() > 1 {
             return true;
@@ -954,7 +971,22 @@ impl FeedIndex {
                     HistoryTimestamp::from_millis(bills.step(&item.steps[*step])?.completed_at_ms)
                 })
             });
-        let (title_width, reach) = header_columns(width);
+        let (header_width, reach) = header_columns(width);
+        let thoughts: Vec<String> = header
+            .scope
+            .iter()
+            .filter_map(|index| {
+                let thought = cells.get(*index)?.as_any().downcast_ref::<ThoughtCell>()?;
+                (thought.is_readable()
+                    && header
+                        .steps
+                        .iter()
+                        .any(|step| item.steps[*step] == thought.response_id()))
+                .then(|| thought.id.clone())
+            })
+            .collect();
+        let cot = !thoughts.is_empty() && header_width >= 6;
+        let title_width = header_width.saturating_sub(if cot { 6 } else { 0 }).max(1);
         let invocation = match header.title {
             Title::Owned(index) => cells.get(index).and_then(|cell| {
                 let mut calls = crate::history_cell::invocation::collect(cell.as_ref());
@@ -962,7 +994,7 @@ impl FeedIndex {
             }),
             _ => None,
         };
-        let (titles, mut controls) = if let Some(call) = &invocation {
+        let (mut titles, mut controls) = if let Some(call) = &invocation {
             if header.disclosure.unfolded() {
                 let source = match header.title {
                     Title::Owned(index) => invocation::PreparationSource::Retained(&cells[index]),
@@ -1034,6 +1066,29 @@ impl FeedIndex {
                 controls,
             )
         };
+        if cot {
+            let column = header_width.saturating_sub(5);
+            // A narrow invocation can spill its fixed-width port strip beyond the title lane.
+            if titles
+                .last()
+                .is_some_and(|title| title.line.width() >= column)
+            {
+                titles.push(HeaderRows::label(Line::default(), 0..0));
+            }
+            let row = titles.len().saturating_sub(1);
+            let title = &mut titles[row].line;
+            title.push_span(" ".repeat(column.saturating_sub(title.width())));
+            title.push_span(if thoughts.iter().any(|id| expanded.contains(id)) {
+                Span::styled("[cot]", crate::render::disclosure::tab_style())
+            } else {
+                "[cot]".dim()
+            });
+            controls.push(HeaderControl {
+                row,
+                columns: column as u16..(column + 5) as u16,
+                target: FoldTarget::Thought(thoughts),
+            });
+        }
         for control in &mut controls {
             control.columns.start += TITLE_COLUMN;
             control.columns.end += TITLE_COLUMN;
@@ -1055,7 +1110,7 @@ impl FeedIndex {
         }
         spans.extend(first.line.spans);
         if let Some(figures) = self.figures(cells, header, bills, output_tokens) {
-            spans.push(" ".repeat(title_width - used.min(title_width) + 1).into());
+            spans.push(" ".repeat(header_width - used.min(header_width) + 1).into());
             spans.push(total_span(figures.total));
             if reach >= Reach::Split
                 && let Some(split) = figures.split
@@ -1145,6 +1200,9 @@ impl FeedIndex {
                     .iter()
                     .filter_map(|step| bills.step(&item.steps[*step]))
                     .collect();
+                if steps.is_empty() {
+                    return None;
+                }
                 steps_figures(&steps, &|response| {
                     self.placed_users.get(response).copied().unwrap_or(0)
                 })
@@ -1251,11 +1309,19 @@ fn entry_kind(
 
 /// The billed steps a cell belongs to, and a step it joins without belonging to it: a Code
 /// Mode wait joins its exec's item.
-fn steps_of<'b>(cell: &dyn HistoryCell, bills: &'b StepBills) -> (Vec<&'b str>, Option<&'b str>) {
+fn steps_of<'b>(
+    cell: &'b dyn HistoryCell,
+    bills: &'b StepBills,
+) -> (Vec<&'b str>, Option<&'b str>) {
     let any = cell.as_any();
-    let known = |response: &str| bills.step(response).map(|step| step.response_id.as_str());
     if let Some(thought) = any.downcast_ref::<ThoughtCell>() {
-        return (known(thought.response_id()).into_iter().collect(), None);
+        return (
+            (thought.is_readable() || bills.step(thought.response_id()).is_some())
+                .then_some(thought.response_id())
+                .into_iter()
+                .collect(),
+            None,
+        );
     }
     if let Some(message) = any.downcast_ref::<AgentMarkdownCell>() {
         let step = message
