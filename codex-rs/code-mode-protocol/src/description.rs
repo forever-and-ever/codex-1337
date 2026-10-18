@@ -32,12 +32,12 @@ Optional first line: // @exec: {"max_output_tokens": 1000}. Default output budge
 Output enters context only when explicitly emitted:
 - text(value, options?): append output; notify(value, options?): emit immediately. Optional metadata=true includes native execution metadata.
 - yield_control(): emit accumulated output and hand control back while this cell keeps running.
-- exit(): end successfully now.
+- exit(): end successfully now. fail(message): end unsuccessfully now with a message string; neither helper can be caught.
 {{ sh_helper }}
 {{ media_helpers }}
 - store(key, value), load(key): retain serializable values by string key across cells; missing keys return undefined.
 - setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers. Timers alone do not keep the isolate alive; await a promise when waiting."#;
-const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A fence fails on background/yielded work or any failed prerequisite, including nested calls; caught errors do not erase failures.";
+const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A cell succeeds on its own successful foreground completion; caught nested tool errors and handled nonzero process exits are data. Inspect collected outcomes and call fail(message) when they must reject the stage. Uncaught errors, cancellation, host failure or uncertainty, unawaited work, and any background/yielded work still fail the fence. Direct top-level tools retain their own failure verdicts.";
 const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
 - `cell_id` identifies the running `exec` cell to resume.
 - `wait` blocks until the script finishes or calls `yield_control()`.

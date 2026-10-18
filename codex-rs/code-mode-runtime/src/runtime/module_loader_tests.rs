@@ -33,7 +33,7 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
         next_timeout_id: 1,
         tool_call_id: "cell".to_string(),
         runtime_command_tx,
-        exit_requested: false,
+        exit_requested: None,
         sh_calls: Vec::new(),
     });
 
@@ -124,7 +124,7 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         next_timeout_id: 1,
         tool_call_id: "cell".to_string(),
         runtime_command_tx,
-        exit_requested: false,
+        exit_requested: None,
         sh_calls: Vec::new(),
     });
     let enabled_tools = scope

@@ -29,7 +29,7 @@ fn mark_exit_requested(
     scope
         .get_slot_mut::<RuntimeState>()
         .expect("runtime state")
-        .exit_requested = true;
+        .exit_requested = Some(Ok(()));
     retval.set(args.get(0));
 }
 
@@ -122,7 +122,7 @@ clearTimeout(earlyTimer); setTimeout(() => {}, 60000);
             next_timeout_id: 1,
             tool_call_id: "cell".to_string(),
             runtime_command_tx,
-            exit_requested: false,
+            exit_requested: None,
             sh_calls: Vec::new(),
         });
         globals::install_globals(scope, &enabled_tools).expect("install globals");

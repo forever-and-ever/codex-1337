@@ -1,6 +1,7 @@
 use super::callbacks::audio_callback;
 use super::callbacks::clear_timeout_callback;
 use super::callbacks::exit_callback;
+use super::callbacks::fail_callback;
 use super::callbacks::generated_image_callback;
 use super::callbacks::image_callback;
 use super::callbacks::load_callback;
@@ -43,6 +44,7 @@ pub(super) fn install_globals(
     let notify = helper_function(scope, "notify", notify_callback)?;
     let yield_control = helper_function(scope, "yield_control", yield_control_callback)?;
     let exit = helper_function(scope, "exit", exit_callback)?;
+    let fail = helper_function(scope, "fail", fail_callback)?;
 
     set_global(scope, global, "tools", tools.into())?;
     if let Some(sh) = super::sh::helper(scope, tools)? {
@@ -62,6 +64,7 @@ pub(super) fn install_globals(
     set_global(scope, global, "notify", notify.into())?;
     set_global(scope, global, "yield_control", yield_control.into())?;
     set_global(scope, global, "exit", exit.into())?;
+    set_global(scope, global, "fail", fail.into())?;
 
     let source = v8::String::new(scope, include_str!("settled.js"))
         .ok_or_else(|| "failed to allocate settlement helpers".to_string())?;

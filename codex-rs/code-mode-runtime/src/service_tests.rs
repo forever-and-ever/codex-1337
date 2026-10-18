@@ -579,7 +579,7 @@ async fn synchronous_exit_returns_successfully() {
 
 #[tokio::test]
 async fn exit_stops_the_whole_cell_and_preserves_only_prior_writes() {
-    for (label, source) in [
+    let sources = [
         ("exit inside infinite loop", r#"for (;;) { exit(); }"#),
         ("infinite loop after exit", r#"exit(); for (;;) {}"#),
         (
@@ -642,7 +642,14 @@ throw {
     toString() { for (;;) {} }
 };"#,
         ),
-    ] {
+    ];
+    for (label, source, failure) in sources.into_iter().flat_map(|(label, source)| {
+        [None, Some("producer failed")].map(move |failure| (label, source, failure))
+    }) {
+        let source = match failure {
+            Some(message) => source.replace("exit()", &format!("fail({message:?})")),
+            None => source.to_owned(),
+        };
         let service = InProcessCodeModeSession::new();
         let response = tokio::time::timeout(
             Duration::from_secs(5),
@@ -667,7 +674,7 @@ throw {
                 content_items: vec![FunctionCallOutputContentItem::InputText {
                     text: "before".to_string(),
                 }],
-                error_text: None,
+                error_text: failure.map(str::to_owned),
             },
             "{label}"
         );
@@ -1620,6 +1627,7 @@ text([
         "escape",
         "exit",
         "eval",
+        "fail",
         "generatedImage",
         "globalThis",
         "image",

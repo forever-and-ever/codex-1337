@@ -97,7 +97,7 @@ pub(super) fn completion_state(
     // This isolate belongs to the exiting cell; never pump or await it again.
     if scope
         .get_slot::<RuntimeState>()
-        .is_some_and(|state| state.exit_requested)
+        .is_some_and(|state| state.exit_requested.is_some())
     {
         return CompletionState::Completed { error_text: None };
     }

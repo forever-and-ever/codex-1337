@@ -60,7 +60,7 @@ pub(super) fn running(scope: &mut v8::PinScope<'_, '_>) -> bool {
     let Some(state) = scope.get_slot_mut::<RuntimeState>() else {
         return false;
     };
-    if state.exit_requested {
+    if state.exit_requested.is_some() {
         return false;
     }
     let calls = std::mem::take(&mut state.sh_calls);
@@ -119,7 +119,7 @@ fn print_callback(
         }
     };
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText { text },
@@ -162,7 +162,7 @@ fn hold_callback(
     };
     let promise = v8::Global::new(scope, promise);
     if let Some(state) = scope.get_slot_mut::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         state.sh_calls.push(promise);
     }

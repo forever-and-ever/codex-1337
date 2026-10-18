@@ -367,9 +367,9 @@ pub(super) fn value_to_error_text(
     // returning here. Never enter a user-defined toString() after that.
     if scope
         .get_slot::<RuntimeState>()
-        .is_some_and(|state| state.exit_requested)
+        .is_some_and(|state| state.exit_requested.is_some())
     {
-        // send_scope_result reports this as successful exit and preserves prior stores.
+        // send_scope_result owns the requested terminal outcome and prior stores.
         return String::new();
     }
     value.to_rust_string_lossy(scope)

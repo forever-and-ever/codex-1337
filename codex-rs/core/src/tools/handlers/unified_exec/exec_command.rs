@@ -474,7 +474,7 @@ impl ExecCommandHandler {
                 output_omitted_bytes,
                 ..
             }) => {
-                let _ = crate::tools::fence::Prerequisite::current().finish(/*success*/ false);
+                crate::tools::fence::Prerequisite::direct_failure();
                 let output_text = output.aggregated_output.text;
                 let original_token_count =
                     original_token_count.unwrap_or_else(|| approx_token_count(&output_text));
