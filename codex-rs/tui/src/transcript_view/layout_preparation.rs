@@ -531,6 +531,8 @@ impl TranscriptView {
                         _ if !disclosure => {
                             let columns = if seat.content == Content::Beheaded {
                                 crate::transcript_geometry::NESTED_COLUMNS
+                            } else if cell.as_any().is::<crate::history_cell::RespondingCell>() {
+                                crate::transcript_geometry::TITLE_COLUMN
                             } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
                                 crate::transcript_geometry::TITLE_COLUMN
                                     - crate::transcript_geometry::MARKER_COLUMNS
