@@ -47,26 +47,29 @@ async fn requested_runtime_duration_is_added_to_the_transport_deadline() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn default_execution_yield_and_grace_extend_the_outcome_deadline() {
-    let runtime_timeout =
-        Duration::from_millis(DEFAULT_EXEC_YIELD_TIME_MS).saturating_add(Duration::from_secs(1));
-    let task = tokio::spawn(enforce(
-        "execution outcome",
-        runtime_timeout,
-        pending::<Result<(), tonic::Status>>(),
-    ));
-    tokio::task::yield_now().await;
+async fn execution_yield_and_grace_extend_the_outcome_deadline() {
+    for runtime_timeout in [
+        Duration::from_millis(DEFAULT_EXEC_YIELD_TIME_MS).saturating_add(Duration::from_secs(1)),
+        Duration::from_secs(3_601),
+    ] {
+        let task = tokio::spawn(enforce(
+            "execution outcome",
+            runtime_timeout,
+            pending::<Result<(), tonic::Status>>(),
+        ));
+        tokio::task::yield_now().await;
 
-    tokio::time::advance(Duration::from_secs(70)).await;
-    tokio::task::yield_now().await;
-    assert!(!task.is_finished());
+        tokio::time::advance(runtime_timeout + Duration::from_secs(59)).await;
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
 
-    tokio::time::advance(Duration::from_secs(2)).await;
-    assert!(matches!(
-        task.await.expect("execution outcome deadline task"),
-        Err(RequestError::TimedOut(message))
-            if message == "gRPC code-mode host timed out waiting for execution outcome response"
-    ));
+        tokio::time::advance(Duration::from_secs(2)).await;
+        assert!(matches!(
+            task.await.expect("execution outcome deadline task"),
+            Err(RequestError::TimedOut(message))
+                if message == "gRPC code-mode host timed out waiting for execution outcome response"
+        ));
+    }
 }
 
 #[tokio::test]

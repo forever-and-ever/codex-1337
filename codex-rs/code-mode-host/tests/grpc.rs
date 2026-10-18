@@ -304,7 +304,7 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
     });
     let mut execute = request(r#"await tools.large({}); text("done");"#);
     execute.enabled_tools = vec![tool("large")];
-    execute.yield_time_ms = Some(60_000);
+    execute.yield_time_ms = Some(3_600_000);
     let signal = CancellationToken::new();
     signal.cancel();
     let cell = session
@@ -324,7 +324,7 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
     let mut wait = session.wait(
         WaitRequest {
             cell_id: cell_id.clone(),
-            yield_time_ms: 60_000,
+            yield_time_ms: 3_600_000,
         },
         Some(wait_signal.clone()),
     );
@@ -344,7 +344,7 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
         session.wait(
             WaitRequest {
                 cell_id: cell_id.clone(),
-                yield_time_ms: 60_000,
+                yield_time_ms: 3_600_000,
             },
             /*preempt*/ None,
         ),

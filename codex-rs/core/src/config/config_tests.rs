@@ -700,7 +700,7 @@ async fn load_config_resolves_code_mode_config() -> std::io::Result<()> {
         r#"
 [features.code_mode]
 enabled = true
-max_yield_time_ms = 10000
+max_yield_time_ms = 3600000
 experimental_show_cell_overhead = true
 excluded_tool_namespaces = ["mcp__codex_apps", "multi_agent_v1"]
 direct_only_tool_namespaces = ["mcp__history", "mcp__notes"]
@@ -718,7 +718,7 @@ disable_in_process_fallback = true
     )
     .await?;
 
-    assert_eq!(config.code_mode.max_yield_time_ms.get(), 10_000);
+    assert_eq!(config.code_mode.max_yield_time_ms.get(), 3_600_000);
     assert!(config.code_mode.experimental_show_cell_overhead);
     assert_eq!(
         config.code_mode.excluded_tool_namespaces,

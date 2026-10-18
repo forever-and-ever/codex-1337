@@ -68,7 +68,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
             ExecuteRequest {
                 enabled_tools: vec![echo_tool()],
                 source: r#"await tools.echo({}); text("done");"#.to_string(),
-                yield_time_ms: Some(60_000),
+                yield_time_ms: Some(3_600_000),
                 ..execute_request("")
             },
             delegate.clone(),
@@ -97,7 +97,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
                 .wait(
                     WaitRequest {
                         cell_id: cell_id("1"),
-                        yield_time_ms: 60_000,
+                        yield_time_ms: 3_600_000,
                     },
                     Some(wait_signal),
                 )
@@ -124,7 +124,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
                 .wait(
                     WaitRequest {
                         cell_id: cell_id("1"),
-                        yield_time_ms: 60_000,
+                        yield_time_ms: 3_600_000,
                     },
                     /*preempt*/ None,
                 )
