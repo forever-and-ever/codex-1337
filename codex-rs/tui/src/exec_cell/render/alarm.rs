@@ -1,5 +1,12 @@
 //! Alarm tails use the command-output row budget and transcript disclosure hint.
-use super::*;
+use super::CommandOutput;
+use super::ExecCell;
+use super::Line;
+use super::OutputLinesParams;
+use super::TOOL_CALL_MAX_LINES;
+use super::output_lines;
+use super::plain_hyperlink_lines;
+use super::visible_lines;
 
 pub(crate) fn alarm_output_lines(output: &CommandOutput, width: u16) -> Vec<Line<'static>> {
     let output = output_lines(

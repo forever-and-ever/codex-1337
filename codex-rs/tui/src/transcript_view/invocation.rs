@@ -187,7 +187,7 @@ impl PreparedInvocation {
         self.count_work(1);
         let available = call.has_formatted_output(width);
         if capabilities.len() == 3 {
-            capabilities.remove(0);
+            let _ = capabilities.remove(0);
         }
         capabilities.push((key, available));
         available
@@ -406,18 +406,18 @@ impl Invocations {
                 PreparationSource::Uncached => None,
             },
             id: call.id.to_owned(),
-            inputs: Default::default(),
-            retained_bytes: Default::default(),
+            inputs: RefCell::default(),
+            retained_bytes: Cell::default(),
             #[cfg(test)]
-            work: Default::default(),
-            raw: Default::default(),
-            formatted_output: Default::default(),
-            outputs: Default::default(),
+            work: Cell::default(),
+            raw: RefCell::default(),
+            formatted_output: RefCell::default(),
+            outputs: RefCell::default(),
         });
         if entry.source.is_some() {
             cache.entries.retain(|entry| !matches!(&entry.source, Some(SourceRevision::Retained(source)) if source.strong_count() == 0));
             if cache.entries.len() == 32 {
-                cache.entries.remove(0);
+                let _ = cache.entries.remove(0);
             }
             cache.entries.push(Rc::clone(&entry));
         }
@@ -428,6 +428,10 @@ impl Invocations {
         self.inputs.get(id).map(AsRef::as_ref)
     }
 
+    #[expect(
+        clippy::fn_params_excessive_bools,
+        reason = "Open/full are independent disclosure policies; formatted input/output independently describe each port capability."
+    )]
     fn ports(
         &self,
         call: &Invocation<'_>,
@@ -504,6 +508,10 @@ impl Invocations {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The two port strips contain only fixed ASCII labels and delimiters; the complete strip is under 40 columns."
+    )]
     pub(super) fn header(
         &self,
         call: &Invocation<'_>,
@@ -580,7 +588,7 @@ impl Invocations {
         let reserve = strip.width() as u16;
         let mut lines = Vec::new();
         let label_end;
-        let offset = if width > reserve + title.width() as u16 {
+        let offset = if usize::from(width) > usize::from(reserve) + title.width() {
             title = crate::line_truncation::truncate_line_with_ellipsis_if_overflow(
                 title,
                 usize::from(width - reserve - 1),
@@ -633,7 +641,7 @@ impl Invocations {
             && let Some(line) = lines.first_mut()
         {
             line.push_span(" ".repeat(usize::from(width).saturating_sub(line.width()) + 2));
-            line.push_span(super::text::token_figure(label, tokens, 0));
+            line.push_span(super::text::token_figure(&label, tokens, 0));
         }
         HeaderRows {
             lines: lines
@@ -720,6 +728,10 @@ impl Invocations {
         )
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The header lane is explicitly capped by body_width, a u16, immediately before conversion."
+    )]
     fn layout_inner(
         &self,
         cell: &dyn HistoryCell,
@@ -884,7 +896,8 @@ impl TranscriptView {
         if self.invocations.input(&input.call_id) != Some(&input) {
             self.invocations.revision = self.invocations.revision.wrapping_add(1);
             let call_id = input.call_id.clone();
-            self.invocations
+            let _ = self
+                .invocations
                 .inputs
                 .insert(call_id.clone(), Arc::new(input));
             self.invocations

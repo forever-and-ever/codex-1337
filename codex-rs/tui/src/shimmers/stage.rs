@@ -102,6 +102,11 @@ impl Stage {
     }
 
     /// Paced tokens that arrived in the last `window` seconds, at most the stage's history.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "A time window deliberately selects whole history ticks; negative windows yield zero and large windows are capped at HISTORY."
+    )]
     pub(super) fn tokens_in(&self, window: f64) -> f64 {
         let ticks = ((window / TICK).round() as usize).min(HISTORY);
         (0..ticks)

@@ -36,6 +36,22 @@ mod tests {
 
     #[test]
     fn script_panes_settle_off_dispatcher_and_reject_stale_completions() {
+        #[derive(Debug)]
+        struct LiveCell(&'static str);
+        impl HistoryCell for LiveCell {
+            fn display_lines(&self, _width: u16) -> Vec<ratatui::text::Line<'static>> {
+                vec![self.0.into()]
+            }
+            fn raw_lines(&self) -> Vec<ratatui::text::Line<'static>> {
+                vec![self.0.into()]
+            }
+            fn activity_ids(&self) -> Vec<String> {
+                vec![self.0.to_owned()]
+            }
+            fn is_tool_entry(&self) -> bool {
+                false
+            }
+        }
         let frames = FrameRequester::test_dummy();
         let mut releases = Vec::new();
         let (started, entered) = std::sync::mpsc::channel();
@@ -49,7 +65,7 @@ mod tests {
                     started.send(()).unwrap();
                     let _ = blocked.recv();
                 });
-            task.poll();
+            let _ = task.poll();
             blockers.push(task);
         }
         for _ in 0..2 {
@@ -98,35 +114,19 @@ mod tests {
                 animation_tick: None,
             })
         };
-        #[derive(Debug)]
-        struct LiveCell(&'static str);
-        impl HistoryCell for LiveCell {
-            fn display_lines(&self, _width: u16) -> Vec<ratatui::text::Line<'static>> {
-                vec![self.0.into()]
-            }
-            fn raw_lines(&self) -> Vec<ratatui::text::Line<'static>> {
-                vec![self.0.into()]
-            }
-            fn activity_ids(&self) -> Vec<String> {
-                vec![self.0.to_owned()]
-            }
-            fn is_tool_entry(&self) -> bool {
-                false
-            }
-        }
         let snapshot = |text: &'static str| crate::transcript_view::OwnedLiveTail {
             active: Some(Arc::new(LiveCell(text))),
             auxiliary: Vec::new(),
         };
-        live.sync_owned_live_tail(80, key(1), false, || snapshot("first revision"));
-        live.sync_owned_live_tail(80, key(2), false, || {
+        let _ = live.sync_owned_live_tail(80, key(1), false, || snapshot("first revision"));
+        let _ = live.sync_owned_live_tail(80, key(2), false, || {
             panic!("an in-flight revision must finish before it is replaced")
         });
         assert!(text(&render(&mut live, &[], 80, 12)).trim().is_empty());
         drop(releases);
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
-            render(&mut view, &cells, 40, 12);
+            let _ = render(&mut view, &cells, 40, 12);
             if let Some(layout) = view.current_layout(&cells, 0) {
                 assert_eq!(layout.text(), format!("Script (python)\n{source}"));
                 break;
@@ -139,9 +139,9 @@ mod tests {
         }
         assert!(!text(&render(&mut view, &cells, 40, 12)).contains("Preparing input"));
         let mut saw_first = false;
-        live.sync_live_activity(&[], vec!["second revision".into()]);
+        let _ = live.sync_live_activity(&[], vec!["second revision".into()]);
         loop {
-            live.sync_owned_live_tail(80, key(2), false, || snapshot("second revision"));
+            let _ = live.sync_owned_live_tail(80, key(2), false, || snapshot("second revision"));
             let frame = text(&render(&mut live, &[], 80, 12));
             if frame.contains("first revision") {
                 saw_first = true;

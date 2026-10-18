@@ -84,6 +84,10 @@ impl Lane {
     pub(crate) fn new(frames: FrameRequester) -> Self {
         Pool::get().lane(frames)
     }
+    #[expect(
+        clippy::panic,
+        reason = "The process-lifetime preparation pool never closes; loss of its worker is an unrecoverable infrastructure invariant violation."
+    )]
     pub(crate) fn spawn(&self, render: impl FnOnce() + Send + 'static) {
         let job = Job {
             owner: None,
@@ -94,12 +98,12 @@ impl Lane {
             match error {
                 TrySendError::Full(job) => {
                     let requests = self.requests.clone();
-                    tokio::spawn(async move {
+                    drop(tokio::spawn(async move {
                         requests
                             .send(job)
                             .await
                             .unwrap_or_else(|_| panic!("transcript preparation pool stopped"));
-                    });
+                    }));
                 }
                 TrySendError::Closed(_) => panic!("transcript preparation pool stopped"),
             }
@@ -135,6 +139,10 @@ impl<T: Send + 'static> Pending<T> {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "The process-lifetime preparation pool never closes; loss of its worker is an unrecoverable infrastructure invariant violation."
+    )]
     pub(crate) fn poll(&mut self) -> Option<T> {
         self.submit();
         match self.result.try_recv() {
@@ -144,6 +152,10 @@ impl<T: Send + 'static> Pending<T> {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "The process-lifetime preparation pool never closes; loss of its worker is an unrecoverable infrastructure invariant violation."
+    )]
     pub(crate) fn submit(&mut self) {
         if let Some(job) = self.queued.take() {
             match self.requests.try_send(job) {
@@ -160,6 +172,10 @@ impl<T: Send + 'static> Pending<T> {
     #[expect(
         clippy::expect_used,
         reason = "The live task retains its cancellation owner until its worker returns a result."
+    )]
+    #[expect(
+        clippy::panic,
+        reason = "The process-lifetime preparation pool never closes; loss of its worker is an unrecoverable infrastructure invariant violation."
     )]
     pub(crate) async fn wait(mut self) -> T {
         if let Some(job) = self.queued.take() {

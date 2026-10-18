@@ -1,6 +1,9 @@
 //! Cloning freezes the mutable live-cell revision for background rendering.
 
-use super::*;
+use super::Arc;
+use super::AtomicBool;
+use super::Ordering;
+use super::SessionHeaderHistoryCell;
 
 impl Clone for SessionHeaderHistoryCell {
     fn clone(&self) -> Self {

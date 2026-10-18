@@ -29,6 +29,10 @@ struct Prism {
 }
 
 impl Prism {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Token totals only shift an approximate visual hue; exact accounting remains upstream."
+    )]
     fn hue(stage: &Stage) -> f64 {
         0.03 * stage.t + stage.tokens as f64 / 3000.0
     }
@@ -44,6 +48,10 @@ impl Shimmer for Prism {
         self.flow = lag(self.flow, flow, /*tau*/ 0.6);
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Header indices and lengths are approximate visual coordinates; subpixel rounding cannot change transcript content."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let hue = Prism::hue(stage);
         let width = stage.header.len() as f64;

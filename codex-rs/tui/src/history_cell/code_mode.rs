@@ -48,7 +48,7 @@ impl HistoryCell for CodeModeWaitCell {
         self.0.transcript_timestamp()
     }
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        self.0.lines(owner_label(&self.1))
+        self.0.lines(&owner_label(&self.1))
     }
     /// The wait's step bill follows its fixed label.
     fn activity_header(&self) -> Option<ActivityHeader> {
@@ -63,10 +63,10 @@ impl HistoryCell for CodeModeWaitCell {
         true
     }
     fn activity_ids(&self) -> Vec<String> {
-        let call = match &self.0.0.event {
-            CodeModeEvent::WaitStarted { call_id, .. }
-            | CodeModeEvent::WaitCompleted { call_id, .. } => call_id,
-            _ => return Vec::new(),
+        let (CodeModeEvent::WaitStarted { call_id: call, .. }
+        | CodeModeEvent::WaitCompleted { call_id: call, .. }) = &self.0.0.event
+        else {
+            return Vec::new();
         };
         vec![format!(
             "code-mode-wait:{}:{}:{call}",
@@ -75,15 +75,21 @@ impl HistoryCell for CodeModeWaitCell {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "The Greek alphabet index is a remainder modulo 24, which fits every supported pointer width."
+)]
 fn label(identity: &str) -> String {
     const GREEK: &[char] = &[
         'α', 'β', 'γ', 'δ', 'ε', 'ζ', 'η', 'θ', 'ι', 'κ', 'λ', 'μ', 'ν', 'ξ', 'ο', 'π', 'ρ', 'σ',
         'τ', 'υ', 'φ', 'χ', 'ψ', 'ω',
     ];
     // A fixed full-identity hash keeps labels stable across redraw, replay, and process restarts.
-    let mut hash = identity.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-    });
+    let mut hash = identity
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
     (0..4)
         .map(|_| {
             let glyph = GREEK[(hash % GREEK.len() as u64) as usize];
@@ -99,7 +105,7 @@ pub(crate) fn owner_label(owner: &CodeModeOwner) -> String {
 
 impl CodeModeFactCell {
     /// A wait reads as the commands do: a group headed "Command", naming the block it waits for.
-    fn lines(&self, label: String) -> Vec<Line<'static>> {
+    fn lines(&self, label: &str) -> Vec<Line<'static>> {
         let verb = match self.0.event {
             CodeModeEvent::WaitStarted { .. } => "Waiting",
             CodeModeEvent::WaitCompleted { .. } => "Waited",
@@ -117,7 +123,7 @@ impl HistoryCell for CodeModeFactCell {
         HistoryTimestamp::from_millis(self.0.created_at.saturating_mul(1_000))
     }
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        self.lines(label(&self.0.exec_call_id))
+        self.lines(&label(&self.0.exec_call_id))
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -188,14 +194,14 @@ impl LegacyCodeMode {
         !ids.is_empty() && ids.iter().all(|id| calls.contains(id))
     }
 
-    fn insert_member(&mut self, incoming: Arc<dyn HistoryCell>) {
+    fn insert_member(&mut self, incoming: &Arc<dyn HistoryCell>) {
         if let Some(group) = incoming.as_any().downcast_ref::<super::ToolOutputGroup>() {
             for member in &group.members {
-                self.insert_member(Arc::clone(member));
+                self.insert_member(member);
             }
             return;
         }
-        let revisions = super::reconcile_tool_calls(&self.members, &incoming);
+        let revisions = super::reconcile_tool_calls(&self.members, incoming);
         for (index, replacement) in revisions.replacements {
             self.members[index] = replacement;
         }
@@ -342,7 +348,7 @@ impl CodeModeCell {
     }
 
     fn header(&self) -> Option<Line<'static>> {
-        self.event_time()?;
+        let _ = self.event_time()?;
         let terminal = self.status();
         let (bullet, verb) = match terminal {
             Some((CodeModeStatus::Completed, _)) => ("•".green().bold(), "Called"),
@@ -434,8 +440,9 @@ impl HistoryCell for CodeModeCell {
             .any(|member| member.has_formatted_output())
     }
     fn transcript_animation_tick(&self) -> Option<u64> {
-        (self.animations_enabled() && self.is_active())
-            .then(|| (self.start_time().elapsed().as_millis() / 50) as u64)
+        (self.animations_enabled() && self.is_active()).then(|| {
+            u64::try_from(self.start_time().elapsed().as_millis() / 50).unwrap_or(u64::MAX)
+        })
     }
     fn activity_header(&self) -> Option<ActivityHeader> {
         self.header().as_ref().map(ActivityHeader::at_end)

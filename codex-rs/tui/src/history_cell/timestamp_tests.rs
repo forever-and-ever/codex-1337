@@ -22,7 +22,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     let source = "A **reply** with a table and enough prose to wrap.\n\n| Name | Value |\n| --- | --- |\n| alpha | 42 |\n";
     let mut stream = StreamController::new(Some(48), Path::new("/tmp"), HistoryRenderMode::Rich);
     stream.timestamp = Some(timestamp);
-    stream.push(source);
+    let _ = stream.push(source);
     let (streamed, _) = stream.finalize();
     let streamed = streamed.unwrap();
     let mut completed = AgentMarkdownCell::new(source.to_string(), Path::new("/tmp"));
@@ -59,7 +59,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     );
     command.completed_at = Some(timestamp);
     assert_eq!(command.transcript_timestamp(), None);
-    command.complete_call(
+    let _ = command.complete_call(
         "call",
         CommandOutput::new(/*exit_code*/ 0, "hello".into()),
         Duration::from_secs(1),
@@ -78,11 +78,13 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
         /*animations_enabled*/ false,
     );
     exploration.completed_at = Some(timestamp);
-    exploration.complete_call("read", CommandOutput::default(), Duration::from_secs(1));
+    let _ = exploration.complete_call("read", CommandOutput::default(), Duration::from_secs(1));
 
     let mut snapshot = String::new();
     for width in [60, 32, 60] {
-        snapshot.push_str(&format!("width {width}\n"));
+        snapshot.push_str("width ");
+        snapshot.push_str(&width.to_string());
+        snapshot.push('\n');
         let content_width =
             crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
         let lines = crate::transcript_geometry::clock_lines(

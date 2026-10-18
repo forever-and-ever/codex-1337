@@ -1,6 +1,13 @@
 //! Attributed cross-thread messages are tool output, never user prompts.
 
-use super::*;
+use super::HistoryCell;
+use super::HistoryTimestamp;
+use super::Line;
+use super::RtOptions;
+use super::Stylize;
+use super::adaptive_wrap_lines;
+use super::prefix_lines;
+use super::sanitize_user_text;
 use crate::dynamic_tools::DelegatedMessage;
 use crate::style::aside_style;
 

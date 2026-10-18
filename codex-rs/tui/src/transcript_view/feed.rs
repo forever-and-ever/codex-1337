@@ -24,6 +24,18 @@
 //! member with that step's own figures; the one fold drives both levels. A Thought shows only
 //! when it has text to read: otherwise its tokens are its step's thought figure.
 
+use super::Anchor;
+use super::Arc;
+use super::EntryKey;
+use super::HistoryCell;
+use super::HistoryRenderMode;
+use super::HyperlinkLine;
+use super::Line;
+use super::Position;
+use super::Stylize;
+use super::TranscriptView;
+use super::disclosure;
+use super::invocation;
 use super::step_bills::Figures;
 use super::step_bills::Own;
 use super::step_bills::Split;
@@ -36,7 +48,7 @@ use super::text::HeaderControl;
 use super::text::HeaderRows;
 use super::text::token_figure;
 use super::text::token_label;
-use super::*;
+use super::tool_output_tokens;
 use crate::history_cell::AgentMarkdownCell;
 use crate::history_cell::ArrivalCell;
 use crate::history_cell::CodeModeCell;
@@ -446,7 +458,7 @@ impl FeedIndex {
             if let Some((kind, key)) =
                 entry_kind(cell, &cell_nodes[index], last_step, &mut placed_users)
             {
-                items.push(Item::new(kind, key));
+                items.push(Item::new(kind, &key));
                 let item = items.len() - 1;
                 items[item].segments.push(vec![index]);
                 roles[index] = Role::Member(Membership {
@@ -464,10 +476,7 @@ impl FeedIndex {
             };
             let root = find(&mut parent, *first);
             let item = *item_of_root.entry(root).or_insert_with(|| {
-                items.push(Item::new(
-                    Kind::Steps { calls: false },
-                    names[*first].to_string(),
-                ));
+                items.push(Item::new(Kind::Steps { calls: false }, names[*first]));
                 items.len() - 1
             });
             if last_item != Some(item) || items[item].segments.is_empty() {
@@ -479,7 +488,11 @@ impl FeedIndex {
             let mut opens = Vec::new();
             for node in &cell_nodes[index] {
                 let name = names[*node];
-                let position = if let Some(position) = items[item].steps.iter().position(|step| step == name) { position } else {
+                let position = if let Some(position) =
+                    items[item].steps.iter().position(|step| step == name)
+                {
+                    position
+                } else {
                     items[item].steps.push(name.to_string());
                     opens.push(items[item].steps.len() - 1);
                     items[item].steps.len() - 1
@@ -616,11 +629,11 @@ impl FeedIndex {
             })
             .collect();
         if calls.len() == 1 {
-            return item.segments.iter().flatten().any(|index| {
-                cells[*index]
-                    .as_any()
-                    .is::<CodeModeCell>()
-            });
+            return item
+                .segments
+                .iter()
+                .flatten()
+                .any(|index| cells[*index].as_any().is::<CodeModeCell>());
         }
         let content_width =
             crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
@@ -658,7 +671,7 @@ impl FeedIndex {
                         || cell.compact_hyperlink_lines(content_width),
                         |parts| parts.lines,
                     );
-                behead(&mut lines);
+                let _ = behead(&mut lines);
                 if !lines.is_empty() {
                     return true;
                 }
@@ -826,7 +839,7 @@ impl FeedIndex {
         let index = *self.folds.get(fold)?;
         let item = &self.items[index];
         if !expanded.remove(&item.fold_mark) {
-            expanded.insert(item.fold_mark.clone());
+            let _ = expanded.insert(item.fold_mark.clone());
         }
         Some(index)
     }
@@ -871,6 +884,10 @@ impl FeedIndex {
             .find_map(|segment| sites(segment).first().copied())
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The invocation title lane is derived from the u16 terminal width before conversion."
+    )]
     pub(super) fn header_rows(
         &self,
         cells: &[Arc<dyn HistoryCell>],
@@ -906,9 +923,7 @@ impl FeedIndex {
         let (titles, mut controls) = if let Some(call) = &invocation {
             if header.disclosure.unfolded() {
                 let source = match header.title {
-                    Title::Owned(index) => {
-                        invocation::PreparationSource::Retained(&cells[index])
-                    }
+                    Title::Owned(index) => invocation::PreparationSource::Retained(&cells[index]),
                     _ => unreachable!("invocation header requires an owned source"),
                 };
                 let prepared = invocations.prepared(call, source);
@@ -951,17 +966,22 @@ impl FeedIndex {
             {
                 for (choice, label) in [(OutputMode::Raw, "[Raw]"), (OutputMode::Fmt, "[Fmt]")] {
                     title.push_span(" ");
-                    let start = title.width() as u16;
+                    let start = title.width();
                     title.push_span(if mode == choice {
                         Span::styled(label, crate::render::disclosure::tab_style())
                     } else {
                         label.dim()
                     });
-                    controls.push(HeaderControl {
-                        row: 0,
-                        columns: start..title.width() as u16,
-                        target: FoldTarget::OutputMode(choice),
-                    });
+                    let end = title.width();
+                    if end <= title_width
+                        && let (Ok(start), Ok(end)) = (u16::try_from(start), u16::try_from(end))
+                    {
+                        controls.push(HeaderControl {
+                            row: 0,
+                            columns: start..end,
+                            target: FoldTarget::OutputMode(choice),
+                        });
+                    }
                 }
             }
             (
@@ -1118,7 +1138,7 @@ impl FeedIndex {
 }
 
 impl Item {
-    fn new(kind: Kind, key: String) -> Self {
+    fn new(kind: Kind, key: &str) -> Self {
         let fold = format!("feed:{key}");
         Self {
             kind,
@@ -1312,7 +1332,7 @@ pub(super) fn behead(lines: &mut Vec<HyperlinkLine>) -> usize {
         .iter()
         .position(|line| line.width() > 0)
         .map_or(lines.len(), |rest| title + 1 + rest);
-    lines.drain(..rest);
+    let _ = lines.drain(..rest);
     rest
 }
 
@@ -1364,7 +1384,7 @@ fn split_spans(split: Split) -> impl Iterator<Item = Span<'static>> {
         if tokens == 0 {
             " ".repeat(width).into()
         } else {
-            token_figure(token_label(tokens), tokens, width)
+            token_figure(&token_label(tokens), tokens, width)
         }
     };
     let own = match split.own {
@@ -1378,7 +1398,7 @@ fn split_spans(split: Split) -> impl Iterator<Item = Span<'static>> {
             let approximate = if approximate { "≈" } else { "" };
             let pending = if pending { "+…" } else { "" };
             token_figure(
-                format!("{approximate}{}{pending}", token_label(tokens)),
+                &format!("{approximate}{}{pending}", token_label(tokens)),
                 tokens,
                 own,
             )
@@ -1397,9 +1417,9 @@ fn split_spans(split: Split) -> impl Iterator<Item = Span<'static>> {
 /// The total, right-aligned and colored by size; placeholders stay dim.
 fn total_span(total: Total) -> Span<'static> {
     match total {
-        Total::Exact(tokens) => token_figure(token_label(tokens), tokens, TOTAL_WIDTH),
+        Total::Exact(tokens) => token_figure(&token_label(tokens), tokens, TOTAL_WIDTH),
         Total::Approximate(tokens) => {
-            token_figure(format!("≈{}", token_label(tokens)), tokens, TOTAL_WIDTH)
+            token_figure(&format!("≈{}", token_label(tokens)), tokens, TOTAL_WIDTH)
         }
         Total::Pending => format!("{:>TOTAL_WIDTH$}", "…").dim(),
         Total::Severed => format!("{:>TOTAL_WIDTH$}", "—").dim(),
@@ -1424,7 +1444,7 @@ impl TranscriptView {
         response_id: &str,
     ) -> Option<Range<usize>> {
         let bills = &self.step_bills;
-        bills.step(response_id)?;
+        let _ = bills.step(response_id)?;
         let mut thought = None;
         let mut first = None;
         for (index, cell) in cells.iter().enumerate().rev() {
@@ -1485,7 +1505,8 @@ impl TranscriptView {
             ..
         }) = &seat.header
         {
-            self.disclosure
+            let _ = self
+                .disclosure
                 .expanded
                 .remove(&self.feed.items[*item].fold_mark);
         }
@@ -1529,21 +1550,25 @@ impl TranscriptView {
                     continue;
                 }
                 // Both forms default open; late admission moves the same closed mark and focus.
-                let prior = Item::new(Kind::CodeMode, block.identity());
+                let prior = Item::new(Kind::CodeMode, &block.identity());
                 if self.disclosure.expanded.remove(&prior.fold_mark) {
-                    self.disclosure.expanded.insert(item.fold_mark.clone());
+                    let _ = self.disclosure.expanded.insert(item.fold_mark.clone());
                 }
                 if let Some(focused) = &mut self.disclosure.focused
                     && let FoldTarget::Part(fold) = &mut focused.target
                     && *fold == prior.fold
                 {
-                    *fold = item.fold.clone();
+                    fold.clone_from(&item.fold);
                 }
             }
         }
     }
 
     /// Fold or unfold a Feed Item, keeping its remaining header in view and focused.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."
+    )]
     pub(super) fn toggle_feed(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],

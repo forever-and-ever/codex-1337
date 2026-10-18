@@ -80,7 +80,7 @@ impl Command {
     fn apply(self, core: &mut StreamCore) {
         match self {
             Self::Delta(delta) => {
-                core.push_delta(&delta);
+                let _ = core.push_delta(&delta);
             }
             Self::Width(width) => core.set_width(width),
             Self::Mode(mode) => core.set_render_mode(mode),
@@ -141,7 +141,7 @@ impl Background {
             let mut core = StreamCore::new(width, &cwd, mode, context);
             core.render.list_spacing = spacing;
             STREAMS.with(|streams| {
-                streams
+                let _ = streams
                     .borrow_mut()
                     .insert(id, (core, super::immutable_rows::Publication::default()));
             });
@@ -223,7 +223,7 @@ impl Background {
                     core.emitted_stable_len = 0;
                     core.enqueued_stable_len = 0;
                     core.state.clear_queue();
-                    core.sync_stable_queue();
+                    let _ = core.sync_stable_queue();
                 }
                 let (rows, tail) = publication.prepare(core);
                 let count = rows.len();
@@ -247,7 +247,7 @@ impl Background {
         self.work = Work::Running(task);
     }
     fn push(&mut self, command: Command) {
-        self.oldest.get_or_insert_with(Instant::now);
+        let _ = self.oldest.get_or_insert_with(Instant::now);
         self.commands.push(command);
         self.poll();
     }
@@ -298,7 +298,7 @@ impl Background {
         let lines = std::mem::take(&mut self.lines);
         let lane = self.lane.clone();
         let id = self.id;
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let ready = match work {
                 Work::Running(task) => Some(task.wait().await),
                 _ => None,
@@ -317,7 +317,7 @@ impl Background {
                     finish(core.state.collector.finalize_and_take_source());
                 });
             });
-        });
+        }));
     }
 }
 impl Drop for Background {
@@ -329,7 +329,7 @@ impl Drop for Background {
         let id = self.id;
         let lane = self.lane.clone();
         let lines = std::mem::take(&mut self.lines);
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let ready = match work {
                 Work::Running(task) => Some(task.wait().await),
                 _ => None,
@@ -338,10 +338,10 @@ impl Drop for Background {
                 drop(ready);
                 drop(lines);
                 STREAMS.with(|streams| {
-                    streams.borrow_mut().remove(&id);
+                    let _ = streams.borrow_mut().remove(&id);
                 });
             });
-        });
+        }));
     }
 }
 
@@ -417,6 +417,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Stream spacing is construction-only configuration; prepared streams cannot be reconstructed in place."
+    )]
     pub(super) fn set_list_spacing(&mut self, spacing: ListSpacing) {
         match self {
             Self::Inline(core) => core.render.list_spacing = spacing,
@@ -534,6 +538,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Prepared streams must transfer completion through their keyed finalization owner, never the synchronous inline API."
+    )]
     pub(super) fn finalize_remaining(&mut self) -> (Vec<HyperlinkLine>, String) {
         match self {
             Self::Inline(core) => core.finalize_remaining(),
@@ -543,6 +551,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Prepared streams transfer their parser on finalization and cannot be reset through the synchronous inline API."
+    )]
     pub(super) fn reset(&mut self) {
         match self {
             Self::Inline(core) => core.reset(),
@@ -602,7 +614,7 @@ impl super::StreamController {
             Rows::Inline(lines) => {
                 let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, first);
                 cell.timestamp = self.timestamp;
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell)
             }
             Rows::Shared(rows) => self.core.wrap_rows(
@@ -636,7 +648,7 @@ impl super::PlanStreamController {
             Rows::Inline(lines) => {
                 let out = self.render_display_lines(lines, include_bottom_padding);
                 let mut cell = history_cell::new_proposed_plan_stream(out, !first);
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell) as Box<dyn HistoryCell>
             }
             Rows::Shared(rows) => self.core.wrap_rows(

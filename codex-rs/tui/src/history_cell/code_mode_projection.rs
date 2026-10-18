@@ -3,6 +3,7 @@
 use super::CodeModeCell;
 use super::CodeModeFactCell;
 use super::LegacyCodeMode;
+use crate::history_cell::ActivityDetails;
 use crate::history_cell::HistoryCell;
 use codex_app_server_protocol::CodeModeEvent;
 use std::collections::BTreeMap;
@@ -19,7 +20,7 @@ pub(crate) fn split_code_mode_members(
     incoming: &Arc<dyn HistoryCell>,
 ) -> Option<Vec<Arc<dyn HistoryCell>>> {
     split_members(
-        cells
+        &cells
             .iter()
             .filter_map(|cell| cell.as_any().downcast_ref::<CodeModeCell>())
             .filter_map(|block| match block {
@@ -31,11 +32,11 @@ pub(crate) fn split_code_mode_members(
 }
 
 fn split_members<'a>(
-    blocks: impl Iterator<Item = &'a LegacyCodeMode> + Clone,
+    blocks: &(impl Iterator<Item = &'a LegacyCodeMode> + Clone),
     incoming: &Arc<dyn HistoryCell>,
 ) -> Option<Vec<Arc<dyn HistoryCell>>> {
     let ids = incoming.tool_call_ids();
-    if !blocks
+    if !(*blocks)
         .clone()
         .any(|block| ids.iter().any(|id| block.calls().contains(id)))
     {
@@ -60,12 +61,12 @@ fn split_members<'a>(
                 .calls
                 .iter()
                 .map(|call| {
-                    if blocks.clone().any(|block| block.owns(call)) {
+                    if (*blocks).clone().any(|block| block.owns(call)) {
                         Arc::new(call.clone()) as Arc<dyn HistoryCell>
                     } else {
                         let mut cell = group.clone();
                         cell.group.calls = vec![call.clone()];
-                        cell.group.details = Default::default();
+                        cell.group.details = ActivityDetails::default();
                         Arc::new(cell) as Arc<dyn HistoryCell>
                     }
                 })
@@ -94,7 +95,7 @@ fn split_members<'a>(
             .map(|call| {
                 let mut cell = group.clone();
                 cell.group.calls = vec![call.clone()];
-                cell.group.details = Default::default();
+                cell.group.details = ActivityDetails::default();
                 Arc::new(cell) as Arc<dyn HistoryCell>
             })
             .chain(
@@ -145,7 +146,7 @@ pub(crate) fn reconcile_code_mode(
             reference = Some(Arc::clone(incoming));
         }
     } else {
-        block.insert_member(Arc::clone(incoming));
+        block.insert_member(incoming);
     }
     // Ownership facts can arrive after their rows. Include earlier members, even when
     // an exploration group straddles this script and unrelated calls.
@@ -174,17 +175,17 @@ pub(crate) fn reconcile_code_mode(
                 block.insert_fact(fact.clone());
             }
             for member in &old.members {
-                block.insert_member(Arc::clone(member));
+                block.insert_member(member);
             }
         } else if reference.is_some() && same_wait_reference(cell.as_ref(), fact?) {
             // The completed reference replaces its pending row rather than creating a second bill.
             reference_position = Some(retained.len());
         } else {
-            let members = split_members(std::iter::once(&block), cell)
+            let members = split_members(&std::iter::once(&block), cell)
                 .unwrap_or_else(|| vec![Arc::clone(cell)]);
             for member in members {
                 if block.owns(member.as_ref()) {
-                    block.insert_member(member);
+                    block.insert_member(&member);
                 } else {
                     retained.push(member);
                 }
@@ -227,7 +228,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     if split.len() != cells.len() || split.iter().zip(cells).any(|(a, b)| !Arc::ptr_eq(a, b)) {
         let mut normalized = split;
         if let Some((range, replacements)) = reunite_code_mode(&normalized) {
-            normalized.splice(range, replacements);
+            let _ = normalized.splice(range, replacements);
         }
         return Some((0..cells.len(), normalized));
     }
@@ -246,7 +247,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
                     *retained = Arc::clone(cell);
                 }
             } else {
-                references.insert(key, (index, Arc::clone(cell)));
+                let _ = references.insert(key, (index, Arc::clone(cell)));
             }
         }
         let Some(CodeModeCell::Legacy(block)) = cell.as_any().downcast_ref::<CodeModeCell>() else {
@@ -261,7 +262,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
         } else {
             let mut retained = block.clone();
             retained.members.clear();
-            blocks.insert(block.exec_call_id.clone(), (index, retained));
+            let _ = blocks.insert(block.exec_call_id.clone(), (index, retained));
         }
     }
     if blocks.is_empty() {
@@ -275,7 +276,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
             };
             let (_, retained) = blocks.get_mut(&block.exec_call_id)?;
             for member in &block.members {
-                retained.insert_member(Arc::clone(member));
+                retained.insert_member(member);
             }
             continue;
         }
@@ -283,8 +284,8 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
             .values_mut()
             .find(|(_, block)| block.owns(cell.as_ref()))
         {
-            block.insert_member(Arc::clone(cell));
-            absorbed.insert(index);
+            block.insert_member(cell);
+            let _ = absorbed.insert(index);
         }
     }
     if !changed && absorbed.is_empty() {

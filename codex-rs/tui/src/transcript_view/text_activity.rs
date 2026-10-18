@@ -1,6 +1,22 @@
 //! Headings retain selectable text; interactive controls stay outside copied source.
 
-use super::*;
+use super::DisclosureControl;
+use super::DisclosurePlacement;
+use super::FoldTarget;
+use super::HeaderControl;
+use super::HeaderRows;
+use super::HyperlinkLine;
+use super::InlineAnchor;
+use super::Line;
+use super::LogicalLineSource;
+use super::OutputMode;
+use super::Range;
+use super::Stylize;
+use super::TextLayout;
+use super::TextRow;
+use super::display_width;
+use super::logical;
+use super::truncate_line_to_width;
 
 fn byte_at_column(text: &str, column: usize) -> usize {
     use unicode_segmentation::UnicodeSegmentation;

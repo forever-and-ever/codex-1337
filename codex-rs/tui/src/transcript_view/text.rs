@@ -471,7 +471,7 @@ impl TextLayout {
                     ),
                     crate::transcript_geometry::TokenSeat::Trailing => {
                         let span = gutter::token_figure(
-                            gutter::token_label(tokens),
+                            &gutter::token_label(tokens),
                             tokens,
                             /*width*/ 0,
                         );

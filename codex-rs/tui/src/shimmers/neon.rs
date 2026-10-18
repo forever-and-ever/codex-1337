@@ -35,6 +35,13 @@ const SURGE: Lottery = Lottery {
 struct Neon;
 
 impl Shimmer for Neon {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        clippy::cast_possible_wrap,
+        reason = "Neon noise deliberately samples whole clock buckets and nonnegative hash-selected letters; header coordinates are visual scalars and allocated-slice indices fit i64."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = stage.t;
         let flicker = (t / TICK).round() as i64;
