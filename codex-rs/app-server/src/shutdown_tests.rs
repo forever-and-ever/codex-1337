@@ -77,7 +77,7 @@ fn pending_upgrade_keeps_admission_open_until_requests_and_turns_are_idle() {
         );
     }
     // Admission and running-turn publication overlap, not a transient idle gap.
-    let _ = running_tx.send_replace(/*value*/ 1);
+    running_tx.send_replace(/*value*/ 1);
     drop(request);
     assert_eq!(
         shutdown.update(
@@ -89,7 +89,7 @@ fn pending_upgrade_keeps_admission_open_until_requests_and_turns_are_idle() {
         ShutdownAction::Noop
     );
     let resumed = admission.admit().expect("resumes still admitted");
-    let _ = running_tx.send_replace(/*value*/ 0);
+    running_tx.send_replace(/*value*/ 0);
     assert_eq!(
         shutdown.update(
             &mut running,

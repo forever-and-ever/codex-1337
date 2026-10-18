@@ -18,7 +18,7 @@ impl App {
         } else {
             UiRequestKind::ReadOnly
         };
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             kind,

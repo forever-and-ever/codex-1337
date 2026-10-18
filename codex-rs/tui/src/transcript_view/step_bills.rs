@@ -109,16 +109,14 @@ impl StepBills {
             return false;
         }
         for call_id in &item.call_ids {
-            let _ = self
-                .response_by_call
+            self.response_by_call
                 .insert(call_id.clone(), item.response_id.clone());
         }
         for message_id in &item.message_ids {
-            let _ = self
-                .response_by_message
+            self.response_by_message
                 .insert(message_id.clone(), item.response_id.clone());
         }
-        let _ = self.by_response.insert(item.response_id.clone(), item);
+        self.by_response.insert(item.response_id.clone(), item);
         self.revision += 1;
         true
     }

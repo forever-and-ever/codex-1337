@@ -22,7 +22,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     let source = "A **reply** with a table and enough prose to wrap.\n\n| Name | Value |\n| --- | --- |\n| alpha | 42 |\n";
     let mut stream = StreamController::new(Some(48), Path::new("/tmp"), HistoryRenderMode::Rich);
     stream.timestamp = Some(timestamp);
-    let _ = stream.push(source);
+    stream.push(source);
     let (streamed, _) = stream.finalize();
     let streamed = streamed.unwrap();
     let mut completed = AgentMarkdownCell::new(source.to_string(), Path::new("/tmp"));
@@ -75,7 +75,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
     );
     command.completed_at = Some(timestamp);
     assert_eq!(command.transcript_timestamp(), None);
-    let _ = command.complete_call(
+    command.complete_call(
         "call",
         CommandOutput::new(/*exit_code*/ 0, "hello".into()),
         Duration::from_secs(1),
@@ -94,7 +94,7 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
         /*animations_enabled*/ false,
     );
     exploration.completed_at = Some(timestamp);
-    let _ = exploration.complete_call("read", CommandOutput::default(), Duration::from_secs(1));
+    exploration.complete_call("read", CommandOutput::default(), Duration::from_secs(1));
 
     let mut snapshot = String::new();
     for width in [60, 32, 60] {

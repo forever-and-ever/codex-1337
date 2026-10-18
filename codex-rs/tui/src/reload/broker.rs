@@ -52,7 +52,7 @@ pub(super) async fn listen(
         let (stream, _) = listener.accept().await?;
         connection += 1;
         let commands = commands.clone();
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
                 return;
             };
@@ -98,7 +98,7 @@ pub(super) async fn listen(
                 () = forwarding => {},
             }
             let _ = commands.send(Command::Detach(connection)).await;
-        }));
+        });
     }
 }
 
@@ -139,10 +139,10 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     }
                 }
                 Some(Command::Attach(connection, writer)) => {
-                    let _ = ui.insert(connection, writer);
+                    ui.insert(connection, writer);
                 }
                 Some(Command::Detach(connection)) => {
-                    let _ = ui.remove(&connection);
+                    ui.remove(&connection);
                 }
                 Some(Command::Input(connection, message)) => {
                     if !ui.contains_key(&connection) {
@@ -168,7 +168,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                             request.id = RequestId::String(format!("ui-host-{request_sequence}"));
                             let handle = client.request_handle();
                             let results = results.clone();
-                            drop(tokio::spawn(async move {
+                            tokio::spawn(async move {
                                 let result = handle.request_json_rpc(request).await;
                                 let message = match result {
                                     Ok(Ok(result)) => JSONRPCMessage::Response(JSONRPCResponse { id, result }),
@@ -183,7 +183,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                                     }),
                                 };
                                 let _ = results.send((connection, message)).await;
-                            }));
+                            });
                         }
                         JSONRPCMessage::Notification(notification) => {
                             if notification.method == "initialized" {
@@ -197,14 +197,14 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                             if pending.contains_key(&response.id)
                                 && client.resolve_server_request(response.id.clone(), response.result).await.is_ok()
                             {
-                                let _ = pending.remove(&response.id);
+                                pending.remove(&response.id);
                             }
                         }
                         JSONRPCMessage::Error(error) => {
                             if pending.contains_key(&error.id)
                                 && client.request_handle().reject_server_request(error.id.clone(), error.error).await.is_ok()
                             {
-                                let _ = pending.remove(&error.id);
+                                pending.remove(&error.id);
                             }
                         }
                     }
@@ -219,14 +219,14 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
             } => match event {
                 Some(AppServerEvent::ServerNotification(notification)) => {
                     if let codex_app_server_protocol::ServerNotification::ServerRequestResolved(value) = notification.as_ref() {
-                        let _ = pending.remove(&value.request_id);
+                        pending.remove(&value.request_id);
                     }
                     send(&mut ui, &Audience::All, &notification);
                 }
                 Some(AppServerEvent::ServerRequest(request)) => {
                     if let Ok(value) = serde_json::to_value(&request)
                         && let Some(id) = value.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()) {
-                            let _ = pending.insert(id, value.clone());
+                            pending.insert(id, value.clone());
                             send(&mut ui, &Audience::All, &value);
                         }
                 }

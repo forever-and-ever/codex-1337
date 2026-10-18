@@ -34,7 +34,7 @@ impl App {
             return false;
         }
         let generation = self.model_selection_generation;
-        let _ = self.request_server(
+        self.request_server(
             server,
             super::super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
             super::super::turn_submissions::ui_requests::UiRequestKind::Mutation,
@@ -56,14 +56,13 @@ impl App {
                 if changes_permissions {
                     match result {
                         Ok(true) => {
-                            let _ = app
-                                .agents_overview
+                            app.agents_overview
                                 .requested_permission_profiles
                                 .remove(&thread_id);
                         }
                         Ok(false)
                         | Err(super::super::turn_submissions::SubmissionFailure::Rejected(_)) => {
-                            let _ = app.pending_server_profiles.remove(&thread_id);
+                            app.pending_server_profiles.remove(&thread_id);
                         }
                         _ => {}
                     }
@@ -124,7 +123,7 @@ impl App {
             });
         // Reserve the selection before its confirming notification can arrive.
         if accepted && let (Some(thread_id), Some(selection)) = (thread_id, pending_cyber_profile) {
-            let _ = self.pending_server_profiles.insert(thread_id, selection);
+            self.pending_server_profiles.insert(thread_id, selection);
         }
     }
 

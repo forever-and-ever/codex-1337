@@ -276,8 +276,7 @@ impl Session {
         self.services.model_client.invalidate_account();
         self.services.models_manager.invalidate_account().await;
         self.services.plugins_manager.clear_cache();
-        let _ = self
-            .services
+        self.services
             .plugins_manager
             .clear_remote_installed_plugins_cache();
         // Account-dependent extension state uses the same rebuild path as configuration.

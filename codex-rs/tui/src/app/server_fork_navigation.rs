@@ -238,7 +238,7 @@ impl App {
             from_agents_overview,
             source_turn_running: self.chat_widget.is_agent_turn_running(),
         };
-        let _ = self.request_server_prepared(
+        self.request_server_prepared(
             server,
             ui_requests::UiRequestScope::Thread(thread_id),
             ui_requests::UiRequestKind::ReadOnly,
@@ -560,20 +560,19 @@ impl App {
         );
         for thread_id in retained {
             if !self.side_threads.contains_key(&thread_id) {
-                let _ = self
-                    .agents_overview
+                self.agents_overview
                     .dispatched_requests
                     .entry(thread_id)
                     .or_default();
                 if let Some(channel) = self.thread_event_channels.get(&thread_id)
                     && let Some(input) = channel.store.lock().await.input_state.clone()
                 {
-                    let _ = self.agents_overview.input_states.insert(thread_id, input);
+                    self.agents_overview.input_states.insert(thread_id, input);
                 }
             }
         }
         if let Some(input) = self.chat_widget.capture_thread_input_state() {
-            let _ = self.agents_overview.input_states.insert(source, input);
+            self.agents_overview.input_states.insert(source, input);
         }
     }
 
@@ -652,13 +651,11 @@ impl App {
                     ready.started.turns,
                 );
             }
-            let _ = self
-                .side_threads
+            self.side_threads
                 .insert(target, SideThreadState::new(parent));
             self.upsert_agent_picker_thread(target, None, None, false);
             if let Some(profile) = ready.context.input.permissions.selection() {
-                let _ = self
-                    .agents_overview
+                self.agents_overview
                     .selected_permission_profiles
                     .insert(target, profile.profile_id.clone());
             }
@@ -682,8 +679,7 @@ impl App {
                 if let ForkPurpose::Side { prompt } = &mut ready.context.input.purpose
                     && let Some(message) = prompt.take()
                 {
-                    let _ = self
-                        .chat_widget
+                    self.chat_widget
                         .submit_user_message_as_plain_user_turn(message);
                 }
             }
@@ -699,8 +695,7 @@ impl App {
             ForkPurpose::Ordinary { .. } | ForkPurpose::Side { .. } => None,
         };
         if let Some(profile) = ready.context.input.permissions.selection() {
-            let _ = self
-                .agents_overview
+            self.agents_overview
                 .selected_permission_profiles
                 .insert(target, profile.profile_id.clone());
         }

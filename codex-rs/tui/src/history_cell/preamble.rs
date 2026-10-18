@@ -394,7 +394,7 @@ impl HistoryCell for PreambleCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut expanded = HashSet::new();
-        let _ = expanded.insert(self.raw_fold());
+        expanded.insert(self.raw_fold());
         let mut lines = self.display_hyperlink_lines(width);
         lines.extend(
             self.feed_body(width, &expanded, super::output_provenance::OutputMode::Raw)

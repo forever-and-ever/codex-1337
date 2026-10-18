@@ -27,7 +27,7 @@ impl WorldStateSnapshot {
         for (id, revision) in revisions.iter().chain(&fresh) {
             if let Some(text) = &revision.current {
                 let key = (text.role().to_string(), text.kind.0.clone());
-                let _ = kinds
+                kinds
                     .entry(key)
                     .and_modify(|owner: &mut Option<String>| {
                         if owner.as_ref() != Some(id) {
@@ -35,12 +35,12 @@ impl WorldStateSnapshot {
                         }
                     })
                     .or_insert_with(|| Some(id.clone()));
-                let _ = owners.insert(text.fingerprint().0, id.clone());
+                owners.insert(text.fingerprint().0, id.clone());
             }
         }
         for (id, revision) in &revisions {
             for hash in &revision.lineage {
-                let _ = owners.insert(hash.0.clone(), id.clone());
+                owners.insert(hash.0.clone(), id.clone());
             }
         }
         for (id, revision) in &mut revisions {
@@ -48,7 +48,7 @@ impl WorldStateSnapshot {
         }
         // A newly configured section has no historical amendment lineage yet.
         for (id, revision) in fresh {
-            let _ = revisions
+            revisions
                 .entry(id)
                 .and_modify(|old| old.current.clone_from(&revision.current))
                 .or_insert(revision);
@@ -93,7 +93,7 @@ impl WorldStateSnapshot {
                         assert_eq!(role, text.role(), "instruction amendment changed authority");
                         materialized
                             .push(AnnotatedContent::input_text(&text.text, text.kind.clone()));
-                        let _ = emitted.insert(id.to_string());
+                        emitted.insert(id.to_string());
                     }
                     changed = true;
                     continue;
@@ -163,7 +163,7 @@ impl WorldStateSnapshot {
                 )
             })
             .count();
-        let _ = result.splice(insertion..insertion, additions);
+        result.splice(insertion..insertion, additions);
         result
     }
 }

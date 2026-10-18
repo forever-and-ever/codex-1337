@@ -33,7 +33,6 @@ impl CodeModePayload for ThreadItem {
 }
 
 impl ThreadItem {
-    #[must_use]
     pub fn into_native_item(self) -> Self {
         match self {
             Self::CodeModeOwned(owned) => *owned.into_parts().1,
@@ -41,7 +40,6 @@ impl ThreadItem {
         }
     }
 
-    #[must_use]
     pub fn native_item(&self) -> &Self {
         match self {
             Self::CodeModeOwned(owned) => owned.payload(),
@@ -51,7 +49,6 @@ impl ThreadItem {
 }
 
 impl ServerNotification {
-    #[must_use]
     pub fn into_native_notification(self) -> Self {
         match self {
             Self::CodeModeOwned(owned) => *owned.into_parts().1,
@@ -59,7 +56,6 @@ impl ServerNotification {
         }
     }
 
-    #[must_use]
     pub fn native_notification(&self) -> &Self {
         match self {
             Self::CodeModeOwned(owned) => owned.payload(),
@@ -68,7 +64,6 @@ impl ServerNotification {
     }
 
     /// Non-transcript side effects, including approvals and thread status, stay native.
-    #[must_use]
     pub fn with_code_mode_owner(self, owner: &CodeModeOwner) -> Self {
         let thread_id = match &self {
             Self::ItemStarted(item) => Some(item.thread_id.as_str()),

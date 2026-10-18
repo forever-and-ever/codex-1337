@@ -44,7 +44,7 @@ impl MutableCatalog {
             }))
             .await?,
         );
-        let _ = client
+        client
             .initialize(
                 InitializeRequestParams::new(
                     ClientCapabilities::default(),
@@ -147,7 +147,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
         .prepare_call_for_tool(Arc::clone(before.config()), stale_call.tool_info())
         .await
         .expect("equivalent definition on a replacement connection");
-    let _ = equivalent
+    equivalent
         .call(
             /*arguments*/ None, /*meta*/ None, /*timeout*/ None,
         )
@@ -325,7 +325,7 @@ async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_noti
     assert_eq!(fixture.control.requests.load(Ordering::Acquire), 9);
     fixture.control.pause_call.store(false, Ordering::Release);
     fixture.control.release_call.notify_one();
-    let _ = running.await??;
+    running.await??;
     let published = capture_binding(&fixture.connections).await;
     assert!(published.prepare_call("docs", "after_call").is_some());
     assert!(published.prepare_call("docs", "second_revision").is_none());

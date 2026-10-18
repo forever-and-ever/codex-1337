@@ -403,7 +403,7 @@ impl Shared {
             Ok(Some(sent)) => Ok(sent),
             Err(error) => Err(error),
         };
-        let _ = self.update(thread, |entry| {
+        self.update(thread, |entry| {
             let Cache::Warm {
                 refreshed,
                 replay: Some(retained),
@@ -462,7 +462,7 @@ impl PromptCacheObserver for Shared {
     }
 
     fn fact(&self, thread: ThreadId, fact: PromptCacheFact) {
-        let _ = self.update(thread, |entry| {
+        self.update(thread, |entry| {
             match fact {
                 PromptCacheFact::HumanTurn => {
                     if let Warming::On { until } = &mut entry.warming {
@@ -486,7 +486,7 @@ impl PromptCacheObserver for Shared {
             usage,
             replay,
         } = request;
-        let _ = self.update(thread, |entry| {
+        self.update(thread, |entry| {
             if epoch != entry.epoch {
                 return Vec::new();
             }

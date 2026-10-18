@@ -106,7 +106,7 @@ impl IdleRestart {
 
     pub(crate) fn set_ready(&mut self, ready: bool) {
         if ready {
-            let _ = self.deadline.get_or_insert_with(|| Instant::now() + IDLE);
+            self.deadline.get_or_insert_with(|| Instant::now() + IDLE);
         } else {
             self.deadline = None;
         }
@@ -144,7 +144,7 @@ impl IdleRestart {
                 .kill_on_drop(true)
                 .spawn()?;
             let mut stdout = Vec::new();
-            let _ = child
+            child
                 .stdout
                 .take()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?

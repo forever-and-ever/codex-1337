@@ -286,7 +286,7 @@ impl Projection {
             ResponseEvent::OutputItemAdded(item) => {
                 let item = self.item(item, true);
                 if let ResponseItem::CustomToolCall { id: Some(id), .. } = &item {
-                    let _ = self.freeform_items.insert(id.clone());
+                    self.freeform_items.insert(id.clone());
                 }
                 vec![ResponseEvent::OutputItemAdded(item)]
             }
@@ -312,7 +312,7 @@ impl Projection {
                     });
                 }
                 if let Some(id) = item.id() {
-                    let _ = self.freeform_items.remove(id);
+                    self.freeform_items.remove(id);
                 }
                 events.push(ResponseEvent::OutputItemDone(item));
                 events

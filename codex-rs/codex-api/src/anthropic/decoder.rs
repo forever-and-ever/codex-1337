@@ -23,7 +23,6 @@ use std::collections::BTreeSet;
 const MAX_BLOCKS: usize = 1024;
 
 /// Interprets the native completion disposition after upstream usage is recorded.
-#[must_use]
 pub fn anthropic_context_window_exceeded(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -32,7 +31,6 @@ pub fn anthropic_context_window_exceeded(metadata: &ResponseUsageMetadata) -> bo
 }
 
 /// Reports native output truncation after upstream usage is recorded.
-#[must_use]
 pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -40,7 +38,6 @@ pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool
     )
 }
 /// Reports a native refusal after upstream usage is recorded.
-#[must_use]
 pub fn anthropic_refused(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -309,7 +306,7 @@ impl<'a> Decoder<'a> {
                     }
                     _ => {}
                 }
-                let _ = self.blocks.insert(index, open);
+                self.blocks.insert(index, open);
                 self.next_index += 1;
             }
             Frame::ContentBlockDelta { index, delta } => {

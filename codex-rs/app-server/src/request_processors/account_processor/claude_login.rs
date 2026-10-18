@@ -48,7 +48,7 @@ impl AccountRequestProcessor {
             )
             .await;
         let processor = self.clone();
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let store = AccountStore::new(processor.config.codex_home.to_path_buf());
             let (success, error) = match attempt.complete(&store).await {
                 Ok(id) => {
@@ -91,6 +91,6 @@ impl AccountRequestProcessor {
             if active.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
                 *active = None;
             }
-        }));
+        });
     }
 }

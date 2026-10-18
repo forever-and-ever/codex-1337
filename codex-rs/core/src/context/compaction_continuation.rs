@@ -100,7 +100,7 @@ impl CompactionContinuation {
                     input,
                     ..
                 } => {
-                    let _ = calls.insert(
+                    calls.insert(
                         call_id.as_str(),
                         (ToolName::new(namespace.clone(), name.clone()), input),
                     );
@@ -206,7 +206,7 @@ impl CompactionContinuation {
                     "request and goal fragments exceed the byte bound",
                 ));
             };
-            let _ = self.0.remove(oldest);
+            self.0.remove(oldest);
         }
         Ok(())
     }

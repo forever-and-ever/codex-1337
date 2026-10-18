@@ -104,7 +104,7 @@ impl Renderer {
         let mut line = format!("{pad}{name}: {kind}");
         if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
             let _ = write!(line, "; see {reference}");
-            let _ = self.references.insert(reference.to_owned());
+            self.references.insert(reference.to_owned());
         }
         if let Some(description) = object.get("description").and_then(Value::as_str) {
             line.push_str(". ");

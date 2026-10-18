@@ -181,7 +181,7 @@ fn optional_thinking_breakdown_does_not_corrupt_completion_accounting() {
             json!({"type":"message_start","message":{"id":"msg","usage":{"input_tokens":2,"output_tokens":0,"output_tokens_details":{"thinking_tokens":0}}}}),
             json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":final_usage}),
         ] {
-            let _ = decoder.decode(&frame.to_string()).unwrap();
+            decoder.decode(&frame.to_string()).unwrap();
         }
         let events = decoder
             .decode(&json!({"type":"message_stop"}).to_string())
@@ -406,8 +406,8 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
         ("refusal", (false, false, true)),
     ] {
         let mut decoder = Decoder::new(&[]);
-        let _ = decoder.decode(&json!({"type":"message_start","message":{"id":"limited","usage":{"input_tokens":45,"output_tokens":0}}}).to_string()).unwrap();
-        let _ = decoder.decode(&json!({"type":"message_delta","delta":{"stop_reason":reason},"usage":{"output_tokens":2}}).to_string()).unwrap();
+        decoder.decode(&json!({"type":"message_start","message":{"id":"limited","usage":{"input_tokens":45,"output_tokens":0}}}).to_string()).unwrap();
+        decoder.decode(&json!({"type":"message_delta","delta":{"stop_reason":reason},"usage":{"output_tokens":2}}).to_string()).unwrap();
         let completed = decoder
             .decode(&json!({"type":"message_stop"}).to_string())
             .unwrap();

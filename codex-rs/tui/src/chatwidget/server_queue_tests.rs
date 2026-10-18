@@ -23,7 +23,7 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         })),
     };
     chat.update_server_queue(vec![item.clone()], /*busy*/ false);
-    let _ = chat.maybe_send_next_queued_input();
+    chat.maybe_send_next_queued_input();
     assert!(
         ops.try_recv().is_err(),
         "the durable queue, not this TUI, owns dispatch"
@@ -32,11 +32,11 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         "incoming_queued_message",
         render_bottom_popup(&chat, /*width*/ 80)
     );
-    let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
     // Removal must be acknowledged before the incoming message becomes a draft.
     assert_eq!(chat.composer_text_with_pending(), "unfinished prompt");
     // The widget emits intents; App's mutation owner admits only one operation.
-    let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
     let actions = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::Queue(QueueEvent::Remove {

@@ -58,7 +58,7 @@ mod tests {
     #[tokio::test]
     async fn finalization_preserves_errors_without_weakening_counts() {
         let server = start_mock_server().await;
-        let _ = mount_sse_sequence(&server, vec![String::new()]).await;
+        mount_sse_sequence(&server, vec![String::new()]).await;
         let error = Box::new(Error::other("injected body failure"));
         let identity = ptr::from_ref(error.as_ref());
 
@@ -76,12 +76,12 @@ mod tests {
         assert_eq!(ptr::from_ref(returned.as_ref()), identity);
         server.verify().await;
 
-        let _ = mount_sse_sequence(&server, vec![String::new()]).await;
+        mount_sse_sequence(&server, vec![String::new()]).await;
         let Err(returned) = run(&[&server], async {
             let second = start_mock_server().await;
-            let _ = mount_sse_sequence(&second, vec![String::new()]).await;
+            mount_sse_sequence(&second, vec![String::new()]).await;
             let third = start_mock_server().await;
-            let _ = mount_sse_sequence(&third, vec![String::new()]).await;
+            mount_sse_sequence(&third, vec![String::new()]).await;
             let result = run(&[&second, &third], async {
                 Err::<(), _>(returned)?;
                 Ok::<(), Box<Error>>(())
@@ -99,7 +99,7 @@ mod tests {
         server.verify().await;
 
         let unsatisfied = start_mock_server().await;
-        let _ = mount_sse_sequence(&unsatisfied, vec![String::new()]).await;
+        mount_sse_sequence(&unsatisfied, vec![String::new()]).await;
         let verification =
             AssertUnwindSafe(run(&[&server, &unsatisfied], ready(Ok::<_, Error>(()))))
                 .catch_unwind()

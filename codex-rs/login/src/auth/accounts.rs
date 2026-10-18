@@ -108,7 +108,7 @@ impl AuthDocument {
 
     pub fn retain_active(&mut self) {
         if let Some(id) = identity(&self.active) {
-            let _ = self.wrangler_accounts.insert(id, self.active.clone());
+            self.wrangler_accounts.insert(id, self.active.clone());
         }
     }
 
@@ -127,7 +127,7 @@ impl AuthDocument {
     pub fn install(&mut self, auth: AuthDotJson) {
         self.retain_active();
         if let Some(id) = identity(&auth) {
-            let _ = self.wrangler_accounts.remove(&id);
+            self.wrangler_accounts.remove(&id);
         }
         self.active = auth;
     }
@@ -139,7 +139,7 @@ impl AuthDocument {
         if let Some(id) = identity(&auth)
             && identity(&self.active).is_some_and(|active| active != id)
         {
-            let _ = self.wrangler_accounts.insert(id, auth);
+            self.wrangler_accounts.insert(id, auth);
             return;
         }
         self.install(auth);
@@ -209,9 +209,9 @@ impl AuthStorageBackend for AccountStorage {
             .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))?;
         if identity(&document.active).as_deref() == Some(&self.id) {
             document.active = auth.clone();
-            let _ = document.wrangler_accounts.remove(&self.id);
+            document.wrangler_accounts.remove(&self.id);
         } else {
-            let _ = document
+            document
                 .wrangler_accounts
                 .insert(self.id.clone(), auth.clone());
         }
@@ -235,7 +235,7 @@ impl AuthStorageBackend for AccountStorage {
             document.active = replacement;
         }
         if let Some(active) = identity(&document.active) {
-            let _ = document.wrangler_accounts.remove(&active);
+            document.wrangler_accounts.remove(&active);
         }
         self.write(&document)?;
         Ok(removed)

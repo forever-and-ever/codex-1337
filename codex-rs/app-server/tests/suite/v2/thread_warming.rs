@@ -99,7 +99,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
                 })
                 .await?;
             let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-            let _ = timeout(
+            timeout(
                 READ_TIMEOUT,
                 app.read_stream_until_notification_message("turn/completed"),
             )
@@ -144,7 +144,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
             assert_eq!(attached.warming, PromptCacheWarming::Off);
         }
 
-        let _ = timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
+        timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
         let mut app = TestAppServer::builder()
             .with_codex_home(home.path())
             .build_initialized_with_timeout(READ_TIMEOUT)
@@ -164,7 +164,7 @@ async fn observed_cache_usage_controls_warmth_across_completion_attach_and_resta
         // Resume checkpoints settings, not cache evidence: no request lease survives in metadata.
         assert_eq!(restored.estimate, PromptCacheEstimate::Cold);
         assert_eq!(restored.warming, PromptCacheWarming::Off);
-        let _ = timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
+        timeout(READ_TIMEOUT, app.shutdown_gracefully()).await??;
     }
     Ok(())
 }

@@ -15,7 +15,6 @@ pub struct DelegatedMessage {
 impl DelegatedMessage {
     /// Recognizes attribution only on named coordination outputs, including the
     /// persisted desktop namespace. Arbitrary tools cannot claim this envelope.
-    #[must_use]
     pub fn from_tool_output(
         name: &str,
         namespace: Option<&str>,
@@ -28,7 +27,6 @@ impl DelegatedMessage {
         }
         Self::parse(output.to_text().as_deref()?)
     }
-    #[must_use]
     pub fn new(source: &crate::Thread, input: String) -> Self {
         Self {
             source_thread_id: source.id.clone(),
@@ -45,7 +43,6 @@ impl DelegatedMessage {
         }
     }
 
-    #[must_use]
     pub fn encode(&self) -> String {
         let mut output = format!(
             "<codex_delegation>\n  <source_thread_id>{}</source_thread_id>",
@@ -69,7 +66,6 @@ impl DelegatedMessage {
         output
     }
 
-    #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let rest = text.strip_prefix("<codex_delegation>\n  <source_thread_id>")?;
         let (id, mut rest) = rest.split_once("</source_thread_id>")?;

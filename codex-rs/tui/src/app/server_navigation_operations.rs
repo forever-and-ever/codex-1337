@@ -351,7 +351,7 @@ impl App {
             .is_some_and(|operation| operation.id == id)
         {
             self.recover_pending_navigation_draft();
-            let _ = self.server_operations.navigation.cancel(id);
+            self.server_operations.navigation.cancel(id);
         }
     }
 
@@ -696,7 +696,7 @@ impl App {
                     unreachable!("only the defaults stage emits a defaults receipt");
                 };
                 if let Some(defaults) = defaults {
-                    let _ = crate::projectless::apply_defaults(
+                    crate::projectless::apply_defaults(
                         &mut preparation.config,
                         &self.harness_overrides,
                         server,
@@ -717,7 +717,7 @@ impl App {
                 self.add_agents_overview_error(format!(
                     "Failed to read session picker defaults: {error}"
                 ));
-                let _ = self.chat_widget.maybe_send_next_queued_input();
+                self.chat_widget.maybe_send_next_queued_input();
             }
 
             NavigationReceipt::Picker(Ok(mut picker)) if matching => {
@@ -761,7 +761,7 @@ impl App {
                 self.add_agents_overview_error(format!(
                     "Failed to start TUI session picker: {error}"
                 ));
-                let _ = self.chat_widget.maybe_send_next_queued_input();
+                self.chat_widget.maybe_send_next_queued_input();
             }
             NavigationReceipt::Discovered(_)
             | NavigationReceipt::PickerDefaults(_)

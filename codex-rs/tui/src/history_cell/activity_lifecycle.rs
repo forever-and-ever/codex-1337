@@ -211,7 +211,7 @@ pub(crate) fn reconcile_tool_calls(
             let revised = reconcile_tool_calls(&current, member);
             for (index, cell) in revised.replacements {
                 current[index] = Arc::clone(&cell);
-                let _ = replacements.insert(index, cell);
+                replacements.insert(index, cell);
             }
             remainder.extend(revised.remainder);
         }
@@ -257,7 +257,7 @@ pub(crate) fn reconcile_tool_calls(
             for (index, cell) in cells.iter().enumerate() {
                 let cell = replacements.get(&index).unwrap_or(cell);
                 if let Some(updated) = revision.replace(cell) {
-                    let _ = replacements.insert(index, updated);
+                    replacements.insert(index, updated);
                     matched = true;
                 }
             }

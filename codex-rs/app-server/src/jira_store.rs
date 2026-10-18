@@ -259,7 +259,7 @@ impl Store {
             .remove(&name)
             .ok_or_else(|| format!("Issue {name} no longer exists"))?;
         let mut bytes = Vec::new();
-        let _ = fs::File::open(location.path)
+        fs::File::open(location.path)
             .map_err(|error| error.to_string())?
             .take((MAX_BODY_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
@@ -354,14 +354,14 @@ impl Store {
                     self.guard(previous)?;
                 }
                 if same_key {
-                    let _ = staged
+                    staged
                         .persist(&destination)
                         .map_err(|error| error.to_string())?;
                 } else {
                     if self.catalog()?.contains_key(&name) {
                         return Err(format!("Issue {name} already exists; choose another slug"));
                     }
-                    let _ = staged
+                    staged
                         .persist_noclobber(&destination)
                         .map_err(|error| error.to_string())?;
                     if let Some(previous) = previous {

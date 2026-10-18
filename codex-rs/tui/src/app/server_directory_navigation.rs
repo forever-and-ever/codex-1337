@@ -894,7 +894,7 @@ impl App {
             {
                 match result {
                     Ok(Some(defaults)) => {
-                        let _ = crate::projectless::apply_defaults(
+                        crate::projectless::apply_defaults(
                             &mut context.config,
                             &self.harness_overrides,
                             server,

@@ -33,7 +33,7 @@ impl App {
             .get(&thread_id)
             .map(|channel| Arc::clone(&channel.store));
         let read_store = store.clone();
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::ReadOnly,
@@ -63,7 +63,7 @@ impl App {
                     )),
                     Ok(true) => app.commit_daybreak_selection(server, thread_id, enabled, cwd),
                     Ok(false) => {
-                        let _ = app.request_server(
+                        app.request_server(
                             server,
                             UiRequestScope::Thread(thread_id),
                             UiRequestKind::Mutation,
@@ -147,7 +147,7 @@ impl App {
                         "Failed to save the default Daybreak preference: {error}"
                     ));
                 } else {
-                    let _ = app.request_server(
+                    app.request_server(
                         server,
                         UiRequestScope::Connection,
                         UiRequestKind::ReadOnly,

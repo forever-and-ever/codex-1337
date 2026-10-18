@@ -111,7 +111,6 @@ pub struct InProcessClientStartArgs {
 
 impl InProcessClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
-    #[must_use]
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
             explicit_gateway_oauth: false,
@@ -173,7 +172,7 @@ static RUNTIME: OnceLock<EmbeddedStart> = OnceLock::new();
 
 /// Installs this process's app-server runtime; the first installation stands.
 pub fn install(start: EmbeddedStart) {
-    let _ = RUNTIME.get_or_init(|| start);
+    RUNTIME.get_or_init(|| start);
 }
 
 /// Starts the installed app-server runtime.

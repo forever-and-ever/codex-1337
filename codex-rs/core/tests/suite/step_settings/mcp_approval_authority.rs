@@ -95,7 +95,7 @@ async fn mcp_write_approval_follows_the_issuing_turn_not_saved_thread_settings()
         )
         .await?;
         answer_paused_turn(&test.codex, &paused.turn_id).await?;
-        let _ = wait_for_event(&test.codex, |event| {
+        wait_for_event(&test.codex, |event| {
             matches!(event, EventMsg::TurnComplete(_))
         })
         .await;

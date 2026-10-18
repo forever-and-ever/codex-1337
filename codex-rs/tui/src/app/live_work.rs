@@ -520,14 +520,14 @@ impl App {
                 ) { return; }
                 let handle = server.request_handle();
                 let tx = self.app_event_tx.clone();
-                drop(tokio::spawn(async move {
+                tokio::spawn(async move {
                     let result = process_inventory(&handle, thread, request).await;
                     tx.send(AppEvent::LiveWork(Event::Refreshed {
                         thread,
                         request,
                         result,
                     }));
-                }));
+                });
             }
             Event::Refreshed {
                 thread,
@@ -576,11 +576,11 @@ impl App {
                     return;
                 }
                 let request = Uuid::new_v4();
-                let _ = scope.stopping.insert(key, request);
+                scope.stopping.insert(key, request);
                 let thread = scope.thread;
                 let handle = server.request_handle();
                 let tx = self.app_event_tx.clone();
-                drop(tokio::spawn(async move {
+                tokio::spawn(async move {
                     let result: Result<api::ThreadBackgroundTerminalsTerminateResponse, _> =
                         preparation::request(
                             RequestPolicy::Interactive,
@@ -601,7 +601,7 @@ impl App {
                         request,
                         result: result.map(|_| ()).map_err(|error| error.to_string()),
                     }));
-                }));
+                });
             }
             Event::Stopped {
                 thread,
@@ -623,7 +623,7 @@ impl App {
                     return;
                 }
                 if let Err(error) = result {
-                    let _ = scope.stopping.remove(&key);
+                    scope.stopping.remove(&key);
                     self.chat_widget
                         .add_error_message(format!("Could not stop process: {error}"));
                 }
@@ -663,7 +663,7 @@ async fn process_inventory(
         .await
         .map_err(|error| error.to_string())?;
         for item in &response.data {
-            let _ = ThreadId::from_string(&item.thread_id)
+            ThreadId::from_string(&item.thread_id)
                 .map_err(|error| format!("Invalid process owner: {error}"))?;
         }
         items.extend(response.data);
@@ -729,9 +729,9 @@ mod tests {
         app.prepare_live_work();
         let scope = app.live_work.scope.as_mut().unwrap();
         scope.view.focus_group(Group::Processes);
-        let _ = scope.view.handle_key(KeyCode::Down.into());
-        let _ = scope.view.handle_key(KeyCode::Right.into());
-        let _ = scope.view.handle_key(KeyCode::Down.into());
+        scope.view.handle_key(KeyCode::Down.into());
+        scope.view.handle_key(KeyCode::Right.into());
+        scope.view.handle_key(KeyCode::Down.into());
         assert_eq!(
             scope.view.handle_key(KeyCode::Enter.into()),
             Interaction::Action(Action::TerminateProcess {
@@ -747,7 +747,7 @@ mod tests {
         tui.set_owned_screen(true).unwrap();
         let size = Size::new(80, 24);
         tui.terminal.resize(size).unwrap();
-        let _ = app.render_owned_transcript(&mut tui, size).unwrap();
+        app.render_owned_transcript(&mut tui, size).unwrap();
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
         let lines = buffer
             .content()

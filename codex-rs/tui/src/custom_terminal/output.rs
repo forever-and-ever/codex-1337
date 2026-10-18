@@ -351,7 +351,7 @@ impl CaptureGuard {
                 }
             }
             bytes.extend_from_slice(b"\x1b[?2026l");
-            let _ = enqueue(&self.shared, Job::Control(bytes))?;
+            enqueue(&self.shared, Job::Control(bytes))?;
             return Ok(());
         }
         let mut stamp = ui_latency::frame_submitted();
@@ -821,14 +821,14 @@ pub(super) fn is_painted_column(x: u16, left: u16, last_nonblank: u16) -> bool {
 pub(crate) fn begin_restoration(restore: impl FnOnce() -> io::Result<()>) -> Option<io::Error> {
     let mut first_error = restoration_barrier().err();
     if let Err(error) = restore() {
-        let _ = first_error.get_or_insert(error);
+        first_error.get_or_insert(error);
     }
     first_error
 }
 
 pub(crate) fn finish_restoration(first_error: &mut Option<io::Error>) {
     if let Err(error) = restoration_barrier() {
-        let _ = first_error.get_or_insert(error);
+        first_error.get_or_insert(error);
     }
 }
 
@@ -1109,7 +1109,7 @@ mod tests {
         let mut writer = Terminal::with_options(VT100Backend::new(120, 4))?;
         let mut initial = rule(Rect::new(0, 0, 120, 4));
         initial.set_string(0, 2, "old-width transcript rows", Style::default());
-        let _ = write_snapshot(&mut writer, capture(&mut ui, initial, screen)?)?;
+        write_snapshot(&mut writer, capture(&mut ui, initial, screen)?)?;
 
         // Each geometry axis independently makes a diff invalid: width, viewport
         // origin, and screen size with an otherwise identical viewport.
@@ -1127,7 +1127,7 @@ mod tests {
                 !snapshot.invalidate,
                 "geometry is checked by the writer itself"
             );
-            let _ = write_snapshot(&mut writer, snapshot)?;
+            write_snapshot(&mut writer, snapshot)?;
             assert_rule(&writer, viewport);
         }
 
@@ -1145,7 +1145,7 @@ mod tests {
                 .clear_region(ratatui::backend::ClearType::All)?;
             let snapshot = capture(&mut ui, rule(area), screen)?;
             assert!(snapshot.invalidate, "clear must survive capture");
-            let _ = write_snapshot(&mut writer, snapshot)?;
+            write_snapshot(&mut writer, snapshot)?;
             assert_rule(&writer, area);
             assert!(
                 !capture(&mut ui, rule(area), screen)?.invalidate,

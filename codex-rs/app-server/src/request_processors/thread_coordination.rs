@@ -178,7 +178,7 @@ impl ThreadCoordinationService {
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
         // Do not allocate lifecycle state for arbitrary model-supplied UUIDs.
         if self.threads.thread_manager.get_thread(id).await.is_err() {
-            let _ = self.read(thread_id).await?;
+            self.read(thread_id).await?;
         }
         let lease = self.threads.thread_state_manager.lease_runtime(id).await;
         let deadline =
@@ -206,8 +206,8 @@ impl ThreadCoordinationService {
         {
             return Ok((thread, lease));
         }
-        let _ = self.read(thread_id).await?;
-        let _ = Box::pin(self.threads.thread_resume(
+        self.read(thread_id).await?;
+        Box::pin(self.threads.thread_resume(
             ThreadResumeTarget::Server(ServerResume::Coordination),
             ThreadResumeParams {
                 thread_id: thread_id.to_owned(),
@@ -349,7 +349,7 @@ impl ThreadCoordinationService {
         }
         // Inherit sampling settings, not whichever renderer happens to be attached.
         if let Some(effort) = snapshot.reasoning_effort {
-            let _ = params.config.get_or_insert_default().insert(
+            params.config.get_or_insert_default().insert(
                 "model_reasoning_effort".into(),
                 serde_json::to_value(effort).map_err(|err| internal_error(err.to_string()))?,
             );
@@ -362,8 +362,7 @@ impl ThreadCoordinationService {
             })
             .transpose()?;
         if let Some(name) = &name {
-            let _ = self
-                .threads
+            self.threads
                 .release_confirmed_name_owners(
                     name, /*claimant*/ None, /*confirmed_ids*/ None,
                 )

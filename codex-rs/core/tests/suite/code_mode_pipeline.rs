@@ -176,8 +176,7 @@ text('authority and bounds preserved');
             ],
         )
         .await;
-        let _ = test
-            .codex
+        test.codex
             .start_or_steer_turn(
                 codex_core::TurnInputRequest::user_input(vec![
                     codex_protocol::user_input::UserInput::Text {
@@ -197,7 +196,7 @@ text('authority and bounds preserved');
             )
             .await?;
         let mut filesystem_inputs = Vec::new();
-        let _ = core_test_support::wait_for_event(&test.codex, |event| {
+        core_test_support::wait_for_event(&test.codex, |event| {
             if let codex_protocol::protocol::EventMsg::CodeModeOwned(owned) = event
                 && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) =
                     owned.payload().as_ref()

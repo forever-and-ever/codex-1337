@@ -45,7 +45,7 @@ fn conversation_name(adapter: ModelProviderAdapter) -> &'static str {
 impl ChatgptDelegate {
     pub(crate) fn install(session: &Arc<Session>, config: &Config) {
         if config.model_provider.adapter.borrows_chatgpt() {
-            let _ = session
+            session
                 .services
                 .thread_extension_data
                 .insert(Self(Arc::downgrade(session)));

@@ -181,7 +181,7 @@ impl App {
                 blank.session = session.clone();
             }
             if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                let _ = self.agents_overview.input_states.insert(thread_id, input);
+                self.agents_overview.input_states.insert(thread_id, input);
             }
         }
         let mut ids = self
@@ -206,7 +206,7 @@ impl App {
                 if Some(*thread_id) != self.current_displayed_thread_id()
                     && let Some(input) = store.input_state.clone()
                 {
-                    let _ = self.agents_overview.input_states.insert(*thread_id, input);
+                    self.agents_overview.input_states.insert(*thread_id, input);
                 }
                 let requests: Vec<_> = store
                     .pending_replay_requests()
@@ -232,8 +232,7 @@ impl App {
         if running {
             for thread_id in ids {
                 if !self.side_threads.contains_key(&thread_id) {
-                    let _ = self
-                        .agents_overview
+                    self.agents_overview
                         .dispatched_requests
                         .entry(thread_id)
                         .or_default();
@@ -400,7 +399,7 @@ impl App {
                 self.chat_widget.on_thread_settings_updated(settings);
             }
             if !preserve_in_flight_turn && !matches!(after, SelectionAfter::Fork) {
-                let _ = self.chat_widget.maybe_send_next_queued_input();
+                self.chat_widget.maybe_send_next_queued_input();
             }
         }
         self.queue_farm_receipt_replay();

@@ -88,7 +88,7 @@ impl ChatWidget {
                         .set_interrupt_hint_visible(/*visible*/ true);
                     self.status_state.terminal_title_status_kind =
                         TerminalTitleStatusKind::WaitingForBackgroundTerminal;
-                    let _ = self.set_status(
+                    self.set_status(
                         "Waiting for background terminal".into(),
                         command,
                         StatusDetailsCapitalization::Preserve,
@@ -128,12 +128,11 @@ impl ChatWidget {
             } => {
                 if *status == CollabAgentToolCallStatus::InProgress {
                     if let Some(summary) = multi_agents::spawn_request_summary(item.native_item()) {
-                        let _ = self
-                            .pending_collab_spawn_requests
+                        self.pending_collab_spawn_requests
                             .insert(id.clone(), summary);
                     }
                 } else {
-                    let _ = self.pending_collab_spawn_requests.remove(id);
+                    self.pending_collab_spawn_requests.remove(id);
                 }
             }
             _ => {}

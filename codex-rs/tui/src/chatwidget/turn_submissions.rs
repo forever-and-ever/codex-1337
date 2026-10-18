@@ -45,7 +45,7 @@ impl ChatWidget {
             }
             self.input_queue.recovered_queue &= self.input_queue.has_queued_follow_up_messages();
         }
-        let _ = self.bottom_pane.handle_restricted_key(
+        self.bottom_pane.handle_restricted_key(
             KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
             crate::bottom_pane::RestrictedInputMode::Disconnected,
         );
@@ -212,13 +212,11 @@ impl ChatWidget {
         let AppCommand::UserTurn {
             client_user_message_id,
             items,
-            pending_steer_replacement,
             ..
         } = op
         else {
             unreachable!("user-turn draft")
         };
-        let _ = pending_steer_replacement;
         Self::submission_draft_from_inputs(
             client_user_message_id.clone(),
             items,
@@ -394,7 +392,7 @@ impl InputQueueState {
             .replacement()
             .is_some_and(|replacement| replacement.appended.client_id == draft.client_id)
         {
-            let _ = self.pending_steer.finish_replacement(replaced);
+            self.pending_steer.finish_replacement(replaced);
         } else if !replaced
             && let DraftOrigin::Append { previous, appended } = &draft.origin
             && self.pending_steer.client_id() == Some(previous.client_id.as_str())

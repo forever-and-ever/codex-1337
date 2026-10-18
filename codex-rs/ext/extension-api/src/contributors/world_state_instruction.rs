@@ -11,7 +11,6 @@ pub enum WorldStateSectionMode {
 impl WorldStateSectionContribution {
     /// Ordinary renders provide semantic amendments. The harness owns retained
     /// revision proofs and uses `current` to resolve amendments before compaction.
-    #[must_use]
     pub fn with_instruction_amendments(
         mut self,
         current: Option<RenderedWorldStateFragment>,
@@ -20,7 +19,6 @@ impl WorldStateSectionContribution {
         self
     }
 
-    #[must_use]
     pub fn mode(&self) -> &WorldStateSectionMode {
         &self.mode
     }

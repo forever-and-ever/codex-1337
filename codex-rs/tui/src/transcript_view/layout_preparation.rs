@@ -163,7 +163,7 @@ impl LayoutCache {
                     });
                     self.pending[pending].requested_frame = self.frame;
                     if let Some(layout) = self.pending[pending].task.poll() {
-                        let _ = self.pending.remove(pending);
+                        self.pending.remove(pending);
                         entry.layout = layout;
                         entry.refreshed_at = std::time::Instant::now();
                     }
@@ -208,7 +208,7 @@ impl LayoutCache {
                 self.waiting = true;
                 return None;
             };
-            let _ = self.pending.remove(index);
+            self.pending.remove(index);
             layout
         } else {
             Arc::new(presentation.decorate(prepare()()))
@@ -251,13 +251,13 @@ impl LayoutCache {
             })
             .collect();
         for key in keys {
-            let _ = self.take(&key);
+            self.take(&key);
         }
     }
 
     fn take(&mut self, key: &CacheKey) -> Option<CachedLayout> {
         let entry = self.entries.remove(key)?;
-        let _ = self.recency.remove(&entry.access);
+        self.recency.remove(&entry.access);
         self.bytes -= entry.layout.retained_bytes();
         Some(entry)
     }
@@ -266,8 +266,8 @@ impl LayoutCache {
         self.access += 1;
         entry.access = self.access;
         self.bytes += entry.layout.retained_bytes();
-        let _ = self.recency.insert(entry.access, key);
-        let _ = self.entries.insert(key, entry);
+        self.recency.insert(entry.access, key);
+        self.entries.insert(key, entry);
     }
 
     fn evict(&mut self) {
@@ -279,7 +279,7 @@ impl LayoutCache {
             if self.entries[&key].rendered_frame + 1 >= self.frame {
                 break;
             }
-            let _ = self.take(&key);
+            self.take(&key);
         }
     }
 }
@@ -563,7 +563,7 @@ impl TranscriptView {
                             );
                             if mode == HistoryRenderMode::Rich {
                                 if seat.content == Content::Beheaded {
-                                    let _ = feed::behead(&mut lines);
+                                    feed::behead(&mut lines);
                                 }
                                 TextLayout::new(
                                     crate::transcript_geometry::gutter_lines(

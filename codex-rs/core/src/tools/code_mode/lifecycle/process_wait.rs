@@ -55,7 +55,7 @@ impl CodeModeService {
         let (opened, admitted) = oneshot::channel();
         let (close, closed) = oneshot::channel();
         let wait = ProcessWait { release, closed };
-        drop(self.transcript.tasks.spawn(async move {
+        self.transcript.tasks.spawn(async move {
             scope
                 .record(
                     &turn,
@@ -80,7 +80,7 @@ impl CodeModeService {
                 )
                 .await;
             let _ = close.send(());
-        }));
+        });
         admitted
             .await
             .expect("process wait tracker must admit its lease");

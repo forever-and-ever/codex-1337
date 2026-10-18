@@ -39,7 +39,7 @@ impl ChatWidget {
         {
             let cwd = self.config.cwd.to_path_buf();
             let tx = self.app_event_tx.clone();
-            drop(tokio::spawn(async move {
+            tokio::spawn(async move {
                 if let Some(branch) =
                     crate::branch_summary::current_branch_name(runner.as_ref(), &branch_cwd).await
                 {
@@ -49,7 +49,7 @@ impl ChatWidget {
                         cwd,
                     });
                 }
-            }));
+            });
         }
     }
 
@@ -85,7 +85,7 @@ impl ChatWidget {
             thread_id,
         );
         let tx = self.app_event_tx.clone();
-        let _ = self.clear_active_stream_tail();
+        self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
         let result = controller.finish_background(move |source| {
             let source = completed.unwrap_or(source);
@@ -133,7 +133,7 @@ impl ChatWidget {
             .expect("background stream has an item");
         let cwd = self.config.cwd.to_path_buf();
         let tx = self.app_event_tx.clone();
-        let _ = self.clear_active_stream_tail();
+        self.clear_active_stream_tail();
         self.note_stream_consolidation_queued();
         let result = controller.finish_background(move |source| {
             let authoritative = completed.is_some();

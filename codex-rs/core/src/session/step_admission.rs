@@ -252,7 +252,7 @@ impl Session {
         let session = Arc::clone(self);
         let turn_context = Arc::clone(turn_context);
         // Tokenizing large or pathological text must not hold up the turn.
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             match tokio::task::spawn_blocking(move || seal(previous, received, admitted)).await {
                 Ok((turn_id, item)) => {
                     session
@@ -261,7 +261,7 @@ impl Session {
                 }
                 Err(error) => tracing::warn!(%error, "step admission measurement failed"),
             }
-        }));
+        });
     }
 
     /// Announces what arrived after the previous step's results as this request reads it.

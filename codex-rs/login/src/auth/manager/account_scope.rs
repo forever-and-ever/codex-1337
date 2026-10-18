@@ -35,7 +35,7 @@ impl PreparedAccount<'_> {
     pub fn commit(self) {
         let mut scope = self.manager.write_account_scope();
         *scope = Some(self.id);
-        let _ = self.manager.set_cached_auth(Some(self.auth));
+        self.manager.set_cached_auth(Some(self.auth));
     }
 }
 
@@ -126,14 +126,14 @@ impl AuthManager {
             ));
         }
         // Login-method and workspace restrictions bind the active login as they bind a conversation.
-        let _ = self.load_saved_account(id).await?;
+        self.load_saved_account(id).await?;
         crate::auth::activate_account(
             &self.codex_home,
             id,
             self.auth_credentials_store_mode,
             self.keyring_backend_kind,
         )?;
-        let _ = self.reload().await;
+        self.reload().await;
         Ok(())
     }
 
@@ -164,7 +164,7 @@ impl AuthManager {
         {
             let mut scope = manager.write_account_scope();
             *scope = Some(id.to_owned());
-            let _ = manager.set_cached_auth(auth);
+            manager.set_cached_auth(auth);
         }
         Ok(Arc::new(manager))
     }

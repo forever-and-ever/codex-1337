@@ -58,7 +58,6 @@ impl ReadIntent {
         })
     }
 
-    #[must_use]
     pub fn from_tool_input(input: &codex_protocol::tool_input::ToolInput) -> Option<Self> {
         use codex_protocol::tool_input::ToolInputPayload;
 
@@ -82,7 +81,6 @@ impl ReadIntent {
         })
     }
 
-    #[must_use]
     pub fn label(&self, name: &str) -> String {
         match self.range {
             ReadRange::Whole => format!("{name} (whole file)"),

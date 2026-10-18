@@ -105,7 +105,7 @@ impl ChatWidget {
                 ..Default::default()
             });
         }
-        let _ = self.bottom_pane.replace_selection_view_if_present(
+        self.bottom_pane.replace_selection_view_if_present(
             PROVIDER_MODELS_VIEW,
             SelectionViewParams {
                 view_id: Some(PROVIDER_MODELS_VIEW),

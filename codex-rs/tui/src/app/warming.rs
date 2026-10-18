@@ -15,7 +15,7 @@ impl App {
         thread_id: ThreadId,
         enabled: bool,
     ) {
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,

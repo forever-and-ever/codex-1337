@@ -111,7 +111,7 @@ impl LocalShell {
     }
 
     pub(super) async fn shutdown(&mut self) -> Option<String> {
-        let _ = self.state.request_stop();
+        self.state.request_stop();
         if let Some(Job { task, .. }) = self.state.job_mut() {
             // Abort-on-drop still owns cleanup if the normal exit wait cannot finish.
             if tokio::time::timeout(std::time::Duration::from_secs(3), &mut *task)

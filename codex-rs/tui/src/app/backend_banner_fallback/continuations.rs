@@ -21,7 +21,7 @@ impl App {
     ) {
         self.model_selection_generation.advance();
         let generation = self.model_selection_generation;
-        let _ = self.request_thread_settings_update(app_server, params, move |app, updated| {
+        self.request_thread_settings_update(app_server, params, move |app, updated| {
             if updated
                 && app.model_selection_generation == generation
                 && app.active_thread_id == Some(thread_id)

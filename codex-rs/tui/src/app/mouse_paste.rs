@@ -208,7 +208,7 @@ impl App {
             return event;
         }
         let Some(pending) = self.pending_mouse_paste.as_ref() else {
-            let _ = tui.clipboard.take_text_result();
+            tui.clipboard.take_text_result();
             return event;
         };
         if self

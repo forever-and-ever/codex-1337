@@ -192,5 +192,5 @@ fn salvage_always_yields_an_encodable_history() {
             AnthropicRepair::Closed(1),
         ]
     );
-    let _ = encode_history(&salvage.items, "", &[], &[InputModality::Text]).unwrap();
+    encode_history(&salvage.items, "", &[], &[InputModality::Text]).unwrap();
 }

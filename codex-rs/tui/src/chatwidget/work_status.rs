@@ -61,7 +61,7 @@ impl ChatWidget {
         let status = &self.status_state.current_status;
         if status.header == "Working" {
             let header = self.work_status_header(&status.header);
-            let _ = self.bottom_pane.update_status(
+            self.bottom_pane.update_status(
                 header,
                 status.details.clone(),
                 StatusDetailsCapitalization::Preserve,

@@ -88,14 +88,14 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
     let mut openai = config.model_provider.clone();
     openai.base_url = Some(format!("{}/v1", server.uri()));
     openai.supports_websockets = false;
-    let _ = config.model_providers.insert("openai".into(), openai);
+    config.model_providers.insert("openai".into(), openai);
     config.model_provider_id = "claude_subscription".into();
     config.model_provider = ModelProviderInfo {
         adapter: ModelProviderAdapter::ClaudeSubscription,
         name: "Claude subscription".into(),
         ..Default::default()
     };
-    let _ = config.model_providers.insert(
+    config.model_providers.insert(
         config.model_provider_id.clone(),
         config.model_provider.clone(),
     );

@@ -204,7 +204,7 @@ impl LiveWorkView {
         }
         let work = Key::Group(Group::Work);
         if self.find(&work).is_none() && keys.contains(&work) {
-            let _ = self.open.insert(work);
+            self.open.insert(work);
         }
         self.open.retain(|key| keys.contains(key));
         let mut selected = self.selected.take();
@@ -250,10 +250,10 @@ impl LiveWorkView {
 
     pub(crate) fn focus_group(&mut self, group: Group) {
         self.selection.jump_to_latest();
-        let _ = self.release_hover();
+        self.release_hover();
         let key = Key::Group(group);
         if self.find(&key).is_some_and(Row::is_visible) {
-            let _ = self.open.insert(key.clone());
+            self.open.insert(key.clone());
             self.selected = Some(Focus::Row(key));
             self.focused = true;
             self.hits.clear();
@@ -264,7 +264,7 @@ impl LiveWorkView {
         self.focused = false;
         self.selection.end_drag();
         if !self.selection.has_active_interaction() {
-            let _ = self.release_hover();
+            self.release_hover();
         }
     }
 
@@ -421,7 +421,7 @@ impl LiveWorkView {
                         .any(|(area, _)| area.contains(Position::new(mouse.column, mouse.row)))
                 {
                     self.selection.jump_to_latest();
-                    let _ = self.release_hover();
+                    self.release_hover();
                     return None;
                 }
                 if mouse.kind == MouseEventKind::Moved && self.selection.has_active_interaction() {
@@ -431,16 +431,16 @@ impl LiveWorkView {
                 if action.is_some() {
                     self.focused = false;
                     if self.selection.has_active_interaction() {
-                        let _ = self.hover.get_or_insert(Hover {
+                        self.hover.get_or_insert(Hover {
                             position: Position::new(mouse.column, mouse.row),
                             pending_rows: None,
                         });
                     } else {
-                        let _ = self.release_hover();
+                        self.release_hover();
                     }
                 } else if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
                     self.selection.jump_to_latest();
-                    let _ = self.release_hover();
+                    self.release_hover();
                 }
                 action
             }
@@ -448,7 +448,7 @@ impl LiveWorkView {
                 let action = self.selection.handle_key(*key, &[]);
                 if !self.selection.has_active_interaction() {
                     self.selection.jump_to_latest();
-                    let _ = self.release_hover();
+                    self.release_hover();
                 }
                 action
             }
@@ -511,7 +511,7 @@ impl LiveWorkView {
     }
 
     pub(crate) fn handle_key(&mut self, event: KeyEvent) -> Interaction {
-        let _ = self.release_hover();
+        self.release_hover();
         if !self.focused
             || event.kind == KeyEventKind::Release
             || event
@@ -531,7 +531,7 @@ impl LiveWorkView {
                 if let Some(key) = self.selected.as_ref().map(Focus::key)
                     && self.find(key).is_some_and(Row::has_disclosure)
                 {
-                    let _ = self.open.insert(key.clone());
+                    self.open.insert(key.clone());
                     self.hits.clear();
                 }
             }
@@ -583,7 +583,7 @@ impl LiveWorkView {
             }
             Some(Focus::Row(key)) if self.find(&key).is_some_and(Row::has_disclosure) => {
                 if !self.open.remove(&key) {
-                    let _ = self.open.insert(key);
+                    self.open.insert(key);
                 }
                 self.hits.clear();
             }
@@ -789,9 +789,9 @@ mod tests {
         let mut view = LiveWorkView::default();
         view.set_rows(inventory(vec![process(owner), process(other)]));
         view.focus_group(Group::Processes);
-        let _ = view.handle_key(KeyCode::Down.into());
-        let _ = view.handle_key(KeyCode::Right.into());
-        let _ = view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
         view.set_rows(inventory(vec![process(other), process(owner)]));
         assert_eq!(
             view.handle_key(KeyCode::Enter.into()),
@@ -808,15 +808,15 @@ mod tests {
             view.selected,
             Some(Focus::Row(Key::Group(Group::Processes)))
         );
-        let _ = view.handle_key(KeyCode::Left.into());
+        view.handle_key(KeyCode::Left.into());
         assert_eq!(view.desired_height(60), 1);
 
         // Hover holds geometry, but never keeps a completed process actionable.
         view.set_rows(inventory(vec![process(owner), process(other)]));
         view.focus_group(Group::Processes);
-        let _ = view.handle_key(KeyCode::Down.into());
-        let _ = view.handle_key(KeyCode::Right.into());
-        let _ = view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
         let area = Rect::new(0, 0, 60, 10);
         let mut buf = Buffer::empty(area);
         view.render(area, &mut buf);
@@ -832,7 +832,7 @@ mod tests {
             row,
             modifiers: KeyModifiers::NONE,
         };
-        let _ = view.handle_mouse(mouse(MouseEventKind::Moved, hit.x, hit.y));
+        view.handle_mouse(mouse(MouseEventKind::Moved, hit.x, hit.y));
         view.set_rows(inventory(vec![process(other), process(owner)]));
         view.render(area, &mut buf);
         assert!(
@@ -875,9 +875,9 @@ mod tests {
         let mut view = LiveWorkView::default();
         view.set_rows(inventory(vec![process(owner)]));
         view.focus_group(Group::Processes);
-        let _ = view.handle_key(KeyCode::Down.into());
-        let _ = view.handle_key(KeyCode::Right.into());
-        let _ = view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
         let parent = Key::Operation {
             thread_id: owner,
             id: "container".into(),
@@ -928,8 +928,8 @@ mod tests {
             ),
         ]);
         view.focus_group(Group::Work);
-        let _ = view.handle_key(KeyCode::Down.into());
-        let _ = view.handle_key(KeyCode::Right.into());
+        view.handle_key(KeyCode::Down.into());
+        view.handle_key(KeyCode::Right.into());
         assert_eq!(view.desired_height(60), 24);
         let area = Rect::new(2, 3, 60, 5);
         let mut buf = Buffer::empty(area);
@@ -1010,12 +1010,12 @@ mod tests {
             ))
             .is_some()
         );
-        let _ = view.selection_event(&mouse(
+        view.selection_event(&mouse(
             MouseEventKind::Drag(MouseButton::Left),
             area.right() - 1,
             area.bottom() - 1,
         ));
-        let _ = view.selection_event(&mouse(
+        view.selection_event(&mouse(
             MouseEventKind::Up(MouseButton::Left),
             area.right() - 1,
             area.bottom() - 1,

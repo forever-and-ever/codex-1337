@@ -31,7 +31,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
     let seen = Arc::clone(&methods);
     let mut servers = tokio::task::JoinSet::new();
     let cwd = root.clone();
-    let _ = servers.spawn(async move {
+    servers.spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         let mut connection = 0;
         loop {
@@ -40,7 +40,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
             let methods = Arc::clone(&seen);
             let mut gate = gate.clone();
             let cwd = cwd.clone();
-            let _ = connections.spawn(async move {
+            connections.spawn(async move {
                 let mut ws = tokio_tungstenite::accept_async(stream).await?;
                 let thread = json!({
                     "id": THREAD, "sessionId": THREAD, "preview": "", "ephemeral": false,

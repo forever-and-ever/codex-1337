@@ -157,7 +157,7 @@ impl ChatWidget {
                         })
                     })
                     .collect();
-                let _ = self.queue_user_message_with_options(
+                self.queue_user_message_with_options(
                     UserMessage {
                         text: format!("{GOAL_PREFIX}{}", draft.objective),
                         local_images: draft.local_images,

@@ -7,9 +7,9 @@ use pretty_assertions::assert_eq;
 async fn ordinary_notifications_invalidate_cached_bindings_at_the_next_boundary()
 -> anyhow::Result<()> {
     let fixture = MutableCatalog::new().await?;
-    let _ = fixture.connections.list_all_tools().await;
+    fixture.connections.list_all_tools().await;
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
-    let _ = config
+    config
         .server_permission_profiles
         .insert("docs".to_string(), PermissionProfile::default());
     let published = Arc::new(PublishedMcpRuntime {

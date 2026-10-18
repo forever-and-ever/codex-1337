@@ -159,7 +159,7 @@ impl App {
                     if let Some((turn_id, item_id)) = &start_item {
                         for turn in &mut thread.turns {
                             if &turn.id == turn_id {
-                                if let Some(index) = turn.items.iter().position(|item| item.id() == item_id) { let _ = turn.items.drain(..index); }
+                                if let Some(index) = turn.items.iter().position(|item| item.id() == item_id) { turn.items.drain(..index); }
                                 break;
                             }
                             turn.items.clear();
@@ -248,7 +248,7 @@ impl App {
             retained_turns,
         };
         self.pending_revert = Some(pending);
-        let _ = self.request_server(server, UiRequestScope::Thread(thread_id), UiRequestKind::Mutation, "revert prompt",
+        self.request_server(server, UiRequestScope::Thread(thread_id), UiRequestKind::Mutation, "revert prompt",
             move |handle| async move {
                 let response: ThreadRevertResponse = handle.request_typed(ClientRequest::ThreadRevert {
                     request_id: RequestId::String(format!("tui-prompt-revert-{id}")),
@@ -318,8 +318,7 @@ impl App {
                 .as_mut()
                 .expect("prompt edit retained its source input");
             input.recover_submission_drafts(drafts, DraftDisposition::Edit);
-            let _ = self
-                .agents_overview
+            self.agents_overview
                 .input_states
                 .insert(pending.thread_id, input.clone());
         }
@@ -522,7 +521,7 @@ impl App {
         if self.primary_thread_id == Some(thread_id) {
             self.primary_session_configured = Some(session.clone());
         }
-        let _ = self.thread_event_channels.remove(&thread_id);
+        self.thread_event_channels.remove(&thread_id);
         self.active_thread_id = None;
         self.recap.reset_for_new_thread(Instant::now());
         self.recap.seed_from_turns(&retained_turns, Instant::now());

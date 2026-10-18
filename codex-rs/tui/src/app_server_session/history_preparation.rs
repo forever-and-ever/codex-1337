@@ -46,13 +46,13 @@ impl AppServerSession {
         match update {
             HistoryPaginationUpdate::Untracked => {}
             HistoryPaginationUpdate::Summary(thread_id) => {
-                let _ = self.history_pagination.remove(&thread_id);
+                self.history_pagination.remove(&thread_id);
             }
             HistoryPaginationUpdate::Legacy(thread_id) => {
-                let _ = self.history_pagination.entry(thread_id).or_default();
+                self.history_pagination.entry(thread_id).or_default();
             }
             HistoryPaginationUpdate::Paginated { thread_id, state } => {
-                let _ = self.history_pagination.insert(thread_id, state);
+                self.history_pagination.insert(thread_id, state);
             }
         }
     }
@@ -145,7 +145,7 @@ pub(super) async fn merge_thread_item_page(
             let page =
                 thread_turns_page(policy, handle, thread_id, Some(cursor.clone()), limit).await?;
             for turn in merge_turn_page(&cursor, page, state, turns) {
-                let _ = missing_turn_ids.remove(&turn.id);
+                missing_turn_ids.remove(&turn.id);
             }
         }
         if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
@@ -369,7 +369,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                 )
                 .await?;
                 progress();
-                let _ = merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
+                merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
             }
         }
         Ok(())

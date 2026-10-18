@@ -15,7 +15,7 @@ impl App {
         thread_id: ThreadId,
     ) {
         let frame = tui.frame_requester();
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,

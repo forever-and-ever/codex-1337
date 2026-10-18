@@ -10,7 +10,7 @@ fn small_entries_are_retained_beyond_the_old_count_limit() {
     cache.begin_frame();
     for cell in &cells {
         let history = cell.clone() as Arc<dyn HistoryCell>;
-        let _ = cache.get(
+        cache.get(
             &history,
             /*width*/ 20,
             CellPresentation {
@@ -35,7 +35,7 @@ fn small_entries_are_retained_beyond_the_old_count_limit() {
     }
     for index in [99, 98, 0] {
         let history = cells[index].clone() as Arc<dyn HistoryCell>;
-        let _ = cache.get(
+        cache.get(
             &history,
             /*width*/ 20,
             CellPresentation {

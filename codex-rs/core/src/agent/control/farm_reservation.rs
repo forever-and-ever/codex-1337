@@ -129,7 +129,7 @@ impl LocalAgentControl {
                 .get_agent_path()
                 .unwrap_or_else(AgentPath::root);
             if let Some(name) = &task_name {
-                let _ = parent_path
+                parent_path
                     .join(name)
                     .map_err(CodexErr::InvalidRequest)
                     .map_err(FarmAttemptError::Preclaim)?;

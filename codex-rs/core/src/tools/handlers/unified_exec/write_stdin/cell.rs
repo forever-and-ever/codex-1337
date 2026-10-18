@@ -48,11 +48,11 @@ impl Caller {
                     unreachable!("write_stdin has a function schema");
                 };
                 let properties = spec.parameters.properties.get_or_insert_default();
-                let _ = properties.insert(
+                properties.insert(
                     "chars".to_string(),
                     JsonSchema::string(Some(CHARS_DESCRIPTION.to_string())),
                 );
-                let _ = properties.insert(
+                properties.insert(
                     "yield_time_ms".to_string(),
                     JsonSchema::number(Some(YIELD_TIME_DESCRIPTION.to_string())),
                 );

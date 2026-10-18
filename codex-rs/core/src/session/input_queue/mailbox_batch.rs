@@ -163,7 +163,7 @@ impl InputQueue {
                     || execution.release_generation != generation
                     || deadline <= Instant::now()
             }) {
-                let _ = self.release_mailbox_batch().await;
+                self.release_mailbox_batch().await;
                 return;
             }
             tokio::select! {
@@ -173,7 +173,7 @@ impl InputQueue {
                     if result.is_err() || execution.active < 2
                         || batch.is_some_and(|(_, generation)| execution.release_generation != generation)
                     {
-                        let _ = self.release_mailbox_batch().await;
+                        self.release_mailbox_batch().await;
                     }
                     // Also retry ordinary-mail admission when execution capacity is released.
                     return;

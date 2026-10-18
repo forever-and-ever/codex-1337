@@ -85,7 +85,7 @@ impl App {
             }
             JiraAction::List { .. } | JiraAction::Read { .. } => None,
         };
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let result = match tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<ThreadJiraResponse>(ClientRequest::ThreadJira {
@@ -103,7 +103,7 @@ impl App {
                     .into()),
             };
             tx.send(AppEvent::JiraFinished { token, result });
-        }));
+        });
     }
 
     fn request_jira_preview(&mut self, server: &mut AppServerSession) {

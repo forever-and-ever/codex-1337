@@ -269,11 +269,11 @@ impl Alarms {
 
     fn attach_hold(&self, thread: ThreadId, data: &codex_extension_api::ExtensionData) {
         let weak = Arc::downgrade(&self.0);
-        let _ = data.insert(codex_core::idle_hold::IdleHold::new(move || {
+        data.insert(codex_core::idle_hold::IdleHold::new(move || {
             weak.upgrade()
                 .is_some_and(|shared| Alarms(shared).held(thread))
         }));
-        let _ = data.insert(self.clone());
+        data.insert(self.clone());
     }
 
     fn summaries(&self, thread: ThreadId) -> Vec<AlarmSummary> {
@@ -337,7 +337,7 @@ impl Alarms {
             .await
             .map_err(|err| err.to_string())?;
         let id = alarm.id;
-        let _ = self.0.registry().alarms.insert(id, alarm.clone());
+        self.0.registry().alarms.insert(id, alarm.clone());
         if let Arm::Watch {
             session_id,
             watch,
@@ -350,7 +350,7 @@ impl Alarms {
                 let cause = delivery::watch(watch, session_id, deadline).await;
                 let _ = sounded.send((id, cause));
             });
-            let _ = self.0.registry().watches.insert(
+            self.0.registry().watches.insert(
                 id,
                 WatchTask {
                     task,
@@ -395,8 +395,8 @@ impl Alarms {
         }
         if let Some(id) = parsed {
             let mut registry = self.0.registry();
-            let _ = registry.alarms.remove(&id);
-            let _ = registry.watches.remove(&id);
+            registry.alarms.remove(&id);
+            registry.watches.remove(&id);
         }
         self.publish(thread, None);
         Ok(self.summaries(thread))
@@ -424,8 +424,8 @@ impl Alarms {
             .map(|alarm| alarm.id)
             .collect::<Vec<_>>();
         for id in ids {
-            let _ = registry.alarms.remove(&id);
-            let _ = registry.watches.remove(&id);
+            registry.alarms.remove(&id);
+            registry.watches.remove(&id);
         }
         drop(registry);
         self.publish(thread, None);
@@ -461,9 +461,9 @@ impl Alarms {
             .await
             .map_err(|err| err.to_string())?;
         let mut registry = self.0.registry();
-        let _ = registry.watches.remove(&id);
+        registry.watches.remove(&id);
         if sounded {
-            let _ = registry.alarms.insert(
+            registry.alarms.insert(
                 id,
                 ThreadAlarm {
                     note: sounding.note,
@@ -472,7 +472,7 @@ impl Alarms {
                 },
             );
         } else {
-            let _ = registry.alarms.remove(&id);
+            registry.alarms.remove(&id);
         }
         drop(registry);
         self.publish(alarm.thread_id, None);

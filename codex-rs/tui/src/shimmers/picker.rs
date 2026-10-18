@@ -206,9 +206,9 @@ pub(super) fn stage_rows(
         "Command".bold(),
         " cargo test -p codex-tui --lib".into(),
     ]);
-    let _ = buf.set_line(area.x, area.y, &tool, area.width);
+    buf.set_line(area.x, area.y, &tool, area.width);
     let output = Line::from("    Compiling codex-tui v0.0.0".dim());
-    let _ = buf.set_line(area.x, area.y + 1, &output, area.width);
+    buf.set_line(area.x, area.y + 1, &output, area.width);
     let (mut lead, backdrop) = engine.status(
         header, timer, palette, /*mark*/ true, /*letters*/ true,
     );
@@ -217,8 +217,8 @@ pub(super) fn stage_rows(
         format!("({} • ⌃c to interrupt)", fmt_elapsed_compact(timer)).dim(),
     ]);
     let y = area.y + 3;
-    let _ = buf.set_line(area.x, y, &Line::from(lead), area.width);
+    buf.set_line(area.x, y, &Line::from(lead), area.width);
     for (x, bg) in (area.x..area.right()).zip(&backdrop) {
-        let _ = buf[(x, y)].set_bg(color(*bg));
+        buf[(x, y)].set_bg(color(*bg));
     }
 }

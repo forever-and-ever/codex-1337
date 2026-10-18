@@ -564,7 +564,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
 
     // A valid token is not authority for a different conversation or a rewritten draft scope.
     let mut mismatched = confirmed_attempt;
-    let _ = mismatched
+    mismatched
         .as_object_mut()
         .expect("attempt object")
         .remove("newThread");
@@ -757,7 +757,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         })
         .await?;
     let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let _ = timeout(
+    timeout(
         DEFAULT_READ_TIMEOUT,
         app.read_stream_until_notification_message("turn/completed"),
     )
@@ -812,7 +812,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         })
         .await?;
     let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let _ = timeout(
+    timeout(
         DEFAULT_READ_TIMEOUT,
         app.read_stream_until_notification_message("turn/completed"),
     )
@@ -848,7 +848,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
     assert_eq!(response.selected_account_id.as_deref(), Some("bob:bob"));
 
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     app = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
@@ -950,7 +950,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         (Some("alice:alice"), Some("bob:bob"))
     );
     app.send_response(tool_id, json!({"answers": {}})).await?;
-    let _ = timeout(
+    timeout(
         DEFAULT_READ_TIMEOUT,
         app.read_stream_until_notification_message("turn/completed"),
     )
@@ -997,7 +997,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         .await?;
     let family: ThreadStartResponse =
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let _ = responses::mount_sse_once(&server, responses::sse(vec![
+    responses::mount_sse_once(&server, responses::sse(vec![
         responses::ev_function_call_with_namespace("spawn-family-worker", "wrangler_agents", "spawn_agent",
             &json!({"task_name": "worker", "message": "family-worker-only", "fork_turns": "none"}).to_string()),
         responses::ev_completed("family-spawn"),
@@ -1010,7 +1010,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             r#"{"cmd":"printf family-worker-done","sandbox_permissions":"require_escalated","justification":"account handoff approval boundary"}"#),
         responses::ev_completed("worker-approval"),
     ])).await;
-    let _ = responses::mount_sse_once_match(
+    responses::mount_sse_once_match(
         &server,
         |request: &wiremock::Request| {
             String::from_utf8_lossy(&request.body).contains("spawn-family-worker")
@@ -1055,7 +1055,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             } => (params.thread_id, request_id),
             request => anyhow::bail!("expected family input request, got {request:?}"),
         };
-        let _ = questions.insert(thread_id, request_id);
+        questions.insert(thread_id, request_id);
     }
     let root_question = questions.remove(&family.thread.id).expect("root question");
     let (child_id, child_question) = questions.into_iter().next().expect("child question");
@@ -1075,7 +1075,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
     .await;
     app.send_response(child_question, json!({"decision": "decline"}))
         .await?;
-    let _ = timeout(
+    timeout(
         DEFAULT_READ_TIMEOUT,
         app.read_stream_until_notification_message("turn/completed"),
     )
@@ -1119,7 +1119,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
     );
 
     // Restart with the parent still waiting: its durable selection must not revert.
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     drop(root_question);
     app = TestAppServer::builder()
         .with_codex_home(home.path())
@@ -1184,7 +1184,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         .await?;
     let _: ThreadAccountSelectResponse =
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let _ = timeout(
+    timeout(
         DEFAULT_READ_TIMEOUT,
         app.read_stream_until_notification_message("turn/completed"),
     )
@@ -1211,7 +1211,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         .await?;
     let legacy: ThreadStartResponse =
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
-    let _ = responses::mount_sse_once(
+    responses::mount_sse_once(
         &server,
         responses::sse(vec![
             responses::ev_function_call_with_namespace(
@@ -1224,7 +1224,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         ]),
     )
     .await;
-    let _ = responses::mount_sse_once_match(&server, |request: &wiremock::Request| {
+    responses::mount_sse_once_match(&server, |request: &wiremock::Request| {
         let body = String::from_utf8_lossy(&request.body);
         body.contains("legacy-account-child-only") && !body.contains("spawn-account-child")
     }, responses::sse(vec![
@@ -1232,7 +1232,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             r#"{"cmd":"printf legacy-child","sandbox_permissions":"require_escalated","justification":"account durability approval boundary"}"#),
         responses::ev_completed("legacy-child-approval"),
     ])).await;
-    let _ = responses::mount_sse_once_match(
+    responses::mount_sse_once_match(
         &server,
         |request: &wiremock::Request| {
             String::from_utf8_lossy(&request.body).contains("spawn-account-child")
@@ -1287,7 +1287,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
     assert!(selected.conversation_changed);
     assert!(selected.default_saved);
     assert!(selected.pending);
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     // Another family's choice of active login cannot supersede the saved root selection.
     codex_login::auth::activate_account(
         home.path(),

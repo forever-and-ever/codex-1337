@@ -65,7 +65,7 @@ async fn history_prefetch_waits_for_prepared_rows() -> Result<(), Box<dyn std::e
 
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let _ = render(&mut view, &cells, 24, 10);
+            render(&mut view, &cells, 24, 10);
             if view.needs_history(&cells) {
                 return Ok::<(), tokio::sync::broadcast::error::RecvError>(());
             }
@@ -85,8 +85,8 @@ fn live_preparation_does_not_freeze_retained_navigation() {
     let mut extended = cells.clone();
     extended.push(cell("new submitted message"));
     let mut view = TranscriptView::default();
-    let _ = render(&mut view, &extended, 32, 4);
-    let _ = render(&mut view, &cells, 32, 4);
+    render(&mut view, &extended, 32, 4);
+    render(&mut view, &cells, 32, 4);
     view.cache.frames = Some(crate::tui::FrameRequester::test_dummy());
     let before = render(&mut view, &cells, 32, 4);
 
@@ -94,7 +94,7 @@ fn live_preparation_does_not_freeze_retained_navigation() {
     let _held = gate
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let _ = view.sync_owned_live_tail(
+    view.sync_owned_live_tail(
         32,
         Some(ActiveCellTranscriptKey {
             cacheable: true,
@@ -114,7 +114,7 @@ fn live_preparation_does_not_freeze_retained_navigation() {
     view.scroll(&cells, -2);
     assert_ne!(render(&mut view, &cells, 32, 4), before);
     view.jump_to_latest();
-    let _ = render(&mut view, &extended, 32, 4);
+    render(&mut view, &extended, 32, 4);
     assert!(
         view.visible
             .iter()
@@ -147,7 +147,7 @@ async fn return_to_latest_cancels_unfinished_history_scroll()
     // Finishing a superseded scroll must not undo a later return to the live edge.
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let _ = render(&mut view, &cells, 32, 4);
+            render(&mut view, &cells, 32, 4);
             if view.deferred_scroll.is_none() && !view.cache.waiting {
                 return Ok::<(), tokio::sync::broadcast::error::RecvError>(());
             }

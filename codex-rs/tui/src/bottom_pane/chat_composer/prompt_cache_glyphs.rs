@@ -93,7 +93,7 @@ impl ChatComposer {
         if composer.height < 3 || left <= composer.x.saturating_add(LIVE_PREFIX_COLS) {
             return;
         }
-        let _ = buf.set_line(left, composer.bottom() - 1, &line, width);
+        buf.set_line(left, composer.bottom() - 1, &line, width);
     }
 }
 

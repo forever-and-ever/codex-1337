@@ -32,7 +32,7 @@ impl Session {
             .and_then(|turn| turn.task.as_ref())
             .map(|task| task.turn_context.capture_current_model_info())
         {
-            let _ = normalize_agent_service_tier(
+            normalize_agent_service_tier(
                 requested,
                 &model,
                 self.features.enabled(Feature::FastMode),

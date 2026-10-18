@@ -18,7 +18,6 @@ pub struct OpenRouterConfig {
 }
 
 impl OpenRouterConfig {
-    #[must_use]
     pub fn default_key(&self) -> Option<&KeyName> {
         match &self.default_key {
             Some(key) => Some(key),

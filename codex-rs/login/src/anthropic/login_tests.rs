@@ -40,7 +40,7 @@ async fn callback(attempt: &LoginAttempt, target: &str) {
         .await
         .unwrap();
     let mut response = Vec::new();
-    let _ = stream.read_to_end(&mut response).await.unwrap();
+    stream.read_to_end(&mut response).await.unwrap();
 }
 
 async fn endpoints(server: &MockServer, account: &str, access: &str) {

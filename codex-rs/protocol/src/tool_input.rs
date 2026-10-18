@@ -32,7 +32,6 @@ pub enum ToolInputPayload {
 }
 
 impl ToolInputPayload {
-    #[must_use]
     pub fn text(&self) -> &str {
         match self {
             Self::Json(text) | Self::Text(text) => text,
@@ -41,7 +40,6 @@ impl ToolInputPayload {
 }
 
 impl ToolInput {
-    #[must_use]
     pub fn capture(item: &ResponseItem) -> Option<Self> {
         let (call_id, name, payload) = match item {
             ResponseItem::FunctionCall {

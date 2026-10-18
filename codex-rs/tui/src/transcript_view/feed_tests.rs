@@ -83,7 +83,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
             .unwrap()
             .block
     };
-    let _ = reduce(fact("start", CodeModeEvent::Started {
+    reduce(fact("start", CodeModeEvent::Started {
         call_id: exec.into(),
         script: Some(command.map_or_else(
             || "text(\"only emitted text\");".into(),
@@ -91,7 +91,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
         )),
     }));
     if let Some(command) = command {
-        let _ = reduce(ThreadItem::CommandExecution {
+        reduce(ThreadItem::CommandExecution {
             sandbox_type: None,
             model_context: None,
             id: "call-status".into(),
@@ -109,7 +109,7 @@ fn script_block(exec: &str, command: Option<&str>, output: Option<&str>) -> Arc<
         });
     }
     if let Some(output) = output {
-        let _ = reduce(ThreadItem::FunctionCallOutput {
+        reduce(ThreadItem::FunctionCallOutput {
             id: format!("{exec}-output"),
             call_id: Some(exec.into()),
             name: "exec".into(),
@@ -163,7 +163,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    let _ = exec.complete_call(
+    exec.complete_call(
         "call-1",
         // Items unfold by default, so a header-only activity once dumped all of its output here.
         CommandOutput::new(
@@ -388,7 +388,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         .fold_targets()[0]
         .clone();
     assert!(view.focus_fold(&cells, injection, fold.clone()));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let opened = screen(&mut view, "injection opened");
     assert!(opened.contains("<environment_context>"));
     assert_eq!(
@@ -400,7 +400,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         Some(usize::from(crate::transcript_geometry::GUTTER_COLUMNS))
     );
     assert!(view.focus_fold(&cells, injection, fold));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let code = cells
         .iter()
         .position(|cell| cell.as_any().is::<CodeModeCell>())
@@ -414,8 +414,8 @@ fn steps_fold_under_one_header_with_their_figures() {
         code,
         control("exec-1", Action::Format(Port::Input, OutputMode::Raw))
     ));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-    let _ = screen(&mut view, "script");
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    screen(&mut view, "script");
     assert!(view.focus_fold(
         &cells,
         code,
@@ -424,7 +424,7 @@ fn steps_fold_under_one_header_with_their_figures() {
             Action::Toggle(Port::Input, Panel::Hidden(OutputMode::Raw))
         )
     ));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let command = (0..cells.len())
         .find(|index| {
             view.current_layout(&cells, *index).is_some_and(|layout| {
@@ -449,11 +449,11 @@ fn steps_fold_under_one_header_with_their_figures() {
         "command controls: {:?}",
         view.current_layout(&cells, command).unwrap().fold_targets()
     );
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-    let _ = screen(&mut view, "folded");
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    screen(&mut view, "folded");
     let manual = view.disclosure.expanded.clone();
     view.begin_search();
-    let _ = view.paste_search("<environment_context>");
+    view.paste_search("<environment_context>");
     assert!((0..512).any(|_| !view.advance_search(&cells)));
     assert!(
         view.layout(&cells, injection)
@@ -531,21 +531,21 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert!(!collapsed.contains("Base instructions"));
     let parent = view.current_layout(&cells, 0).unwrap().fold_targets()[0].clone();
     assert!(view.focus_fold(&cells, 0, parent.clone()));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let summary = screen(&mut view, &cells, "summary", 80);
     assert!(summary.contains("Base instructions"));
     assert!(summary.contains("Raw Context"));
     assert!(!summary.contains("<instructions>"));
     for _ in 0..2 {
-        let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     }
     assert!(!screen(&mut view, &cells, "summary reopened", 80).contains("<instructions>"));
-    let _ = view.handle_key(crossterm::event::KeyCode::Down.into(), &cells);
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Down.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     assert!(screen(&mut view, &cells, "raw explicitly opened", 80).contains("<instructions>"));
     let second_parent = view.current_layout(&cells, 1).unwrap().fold_targets()[0].clone();
     assert!(view.focus_fold(&cells, 1, second_parent));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     assert!(
         !view
             .current_layout(&cells, 1)
@@ -553,11 +553,11 @@ fn steps_fold_under_one_header_with_their_figures() {
             .text()
             .contains("other window")
     );
-    let _ = screen(&mut view, &cells, "narrow raw", 40);
+    screen(&mut view, &cells, "narrow raw", 40);
     assert!(screen(&mut view, &cells, "wide raw", 80).contains("<instructions>"));
     assert!(view.focus_fold(&cells, 0, parent.clone()));
     for _ in 0..2 {
-        let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     }
     assert!(
         screen(&mut view, &cells, "raw retained across parent fold", 80).contains("<instructions>")
@@ -566,10 +566,10 @@ fn steps_fold_under_one_header_with_their_figures() {
     view.jump_to_latest();
     assert!(screen(&mut view, &cells, "same item replayed", 80).contains("<instructions>"));
     assert!(view.focus_fold(&cells, 0, parent));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let manual = view.disclosure.expanded.clone();
     view.begin_search();
-    let _ = view.paste_search("needle Ω");
+    view.paste_search("needle Ω");
     assert!((0..512).any(|_| !view.advance_search(&cells)));
     assert!(
         view.layout(&cells, 0)
@@ -594,12 +594,12 @@ fn steps_fold_under_one_header_with_their_figures() {
     view.record_step_admission(step("source-step", &[exec], &[], Admission::Pending));
     // A separately cached legacy live-search projection once omitted visible Code Mode source.
     let mut live_view = TranscriptView::default();
-    let _ = live_view.sync_live_activity(&[], cells[0].activity_ids());
-    let _ = live_view.sync_live_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
-    let _ = crate::transcript_view::tests::render(&mut live_view, &[], 80, 20);
+    live_view.sync_live_activity(&[], cells[0].activity_ids());
+    live_view.sync_live_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
+    crate::transcript_view::tests::render(&mut live_view, &[], 80, 20);
     live_view.begin_search();
-    let _ = live_view.paste_search("text(");
-    let _ = live_view.sync_search_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
+    live_view.paste_search("text(");
+    live_view.sync_search_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
     assert!((0..512).any(|_| !live_view.advance_search(&[])));
     assert!(live_view.is_search_expanded(EntryKey::Live));
     live_view.cancel_search();
@@ -630,9 +630,9 @@ fn steps_fold_under_one_header_with_their_figures() {
             Panel::Visible(OutputMode::Fmt)
         ))
     ));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     for width in [104, 40, 80] {
-        let _ = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
+        crate::transcript_view::tests::render(&mut view, &cells, width, 24);
         let layout = view.current_layout(&cells, 0).unwrap();
         assert!(layout.text().contains("text(\"only emitted text\");"));
         assert!(
@@ -643,8 +643,8 @@ fn steps_fold_under_one_header_with_their_figures() {
         for mode in [OutputMode::Raw, OutputMode::Fmt] {
             let control = target(Action::Format(Port::Output, mode));
             assert!(view.focus_fold(&cells, 0, control.clone()));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-            let _ = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            crate::transcript_view::tests::render(&mut view, &cells, width, 24);
             assert!(
                 view.current_layout(&cells, 0)
                     .unwrap()

@@ -7,7 +7,6 @@ use crate::ToolDefinition;
 const HELPER: &str = "- `sh(...commands)`: runs commands concurrently through `tools.exec_command`, each a `cmd` string or its arguments object; appends their results in order like `text(results)`, with `Error` for a rejected call; resolves to the results. The script waits for `sh` even unawaited.\n";
 
 /// The nested tool `sh` runs commands through; a cell without it has no `sh`.
-#[must_use]
 pub fn is_exec_command(tool_name: &ToolName) -> bool {
     tool_name.is_default_namespace() && tool_name.name == "exec_command"
 }

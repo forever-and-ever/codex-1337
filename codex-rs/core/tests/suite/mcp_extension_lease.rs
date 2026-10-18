@@ -85,7 +85,7 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
             .await,
         codex_core::ConfigRefreshOutcome::Published
     );
-    let _ = Box::pin(fixture.codex.call_mcp_tool(
+    Box::pin(fixture.codex.call_mcp_tool(
         "leased_mcp",
         "echo",
         Some(json!({"message": "after refresh"})),
@@ -119,14 +119,14 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
         "unexpected call error: {error}"
     );
 
-    let _ = fixture
+    fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "continue".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    let _ = wait_for_event(&fixture.codex, |event| {
+    wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -153,7 +153,7 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
     }))
     .await??;
     fixture.codex.detach_mcp_extension(&first).await;
-    let _ = Box::pin(fixture.codex.call_mcp_tool(
+    Box::pin(fixture.codex.call_mcp_tool(
         "leased_mcp",
         "echo",
         Some(json!({"message": "replacement"})),
@@ -288,14 +288,14 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
             .set_delay(Duration::from_secs(30)),
     )
     .await;
-    let _ = fixture
+    fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Keep this turn active".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    let _ = wait_for_event(&fixture.codex, |event| {
+    wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnStarted(_))
     })
     .await;
@@ -313,8 +313,8 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
         error.to_string().contains("thread has an active turn"),
         "unexpected attach error: {error}"
     );
-    let _ = fixture.codex.submit(Op::Interrupt).await?;
-    let _ = wait_for_event(&fixture.codex, |event| {
+    fixture.codex.submit(Op::Interrupt).await?;
+    wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnAborted(_))
     })
     .await;
@@ -324,14 +324,14 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
         responses::sse(vec![responses::ev_completed("late")]),
     )
     .await;
-    let _ = fixture
+    fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Keep this turn active".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    let _ = wait_for_event(&fixture.codex, |event| {
+    wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
