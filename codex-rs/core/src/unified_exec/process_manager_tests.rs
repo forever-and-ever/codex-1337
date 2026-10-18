@@ -3,6 +3,7 @@ use crate::shell::Shell;
 use crate::shell::ShellInvocation;
 use crate::shell::ShellType;
 use crate::unified_exec::clamp_yield_time;
+use crate::unified_exec::output_collection;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use core_test_support::assert_regex_match;
 use pretty_assertions::assert_eq;
@@ -343,57 +344,89 @@ fn initial_exec_yield_time_has_no_platform_floor() {
 
 #[tokio::test]
 async fn output_collection_stays_bounded_across_repeated_drains() {
-    let chunks: [&[u8]; 4] = [b"01234567", b"89ABCDEF", b"ghijklmnopq", b"rs"];
-    let output_buffer = Arc::new(tokio::sync::Mutex::new(OutputBuffers::<10>::default()));
-    let output_notify = Arc::new(Notify::new());
-    let output_closed = Arc::new(AtomicBool::new(false));
-    let output_closed_notify = Arc::new(Notify::new());
-    let cancellation_token = CancellationToken::new();
-    let output = OutputHandles {
-        terminal_watches: Arc::default(),
-        output_buffer: Arc::clone(&output_buffer),
-        output_notify: Arc::clone(&output_notify),
-        output_closed: Arc::clone(&output_closed),
-        output_closed_notify: Arc::clone(&output_closed_notify),
-        cancellation_token: cancellation_token.clone(),
-        collection_finished: CancellationToken::new(),
-        drain_policy: OutputDrainPolicy::BoundedAfterExit,
-    };
-
-    let collect = UnifiedExecProcessManager::collect_output_until_deadline(
-        &output,
-        /*pause_state*/ None,
-        Instant::now() + Duration::from_secs(5),
-    );
-    let produce = async {
-        for chunk in chunks {
-            output_buffer.lock().await.push_chunk(chunk);
-            output_notify.notify_one();
-            tokio::time::timeout(Duration::from_secs(1), async {
-                loop {
-                    if output_buffer.lock().await.pending.retained_bytes() == 0 {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("collector should drain each chunk");
-        }
-
-        output_closed.store(true, Ordering::Release);
-        cancellation_token.cancel();
-        output_closed_notify.notify_waiters();
-        output_notify.notify_waiters();
-    };
-
-    let (collected, ()) = tokio::join!(collect, produce);
-    let mut expected = HeadTailBuffer::<10>::default();
-    for chunk in chunks {
-        expected.push_chunk(chunk);
+    enum End {
+        Exit,
+        Interjection,
+        PausedInterjection,
     }
-    assert_eq!(collected, expected);
-    assert_eq!(output_buffer.lock().await.transcript, expected);
+    for end in [End::Exit, End::Interjection, End::PausedInterjection] {
+        let chunks: [&[u8]; 4] = [b"01234567", b"89ABCDEF", b"ghijklmnopq", b"rs"];
+        let output_buffer = Arc::new(tokio::sync::Mutex::new(OutputBuffers::<10>::default()));
+        let output_notify = Arc::new(Notify::new());
+        let output_closed = Arc::new(AtomicBool::new(false));
+        let output_closed_notify = Arc::new(Notify::new());
+        let cancellation_token = CancellationToken::new();
+        let interjection = CancellationToken::new();
+        let (pause_tx, pause_rx) = watch::channel(false);
+        let output = OutputHandles {
+            terminal_watches: Arc::default(),
+            output_buffer: Arc::clone(&output_buffer),
+            output_notify: Arc::clone(&output_notify),
+            output_closed: Arc::clone(&output_closed),
+            output_closed_notify: Arc::clone(&output_closed_notify),
+            cancellation_token: cancellation_token.clone(),
+            collection_finished: CancellationToken::new(),
+            drain_policy: OutputDrainPolicy::BoundedAfterExit,
+        };
+
+        let collect = output_collection::collect(
+            &output,
+            Some(pause_rx),
+            Instant::now() + Duration::from_secs(3_600),
+            match end {
+                End::Exit => None,
+                End::Interjection | End::PausedInterjection => Some(&interjection),
+            },
+        );
+        let produce = async {
+            for chunk in chunks {
+                output_buffer.lock().await.push_chunk(chunk);
+                output_notify.notify_one();
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    loop {
+                        if output_buffer.lock().await.pending.retained_bytes() == 0 {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("collector should drain each chunk");
+            }
+
+            // The final chunk races the stop signal; cancellation must not discard it
+            // or the bytes that earlier iterations already removed from pending.
+            output_buffer.lock().await.push_chunk(b"late");
+            match end {
+                End::Exit => {
+                    output_closed.store(true, Ordering::Release);
+                    cancellation_token.cancel();
+                    output_closed_notify.notify_waiters();
+                    output_notify.notify_waiters();
+                }
+                End::Interjection | End::PausedInterjection => {
+                    if matches!(end, End::PausedInterjection) {
+                        pause_tx.send_replace(true);
+                        tokio::task::yield_now().await;
+                    }
+                    interjection.cancel();
+                }
+            }
+        };
+
+        let (collected, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::join!(collect, produce)
+        })
+        .await
+        .expect("an hour-long poll must return promptly at its stop signal");
+        let mut expected = HeadTailBuffer::<10>::default();
+        for chunk in chunks {
+            expected.push_chunk(chunk);
+        }
+        expected.push_chunk(b"late");
+        assert_eq!(collected, expected);
+        assert_eq!(output_buffer.lock().await.transcript, expected);
+    }
 }
 
 #[tokio::test]

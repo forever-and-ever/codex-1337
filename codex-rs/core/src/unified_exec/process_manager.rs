@@ -1040,8 +1040,16 @@ impl UnifiedExecProcessManager {
         };
         let start = Instant::now();
         let deadline = start + Duration::from_millis(yield_time_ms);
-        let collected_output =
-            Self::collect_output_until_deadline(&output, pause_state, deadline).await;
+        let collected_output = super::output_collection::collect(
+            &output,
+            pause_state,
+            deadline,
+            context
+                .poll_interjection
+                .as_ref()
+                .filter(|_| request.input.is_empty()),
+        )
+        .await;
         let wall_time = Instant::now().saturating_duration_since(start);
 
         let original_token_count = usize::try_from(approx_tokens_from_byte_count(
@@ -1588,165 +1596,12 @@ impl UnifiedExecProcessManager {
         result
     }
 
-    #[tracing::instrument(
-        name = "unified_exec.collect_output",
-        level = "info",
-        skip_all,
-        fields(
-            outcome = tracing::field::Empty,
-            stop_reason = tracing::field::Empty,
-            exit_signaled = tracing::field::Empty,
-            output_closed = tracing::field::Empty,
-        )
-    )]
     pub(super) async fn collect_output_until_deadline<const MAX_BYTES: usize>(
         output: &OutputHandles<MAX_BYTES>,
-        mut pause_state: Option<watch::Receiver<bool>>,
-        mut deadline: Instant,
+        pause_state: Option<watch::Receiver<bool>>,
+        deadline: Instant,
     ) -> HeadTailBuffer<MAX_BYTES> {
-        const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
-
-        enum StopReason {
-            OutputClosed,
-            Deadline,
-            PostExitDeadline,
-        }
-
-        let OutputHandles {
-            output_buffer,
-            output_notify,
-            output_closed,
-            output_closed_notify,
-            cancellation_token,
-            ..
-        } = output;
-        let mut collected = HeadTailBuffer::default();
-        let mut exit_signal_received = cancellation_token.is_cancelled();
-        let mut post_exit_deadline: Option<Instant> = None;
-        let stop_reason = loop {
-            Self::extend_deadlines_while_paused(
-                &mut pause_state,
-                &mut deadline,
-                &mut post_exit_deadline,
-            )
-            .await;
-            let drained_output: HeadTailBuffer<MAX_BYTES>;
-            let has_drained_output: bool;
-            let mut wait_for_output = None;
-            {
-                let mut guard = output_buffer.lock().await;
-                drained_output = std::mem::take(&mut guard.pending);
-                has_drained_output =
-                    drained_output.retained_bytes() > 0 || drained_output.omitted_bytes() > 0;
-                if !has_drained_output {
-                    wait_for_output = Some(output_notify.notified());
-                }
-            }
-
-            if !has_drained_output {
-                exit_signal_received |= cancellation_token.is_cancelled();
-                if exit_signal_received && output_closed.load(Ordering::Acquire) {
-                    break StopReason::OutputClosed;
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining == Duration::ZERO {
-                    break StopReason::Deadline;
-                }
-
-                if exit_signal_received {
-                    let now = Instant::now();
-                    let close_wait_deadline = *post_exit_deadline
-                        .get_or_insert_with(|| now + remaining.min(POST_EXIT_CLOSE_WAIT_CAP));
-                    let close_wait_remaining = close_wait_deadline.saturating_duration_since(now);
-                    if close_wait_remaining == Duration::ZERO {
-                        break StopReason::PostExitDeadline;
-                    }
-                    let notified = wait_for_output.unwrap_or_else(|| output_notify.notified());
-                    let closed = output_closed_notify.notified();
-                    tokio::pin!(notified);
-                    tokio::pin!(closed);
-                    tokio::select! {
-                        _ = &mut notified => {}
-                        _ = &mut closed => {}
-                        _ = tokio::time::sleep(close_wait_remaining) => break StopReason::PostExitDeadline,
-                        _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
-                    }
-                    continue;
-                }
-
-                let notified = wait_for_output.unwrap_or_else(|| output_notify.notified());
-                tokio::pin!(notified);
-                let exit_notified = cancellation_token.cancelled();
-                tokio::pin!(exit_notified);
-                tokio::select! {
-                    _ = &mut notified => {}
-                    _ = &mut exit_notified => exit_signal_received = true,
-                    _ = tokio::time::sleep(remaining) => break StopReason::Deadline,
-                    _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
-                }
-                continue;
-            }
-
-            collected.push_buffer(drained_output);
-
-            exit_signal_received |= cancellation_token.is_cancelled();
-            if Instant::now() >= deadline {
-                break StopReason::Deadline;
-            }
-        };
-
-        let span = tracing::Span::current();
-        span.record(
-            "stop_reason",
-            match stop_reason {
-                StopReason::OutputClosed => "output_closed",
-                StopReason::Deadline => "deadline",
-                StopReason::PostExitDeadline => "post_exit_deadline",
-            },
-        );
-        span.record(
-            "exit_signaled",
-            exit_signal_received || cancellation_token.is_cancelled(),
-        );
-        span.record("output_closed", output_closed.load(Ordering::Acquire));
-        span.record("outcome", "completed");
-        collected
-    }
-
-    async fn extend_deadlines_while_paused(
-        pause_state: &mut Option<watch::Receiver<bool>>,
-        deadline: &mut Instant,
-        post_exit_deadline: &mut Option<Instant>,
-    ) {
-        let Some(receiver) = pause_state.as_mut() else {
-            return;
-        };
-        if !*receiver.borrow() {
-            return;
-        }
-
-        let paused_at = Instant::now();
-        while *receiver.borrow() {
-            if receiver.changed().await.is_err() {
-                break;
-            }
-        }
-
-        let paused_for = paused_at.elapsed();
-        *deadline += paused_for;
-        if let Some(post_exit_deadline) = post_exit_deadline.as_mut() {
-            *post_exit_deadline += paused_for;
-        }
-    }
-
-    async fn wait_for_pause_change(pause_state: Option<&watch::Receiver<bool>>) {
-        match pause_state {
-            Some(pause_state) => {
-                let mut receiver = pause_state.clone();
-                let _ = receiver.changed().await;
-            }
-            None => std::future::pending::<()>().await,
-        }
+        super::output_collection::collect(output, pause_state, deadline, None).await
     }
 
     fn prune_processes_if_needed(store: &mut ProcessStore) -> Option<ProcessEntry> {

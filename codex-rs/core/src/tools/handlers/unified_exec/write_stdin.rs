@@ -1,6 +1,7 @@
 use crate::function_tool::FunctionCallError;
 use codex_features::Feature;
 
+use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
@@ -70,6 +71,7 @@ impl WriteStdinHandler {
             cancellation_token,
             call_id,
             tool_name,
+            source,
             payload,
             ..
         } = invocation;
@@ -96,13 +98,22 @@ impl WriteStdinHandler {
                 "unified exec is unavailable in this session",
             )?;
         }
-        let context = UnifiedExecContext::new(
+        // A cell owns yielding. Its originating step's latched news must not turn
+        // a surviving nested script into a tight loop of immediately yielded polls.
+        let poll_interjection = match source {
+            ToolCallSource::CodeMode { .. } => None,
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
+                Some(step_context.interjection.news().clone())
+            }
+        };
+        let mut context = UnifiedExecContext::new(
             session.clone(),
             step_context,
             cancellation_token,
             call_id,
             tool_name,
         );
+        context.poll_interjection = poll_interjection;
         let response = session
             .services
             .unified_exec_manager

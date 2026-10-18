@@ -50,6 +50,7 @@ mod errors;
 mod head_tail_buffer;
 mod initial_wait;
 mod oneshot;
+mod output_collection;
 mod process;
 mod process_manager;
 mod process_state;
@@ -91,6 +92,7 @@ pub(crate) struct UnifiedExecContext {
     pub cancellation_token: CancellationToken,
     pub call_id: String,
     pub tool_name: codex_tools::ToolName,
+    pub(crate) poll_interjection: Option<CancellationToken>,
 }
 
 impl UnifiedExecContext {
@@ -107,6 +109,7 @@ impl UnifiedExecContext {
             cancellation_token,
             call_id,
             tool_name: tool_name.with_default_namespace(),
+            poll_interjection: None,
         }
     }
 }

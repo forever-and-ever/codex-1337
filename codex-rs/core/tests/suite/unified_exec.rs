@@ -2262,12 +2262,15 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
 
     let server = start_mock_server().await;
     mock_server::run(&[&server], async {
-        let mut builder = test_codex();
+        let mut builder = test_codex().with_config(|config| {
+            config.features.disable(Feature::InstantInterrupt).expect("disable instant interruption");
+        });
         let test = builder.build_with_auto_env(&server).await?;
 
         let start_call_id = "uexec-cat-start";
         let send_call_id = "uexec-cat-send";
         let exit_call_id = "uexec-cat-exit";
+        let poll_call_id = "uexec-cat-poll";
         let receipt_call_id = "uexec-cat-receipt";
 
         let start_args = serde_json::json!({
@@ -2304,6 +2307,18 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
                     &serde_json::to_string(&send_args)?,
                 ),
                 ev_completed("resp-2"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-poll"),
+                ev_function_call(
+                    poll_call_id,
+                    "write_stdin",
+                    &serde_json::json!({
+                        "session_id": 1000,
+                        "yield_time_ms": 3_600_000,
+                    }).to_string(),
+                ),
+                ev_completed("resp-poll"),
             ]),
             sse(vec![
                 ev_response_created("resp-3"),
@@ -2346,6 +2361,16 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
         loop {
             let event = wait_for_event(&test.codex, |_| true).await;
             match event {
+                EventMsg::RawResponseItem(raw)
+                    if matches!(&raw.item, ResponseItem::FunctionCall { call_id, .. } if call_id == poll_call_id) =>
+                {
+                    test.codex.start_or_steer_turn(
+                        TurnInputRequest::user_input(vec![UserInput::Text {
+                            text: "release the observation, not the terminal".into(),
+                            text_elements: Vec::new(),
+                        }])
+                    ).await?;
+                }
                 EventMsg::TerminalInteraction(event)
                     if event.call_id == start_call_id
                         && event.stdin
@@ -2417,6 +2442,12 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
             send_output.exit_code.is_none(),
             "write_stdin should not include exit_code while process is running"
         );
+
+        let interrupted_poll = outputs.get(poll_call_id).expect("steered direct empty poll");
+        assert_eq!(interrupted_poll.process_id.as_ref(), Some(&process_id));
+        assert_eq!(interrupted_poll.exit_code, None);
+        assert!(bodies.last().expect("final model request").to_string()
+            .contains("release the observation, not the terminal"));
 
         let exit_output = outputs
             .get(exit_call_id)
