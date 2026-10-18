@@ -499,10 +499,20 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: none in 0.162 on the owners.
 - Evidence: 1112d83c56, a365185343, dbe071b9e1, a53d7705fe.
 
+### fork-lint-posture
+
+- Telos: fork-owned Rust meets the house lint posture, and upstream code keeps upstream's.
+- Holds: every Rust file whose path the merged release tag lacks passes `scripts/check_fork_lints.py` under `codex-rs/fork-lints.toml`. That policy is the rust-bootstrap template plus two fork exceptions, each with its reason beside it. Upstream files answer only to upstream's `[workspace.lints]`. The runner caps every lint at warn, so upstream code cannot stop the build, and fails on any diagnostic in a fork-owned file. `clippy.toml` gains `allow-panic-in-tests`; it is inert for upstream's lints.
+- Owners: `codex-rs/fork-lints.toml`, `scripts/check_fork_lints.py`.
+- Tripwire: the gate itself.
+- Pressure: a toolchain bump can raise new findings in fork files. A file the fork moves out of an upstream path becomes fork-owned and gains the posture; an upstream release that adds a file at a fork-owned path takes that file out of the gate.
+- Evidence: maintainer decision; the first run flagged 2877 findings in 444 of 592 fork-owned files.
+
 ## Index
 
 Upstream files, where merge conflicts arise:
 
+- `codex-rs/clippy.toml`: fork-lint-posture
 - `codex-rs/tui/src/app/transcript_export.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/thread_settings.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/app_server_events.rs`: fast-ui-thread
