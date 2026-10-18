@@ -1,3 +1,4 @@
+use codex_code_mode_protocol::EnabledToolMetadata;
 use codex_code_mode_protocol::normalize_code_mode_identifier;
 use serde::Deserialize;
 use serde_json::json;
@@ -63,26 +64,88 @@ pub(super) fn describe_tool_callback(
             }
         }
     };
-    let description = scope.get_slot::<RuntimeState>().and_then(|state| {
-        state
-            .enabled_tools
-            .iter()
-            .find(|tool| tool.global_name == name)
-            .map(|tool| match options.detail {
-                DescriptionDetail::Contract => tool.description.clone(),
-                DescriptionDetail::Output => tool.describe_output(),
-                DescriptionDetail::Schema => tool.describe_schema(),
-            })
-    });
-    let Some(description) = description else {
-        throw_type_error(scope, &format!("unknown tool `{name}`"));
+    let Some(state) = scope.get_slot::<RuntimeState>() else {
+        throw_type_error(scope, "runtime state unavailable");
         return;
+    };
+    let description = match resolve_tool(&name, &state.enabled_tools) {
+        Ok(tool) => match options.detail {
+            DescriptionDetail::Contract => tool.description.clone(),
+            DescriptionDetail::Output => tool.describe_output(),
+            DescriptionDetail::Schema => tool.describe_schema(),
+        },
+        Err(error) => {
+            throw_type_error(scope, &error);
+            return;
+        }
     };
     let Some(description) = v8::String::new(scope, &description) else {
         throw_type_error(scope, "failed to allocate tool description");
         return;
     };
     retval.set(description.into());
+}
+
+fn resolve_tool<'a>(
+    name: &str,
+    tools: &'a [EnabledToolMetadata],
+) -> Result<&'a EnabledToolMetadata, String> {
+    if let Some(tool) = tools.iter().find(|tool| tool.global_name == name) {
+        return Ok(tool);
+    }
+    let alias = name.strip_prefix("tools.").unwrap_or(name);
+    let rewritten = alias.replace('.', "__");
+    let matches = tools
+        .iter()
+        .filter(|tool| {
+            tool.global_name == alias
+                || tool.global_name == rewritten
+                || tool.tool_name.to_string() == alias
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [tool] => Ok(tool),
+        [] => {
+            if tools.is_empty() {
+                return Err(format!("unknown tool `{name}`: no tools are enabled"));
+            }
+            let mut suggestions = tools.iter().collect::<Vec<_>>();
+            suggestions.sort_by_key(|tool| {
+                let common = tool
+                    .global_name
+                    .chars()
+                    .zip(rewritten.chars())
+                    .take_while(|(left, right)| left == right)
+                    .count()
+                    + tool
+                        .global_name
+                        .chars()
+                        .rev()
+                        .zip(rewritten.chars().rev())
+                        .take_while(|(left, right)| left == right)
+                        .count();
+                (std::cmp::Reverse(common), &tool.global_name)
+            });
+            Err(format!(
+                "unknown tool `{name}`. Did you mean: {}? Use search_tools to find an enabled canonical name.",
+                suggestions
+                    .iter()
+                    .take(3)
+                    .map(|tool| tool.global_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+        _ => Err(format!(
+            "ambiguous tool alias `{name}`. Did you mean: {}? Use an exact canonical name.",
+            matches
+                .iter()
+                .take(3)
+                .map(|tool| tool.global_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 #[expect(

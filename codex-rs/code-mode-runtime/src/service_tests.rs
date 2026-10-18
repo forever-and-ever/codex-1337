@@ -1395,6 +1395,14 @@ async fn global_scope_contains_only_allowed_items() {
             ..echo_tool()
         },
     ));
+    enabled_tools.push(codex_code_mode_protocol::augment_tool_definition(
+        ToolDefinition {
+            name: "other_echo".to_string(),
+            tool_name: ToolName::plain("other.echo"),
+            description: "Dotted spelling collision".to_string(),
+            ..echo_tool()
+        },
+    ));
     let metadata = enabled_tools
         .iter()
         .cloned()
@@ -1425,6 +1433,9 @@ text(ALL_TOOLS.find(tool => tool.name === page.matches[0].name));
 text(describe_tool(page.matches[0].name));
 text(describe_tool(page.matches[0].name, {detail: "output"}));
 text(describe_tool(page.matches[0].name, {detail: "contract"}));
+text(describe_tool("tools." + page.matches[0].name));
+text(describe_tool("tools.mcp__sample.echo_00"));
+text(describe_tool("mcp__sample__.echo-00"));
 text(describe_tool("other__echo", {detail: "output"}));
 text(describe_tool(page.matches[0].name, {detail: "schema"}));
 text(await tools[page.matches[0].name]({message: "same input"}));
@@ -1434,6 +1445,17 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
       () => describe_tool(page.matches[0].name, {output: true})].map(run => {
     try {run(); return false;} catch {return true;}
 }));
+text([
+    describe_tool("other_echo") === describe_tool("tools.other_echo"),
+    typeof tools["other.echo"],
+    ...["other.echo", "other__ech"].map(name => {
+        try {describe_tool(name); return false;}
+        catch (error) {
+            return String(error).includes("Did you mean:")
+                && String(error).includes("other__echo");
+        }
+    })
+]);
 "#
                 .to_string(),
                 yield_time_ms: None,
@@ -1584,10 +1606,14 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
             serde_json::json!(full_description),
             serde_json::json!(output_description),
             serde_json::json!(full_description),
+            serde_json::json!(full_description),
+            serde_json::json!(full_description),
+            serde_json::json!(full_description),
             serde_json::json!("other__echo: no declared output schema"),
             schemas,
             JsonValue::Null,
             serde_json::json!([true, true, true, true, true]),
+            serde_json::json!([true, "undefined", true, true]),
         ]
     );
     assert!(metadata[0]["description"].as_str().unwrap().chars().count() <= 160);
