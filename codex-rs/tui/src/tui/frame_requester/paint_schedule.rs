@@ -1,6 +1,14 @@
 //! Content cadence is independent of completed-frame paint admission.
 
-use super::*;
+use super::Duration;
+use super::FrameKind;
+use super::FrameRequest;
+use super::FrameScheduler;
+use super::Instant;
+use super::Ordering;
+use super::PresentationMode;
+use super::REDUCED_CONTENT_INTERVAL;
+use super::scheduling_now;
 
 impl FrameScheduler {
     pub(super) async fn run_prepared(mut self) {
@@ -26,7 +34,6 @@ impl FrameScheduler {
                     // Do not send a draw immediately here. By continuing the loop,
                     // we recompute the sleep target so the draw fires once via the
                     // sleep branch, coalescing multiple requests into a single draw.
-                    continue;
                 }
                 () = &mut deadline => {
                     // The timer can be ready alongside queued requests. Drain a bounded

@@ -70,6 +70,13 @@ struct Puzzle {
 }
 
 impl Rubik {
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap,
+        reason = "The visual puzzle deliberately quantizes nonnegative token/time progress into moves; round = moves / 40 fits i64 and scramble indices are below 12."
+    )]
     fn puzzle(&self, stage: &Stage) -> Puzzle {
         let moves = (stage.tokens as f64 / 10.0 + self.waited).floor() as u64;
         let round = moves / ROUND;
@@ -133,12 +140,16 @@ impl Shimmer for Rubik {
             }
         };
         row.mark = [0, 4]
-            .map(|first| if let Some(flash) = flash { Ink::of('█').fg(flash) } else {
-                let bits = (0..4)
-                    .filter(|&q| !stickers[first + q])
-                    .map(|q| QUADRANT_BITS[q])
-                    .sum::<usize>();
-                Ink::of(QUADRANTS[bits]).fg(dim(a)).bg(dim(b))
+            .map(|first| {
+                if let Some(flash) = flash {
+                    Ink::of('█').fg(flash)
+                } else {
+                    let bits = (0..4)
+                        .filter(|&q| !stickers[first + q])
+                        .map(|q| QUADRANT_BITS[q])
+                        .sum::<usize>();
+                    Ink::of(QUADRANTS[bits]).fg(dim(a)).bg(dim(b))
+                }
             })
             .to_vec();
         row.header = stage.letters(|i, _| match flash {

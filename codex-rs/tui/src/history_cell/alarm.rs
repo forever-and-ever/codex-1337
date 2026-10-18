@@ -1,5 +1,14 @@
 //! A sounded alarm is immutable transcript output, not a user message.
-use super::*;
+use super::HistoryCell;
+use super::HistoryTimestamp;
+use super::Line;
+use super::OutputMode;
+use super::RtOptions;
+use super::Stylize;
+use super::activity_parts;
+use super::adaptive_wrap_lines;
+use super::prefix_lines;
+use super::sanitize_user_text;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::alarm_output_lines;
 use codex_app_server_protocol::alarm_sounding::AlarmCause;

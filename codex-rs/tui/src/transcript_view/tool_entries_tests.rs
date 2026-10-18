@@ -4,11 +4,23 @@ use super::*;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::ToolOutputCell;
 use crate::history_cell::activity_parts::FoldTarget;
+use crate::history_cell::invocation::Action;
+use crate::history_cell::invocation::Panel;
+use crate::history_cell::invocation::Port;
+use crate::multi_agents::AgentMetadata;
+use codex_app_server_protocol::CollabAgentTool;
+use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::SubAgentActivityKind;
 use codex_app_server_protocol::ThreadItem;
+use codex_protocol::agent_wait::AgentWaitCompletion;
+use codex_protocol::agent_wait::AgentWaitOutcome;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
+use codex_protocol::step_admission::ArrivalItem;
+use codex_protocol::step_admission::ArrivalKind;
+use codex_protocol::step_admission::ArrivalSource;
 use pretty_assertions::assert_eq;
+use std::collections::HashMap;
 
 #[test]
 fn completed_thought_discloses_only_readable_reasoning() {
@@ -109,9 +121,6 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     let cells: Vec<Arc<dyn HistoryCell>> = vec![output.clone()];
     let mut view = TranscriptView::default();
-    use crate::history_cell::invocation::Action;
-    use crate::history_cell::invocation::Panel;
-    use crate::history_cell::invocation::Port;
     view.record_tool_output_tokens("tool-output-tokens:mode".into(), "mode".into(), Some(123));
     view.invocations.apply(
         "mode",
@@ -119,7 +128,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     let mut painted = Vec::new();
     for mode in [OutputMode::Fmt, OutputMode::Raw, OutputMode::Fmt] {
-        tests::render(&mut view, &cells, 80, 14);
+        let _ = tests::render(&mut view, &cells, 80, 14);
         let layout = view.current_layout(&cells, 0).unwrap();
         let target = FoldTarget::Invocation {
             call_id: "mode".into(),
@@ -127,7 +136,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         };
         let (row, columns, _) = layout.fold_position(&target).unwrap();
         assert_eq!(layout.fold_at(row, columns.start), Some(target));
-        assert!(view.toggle_disclosure_at(&cells, columns.start, row as u16));
+        assert!(view.toggle_disclosure_at(&cells, columns.start, u16::try_from(row).unwrap()));
         let buffer = tests::render(&mut view, &cells, 80, 14);
         let layout = view.current_layout(&cells, 0).unwrap();
         let text = layout.text().to_owned();
@@ -146,13 +155,13 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         view.begin_selection(
             &cells,
             crate::transcript_geometry::TITLE_COLUMN,
-            row as u16,
+            u16::try_from(row).unwrap(),
             1,
         );
         let selection = view.selection.as_mut().unwrap();
         selection.start.offset = 0;
         selection.end.offset = layout.text().len();
-        tests::render(&mut view, &cells, 34, 18);
+        let _ = tests::render(&mut view, &cells, 34, 18);
         assert_eq!(view.selected_text(&cells), Some(text));
         view.end_selection(&cells);
         painted.push(format!("{mode:?}\n{buffer:?}"));
@@ -243,14 +252,14 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             "unsafe",
             Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
         );
-        tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        let _ = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
         let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
         let start = layout.text().find(&safe).unwrap();
         view.begin_selection(&cells, /*column*/ 4, /*row*/ 1, /*clicks*/ 1);
         let selection = view.selection.as_mut().unwrap();
         selection.start.offset = start;
         selection.end.offset = start + safe.len();
-        tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
+        let _ = tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
         assert_eq!(view.selected_text(&cells).as_deref(), Some(safe.as_str()));
         view.end_selection(&cells);
         let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
@@ -281,9 +290,6 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     // Context inspectors and replay use the same evidence boundary as tool output.
     // Submitted definitions are model-bound, but their client JSON is not a provider prompt.
     // Preserve that evidence distinction through replay, formatting and selection.
-    use codex_protocol::step_admission::ArrivalItem;
-    use codex_protocol::step_admission::ArrivalKind;
-    use codex_protocol::step_admission::ArrivalSource;
     for (source, kind, expected) in [
         (
             ArrivalSource::Captured {
@@ -322,7 +328,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         })
         .unwrap();
         if source == ArrivalSource::Legacy {
-            encoded.as_object_mut().unwrap().remove("source");
+            let _ = encoded.as_object_mut().unwrap().remove("source");
         }
         let replay =
             crate::history_cell::ArrivalCell::new(serde_json::from_value(encoded).unwrap());
@@ -402,14 +408,14 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 backgrounds.push(styles[0].1);
             }
             // A renderer's span-level background/reverse must not leak through Client provenance.
-            let mut decorated = vec![HyperlinkLine::from(
-                Line::from(ratatui::text::Span::styled(
+            let mut decorated = vec![HyperlinkLine::from(Line::from(
+                ratatui::text::Span::styled(
                     "human-only annotation",
                     ratatui::style::Style::default()
                         .bg(ratatui::style::Color::Red)
                         .add_modifier(ratatui::style::Modifier::REVERSED),
-                )),
-            )];
+                ),
+            ))];
             crate::history_cell::output_provenance::mark_lines(
                 &mut decorated,
                 OutputProvenance::Client,
@@ -575,7 +581,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(!tests::text(&closed).contains("Raw Context"));
             let parent = view.current_layout(&cells, 0).unwrap().fold_targets()[0].clone();
             assert!(view.focus_fold(&cells, 0, parent));
-            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 64, 6);
             assert!(tests::text(&folded).contains("Raw Context"));
             assert!(
@@ -591,8 +597,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 0,
                 FoldTarget::Part("arrival-raw:provenance-definitions".into())
             ));
-            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-            tests::render(&mut view, &cells, 64, 12);
+            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let _ = tests::render(&mut view, &cells, 64, 12);
             let layout = view.current_layout(&cells, 0).unwrap();
             let start = layout.text().find(json).unwrap();
             assert!(layout.text().contains("Tool Declarations"));
@@ -600,12 +606,12 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             let selection = view.selection.as_mut().unwrap();
             selection.start.offset = start;
             selection.end.offset = start + json.len();
-            tests::render(&mut view, &cells, 32, 16);
+            let _ = tests::render(&mut view, &cells, 32, 16);
             assert_eq!(view.selected_text(&cells), Some(json.into()));
             view.end_selection(&cells);
             assert!(view.focus_fold(&cells, 0, FoldTarget::OutputMode(OutputMode::Fmt)));
-            view.handle_key(crossterm::event::KeyCode::Right.into(), &cells);
-            tests::render(&mut view, &cells, 64, 16);
+            let _ = view.handle_key(crossterm::event::KeyCode::Right.into(), &cells);
+            let _ = tests::render(&mut view, &cells, 64, 16);
             let formatted = view.current_layout(&cells, 0).unwrap();
             assert!(formatted.text().contains("9007199254740993123456789"));
             assert!(formatted.text().contains("1.2300e+04"));
@@ -615,7 +621,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 0,
                 FoldTarget::Part("arrival-raw:provenance-definitions".into())
             ));
-            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 32, 8);
             assert!(
                 !view
@@ -724,7 +730,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    shell.complete_call(
+    let _ = shell.complete_call(
         "shell",
         CommandOutput::new(/*exit_code*/ 0, "source".into()),
         Duration::ZERO,
@@ -738,7 +744,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    poll.complete_call(
+    let _ = poll.complete_call(
         "poll",
         CommandOutput::new(/*exit_code*/ 0, String::new()),
         Duration::ZERO,
@@ -820,7 +826,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         view.set_presentation(/*detailed*/ false, HistoryRenderMode::Rich);
         view.jump_to_latest();
         // Normal live prose travels through the auxiliary activity-presentation boundary.
-        view.sync_live_activity_tail(
+        let _ = view.sync_live_activity_tail(
             width,
             /*key*/ None,
             /*expanded*/ false,
@@ -842,7 +848,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
             },
         );
         let live = tests::render(&mut view, &cells, width, /*height*/ 50);
-        view.sync_live_tail(width, /*key*/ None, |_| None);
+        let _ = view.sync_live_tail(width, /*key*/ None, |_| None);
         cells.push(Arc::clone(&tail));
         let committed = tests::render(&mut view, &cells, width, /*height*/ 50);
         // Committing heads the finished reply, and the header takes its clock; every other
@@ -859,7 +865,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
             .position(|row| row.contains("[-] Response"))
             .expect("the finished reply heads itself");
         let mut committed_rows = rows(&committed);
-        committed_rows.remove(header);
+        let _ = committed_rows.remove(header);
         for (index, (live, committed)) in rows(&live).iter().zip(&committed_rows).enumerate() {
             let from = if index == header {
                 usize::from(crate::transcript_geometry::CLOCK_COLUMNS)
@@ -880,11 +886,9 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         let tool_layout = view.current_layout(&cells, /*index*/ 2).unwrap();
         let target = FoldTarget::Invocation {
             call_id: "poll".into(),
-            action: crate::history_cell::invocation::Action::Toggle(
-                crate::history_cell::invocation::Port::Input,
-                crate::history_cell::invocation::Panel::Visible(
-                    crate::history_cell::output_provenance::OutputMode::Fmt,
-                ),
+            action: Action::Toggle(
+                Port::Input,
+                Panel::Visible(crate::history_cell::output_provenance::OutputMode::Fmt),
             ),
         };
         let (row, columns, _) = tool_layout.fold_position(&target).unwrap();
@@ -896,13 +900,13 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
         snapshots.push(format!("width={width}\n{}", text.trim_end()));
         if width == 64 {
             assert!(view.focus_fold(&cells, 2, target));
-            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let expanded = tests::render(&mut view, &cells, width, /*height*/ 50);
             let text = tests::text(&expanded);
             assert!(text.contains("poll foo"));
             assert!(!text.contains("tokens"));
             snapshots.push(format!("expanded width={width}\n{}", text.trim_end()));
-            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         }
         view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
         view.jump_to_latest();
@@ -911,7 +915,7 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
             "detailed width={width}\n{}",
             tests::text(&detailed).trim_end()
         ));
-        cells.pop();
+        let _ = cells.pop();
     }
     let clock = timestamp.unwrap().span().content.trim().to_owned();
     insta::assert_snapshot!(snapshots.join("\n\n").replace(&clock, "14:17"));
@@ -1069,7 +1073,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     insta::assert_snapshot!(rendered);
 
     // A following live tool must be as tightly spaced as its committed counterpart.
-    cells.pop();
+    let _ = cells.pop();
     let tail = ToolOutputCell::from_output(
         "tail",
         Some("tail"),
@@ -1079,11 +1083,11 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     )
     .unwrap();
     let ids = tail.activity_ids();
-    view.sync_live_activity(&cells, ids);
-    view.sync_live_invocation_tail(100, None, &tail, Vec::new());
+    let _ = view.sync_live_activity(&cells, ids);
+    let _ = view.sync_live_invocation_tail(100, None, &tail, Vec::new());
     let mut live = Buffer::empty(area);
     view.render(area, &mut live, &cells);
-    view.sync_live_tail(/*width*/ 100, /*key*/ None, |_| None);
+    let _ = view.sync_live_tail(/*width*/ 100, /*key*/ None, |_| None);
     cells.push(Arc::new(tail));
     let mut committed = Buffer::empty(area);
     view.render(area, &mut committed, &cells);
@@ -1108,11 +1112,9 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         let output = cell.as_any().downcast_ref::<ToolOutputCell>().unwrap();
         expanded_view.invocations.apply(
             output.outer_call_id().unwrap(),
-            crate::history_cell::invocation::Action::Toggle(
-                crate::history_cell::invocation::Port::Output,
-                crate::history_cell::invocation::Panel::Visible(
-                    crate::history_cell::output_provenance::OutputMode::Raw,
-                ),
+            Action::Toggle(
+                Port::Output,
+                Panel::Visible(crate::history_cell::output_provenance::OutputMode::Raw),
             ),
         );
     }
@@ -1199,8 +1201,6 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     insta::assert_snapshot!("empty_return_measurements", examples.join("\n\n"));
 
     // Wait wake evidence survives lifecycle revision without becoming output authority.
-    use codex_app_server_protocol::CollabAgentTool;
-    use codex_app_server_protocol::CollabAgentToolCallStatus;
     let wait_item = |status, wait_completion| ThreadItem::CollabAgentToolCall {
         id: "agent-wait".into(),
         tool: CollabAgentTool::Wait,
@@ -1211,7 +1211,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         model: None,
         reasoning_effort: None,
         wait_completion,
-        agents_states: Default::default(),
+        agents_states: HashMap::default(),
     };
     let cwd = codex_utils_absolute_path::AbsolutePathBuf::from_absolute_path(
         std::env::current_dir().unwrap(),
@@ -1226,7 +1226,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             crate::multi_agents::tool_call_history_cell(
                 &wait_item(status.clone(), None),
                 /*cached_spawn_request*/ None,
-                |_| crate::multi_agents::AgentMetadata::default(),
+                |_| AgentMetadata::default(),
             )
             .unwrap(),
         )) as Arc<dyn HistoryCell>;
@@ -1247,7 +1247,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             ],
             crate::thread_transcript::RawReasoningVisibility::Hidden,
             /*config*/ None,
-            &|_| crate::multi_agents::AgentMetadata::default(),
+            &|_| AgentMetadata::default(),
         );
         assert_eq!(replay.len(), 1);
         assert_eq!(
@@ -1261,8 +1261,6 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         }
     }
     insta::assert_snapshot!("agent_wait_lifecycle", stages.join("\n\n"));
-    use codex_protocol::agent_wait::AgentWaitCompletion;
-    use codex_protocol::agent_wait::AgentWaitOutcome;
     // A tool activity owns its exact capture across interleaving; a later autonomous
     // completion of that same agent is not the tool's completion or result owner.
     let capture = r#"{"previous_status":"running"}"#;
@@ -1284,7 +1282,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         ],
         crate::thread_transcript::RawReasoningVisibility::Hidden,
         None,
-        &|_| Default::default(),
+        &|_| AgentMetadata::default(),
     );
     assert_eq!(replay.len(), 3);
     assert_eq!(replay[0].outer_call_id(), Some("interrupt-p"));
@@ -1307,7 +1305,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         interrupted,
         &cwd,
         crate::code_mode_transcript::Source::Live,
-        &|_| Default::default(),
+        &|_| AgentMetadata::default(),
     );
     assert_eq!(live.tool_call_ids(), scoped[0].tool_call_ids());
     assert_eq!(live.activity_ids(), scoped[0].activity_ids());
@@ -1321,15 +1319,13 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
         0,
         FoldTarget::Invocation {
             call_id: "interrupt-p".into(),
-            action: crate::history_cell::invocation::Action::Toggle(
-                crate::history_cell::invocation::Port::Output,
-                crate::history_cell::invocation::Panel::Visible(
-                    crate::history_cell::output_provenance::OutputMode::Raw
-                ),
+            action: Action::Toggle(
+                Port::Output,
+                Panel::Visible(crate::history_cell::output_provenance::OutputMode::Raw),
             ),
         }
     ));
-    view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
+    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
     let result = tests::render(&mut view, &replay, 100, 12);
     assert!(tests::text(&result).contains(capture));
     // Missing legacy ownership is not proximity: its output item still has a named fold.
@@ -1400,8 +1396,9 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
                 elapsed_ms: 1234,
             }),
         );
-        let cell = crate::multi_agents::tool_call_history_cell(&item, None, |_| Default::default())
-            .unwrap();
+        let cell =
+            crate::multi_agents::tool_call_history_cell(&item, None, |_| AgentMetadata::default())
+                .unwrap();
         let heading = cell.display_lines(120)[0].to_string();
         assert!(heading.contains(label), "{heading}");
         assert!(!heading.contains("task completed"));

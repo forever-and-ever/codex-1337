@@ -197,7 +197,9 @@ impl PreambleCell {
                     .collect::<Vec<_>>()
                     .join(" ");
                 if names.len() > CHANGE_NAMES {
-                    listed.push_str(&format!(" and {} more", names.len() - CHANGE_NAMES));
+                    listed.push_str(" and ");
+                    listed.push_str(&(names.len() - CHANGE_NAMES).to_string());
+                    listed.push_str(" more");
                 }
                 lines.push(Line::from(listed.dim()));
             }
@@ -392,7 +394,7 @@ impl HistoryCell for PreambleCell {
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         let mut expanded = HashSet::new();
-        expanded.insert(self.raw_fold());
+        let _ = expanded.insert(self.raw_fold());
         let mut lines = self.display_hyperlink_lines(width);
         lines.extend(
             self.feed_body(width, &expanded, super::output_provenance::OutputMode::Raw)

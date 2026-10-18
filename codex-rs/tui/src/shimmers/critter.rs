@@ -123,6 +123,11 @@ impl Shimmer for Critter {
         self.tint = Some(tint.blend(target, (-TICK / 0.25).exp()));
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "Sneeze noise quantizes the nonnegative animation clock; header indices fit i64 because they index an allocated slice."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let mood = self.mood(stage);
         let (face, tone) = face_now(mood, stage.t);
@@ -148,6 +153,10 @@ impl Shimmer for Critter {
         });
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The sleep glyph deliberately alternates on whole animation-clock buckets."
+    )]
     fn tool(&self, stage: &Stage) -> Ink {
         if stage.timer % 60 < 2 {
             Ink::of('♪').fg(SUN).bold(true)

@@ -43,12 +43,12 @@ pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
     let (tx, rx) = watch::channel(DesktopAttention::default());
     if std::env::var_os("DISPLAY").is_some() {
         let idle_tx = tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             if let Err(error) = observe_idle(idle_tx.clone()).await {
                 tracing::debug!(%error, "X11 idle observer unavailable");
                 idle_tx.send_modify(|state| state.idle = false);
             }
-        });
+        }));
     }
     let window_id = std::env::var("ALACRITTY_WINDOW_ID")
         .or_else(|_| std::env::var("WINDOWID"))
@@ -59,7 +59,7 @@ pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
                 .ok()
         });
     if let Some(window_id) = window_id {
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             if let Err(error) = observe_window_attention(tx.clone(), window_id).await {
                 tracing::debug!(%error, "i3 window observer unavailable");
                 tx.send_modify(|state| {
@@ -67,7 +67,7 @@ pub(crate) fn start() -> watch::Receiver<DesktopAttention> {
                     state.focused = None;
                 });
             }
-        });
+        }));
     }
     rx
 }
@@ -77,7 +77,7 @@ async fn observe_idle(tx: watch::Sender<DesktopAttention>) -> Result<()> {
     // Give setup one dedicated OS thread rather than a Tokio blocking-pool worker: a timed-out
     // X reply cannot then stall Tokio's runtime shutdown or block agent/terminal input.
     let (setup_tx, setup_rx) = tokio::sync::oneshot::channel();
-    std::thread::Builder::new()
+    let _ = std::thread::Builder::new()
         .name("tui-x11-idle-setup".into())
         .spawn(move || {
             let result = initialize_idle_alarm();
@@ -92,7 +92,7 @@ async fn observe_idle(tx: watch::Sender<DesktopAttention>) -> Result<()> {
     };
 
     let idle = idle_millis.hi > 0 || idle_millis.lo >= 30_000;
-    tx.send_if_modified(|state| {
+    let _ = tx.send_if_modified(|state| {
         if state.idle == idle {
             return false;
         }
@@ -123,7 +123,7 @@ fn drain_idle_alarms(
         if let Event::SyncAlarmNotify(event) = event {
             let elapsed = event.counter_value;
             let idle = elapsed.hi > 0 || elapsed.lo >= 30_000;
-            tx.send_if_modified(|state| {
+            let _ = tx.send_if_modified(|state| {
                 if state.idle == idle {
                     return false;
                 }
@@ -137,10 +137,11 @@ fn drain_idle_alarms(
 
 fn initialize_idle_alarm() -> Result<(x11rb::rust_connection::RustConnection, Int64)> {
     let (conn, _) = x11rb::connect(None)?;
-    conn.sync_initialize(
-        /*desired_major_version*/ 3, /*desired_minor_version*/ 1,
-    )?
-    .reply()?;
+    let _ = conn
+        .sync_initialize(
+            /*desired_major_version*/ 3, /*desired_minor_version*/ 1,
+        )?
+        .reply()?;
     let counter = conn
         .sync_list_system_counters()?
         .reply()?
@@ -151,7 +152,8 @@ fn initialize_idle_alarm() -> Result<(x11rb::rust_connection::RustConnection, In
         .counter;
     let threshold = Int64 {
         hi: 0,
-        lo: IDLE_THRESHOLD.as_millis() as u32,
+        lo: u32::try_from(IDLE_THRESHOLD.as_millis())
+            .context("X11 idle threshold exceeds the protocol's millisecond range")?,
     };
     for test_type in [TESTTYPE::POSITIVE_TRANSITION, TESTTYPE::NEGATIVE_TRANSITION] {
         let alarm = conn.generate_id()?;
@@ -195,7 +197,11 @@ async fn observe_window_attention(
         let mut socket = UnixStream::connect(path).await?;
         let payload = b"[\"window\",\"workspace\",\"output\"]";
         let mut request = b"i3-ipc".to_vec();
-        request.extend_from_slice(&(payload.len() as u32).to_ne_bytes());
+        request.extend_from_slice(
+            &u32::try_from(payload.len())
+                .context("i3 subscription exceeds the protocol message size")?
+                .to_ne_bytes(),
+        );
         request.extend_from_slice(&2_u32.to_ne_bytes()); // SUBSCRIBE
         request.extend_from_slice(payload);
         socket.write_all(&request).await?;
@@ -227,7 +233,7 @@ async fn observe_window_attention(
                 // intermediate focus/move notification.
                 tokio::time::sleep(Duration::from_millis(30)).await;
                 while let Some(result) = events.next().now_or_never() {
-                    result.context("i3 subscription closed")??;
+                    let _ = result.context("i3 subscription closed")??;
                 }
                 update_window_attention(&tx, window_id).await;
             }
@@ -238,7 +244,7 @@ async fn observe_window_attention(
 
 async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
     let mut header = [0_u8; 14];
-    socket.read_exact(&mut header).await?;
+    let _ = socket.read_exact(&mut header).await?;
     ensure!(&header[..6] == b"i3-ipc", "invalid i3 IPC header");
     let length = u32::from_ne_bytes(header[6..10].try_into()?);
     ensure!(
@@ -247,7 +253,7 @@ async fn read_i3_message(socket: &mut UnixStream) -> Result<(u32, Value)> {
     );
     let kind = u32::from_ne_bytes(header[10..14].try_into()?);
     let mut payload = vec![0; length as usize];
-    socket.read_exact(&mut payload).await?;
+    let _ = socket.read_exact(&mut payload).await?;
     Ok((kind, serde_json::from_slice(&payload)?))
 }
 
@@ -274,7 +280,7 @@ async fn update_window_attention(tx: &watch::Sender<DesktopAttention>, window_id
     } else {
         None
     };
-    tx.send_if_modified(|state| {
+    let _ = tx.send_if_modified(|state| {
         let visible = attention.and_then(|attention| attention.visible);
         let focused = attention.and_then(|attention| attention.focused);
         if state.visible == visible && state.focused == focused {

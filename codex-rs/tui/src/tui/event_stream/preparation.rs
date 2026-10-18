@@ -1,13 +1,21 @@
 //! Lagged draw notifications coalesce; finite input bursts bound repaint starvation.
 
-use super::*;
+use super::Context;
+use super::EventSource;
+use super::MAX_INPUT_EVENTS_BETWEEN_DRAWS;
+use super::Pin;
+use super::Poll;
+use super::SizeMonitor;
+use super::Stream;
+use super::TuiEvent;
+use super::TuiEventStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
     pub(super) fn poll_prepared_draw(&mut self, cx: &mut Context<'_>) -> Poll<Option<TuiEvent>> {
         loop {
             match Pin::new(&mut self.draw_stream).poll_next(cx) {
-                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => continue,
+                Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {}
                 Poll::Ready(Some(Ok(()))) => {
                     let event = self
                         .broker

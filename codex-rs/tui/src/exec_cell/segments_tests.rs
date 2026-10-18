@@ -30,16 +30,11 @@ fn outer_boundaries_preserve_shell_source() {
                 .collect::<Vec<_>>(),
             commands
         );
-        let rebuilt = segments
-            .iter()
-            .map(|segment| {
-                format!(
-                    "{}{}",
-                    &script[segment.source.clone()],
-                    segment.connector.map_or("", Connector::suffix).trim_start()
-                )
-            })
-            .collect::<String>();
+        let rebuilt = segments.iter().fold(String::new(), |mut rebuilt, segment| {
+            rebuilt.push_str(&script[segment.source.clone()]);
+            rebuilt.push_str(segment.connector.map_or("", Connector::suffix).trim_start());
+            rebuilt
+        });
         assert_eq!(rebuilt, script);
     }
 }

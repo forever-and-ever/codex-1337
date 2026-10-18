@@ -44,6 +44,10 @@ struct Fireflies {
 }
 
 impl Fireflies {
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Oscillator indices are bounded by SWARM = 32."
+    )]
     fn new() -> Self {
         Self {
             phases: std::array::from_fn(|i| hash(i as i64 + 500)),
@@ -60,6 +64,10 @@ impl Fireflies {
 
 impl Shimmer for Fireflies {
     /// The Kuramoto model: each oscillator is pulled toward the swarm's mean phase.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Oscillator indices are bounded by the 32-element phase array."
+    )]
     fn tick(&mut self, stage: &Stage) {
         let lit = |i: usize| stage.header.get(i).is_some_and(|letter| letter != " ");
         let pull = if stage.busy() {

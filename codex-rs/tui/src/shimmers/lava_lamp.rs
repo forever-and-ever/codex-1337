@@ -55,6 +55,11 @@ impl Shimmer for LavaLamp {
         self.t += if stage.busy() { TICK } else { 0.35 * TICK };
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        reason = "Blob indices are below 3 and columns below GLASS = 34; bubble noise deliberately quantizes whole animation-clock buckets."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = self.t;
         let heat = (stage.tokens_in(/*window*/ 3.0) / 240.0).min(1.0);
@@ -117,6 +122,11 @@ impl Shimmer for LavaLamp {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "The nonnegative lamp clock deliberately selects a whole seven-second bucket modulo the three wax colors."
+    )]
     fn tool(&self, stage: &Stage) -> Ink {
         let drop = WAX[(self.t / 7.0).floor() as usize % WAX.len()];
         Ink::of('•').fg(drop.blend(stage.grey(/*alpha*/ 0.6), /*alpha*/ 0.5))

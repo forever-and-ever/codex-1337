@@ -1,6 +1,11 @@
 //! A stream's insertion locus before it has any unambiguous rows.
 
-use super::*;
+use super::ActivityDisclosure;
+use super::AgentMessageCell;
+use super::HistoryCell;
+use super::Line;
+use super::ProposedPlanStreamCell;
+use super::StreamRowsCell;
 
 #[derive(Debug)]
 pub(crate) struct StreamAnchorCell {

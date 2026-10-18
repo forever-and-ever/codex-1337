@@ -97,7 +97,7 @@ impl ToolOutputGroup {
         cells: &[Arc<dyn HistoryCell>],
         output: Arc<dyn HistoryCell>,
     ) -> Option<ProjectionChange> {
-        output.as_any().downcast_ref::<ToolOutputCell>()?;
+        let _ = output.as_any().downcast_ref::<ToolOutputCell>()?;
         let call_id = output.outer_call_id()?;
         if let Some(start) = Self::patch_owner(cells) {
             if cells[start].outer_call_id() != output.outer_call_id() {
@@ -287,10 +287,7 @@ impl ToolOutputGroup {
                 .iter()
                 .rposition(|item| ids.contains(item.id()))?;
             let items = &turn.items[start..=end];
-            let present = items
-                .iter()
-                .map(ThreadItem::id)
-                .collect::<HashSet<_>>();
+            let present = items.iter().map(ThreadItem::id).collect::<HashSet<_>>();
             (ids.is_subset(&present)
                 && items.iter().all(|item| {
                     ids.contains(item.id())
@@ -454,7 +451,7 @@ impl HistoryCell for ToolOutputGroup {
         {
             let mut receipt_expanded = expanded.clone();
             for id in mcp.activity_ids() {
-                receipt_expanded.remove(&id);
+                let _ = receipt_expanded.remove(&id);
             }
             let mut parts = mcp
                 .output_parts(width, header_reserve, &receipt_expanded, mode)

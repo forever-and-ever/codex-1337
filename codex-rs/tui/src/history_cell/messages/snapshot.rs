@@ -1,6 +1,7 @@
 //! Cloning freezes the mutable live-cell revision for background rendering.
 
-use super::*;
+use super::AgentMarkdownCell;
+use super::MarkdownRenderCache;
 
 impl Clone for AgentMarkdownCell {
     fn clone(&self) -> Self {

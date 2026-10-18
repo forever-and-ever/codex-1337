@@ -186,7 +186,7 @@ pub(crate) fn shade_status(area: Rect, buf: &mut Buffer) {
         return;
     }
     for (x, bg) in (area.x..area.right()).zip(&live.backdrop) {
-        buf[(x, area.y)].set_bg(color(*bg));
+        let _ = buf[(x, area.y)].set_bg(color(*bg));
     }
 }
 
@@ -274,6 +274,10 @@ enum Event {
 }
 
 impl Feed {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Byte counts become approximate visual token estimates, capped by RESULT_CAP; exact accounting remains upstream."
+    )]
     fn observe(&mut self, thread: &str, event: Event, now: Instant) {
         if self.thread != thread {
             *self = Feed {
@@ -292,7 +296,7 @@ impl Feed {
             // A tool runs only within a turn, even one that started before the feed did.
             Event::ToolStarted { id, size } => match &mut self.phase {
                 Phase::Wait { tools } => {
-                    tools.insert(id, size);
+                    let _ = tools.insert(id, size);
                 }
                 Phase::Idle | Phase::Busy { .. } => {
                     self.phase = Phase::Wait {
@@ -318,6 +322,10 @@ impl Feed {
         }
     }
 
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Usage counts only calibrate an approximate animation rate; no accounting depends on these floating-point estimates."
+    )]
     fn settle(&mut self, usage: Usage) {
         if self.usage.is_some_and(|last| last.total == usage.total) {
             return;
@@ -357,6 +365,11 @@ impl Feed {
     }
 
     /// One tick's paced tokens.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Nonnegative paced inflow deliberately emits whole visual tokens and retains the fractional carry; logarithmic pacing bounds each tick."
+    )]
     fn tick(&mut self) -> u32 {
         self.carry += pace(self.inflow() / TICK) * TICK;
         let whole = self.carry.floor();
@@ -478,6 +491,11 @@ mod tests {
     }
 
     /// Tokens the feed lets into the stage over `secs`.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "The test deliberately quantizes a nonnegative fixed duration into animation ticks."
+    )]
     fn run(feed: &mut Feed, secs: f64) -> f64 {
         (0..(secs / TICK).round() as usize)
             .map(|_| feed.inflow())
@@ -493,7 +511,7 @@ mod tests {
         feed.observe(thread, Event::TurnStarted, at(/*secs*/ 0.0));
         // The first report has nothing earlier to settle against: it teaches the forecast's rate and
         // opens the books, and only the inflow after it is checked.
-        run(&mut feed, /*secs*/ 10.0);
+        let _ = run(&mut feed, /*secs*/ 10.0);
         let first = Usage {
             context: 10_000,
             output: 900,

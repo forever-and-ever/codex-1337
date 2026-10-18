@@ -1,6 +1,8 @@
 //! Allocation weights and equality for off-thread layout preparation.
 
-use super::*;
+use super::LogicalLine;
+use super::TextLayout;
+use super::TextRow;
 
 impl TextLayout {
     pub(in crate::transcript_view) fn width(&self) -> u16 {
@@ -14,8 +16,7 @@ impl TextLayout {
             + self.text.capacity() * 4
             + self.logical.capacity() * size_of::<LogicalLine>()
             + self.rows.capacity()
-                * (size_of::<TextRow>()
-                    + 4 * size_of::<ratatui::text::Span<'static>>())
+                * (size_of::<TextRow>() + 4 * size_of::<ratatui::text::Span<'static>>())
     }
 
     pub(in crate::transcript_view) fn same_presentation(&self, other: &Self) -> bool {

@@ -1,6 +1,8 @@
 //! Pinned revisions and search results use the same off-thread width preparation.
 
-use super::*;
+use super::Arc;
+use super::LayoutCache;
+use super::TextLayout;
 use std::sync::Weak;
 
 pub(super) struct Rewrap {

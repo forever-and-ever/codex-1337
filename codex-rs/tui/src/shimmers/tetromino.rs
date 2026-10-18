@@ -134,6 +134,10 @@ impl Piece {
 }
 
 /// The piece `i`th in play: shuffled seven-bags.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "The bag number is i / 7, below i64::MAX, and piece indices are below seven."
+)]
 fn bag(i: u64) -> Piece {
     let mut bag: Vec<(f64, Piece)> = PIECES
         .iter()
@@ -144,6 +148,10 @@ fn bag(i: u64) -> Piece {
     bag[(i % 7) as usize].1
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "Short-circuit bounds checks establish 0 <= px, py < SIDE before indexing the 16-cell board."
+)]
 fn fits(board: &Board, cells: Cells, x: i8, y: i8) -> bool {
     cells.iter().all(|&(cx, cy)| {
         let (px, py) = (cx + x, cy + y);
@@ -154,6 +162,10 @@ fn fits(board: &Board, cells: Cells, x: i8, y: i8) -> bool {
 }
 
 /// The board after locking a piece, full rows removed, and how many there were.
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "Only fully in-board placements established by fits and the caller's top-out check are locked."
+)]
 fn settle(board: &Board, cells: Cells, x: i8, y: i8, piece: Piece) -> (Board, usize) {
     let mut locked = *board;
     for (cx, cy) in cells {
@@ -181,6 +193,11 @@ struct Placement {
 }
 
 /// Every rotation and column for `piece`, with the board each leaves and its worth.
+#[expect(
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    reason = "Counts and the heuristic score come from a 4×4 board: at most 16 cells, four rows, and twelve adjacent height differences."
+)]
 fn placements(board: &Board, piece: Piece) -> Vec<Placement> {
     let mut all = Vec::new();
     for (orientation, &cells) in piece.orientations().iter().enumerate() {
@@ -241,6 +258,10 @@ fn outlook(board: &Board, i: u64, depth: u32) -> f64 {
 
 /// The bot: where the `i`th piece goes, looking three pieces ahead. With nowhere to go, it drops the
 /// piece at the left and tops out.
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "Drawn pieces consume at least FALL = 10 tokens each, so the count fits i64; orientation indices are below four."
+)]
 fn aim(board: &Board, i: u64) -> (Cells, i8, i8) {
     placements(board, bag(i))
         .into_iter()
@@ -297,6 +318,10 @@ struct Tetromino {
 
 impl Tetromino {
     /// One row of fall: spawn, drop or lock the piece.
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "The failed downward fits check locks the prior in-board placement only after every cell passes the top-out check."
+    )]
     fn gravity(&mut self, t: f64) {
         let Some(falling) = self.falling else {
             let (cells, x, height) = aim(&self.board, self.drawn);
@@ -368,6 +393,10 @@ impl Shimmer for Tetromino {
         }
     }
 
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "The falling placement is horizontally in bounds and visible cells pass the nonnegative row check before board indexing."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = stage.t;
         let flashing = |row: usize| {

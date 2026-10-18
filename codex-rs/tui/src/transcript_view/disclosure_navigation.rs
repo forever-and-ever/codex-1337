@@ -1,6 +1,9 @@
 //! Keyboard traversal follows current fold positions, including several folds in one entry.
 
-use super::*;
+use super::Arc;
+use super::HistoryCell;
+use super::TranscriptView;
+use super::presented;
 use crate::keymap::ListAction;
 
 impl TranscriptView {
@@ -29,10 +32,7 @@ impl TranscriptView {
     }
 
     pub(super) fn resume_fold_navigation(&mut self) {
-        let source = std::mem::replace(
-            &mut self.layout_source,
-            presented::LayoutSource::Presented,
-        );
+        let source = std::mem::replace(&mut self.layout_source, presented::LayoutSource::Presented);
         for _ in 0..8 {
             let Some((cells, index, action)) = self.deferred_folds.pop_front() else {
                 break;
@@ -112,7 +112,7 @@ impl TranscriptView {
             };
             if let Some(next) = next {
                 target = next.clone();
-                self.focus_fold(cells, index, target.clone());
+                let _ = self.focus_fold(cells, index, target.clone());
                 continue;
             }
             let mut candidate = index;
@@ -137,7 +137,7 @@ impl TranscriptView {
                 } {
                     index = candidate;
                     target = next.clone();
-                    self.focus_fold(cells, index, target.clone());
+                    let _ = self.focus_fold(cells, index, target.clone());
                     break;
                 }
             }

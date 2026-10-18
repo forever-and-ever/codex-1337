@@ -1,6 +1,26 @@
 //! Cached immutable layouts and the owned closure submitted to background preparation.
 
-use super::*;
+use super::ActivityTranscriptLines;
+use super::Arc;
+use super::CellPresentation;
+use super::Content;
+use super::EntryKey;
+use super::Hash;
+use super::HashSet;
+use super::HistoryCell;
+use super::HistoryRenderMode;
+use super::RenderState;
+use super::Seat;
+use super::TextLayout;
+use super::TokenSeat;
+use super::TranscriptView;
+use super::activity_layout;
+use super::feed;
+use super::feed_digest;
+use super::holds_control;
+use super::invocation;
+use super::rewrap;
+use super::yield_head;
 use crate::history_cell::ToolOutputGroup;
 use std::sync::Weak;
 
@@ -143,7 +163,7 @@ impl LayoutCache {
                     });
                     self.pending[pending].requested_frame = self.frame;
                     if let Some(layout) = self.pending[pending].task.poll() {
-                        self.pending.remove(pending);
+                        let _ = self.pending.remove(pending);
                         entry.layout = layout;
                         entry.refreshed_at = std::time::Instant::now();
                     }
@@ -188,7 +208,7 @@ impl LayoutCache {
                 self.waiting = true;
                 return None;
             };
-            self.pending.remove(index);
+            let _ = self.pending.remove(index);
             layout
         } else {
             Arc::new(presentation.decorate(prepare()()))
@@ -231,13 +251,13 @@ impl LayoutCache {
             })
             .collect();
         for key in keys {
-            self.take(&key);
+            let _ = self.take(&key);
         }
     }
 
     fn take(&mut self, key: &CacheKey) -> Option<CachedLayout> {
         let entry = self.entries.remove(key)?;
-        self.recency.remove(&entry.access);
+        let _ = self.recency.remove(&entry.access);
         self.bytes -= entry.layout.retained_bytes();
         Some(entry)
     }
@@ -246,8 +266,8 @@ impl LayoutCache {
         self.access += 1;
         entry.access = self.access;
         self.bytes += entry.layout.retained_bytes();
-        self.recency.insert(entry.access, key);
-        self.entries.insert(key, entry);
+        let _ = self.recency.insert(entry.access, key);
+        let _ = self.entries.insert(key, entry);
     }
 
     fn evict(&mut self) {
@@ -259,7 +279,7 @@ impl LayoutCache {
             if self.entries[&key].rendered_frame + 1 >= self.frame {
                 break;
             }
-            self.take(&key);
+            let _ = self.take(&key);
         }
     }
 }
@@ -545,7 +565,7 @@ impl TranscriptView {
                             );
                             if mode == HistoryRenderMode::Rich {
                                 if seat.content == Content::Beheaded {
-                                    feed::behead(&mut lines);
+                                    let _ = feed::behead(&mut lines);
                                 }
                                 TextLayout::new(
                                     crate::transcript_geometry::gutter_lines(

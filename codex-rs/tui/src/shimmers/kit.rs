@@ -21,7 +21,9 @@ pub(super) const WHITE: Rgb = Rgb(245.0, 245.0, 245.0);
 
 /// A deterministic draw in [0, 1) for `seed`.
 pub(super) fn hash(seed: i64) -> f64 {
-    let mut x = (seed as i32 as u32 ^ 0x9e37_79b9).wrapping_mul(0x85eb_ca6b);
+    let bytes = seed.to_le_bytes();
+    let low = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let mut x = (low ^ 0x9e37_79b9).wrapping_mul(0x85eb_ca6b);
     x ^= x >> 13;
     x = x.wrapping_mul(0xc2b2_ae35);
     f64::from(x ^ (x >> 16)) / 4_294_967_296.0
@@ -31,6 +33,12 @@ pub(super) fn chance(seed: i64, odds: f64) -> bool {
     hash(seed) < odds
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "The hash is in [0, 1); flooring its scaled value deliberately selects a nonnegative sample, clamped to the slice's last index."
+)]
 pub(super) fn pick<T: Copy>(seed: i64, list: &[T]) -> T {
     list[((hash(seed) * list.len() as f64) as usize).min(list.len() - 1)]
 }
@@ -45,6 +53,10 @@ pub(super) struct Lottery {
 
 impl Lottery {
     /// Progress through the won draw under way at `t`, if one is.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "A lottery draw is deliberately identified by its whole animation-clock bucket."
+    )]
     pub(super) fn at(&self, t: f64) -> Option<f64> {
         let draw = (t / self.every).floor();
         let into = t - draw * self.every;
@@ -83,6 +95,12 @@ pub(super) fn lag(value: f64, target: f64, tau: f64) -> f64 {
 }
 
 /// The color at `x` in [0, 1] along evenly spaced `stops`.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "A clamped unit coordinate deliberately selects adjacent color stops; the floored nonnegative index is capped below the last stop."
+)]
 pub(super) fn ramp(stops: &[Rgb], x: f64) -> Rgb {
     let y = x.clamp(0.0, 1.0) * (stops.len() - 1) as f64;
     let i = (y.floor() as usize).min(stops.len() - 2);

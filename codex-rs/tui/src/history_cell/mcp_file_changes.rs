@@ -15,6 +15,7 @@ use crate::diff_model::FileChange;
 use crate::file_change_view::FileChangeView;
 use crate::terminal_hyperlinks::HyperlinkLine;
 
+#[derive(Clone, Copy)]
 pub(super) enum FileChangeDetail {
     Summary,
     Full,

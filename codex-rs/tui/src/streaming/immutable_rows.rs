@@ -130,7 +130,7 @@ impl Publication {
         .min(committed);
         let mut unresolved = None;
         let mut missing = |link: pulldown_cmark::BrokenLink<'_>| {
-            unresolved.get_or_insert(start + link.span.start);
+            let _ = unresolved.get_or_insert(start + link.span.start);
             None
         };
         let options =
@@ -146,7 +146,7 @@ impl Publication {
                 Event::End(TagEnd::CodeBlock) => code = false,
                 Event::Text(_) if !code => {
                     if let Some(offset) = open_inline(&source[start..], range) {
-                        inline.get_or_insert(start + offset);
+                        let _ = inline.get_or_insert(start + offset);
                     }
                 }
                 _ => {}
@@ -218,7 +218,7 @@ impl Publication {
         let input = &source[start..];
         let mut unresolved = None;
         let mut missing = |link: pulldown_cmark::BrokenLink<'_>| {
-            unresolved.get_or_insert(start + link.span.start);
+            let _ = unresolved.get_or_insert(start + link.span.start);
             None
         };
         let options =
@@ -236,7 +236,7 @@ impl Publication {
                     if !code && start + range.start >= core.render.completed_source_len =>
                 {
                     if let Some(offset) = open_inline(input, range) {
-                        ambiguous.get_or_insert(start + offset);
+                        let _ = ambiguous.get_or_insert(start + offset);
                     }
                 }
                 _ => {}

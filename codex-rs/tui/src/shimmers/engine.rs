@@ -109,6 +109,11 @@ impl Ink {
 
 /// The terminal color for `rgb`, truncating channels as codex-tui's `blend` does.
 pub(super) fn color(rgb: Rgb) -> Color {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Terminal RGB quantization deliberately truncates channels clamped to 0..=255."
+    )]
     let channel = |v: f64| v.clamp(0.0, 255.0) as u8;
     rgb_color((channel(rgb.0), channel(rgb.1), channel(rgb.2)))
 }
