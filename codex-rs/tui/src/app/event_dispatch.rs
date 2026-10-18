@@ -431,7 +431,7 @@ impl App {
                 return self.delete_current_thread(tui, app_server).await;
             }
             AppEvent::ForkCurrentSession { name } => {
-                self.fork_current_thread(tui, app_server, name, Vec::new(), false).await?;
+                self.fork_current_thread(tui, app_server, name, Vec::new(), false);
                 self.chat_widget.maybe_send_next_queued_input();
                 tui.frame_requester().schedule_frame();
             }
@@ -445,7 +445,7 @@ impl App {
             AppEvent::FinishPromptRevert {
                 thread_id,
                 selected_cell,
-            } => self.finish_prompt_revert_projection(tui, app_server, thread_id, selected_cell),
+            } => self.finish_prompt_revert_projection(tui, app_server, thread_id, &selected_cell),
 
             AppEvent::BeginInitialHistoryReplayBuffer => {
                 self.begin_initial_history_replay_buffer();
@@ -823,21 +823,21 @@ impl App {
                 self.append_message_history_entry(thread_id, text);
             }
             AppEvent::ContextInventory { thread_id } => {
-                self.context_inventory(tui, app_server, thread_id).await;
+                self.context_inventory(tui, app_server, thread_id);
             }
             AppEvent::ContextRole { thread_id, command } => {
-                self.context_role(app_server, thread_id, command).await;
+                self.context_role(app_server, thread_id, command);
             }
             AppEvent::LiveWork(event) => {
                 self.handle_live_work_event(app_server, event);
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::DisarmAlarm { thread_id, id } => self.disarm_alarm(app_server, thread_id, id).await,
+            AppEvent::DisarmAlarm { thread_id, id } => self.disarm_alarm(app_server, thread_id, id),
             AppEvent::SetWarming { thread_id, enabled } => {
-                self.set_warming(app_server, thread_id, enabled).await;
+                self.set_warming(app_server, thread_id, enabled);
             }
             AppEvent::Comms { thread_id, comms } => {
-                self.comms(app_server, thread_id, comms).await;
+                self.comms(app_server, thread_id, comms);
             }
             AppEvent::SyncThreadGitBranch {
                 thread_id,
@@ -1873,7 +1873,7 @@ impl App {
                 self.sync_active_thread_service_tier_to_cached_session()
                     .await;
 
-                self.persist_conversation_model_selection(app_server, model, effort, default_effort);
+                self.persist_conversation_model_selection(app_server, &model, &effort, default_effort.as_ref());
             }
             AppEvent::OpenPlanReasoningScopePrompt { model, effort } => {
                 self.chat_widget
@@ -2321,18 +2321,18 @@ impl App {
                 ).await;
             }
             AppEvent::RenameAgentsOverviewThread { thread_id, name } => {
-                self.rename_thread(app_server, thread_id, name, Vec::new()).await;
+                self.rename_thread(app_server, thread_id, name, Vec::new());
             }
             AppEvent::ConfirmedThreadName { request, conflict_thread_ids } => {
                 match request {
                     super::thread_name::ThreadNameRequest::Rename { thread_id, name } => {
-                        self.rename_thread(app_server, thread_id, name, conflict_thread_ids).await;
+                        self.rename_thread(app_server, thread_id, name, conflict_thread_ids);
                     }
                     super::thread_name::ThreadNameRequest::Fork { thread_id, name } => {
                         if self.chat_widget.thread_id() != Some(thread_id) {
                             self.chat_widget.add_error_message("Fork canceled because the source thread changed.".to_string());
                         } else {
-                            self.fork_current_thread(tui, app_server, Some(name), conflict_thread_ids, /*from_agents_overview*/ false).await?;
+                            self.fork_current_thread(tui, app_server, Some(name), conflict_thread_ids, /*from_agents_overview*/ false);
                             self.chat_widget.maybe_send_next_queued_input();
                         }
                     }
@@ -2478,7 +2478,7 @@ impl App {
             AppEvent::Farm { thread_id, mode, submission } => {
                 self.start_farm(tui, app_server, thread_id, mode, submission).await;
             }
-            AppEvent::OpenJira => self.open_jira(tui, app_server).await,
+            AppEvent::OpenJira => self.open_jira(tui, app_server),
             AppEvent::JiraFinished { token, result } => self.finish_jira(tui, app_server, token, result).await,
             AppEvent::FarmFinished { request_id, result } => {
                 self.finish_farm(tui, request_id, result).await;

@@ -1,6 +1,22 @@
 //! Connection-owned voice preference reads and acknowledged-write confirmation.
 
-use super::*;
+use super::App;
+use super::AppServerRequestHandle;
+use super::ClientRequest;
+use super::ConfigBatchWriteParams;
+use super::ConfigWriteResponse;
+use super::ConnectionMutation;
+use super::OperationReceipt;
+use super::PathBuf;
+use super::PendingSubmission;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionRequest;
+use super::TypedRequestError;
+use super::Uuid;
+use super::WriteStatus;
+use super::config_persistence;
+use super::realtime_settings;
 use codex_app_server_protocol as api;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
@@ -67,10 +83,7 @@ pub(super) async fn send(
                 let selected = config
                     .as_ref()
                     .map(|config| {
-                        realtime_settings::configured_voice(
-                            &config.config,
-                            voices.default_v1,
-                        )
+                        realtime_settings::configured_voice(&config.config, voices.default_v1)
                     })
                     .transpose()
                     .map(Option::flatten)
@@ -115,7 +128,6 @@ pub(super) async fn send(
 
 impl App {
     pub(super) fn continue_voice_preference(
-        &mut self,
         active: &mut PendingSubmission,
         write: &ConfigWriteResponse,
     ) -> bool {

@@ -1,6 +1,14 @@
 //! Apply canonical scoped blocks through the existing retained-history/reading snapshot boundary.
+use super::App;
+use super::AppEvent;
+use super::Arc;
+use super::HistoryCell;
+use super::Overlay;
+use super::ServerNotification;
+use super::ThreadId;
+use super::history_cell;
 use super::transcript_splice::TranscriptSplice;
-use super::*;
+use super::tui;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Projection;
 use crate::code_mode_transcript::Source;
@@ -103,7 +111,7 @@ impl App {
     pub(super) fn insert_code_mode_cell(
         &mut self,
         tui: &mut tui::Tui,
-        incoming: Arc<dyn HistoryCell>,
+        incoming: &Arc<dyn HistoryCell>,
     ) {
         let Some(block) = incoming
             .as_any()
@@ -186,7 +194,7 @@ impl App {
             if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                 overlay.regroup_cell_members(index..index + 1, &[]);
             }
-            self.transcript_cells.remove(index);
+            let _ = self.transcript_cells.remove(index);
         }
         if let Some(index) = page.iter().position(|cell| {
             cell.as_any()

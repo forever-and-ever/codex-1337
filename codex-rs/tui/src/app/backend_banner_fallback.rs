@@ -37,7 +37,7 @@ impl App {
             collaboration_mode: Some(mode.clone()),
             ..ThreadSettingsUpdateParams::default()
         };
-        self.request_reserve_reasoning(app_server, thread_id, effort, mode, params);
+        self.request_reserve_reasoning(app_server, thread_id, effort, mode.mode, params);
     }
 
     pub(super) async fn apply_backend_banner_fallback(

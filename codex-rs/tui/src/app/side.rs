@@ -566,6 +566,6 @@ impl App {
             return Ok(AppRunControl::Continue);
         }
 
-        self.start_side_fork(app_server, parent_thread_id, user_message)
+        Ok(self.start_side_fork(app_server, parent_thread_id, user_message))
     }
 }

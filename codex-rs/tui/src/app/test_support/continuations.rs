@@ -8,16 +8,16 @@ pub(in crate::app) async fn settle_frontend_requests(
     server: &mut AppServerSession,
     events: &mut mpsc::UnboundedReceiver<AppEvent>,
 ) -> Result<()> {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    Box::pin(tokio::time::timeout(Duration::from_secs(10), async {
         while app.active_export.is_some() || app.pending_revert.is_some()
             || app.pending_thread_switch_resets != 0 || !events.is_empty()
         {
             tokio::select! {
                 Some(event) = events.recv() => {
-                    Box::pin(app.handle_event(tui, server, event)).await?;
+                    let _ = Box::pin(app.handle_event(tui, server, event)).await?;
                 }
                 Some(completion) = app.server_operations.control_rx.recv() => {
-                    app.handle_server_completion(tui, server, completion).await?;
+                    let _ = Box::pin(app.handle_server_completion(tui, server, completion)).await?;
                 }
                 Some(completion) = app.thread_delivery.completion_rx.recv() => {
                     app.handle_local_thread_completion(server, completion).await?;
@@ -32,7 +32,7 @@ pub(in crate::app) async fn settle_frontend_requests(
             }
         }
         Ok::<_, color_eyre::Report>(())
-    }).await??;
+    })).await??;
     Ok(())
 }
 

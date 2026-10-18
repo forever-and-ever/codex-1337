@@ -67,6 +67,10 @@ pub(crate) enum QueueEvent {
 }
 
 impl App {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "MAX_QUEUE_ITEMS is the server-defined 100-item cap, below u32::MAX."
+    )]
     pub(super) async fn handle_queue_event(
         &mut self,
         server: &AppServerSession,
@@ -75,14 +79,14 @@ impl App {
         match event {
             QueueEvent::Refresh(thread_id) => {
                 if self.queued_messages.reads.contains_key(&thread_id) {
-                    self.queued_messages.read_again.insert(thread_id);
+                    let _ = self.queued_messages.read_again.insert(thread_id);
                     return;
                 }
                 let request = Uuid::new_v4();
-                self.queued_messages.reads.insert(thread_id, request);
+                let _ = self.queued_messages.reads.insert(thread_id, request);
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(
                         Duration::from_secs(/*secs*/ 15),
                         handle.request_typed::<ThreadQueueListResponse>(
@@ -108,7 +112,7 @@ impl App {
                         thread_id,
                         result,
                     }));
-                });
+                }));
             }
             QueueEvent::Loaded {
                 request,
@@ -118,7 +122,7 @@ impl App {
                 if self.queued_messages.reads.get(&thread_id) != Some(&request) {
                     return;
                 }
-                self.queued_messages.reads.remove(&thread_id);
+                let _ = self.queued_messages.reads.remove(&thread_id);
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     match result {
                         Ok(items) => self.chat_widget.update_server_queue(
@@ -144,7 +148,8 @@ impl App {
                     return;
                 }
                 let queued_submission_id = item.id.clone();
-                self.queued_messages
+                let _ = self
+                    .queued_messages
                     .mutations
                     .insert(thread_id, QueueMutation { item, action });
                 if self.chat_widget.thread_id() == Some(thread_id) {
@@ -152,7 +157,7 @@ impl App {
                 }
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(
                         Duration::from_secs(/*secs*/ 15),
                         handle.request_typed::<ThreadQueueDeleteResponse>(
@@ -176,7 +181,7 @@ impl App {
                             .map_err(|error| error.to_string())
                     });
                     events.send(AppEvent::Queue(QueueEvent::Removed { thread_id, result }));
-                });
+                }));
             }
             QueueEvent::Removed { thread_id, result } => {
                 let Some(QueueMutation { item, action }) =
@@ -185,8 +190,8 @@ impl App {
                     return;
                 };
                 // Ignore any pre-cancellation snapshot still in flight.
-                self.queued_messages.reads.remove(&thread_id);
-                self.queued_messages.read_again.remove(&thread_id);
+                let _ = self.queued_messages.reads.remove(&thread_id);
+                let _ = self.queued_messages.read_again.remove(&thread_id);
                 // An uncertain acknowledgement must not lose an explicitly requested draft.
                 // Never submit it automatically: the original may already have been sent.
                 if self.chat_widget.thread_id() == Some(thread_id) {

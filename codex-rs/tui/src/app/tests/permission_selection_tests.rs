@@ -347,8 +347,7 @@ async fn accepted_permissions_survive_directory_change_before_notification() -> 
             // Fork admission must wait for permission acknowledgement before it
             // captures source authority, even without a settings notification.
             let mut tui = crate::tui::test_support::make_test_tui()?;
-            app.fork_current_thread(&mut tui, &mut server, None, Vec::new(), false)
-                .await?;
+            app.fork_current_thread(&mut tui, &mut server, None, Vec::new(), false);
             assert_eq!(app.chat_widget.thread_id(), Some(source));
             app.settle_navigation(&mut tui, &mut server).await?;
             assert_ne!(app.chat_widget.thread_id(), Some(source));

@@ -895,7 +895,7 @@ impl App {
                 tui.frame_requester().schedule_interactive_frame();
             }
         }
-        if self.handle_jira_input(tui, app_server, &event).await? {
+        if self.handle_jira_input(tui, app_server, &event)? {
             return Ok(AppRunControl::Continue);
         }
         self.sync_local_shell_notice();
@@ -1110,8 +1110,7 @@ impl App {
         }
 
         if matches!(&event, TuiEvent::FocusGained | TuiEvent::FocusLost) && self.jira.is_some() {
-            self.handle_jira_input(tui, app_server, &TuiEvent::Draw)
-                .await?;
+            self.handle_jira_input(tui, app_server, &TuiEvent::Draw)?;
             return Ok(AppRunControl::Continue);
         }
 

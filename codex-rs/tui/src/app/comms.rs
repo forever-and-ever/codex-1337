@@ -7,7 +7,7 @@ use codex_protocol::ThreadId;
 
 use api::CommsGate;
 impl App {
-    pub(super) async fn comms(
+    pub(super) fn comms(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -18,7 +18,7 @@ impl App {
         } else {
             UiRequestKind::ReadOnly
         };
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             kind,

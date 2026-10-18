@@ -1,6 +1,19 @@
 //! Urgent control bypasses admission barriers without abandoning request ownership.
 
-use super::*;
+use super::Arc;
+use super::ClientRequest;
+use super::ExitReason;
+use super::Mutex;
+use super::OperationReceipt;
+use super::Result;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::TurnStatus;
+use super::TypedRequestError;
+use super::Uuid;
+use super::active_turn_interrupt_race;
+use super::detach;
+use super::event_dispatch;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -66,7 +79,9 @@ pub(super) async fn send(
         ControlOperation::Interrupt { turn_id } => (Some(turn_id), false),
         ControlOperation::InterruptActive { paginated_history } => {
             let cached = store.lock().await.active_turn_id().map(str::to_owned);
-            let turn_id = if let Some(turn_id) = cached { Some(turn_id) } else {
+            let turn_id = if let Some(turn_id) = cached {
+                Some(turn_id)
+            } else {
                 let thread: api::ThreadReadResponse = handle
                     .thread_read(
                         api::RequestId::String(format!("tui-operation-{id}-read")),
@@ -102,18 +117,16 @@ pub(super) async fn send(
                         Err(error) => return Err(error),
                     }
                 };
-                let turns = if let Some(turns) = history { turns } else {
+                let turns = if let Some(turns) = history {
+                    turns
+                } else {
                     let page: api::ThreadTurnsListResponse = handle
                         .request_typed(ClientRequest::ThreadTurnsList {
-                            request_id: api::RequestId::String(format!(
-                                "tui-operation-{id}-turns"
-                            )),
+                            request_id: api::RequestId::String(format!("tui-operation-{id}-turns")),
                             params: api::ThreadTurnsListParams {
                                 thread_id: thread_id.to_string(),
                                 cursor: None,
-                                limit: Some(
-                                    crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
-                                ),
+                                limit: Some(crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT),
                                 sort_direction: Some(api::SortDirection::Desc),
                                 items_view: Some(api::TurnItemsView::NotLoaded),
                             },

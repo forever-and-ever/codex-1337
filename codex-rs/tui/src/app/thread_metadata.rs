@@ -15,7 +15,7 @@ impl App {
         thread_id: ThreadId,
         branch: String,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,
@@ -69,7 +69,7 @@ impl App {
                 )
             })
             .collect::<Vec<_>>();
-        self.request_server(
+        let _ = self.request_server(
                 server, UiRequestScope::Connection, UiRequestKind::Mutation, "Detaching previous overview threads",
                 move |handle| async move {
                     let mut results = Vec::new();

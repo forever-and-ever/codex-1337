@@ -23,7 +23,7 @@ impl App {
         let handle = app_server.request_handle();
         let rpc_request_id = app_server.next_request_id();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = handle
                 .request_typed::<AccountQuotaReadResponse>(ClientRequest::AccountQuotaRead {
                     request_id: rpc_request_id,
@@ -43,6 +43,6 @@ impl App {
                 })
                 .map_err(|error| error.to_string());
             tx.send(AppEvent::ClaudeQuotaLoaded { request_id, result });
-        });
+        }));
     }
 }

@@ -2,8 +2,23 @@
 //! replacement while a request awaits its receipt or its outcome is unknown; loss of a
 //! response is not a failed spawn. A rejection spawned nothing, so it retains nothing.
 
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Arc;
+use super::ClientRequest;
+use super::Duration;
+use super::HistoryCell;
+use super::Line;
+use super::Result;
+use super::ThreadBufferedEvent;
+use super::ThreadId;
+use super::TypedRequestError;
+use super::Uuid;
+use super::VecDeque;
+use super::history_cell;
 use super::transcript_splice::TranscriptSplice;
-use super::*;
+use super::tui;
 use crate::chatwidget::FarmSubmission;
 use codex_app_server_protocol::ThreadFarmMode;
 use codex_app_server_protocol::ThreadFarmParams;
@@ -124,7 +139,7 @@ impl App {
         let handle = server.request_handle();
         let rpc_id = server.next_request_id();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = match tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<ThreadFarmResponse>(ClientRequest::ThreadFarm {
@@ -155,7 +170,7 @@ impl App {
                 Err(_) => Err(FarmFailure::Uncertain("receipt timed out".into())),
             };
             tx.send(AppEvent::FarmFinished { request_id, result });
-        });
+        }));
     }
 
     pub(super) fn open_farm_recovery(&mut self, thread_id: ThreadId) {
@@ -289,7 +304,8 @@ impl App {
                 // Nothing holds a rejected draft: it returns only to a composer that newer
                 // input does not occupy.
                 if displayed == Some(origin) {
-                    self.chat_widget
+                    let _ = self
+                        .chat_widget
                         .restore_farm_draft(&pending.submission.draft);
                 }
                 format!("Farm rejected: {error}.")
@@ -325,7 +341,7 @@ impl App {
             *existing = receipt.clone();
         } else {
             if self.farm.receipts.len() == MAX_FARM_RECEIPTS {
-                self.farm.receipts.pop_front();
+                let _ = self.farm.receipts.pop_front();
             }
             self.farm.receipts.push_back(receipt.clone());
             // Keep the receipt at its first appearance, not after all replayed output.

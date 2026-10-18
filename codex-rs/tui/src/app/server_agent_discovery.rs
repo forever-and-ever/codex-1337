@@ -1,5 +1,22 @@
 //! Discovery returns metadata observations; only matching navigation intent may project them.
-use super::*;
+use super::AbortOnDropHandle;
+use super::AgentNavigationDirection;
+use super::App;
+use super::AppServerSession;
+use super::Feature;
+use super::FutureExt;
+use super::LaneState;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::PendingNavigation;
+use super::Result;
+use super::ServerCompletion;
+use super::ThreadEventAttachment;
+use super::ThreadId;
+use super::agent_status_feed;
+use super::find_loaded_subagent_threads_for_primary;
+use super::tui;
 use crate::app_server_session::session_preparation::RequestPolicy;
 use codex_app_server_protocol as api;
 
@@ -35,8 +52,8 @@ impl App {
             .map(|(id, _)| id)
             .collect::<Vec<_>>();
         ids.retain(|id| {
-            !self.side_threads.contains_key(id)
-                && !(path_backed.contains(id)
+            !(self.side_threads.contains_key(id)
+                || path_backed.contains(id)
                     && self
                         .thread_event_channels
                         .get(id)
@@ -160,7 +177,7 @@ impl App {
                 DiscoveryReceipt::Liveness(observations),
             ) => {
                 for (id, result) in observations {
-                    self.apply_thread_liveness(result, id);
+                    let _ = self.apply_thread_liveness(result, id);
                 }
                 self.show_agent_picker(server);
             }
@@ -224,14 +241,10 @@ impl App {
             for (thread_id, agent_path) in running_threads {
                 let preview = if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                     match channel.store.try_lock() {
-                        Ok(store) => {
-                            agent_status_feed::AgentStatusThreadPreview::from_store(
-                                agent_path, &store,
-                            )
-                        }
-                        Err(_) => agent_status_feed::AgentStatusThreadPreview::empty(
-                            agent_path,
+                        Ok(store) => agent_status_feed::AgentStatusThreadPreview::from_store(
+                            agent_path, &store,
                         ),
+                        Err(_) => agent_status_feed::AgentStatusThreadPreview::empty(agent_path),
                     }
                 } else {
                     agent_status_feed::AgentStatusThreadPreview::empty(agent_path)
@@ -239,9 +252,8 @@ impl App {
                 entries.push(preview);
             }
 
-            self.chat_widget.add_to_history(
-                agent_status_feed::AgentStatusHistoryCell::new(entries),
-            );
+            self.chat_widget
+                .add_to_history(agent_status_feed::AgentStatusHistoryCell::new(entries));
         }
 
         for thread_id in self
@@ -306,9 +318,9 @@ impl App {
             .collect();
         for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
             if let Some(model) = thread.model {
-                self.agent_navigation.models.insert(thread.thread_id, model);
+                let _ = self.agent_navigation.models.insert(thread.thread_id, model);
             } else {
-                self.agent_navigation.models.remove(&thread.thread_id);
+                let _ = self.agent_navigation.models.remove(&thread.thread_id);
             }
             let agent_path = thread.agent_path;
             let is_closed = matches!(
@@ -325,7 +337,8 @@ impl App {
                 is_closed,
             );
             if self.agent_navigation.get(&thread.thread_id).is_some() {
-                self.agent_navigation
+                let _ = self
+                    .agent_navigation
                     .descendant_roots
                     .insert(thread.thread_id, primary_thread_id);
             }

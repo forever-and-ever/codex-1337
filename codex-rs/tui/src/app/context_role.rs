@@ -7,7 +7,7 @@ use codex_protocol::ThreadId;
 
 use crate::chatwidget::ContextRoleCommand;
 impl App {
-    pub(super) async fn context_role(
+    pub(super) fn context_role(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -15,10 +15,10 @@ impl App {
     ) {
         let kind = match command {
             ContextRoleCommand::Show => UiRequestKind::ReadOnly,
-            _ => UiRequestKind::Mutation,
+            ContextRoleCommand::Set(_) => UiRequestKind::Mutation,
         };
         let clear = matches!(command, ContextRoleCommand::Set(None));
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             kind,

@@ -1,6 +1,40 @@
 //! Directory replacement keeps the source selected until exact authority and detachment commit.
 
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AbortOnDropHandle;
+use super::AbsolutePathBuf;
+use super::App;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::AppServerTarget;
+use super::Arc;
+use super::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
+use super::CleanupContinuation;
+use super::ClientRequest;
+use super::Config;
+use super::DetachScope;
+use super::FutureExt;
+use super::HooksListEntry;
+use super::LaneState;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::OperationOrigin;
+use super::PathBuf;
+use super::PendingNavigation;
+use super::PermissionAuthority;
+use super::PermissionProfileSelection;
+use super::Result;
+use super::RuntimeApprovalPolicyOverride;
+use super::RuntimeKeymap;
+use super::RuntimePermissionProfileTurnOverride;
+use super::RuntimePolicyOverrideScope;
+use super::ServerCompletion;
+use super::ThreadId;
+use super::ThreadInputState;
+use super::Uuid;
+use super::detach;
+use super::tui;
 use crate::app::working_directory::DirectoryAttachment;
 use crate::app::working_directory::background_terminals_blocker;
 use crate::app_server_session::fork_preparation::ForkPreparation;
@@ -270,88 +304,100 @@ impl App {
             operation.generation,
         );
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let outcome = std::panic::AssertUnwindSafe(async {
-                match effect {
-                    DirectoryEffect::Begin => DirectoryOutcome::Begin,
-                    DirectoryEffect::Terminals { ids, target } => {
-                        DirectoryOutcome::Terminals(terminals(&handle, id, &ids, &target).await)
-                    }
-                    DirectoryEffect::Project { cwd, host } => DirectoryOutcome::Project(
-                        read_remote_project_trust_with_policy(
-                            RequestPolicy::Interactive,
-                            handle.clone(),
-                            &cwd,
-                            host,
-                        )
-                        .await,
-                    ),
-                    DirectoryEffect::Defaults(cwd) => DirectoryOutcome::Defaults(
-                        tokio::time::timeout(
-                            ACK_TIMEOUT,
-                            read_effective_config_if_supported(handle.clone(), &cwd),
-                        )
-                        .await
-                        .map_err(|_| "Directory defaults read timed out".into())
-                        .and_then(|result| result.map_err(|error| error.to_string())),
-                    ),
-                    DirectoryEffect::Loaded(root) => DirectoryOutcome::Loaded(
-                        preparation::loaded_observations(RequestPolicy::Interactive, &handle, root)
-                            .await,
-                    ),
-                    DirectoryEffect::Status { ids, target } => DirectoryOutcome::Status(
-                        async {
-                            for thread_id in &ids {
-                                let thread = preparation::read_thread(
-                                    RequestPolicy::Interactive,
-                                    &handle,
-                                    *thread_id,
-                                )
-                                .await
-                                .map_err(|error| format!("Cannot check task status: {error}"))?;
-                                if matches!(thread.status, api::ThreadStatus::Active { .. }) {
-                                    return Err("Cannot change: a task is running.".into());
-                                }
-                            }
-                            terminals(&handle, id, &ids, &target).await
+            let outcome = Box::pin(
+                std::panic::AssertUnwindSafe(async {
+                    match effect {
+                        DirectoryEffect::Begin => DirectoryOutcome::Begin,
+                        DirectoryEffect::Terminals { ids, target } => {
+                            DirectoryOutcome::Terminals(terminals(&handle, id, &ids, &target).await)
                         }
-                        .await,
-                    ),
-                    DirectoryEffect::Acquire(plan) => match *plan {
-                        Acquisition::Start(plan) => DirectoryOutcome::Acquired(plan.run().await),
-                        Acquisition::Fork(plan) => DirectoryOutcome::Acquired(plan.run().await),
-                    },
-                    DirectoryEffect::Detach(mut plan) => DirectoryOutcome::Detached(
-                        match tokio::time::timeout(ACK_TIMEOUT, async {
-                            let primary = detach::DetachPlan {
-                                targets: vec![plan.targets.remove(0)],
-                                voice: plan.voice.take(),
-                            };
-                            let mut results = detach::send(&handle, id, &primary).await;
-                            if results.iter().all(|result| result.result.is_ok()) {
-                                results.extend(detach::send(&handle, id, &plan).await);
-                            }
-                            results
-                        })
-                        .await
-                        {
-                            Ok(results) => detach::DetachReceipt::Complete(results),
-                            Err(_) => detach::DetachReceipt::BudgetExpired,
-                        },
-                    ),
-                    DirectoryEffect::Hooks(cwd) => DirectoryOutcome::Hooks(
-                        tokio::time::timeout(
-                            ACK_TIMEOUT,
-                            crate::startup_hooks_review::load_startup_hooks_review_entry(
+                        DirectoryEffect::Project { cwd, host } => DirectoryOutcome::Project(
+                            read_remote_project_trust_with_policy(
+                                RequestPolicy::Interactive,
                                 handle.clone(),
-                                cwd,
-                            ),
-                        )
-                        .await
-                        .map_err(|_| "Folder hooks read timed out".into()),
-                    ),
-                }
-            })
-            .catch_unwind()
+                                &cwd,
+                                host,
+                            )
+                            .await,
+                        ),
+                        DirectoryEffect::Defaults(cwd) => DirectoryOutcome::Defaults(
+                            tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                read_effective_config_if_supported(handle.clone(), &cwd),
+                            )
+                            .await
+                            .map_err(|_| "Directory defaults read timed out".into())
+                            .and_then(|result| result.map_err(|error| error.to_string())),
+                        ),
+                        DirectoryEffect::Loaded(root) => DirectoryOutcome::Loaded(
+                            preparation::loaded_observations(
+                                RequestPolicy::Interactive,
+                                &handle,
+                                root,
+                            )
+                            .await,
+                        ),
+                        DirectoryEffect::Status { ids, target } => DirectoryOutcome::Status(
+                            async {
+                                for thread_id in &ids {
+                                    let thread = preparation::read_thread(
+                                        RequestPolicy::Interactive,
+                                        &handle,
+                                        *thread_id,
+                                    )
+                                    .await
+                                    .map_err(|error| {
+                                        format!("Cannot check task status: {error}")
+                                    })?;
+                                    if matches!(thread.status, api::ThreadStatus::Active { .. }) {
+                                        return Err("Cannot change: a task is running.".into());
+                                    }
+                                }
+                                terminals(&handle, id, &ids, &target).await
+                            }
+                            .await,
+                        ),
+                        DirectoryEffect::Acquire(plan) => match *plan {
+                            Acquisition::Start(plan) => {
+                                DirectoryOutcome::Acquired(Box::pin(plan.run()).await)
+                            }
+                            Acquisition::Fork(plan) => {
+                                DirectoryOutcome::Acquired(Box::pin(plan.run()).await)
+                            }
+                        },
+                        DirectoryEffect::Detach(mut plan) => DirectoryOutcome::Detached(
+                            match tokio::time::timeout(ACK_TIMEOUT, async {
+                                let primary = detach::DetachPlan {
+                                    targets: vec![plan.targets.remove(0)],
+                                    voice: plan.voice.take(),
+                                };
+                                let mut results = detach::send(&handle, id, &primary).await;
+                                if results.iter().all(|result| result.result.is_ok()) {
+                                    results.extend(detach::send(&handle, id, &plan).await);
+                                }
+                                results
+                            })
+                            .await
+                            {
+                                Ok(results) => detach::DetachReceipt::Complete(results),
+                                Err(_) => detach::DetachReceipt::BudgetExpired,
+                            },
+                        ),
+                        DirectoryEffect::Hooks(cwd) => DirectoryOutcome::Hooks(
+                            tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                crate::startup_hooks_review::load_startup_hooks_review_entry(
+                                    handle.clone(),
+                                    cwd,
+                                ),
+                            )
+                            .await
+                            .map_err(|_| "Folder hooks read timed out".into()),
+                        ),
+                    }
+                })
+                .catch_unwind(),
+            )
             .await
             .unwrap_or(DirectoryOutcome::Terminated);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
@@ -573,7 +619,7 @@ impl App {
             })
             .is_none()
         );
-        self.advance_directory_trust(server, operation, consent.context.clone(), plan)
+        Box::pin(self.advance_directory_trust(server, operation, consent.context.clone(), plan))
             .await;
     }
 
@@ -589,9 +635,7 @@ impl App {
                     .config
                     .permissions
                     .active_permission_profile()
-                    .is_some_and(|profile| {
-                        profile.id == BUILT_IN_PERMISSION_PROFILE_WORKSPACE
-                    }));
+                    .is_some_and(|profile| profile.id == BUILT_IN_PERMISSION_PROFILE_WORKSPACE));
         if defaults {
             let cwd = context.input.cwd.to_path_buf();
             self.server_operations.navigation.current = Some(self.continue_directory_effect(
@@ -802,8 +846,7 @@ impl App {
                         return Ok(());
                     }
                 };
-                self.advance_directory_trust(server, operation, *context, plan)
-                    .await;
+                Box::pin(self.advance_directory_trust(server, operation, *context, plan)).await;
             }
             (DirectoryStage::Trust { context, mut plan }, DirectoryOutcome::Project(result))
                 if matching =>
@@ -844,15 +887,14 @@ impl App {
                         }
                     }
                 }
-                self.advance_directory_trust(server, operation, *context, plan)
-                    .await;
+                Box::pin(self.advance_directory_trust(server, operation, *context, plan)).await;
             }
             (DirectoryStage::Defaults(mut context), DirectoryOutcome::Defaults(result))
                 if matching =>
             {
                 match result {
                     Ok(Some(defaults)) => {
-                        crate::projectless::apply_defaults(
+                        let _ = crate::projectless::apply_defaults(
                             &mut context.config,
                             &self.harness_overrides,
                             server,
@@ -1041,7 +1083,7 @@ impl App {
                         keymap,
                     } = ready;
                     let cwd = context.input.cwd.clone();
-                    self.attach_working_directory(
+                    Box::pin(self.attach_working_directory(
                         tui,
                         server,
                         DirectoryAttachment {
@@ -1052,7 +1094,7 @@ impl App {
                             cwd: cwd.clone(),
                             selected_profile: context.input.permissions.selection().cloned(),
                         },
-                    )
+                    ))
                     .await;
                     if self.current_displayed_thread_id() != Some(target) {
                         self.directory_detached_source();

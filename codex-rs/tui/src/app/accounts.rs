@@ -1,5 +1,17 @@
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Duration;
+use super::ExitMode;
+use super::HashMap;
+use super::RateLimitRefreshOrigin;
+use super::Result;
+use super::ThreadId;
+use super::Uuid;
+use super::VecDeque;
 use crate::app_server_session::typed_requests::SessionRpc;
+use crate::status::StatusAccountDisplay;
+use codex_app_server_protocol::Account;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
 use codex_app_server_protocol::AccountProvider;
@@ -17,8 +29,7 @@ pub(super) struct AccountUi {
     pub(super) selection_request: Option<ThreadId>,
     login_request: Option<ThreadId>,
     claude_login: Option<String>,
-    early_login_completions:
-        VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
+    early_login_completions: VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
     nickname_request: Option<ThreadId>,
     pending: HashMap<ThreadId, String>,
     pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
@@ -29,7 +40,7 @@ impl App {
         use super::turn_submissions::ui_requests::UiRequestKind;
         use super::turn_submissions::ui_requests::UiRequestScope;
         let thread_id = self.current_displayed_thread_id();
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Connection,
             UiRequestKind::Mutation,
@@ -37,9 +48,7 @@ impl App {
             move |handle| async move {
                 handle
                     .logout_account(
-                        codex_app_server_protocol::RequestId::String(
-                            Uuid::new_v4().to_string(),
-                        ),
+                        codex_app_server_protocol::RequestId::String(Uuid::new_v4().to_string()),
                         thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
                             thread_id: Some(id.to_string()),
                         }),
@@ -69,7 +78,7 @@ impl App {
         let handle = server.request_handle();
         let request_id = server.next_request_id();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = handle
                 .request_typed::<codex_app_server_protocol::CancelLoginAccountResponse>(
                     ClientRequest::CancelLoginAccount {
@@ -83,7 +92,7 @@ impl App {
                     error: format!("Cannot cancel Claude sign-in: {error}"),
                 });
             }
-        });
+        }));
     }
 
     pub(super) fn finish_claude_login(
@@ -93,7 +102,7 @@ impl App {
         // The response reader can receive completion before the start waiter runs.
         if self.account_ui.login_request.is_some() && self.account_ui.claude_login.is_none() {
             if self.account_ui.early_login_completions.len() == 2 {
-                self.account_ui.early_login_completions.pop_front();
+                let _ = self.account_ui.early_login_completions.pop_front();
             }
             self.account_ui
                 .early_login_completions
@@ -135,7 +144,7 @@ impl App {
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<AccountNicknameSetResponse>(
@@ -153,7 +162,7 @@ impl App {
             .map_err(|_| "Rename not confirmed; reopen /account to check".to_owned())
             .and_then(|result| result.map_err(|error| error.to_string()));
             tx.send(AppEvent::AccountNicknameSetFinished { thread_id, result });
-        });
+        }));
     }
 
     pub(super) fn finish_account_nickname_set(
@@ -206,7 +215,7 @@ impl App {
         let serial = self.account_ui.serial;
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = handle
                 .request_typed::<codex_app_server_protocol::GetAccountResponse>(
                     ClientRequest::GetAccount {
@@ -228,7 +237,7 @@ impl App {
                 serial,
                 result,
             });
-        });
+        }));
     }
 
     pub(super) fn apply_conversation_account(
@@ -264,8 +273,7 @@ impl App {
                 /*hint*/ None,
             );
         }
-        use crate::status::StatusAccountDisplay;
-        use codex_app_server_protocol::Account;
+
         // Backend-only host authentication has no Account projection. Its
         // capability flag remains owned by the global auth notifications.
         let backend_only = response.account_id.is_none()
@@ -293,7 +301,9 @@ impl App {
             .display_name
             .clone()
             .or_else(|| match &response.account {
-                Some(Account::Chatgpt { email, .. } | Account::ClaudeSubscription { email }) => email.clone(),
+                Some(Account::Chatgpt { email, .. } | Account::ClaudeSubscription { email }) => {
+                    email.clone()
+                }
                 Some(Account::ApiKey {}) | None => None,
             })
             .or_else(|| response.account_id.clone());
@@ -403,7 +413,7 @@ impl App {
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<ThreadAccountListResponse>(
@@ -423,7 +433,7 @@ impl App {
                 serial,
                 result,
             });
-        });
+        }));
     }
 
     pub(super) fn apply_account_picker(
@@ -475,7 +485,7 @@ impl App {
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<ThreadAccountSelectResponse>(
@@ -501,7 +511,7 @@ impl App {
                 })
             });
             tx.send(AppEvent::AccountSelectionFinished { thread_id, result });
-        });
+        }));
     }
 
     pub(super) fn finish_account_selection(
@@ -522,11 +532,12 @@ impl App {
             Ok(response) => {
                 if response.conversation_changed {
                     if response.pending {
-                        self.account_ui
+                        let _ = self
+                            .account_ui
                             .pending
                             .insert(thread_id, response.account_id.clone());
                     } else {
-                        self.account_ui.pending.remove(&thread_id);
+                        let _ = self.account_ui.pending.remove(&thread_id);
                     }
                 }
                 // The ChatGPT default is the server's active login, not configuration.
@@ -545,7 +556,8 @@ impl App {
                     self.last_thread_usage_status_cell = None;
                     self.pending_thread_usage_history_refresh = false;
                     self.refresh_conversation_account(server, thread_id);
-                    self.chat_widget
+                    let _ = self
+                        .chat_widget
                         .refresh_openrouter_status(crate::openrouter::StatusRefresh::Now);
                 }
                 self.chat_widget.add_info_message(
@@ -583,7 +595,7 @@ impl App {
         let request_id = server.next_request_id();
         let handle = server.request_handle();
         let tx = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
@@ -595,7 +607,7 @@ impl App {
             .map_err(|_| "Sign-in start not confirmed; reopen /account before retrying".to_owned())
             .and_then(|result| result.map_err(|error| error.to_string()));
             tx.send(AppEvent::ClaudeLoginStarted { thread_id, result });
-        });
+        }));
     }
 
     pub(super) fn finish_claude_login_start(

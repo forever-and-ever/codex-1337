@@ -2,8 +2,93 @@
 //! Only App mutates the ledger; workers own requests and widgets receive immutable previews.
 //! Turn failures preserve draft recovery; uncertain mutations retain their ordering fence.
 
+use super::AGENTS_OVERVIEW_VIEW_ID;
+use super::AbsolutePathBuf;
+use super::ActiveTurnSteerRace;
+use super::AgentNavigationDirection;
+use super::App;
+use super::AppCommand;
+use super::AppEvent;
+use super::AppRunControl;
+use super::AppServerRequestHandle;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::AppServerTarget;
+use super::ApprovalsReviewer;
+use super::Arc;
+use super::AskForApproval;
+use super::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
+use super::CODEX_CLI_VERSION;
+use super::ChatWidget;
+use super::Config;
+use super::ConfigBatchWriteParams;
+use super::ConfigWriteResponse;
+use super::Duration;
+use super::EnvironmentManager;
+use super::ExitMode;
+use super::ExitReason;
+use super::Feature;
+use super::HashMap;
+use super::HashSet;
+use super::HooksListEntry;
+use super::Instant;
+use super::LoaderOverrides;
+use super::Mutex;
+use super::Path;
+use super::PathBuf;
+use super::PermissionProfileSelection;
+use super::PermissionProfileSnapshot;
+use super::ProviderModelChoice;
+use super::Result;
+use super::RuntimeApprovalPolicyOverride;
+use super::RuntimeKeymap;
+use super::RuntimePermissionProfileOverride;
+use super::RuntimePermissionProfileTurnOverride;
+use super::RuntimePolicyOverrideScope;
+use super::ServerNotification;
+use super::SessionTarget;
+use super::SideThreadState;
+use super::SkillsListParams;
+use super::SkillsListResponse;
+use super::StateDbHandle;
+use super::ThreadEventAttachment;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadInputState;
+use super::ThreadItem;
+use super::ThreadSessionState;
+use super::ThreadSettingsUpdateParams;
+use super::ThreadStartSource;
+use super::TomlValue;
+use super::Turn;
+use super::TurnStatus;
+use super::TypedRequestError;
+use super::UiReply;
+use super::WrapErr;
+use super::WriteStatus;
+use super::active_turn_interrupt_race;
+use super::active_turn_not_steerable_turn_error;
+use super::active_turn_steer_race;
+use super::agent_status_feed;
+use super::agents_overview;
+use super::app_server_requests;
+use super::apply_managed_new_thread_defaults;
+use super::config_persistence;
+use super::event_dispatch;
+use super::find_loaded_subagent_threads_for_primary;
+use super::history_cell;
+use super::misalignment_policy;
+use super::mpsc;
+use super::navigation_config;
+use super::new_session;
+use super::realtime_settings;
+use super::recap;
+use super::session_lifecycle;
+use super::side;
 use super::thread_delivery::LocalThreadCompletion;
-use super::*;
+use super::thread_name;
+use super::tui;
+use super::unbounded_channel;
 use crate::app_command::PendingSteerCancelAction;
 use crate::chatwidget::PendingSteer;
 use crate::chatwidget::UserMessage;
@@ -169,7 +254,7 @@ impl OperationOrigin {
     fn thread(&self) -> (ThreadId, &Arc<Mutex<ThreadEventStore>>) {
         match self {
             Self::Thread { thread_id, store } => (*thread_id, store),
-            Self::Connection => panic!("thread operation has connection origin"),
+            Self::Connection => unreachable!("thread-only submission paths retain a thread origin"),
         }
     }
 }
@@ -272,7 +357,7 @@ impl UserTurnReplay {
         };
         *approval_policy = session.approval_policy;
         *approvals_reviewer = Some(session.approvals_reviewer);
-        *active_permission_profile = session.active_permission_profile.clone();
+        active_permission_profile.clone_from(&session.active_permission_profile);
     }
 
     fn into_command(self) -> AppCommand {
@@ -301,7 +386,7 @@ impl UserTurnReplay {
             ..
         } = &mut self.0
         {
-            *client_user_message_id = draft.client_id.clone();
+            client_user_message_id.clone_from(&draft.client_id);
             *items = input.to_vec();
             *pending_steer_replacement = None;
         }
@@ -600,7 +685,7 @@ impl ServerOperations {
             .expect("selected operation lane disappeared");
         if active.id == id {
             if let Some(next) = waiting.pop_front() {
-                self.lanes.insert(
+                let _ = self.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -616,7 +701,7 @@ impl ServerOperations {
                 .position(editable)
                 .expect("selected queued operation disappeared");
             let removed = waiting.remove(index);
-            self.lanes.insert(
+            let _ = self.lanes.insert(
                 key,
                 SubmissionLane {
                     active,

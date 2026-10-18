@@ -1,6 +1,16 @@
 //! Typed UI continuations carried by the existing server-operation ledger.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::Arc;
+use super::CatalogRequest;
+use super::ConnectionMutation;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionFailure;
+use super::ThreadId;
+use super::ThreadMutation;
+use super::TypedRequestError;
 use codex_app_server_client::AppServerRequestHandle;
 use futures::future::BoxFuture;
 use std::future::Future;
@@ -116,7 +126,7 @@ where
         let mut state = self.request.lock().expect("UI request owner poisoned");
         let RequestState::Waiting(prepare) = std::mem::replace(&mut *state, RequestState::Sent)
         else {
-            panic!("UI request prepared twice");
+            unreachable!("the ordered request ledger prepares each waiting request exactly once");
         };
         *state = RequestState::Prepared(prepare(app, server));
     }
@@ -133,7 +143,9 @@ where
             &mut *self.request.lock().expect("UI request owner poisoned"),
             RequestState::Sent,
         ) else {
-            panic!("UI request dispatched without preparation");
+            unreachable!(
+                "the ordered request ledger dispatches only a prepared request, exactly once"
+            );
         };
         let completion = Arc::clone(&self.completion);
         Box::pin(async move {

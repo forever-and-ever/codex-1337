@@ -748,7 +748,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         );
         for cell in app.transcript_cells.clone() {
             if cell.as_any().is::<history_cell::CodeModeCell>() {
-                app.insert_code_mode_cell(&mut tui, cell);
+                app.insert_code_mode_cell(&mut tui, &cell);
             }
         }
         let older = thread_items_to_transcript_cells(

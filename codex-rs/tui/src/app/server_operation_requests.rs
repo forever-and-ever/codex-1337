@@ -1,6 +1,44 @@
 //! Typed requests and receipts for the non-turn branches of the ordered operation ledger.
 
-use super::*;
+use super::App;
+use super::AppCommand;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Arc;
+use super::ClientRequest;
+use super::ConfigBatchWriteParams;
+use super::ConfigWriteResponse;
+use super::ControlOperation;
+use super::ExitMode;
+use super::HashSet;
+use super::OperationLane;
+use super::OperationOrigin;
+use super::OperationScope;
+use super::PathBuf;
+use super::PendingSubmission;
+use super::RealtimeOperation;
+use super::Result;
+use super::SkillsListParams;
+use super::SkillsListResponse;
+use super::SubmissionFailure;
+use super::SubmissionRequest;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadSettingsUpdateParams;
+use super::TypedRequestError;
+use super::UiReply;
+use super::Uuid;
+use super::WrapErr;
+use super::WriteStatus;
+use super::app_server_requests;
+use super::control;
+use super::detach;
+use super::navigation;
+use super::realtime;
+use super::removal;
+use super::thread_name;
+use super::ui_requests;
+use super::voice_preferences;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -121,12 +159,8 @@ impl ServerOperation {
                 "Detaching frontend before exit"
             }
             Self::Control(ControlOperation::Interrupt { .. }) => "Interrupting turn",
-            Self::Control(ControlOperation::InterruptActive { .. }) => {
-                "Stopping background task"
-            }
-            Self::Control(ControlOperation::StopAndExit { .. }) => {
-                "Stopping task before exit"
-            }
+            Self::Control(ControlOperation::InterruptActive { .. }) => "Stopping background task",
+            Self::Control(ControlOperation::StopAndExit { .. }) => "Stopping task before exit",
             Self::Mutation(mutation) => match mutation {
                 ThreadMutation::Compact => "Starting compaction",
                 ThreadMutation::Rename(_) => "Renaming conversation",
@@ -185,7 +219,9 @@ impl ServerOperation {
     pub(super) fn lane(&self, scope: OperationScope) -> OperationLane {
         let thread_id = || match scope {
             OperationScope::Thread(id) => id,
-            OperationScope::Connection => panic!("thread request has connection scope"),
+            OperationScope::Connection => {
+                unreachable!("thread-only operations are admitted with a thread origin")
+            }
         };
         match self {
             Self::Response(_) => OperationLane::Response(scope),
@@ -413,11 +449,10 @@ impl App {
         }
         let thread_id = origin.thread().0;
         match receipt {
-            OperationReceipt::UiRequestApplied => {}
             OperationReceipt::UiRequest(_) => {
                 unreachable!("typed UI reply reduced before the operation lane")
             }
-            OperationReceipt::Removal(_) => {}
+
             OperationReceipt::ServerRequestDelivered => {
                 if let ServerOperation::Response(delivery) = operation
                     && let ServerRequestDelivery::Resolved { command, .. } = &**delivery
@@ -438,19 +473,14 @@ impl App {
                     widget.accept_realtime_speech(*delivery_id);
                 }
             }
-            OperationReceipt::RealtimePrepared(_)
-            | OperationReceipt::RealtimeStarted
-            | OperationReceipt::RealtimeDiscarded
-            | OperationReceipt::RealtimeStopped => {}
+
             OperationReceipt::StopAndExitCompleted => self
                 .app_event_tx
                 .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt)),
-            OperationReceipt::Interrupted => {}
+
             OperationReceipt::ExitDetached(receipt) => {
-                if let ServerOperation::Control(ControlOperation::DetachAndExit {
-                    plan,
-                    reason,
-                }) = operation
+                if let ServerOperation::Control(ControlOperation::DetachAndExit { plan, reason }) =
+                    operation
                 {
                     self.finish_detach_plan(plan, receipt).await;
                     self.pending_shutdown_exit_thread_id = None;
@@ -498,13 +528,14 @@ impl App {
                         || params.sandbox_policy.is_some()
                         || params.permissions.is_some();
                     if permissions_changed {
-                        self.agents_overview
+                        let _ = self
+                            .agents_overview
                             .requested_permission_profiles
                             .remove(&thread_id);
                     }
                 }
             }
-            OperationReceipt::SettingsUnsupported => {}
+
             OperationReceipt::TrustSaved => unreachable!("trust writes have connection origin"),
             OperationReceipt::ModelDefaultsSaved(_) => {
                 unreachable!("model defaults handled before origin projection")
@@ -512,7 +543,15 @@ impl App {
             OperationReceipt::VoicePreference(_) => {
                 unreachable!("voice preferences have connection origin")
             }
-            OperationReceipt::Compacted
+            OperationReceipt::UiRequestApplied
+            | OperationReceipt::Removal(_)
+            | OperationReceipt::RealtimePrepared(_)
+            | OperationReceipt::RealtimeStarted
+            | OperationReceipt::RealtimeDiscarded
+            | OperationReceipt::RealtimeStopped
+            | OperationReceipt::Interrupted
+            | OperationReceipt::SettingsUnsupported
+            | OperationReceipt::Compacted
             | OperationReceipt::TerminalsCleaned
             | OperationReceipt::AlarmDisarmed
             | OperationReceipt::ServerShellFinished

@@ -3,7 +3,7 @@ use crate::app_server_session::AppServerSession;
 use codex_protocol::ThreadId;
 
 impl App {
-    pub(super) async fn disarm_alarm(
+    pub(super) fn disarm_alarm(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,

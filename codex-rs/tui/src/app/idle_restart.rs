@@ -1,6 +1,11 @@
 //! Restart only the foreground thin client; never run the ordinary shutdown path.
 
-use super::*;
+use super::App;
+use super::AppServerTarget;
+use super::Duration;
+use super::ThreadInputState;
+use super::farm;
+use super::tui;
 
 impl App {
     pub(super) fn ready_for_idle_restart(&self) -> bool {
