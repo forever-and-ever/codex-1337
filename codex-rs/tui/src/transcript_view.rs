@@ -490,6 +490,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn jump_to_latest(&mut self) {
+        self.cancel_deferred_navigation();
         self.cancel_search();
         self.cancel_beginning();
         self.position = Position::Latest;

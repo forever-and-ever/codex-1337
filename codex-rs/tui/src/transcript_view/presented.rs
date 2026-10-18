@@ -193,6 +193,13 @@ impl TranscriptView {
         result
     }
 
+    pub(super) fn cancel_deferred_navigation(&mut self) {
+        self.deferred_scroll = None;
+        self.deferred_focus = None;
+        self.deferred_folds.clear();
+        self.inflight_cells = None;
+    }
+
     #[expect(
         clippy::cast_possible_wrap,
         reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."

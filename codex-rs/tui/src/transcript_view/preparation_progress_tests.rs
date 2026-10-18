@@ -121,3 +121,76 @@ fn live_preparation_does_not_freeze_retained_navigation() {
             .any(|row| row.key == EntryKey::cell(&extended[1]))
     );
 }
+
+#[tokio::test]
+async fn return_to_latest_cancels_unfinished_history_scroll()
+-> Result<(), Box<dyn std::error::Error>> {
+    let gate = Arc::new(Mutex::new(()));
+    let cells = vec![
+        Arc::new(GatedCell(Arc::clone(&gate))) as Arc<dyn HistoryCell>,
+        cell((0..16).map(|row| format!("row {row}")).join("\n")),
+    ];
+    let mut view = TranscriptView::default();
+    let before = render(&mut view, &cells, 32, 4);
+    let (draw_tx, mut draw_rx) = tokio::sync::broadcast::channel(16);
+    {
+        let _held = gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        view.cache.frames = Some(crate::tui::FrameRequester::new(draw_tx));
+        view.scroll(&cells, -100);
+        assert!(view.deferred_scroll.is_some());
+        view.jump_to_latest();
+        assert_eq!(render(&mut view, &cells, 32, 4), before);
+    }
+
+    // Finishing a superseded scroll must not undo a later return to the live edge.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let _ = render(&mut view, &cells, 32, 4);
+            if view.deferred_scroll.is_none() && !view.cache.waiting {
+                return Ok::<(), tokio::sync::broadcast::error::RecvError>(());
+            }
+            draw_rx.recv().await?;
+        }
+    })
+    .await??;
+    assert!(view.is_following());
+    assert_eq!(render(&mut view, &cells, 32, 4), before);
+    Ok(())
+}
+
+#[tokio::test]
+async fn history_layouts_finish_across_displayed_and_current_revisions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cells: Vec<Arc<dyn HistoryCell>> =
+        vec![Arc::new(crate::history_cell::AgentMarkdownCell::new(
+            (0..16)
+                .map(|row| format!("retained response {row}"))
+                .join("\n"),
+            std::path::Path::new("/tmp"),
+        ))];
+    let mut extended = vec![cell("older history")];
+    extended.extend(cells.iter().cloned());
+    let mut view = TranscriptView {
+        area: Rect::new(0, 0, 40, 8),
+        ..Default::default()
+    };
+    let (draw_tx, mut draw_rx) = tokio::sync::broadcast::channel(16);
+    view.cache.frames = Some(crate::tui::FrameRequester::new(draw_tx));
+    // Navigation uses displayed cells while a loaded page prepares the current cells.
+    // Switching sources must not invalidate either source's unfinished layout.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            view.cache.begin_frame();
+            let retained = view.layout(&cells, 0);
+            let current = view.layout(&extended, 1);
+            if retained.is_some() && current.is_some() {
+                return Ok::<(), tokio::sync::broadcast::error::RecvError>(());
+            }
+            draw_rx.recv().await?;
+        }
+    })
+    .await??;
+    Ok(())
+}

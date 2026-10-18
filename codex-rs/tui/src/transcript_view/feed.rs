@@ -69,6 +69,9 @@ use codex_protocol::code_mode::CodeModeEvent;
 use ratatui::text::Span;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Range;
 
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
@@ -120,7 +123,8 @@ pub(super) struct FeedIndex {
     frame: Option<u64>,
     cells: Vec<usize>,
     bills: u64,
-    /// Advances on every rebuild; layouts derived from a seat carry it.
+    /// Identifies source cells, not visits: displayed and current revisions coexist.
+    /// A rebuild counter would invalidate pending layouts each time navigation switches sources.
     pub(super) revision: u64,
     roles: Vec<Role>,
     items: Vec<Item>,
@@ -530,7 +534,9 @@ impl FeedIndex {
         self.cells = cells.iter().map(cell_key).collect();
         self.frame = Some(frame);
         self.bills = bills.revision();
-        self.revision = self.revision.wrapping_add(/*rhs*/ 1);
+        let mut hasher = DefaultHasher::new();
+        self.cells.hash(&mut hasher);
+        self.revision = hasher.finish();
         self.roles = roles;
         self.items = items;
         self.placed_users = placed_users;
