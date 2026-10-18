@@ -119,7 +119,7 @@ impl Session {
         } else {
             build_models_manager(config, auth)
         };
-        managers.insert(
+        let _ = managers.insert(
             config.model_provider_id.clone(),
             CachedAgentModelsManager {
                 key,

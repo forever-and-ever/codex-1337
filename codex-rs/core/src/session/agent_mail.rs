@@ -3,6 +3,7 @@
 
 use super::session::Session;
 use super::turn_context::TurnContext;
+use crate::TurnStartOptions;
 use codex_protocol::ResponseItemId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -86,14 +87,14 @@ impl Session {
         if received.contains_key(id) {
             return false;
         }
-        received.insert(id.clone(), MailProjection::Submitting);
+        let _ = received.insert(id.clone(), MailProjection::Submitting);
         true
     }
 
     pub(crate) async fn release_agent_mail_submission(&self, id: &ResponseItemId) {
         let mut received = self.agent_mail.received.lock().await;
         if matches!(received.get(id), Some(MailProjection::Submitting)) {
-            received.remove(id);
+            let _ = received.remove(id);
         }
     }
 
@@ -141,7 +142,7 @@ impl Session {
         {
             return Ok(false);
         }
-        received.insert(id.clone(), MailProjection::Projecting);
+        let _ = received.insert(id.clone(), MailProjection::Projecting);
         Ok(true)
     }
 
@@ -159,7 +160,7 @@ impl Session {
     )]
     pub(crate) async fn recover_accepted_agent_mail(self: &Arc<Self>) -> CodexResult<()> {
         let acceptance = self.agent_mail.acceptance.lock().await;
-        self.recover_accepted_agent_mail_locked().await?;
+        let _ = self.recover_accepted_agent_mail_locked().await?;
         drop(acceptance);
         self.maybe_start_turn_for_pending_work().await;
         Ok(())
@@ -279,12 +280,12 @@ impl Session {
                 self.input_queue
                     .enqueue_batched_mailbox_communication(
                         communication,
-                        Default::default(),
+                        TurnStartOptions::default(),
                         config.multi_agent_v2.wait_agent_batch_window_ms,
                         execution,
                     )
                     .await;
-                projection.insert(MailProjection::Published);
+                let _ = projection.insert(MailProjection::Published);
             }
         }
         Ok(!publication_blocked)
@@ -335,7 +336,7 @@ impl Session {
                 .admissions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            tasks.close();
+            let _ = tasks.close();
             tasks.clone()
         };
         tasks.wait().await;
@@ -430,7 +431,7 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .spawn(async move {
-                    session
+                    let _ = session
                         .agent_mail
                         .received
                         .lock()
@@ -447,7 +448,7 @@ impl Session {
                             "accepted agent-mail admission panicked; inbox retained".into(),
                         ))
                     });
-                    session.agent_mail.received.lock().await.remove(&id);
+                    let _ = session.agent_mail.received.lock().await.remove(&id);
                     drop(boundary);
                     drop(lifecycle);
                     result

@@ -4,10 +4,14 @@ use crate::mcp::McpRuntimeProjection;
 use crate::tools::ToolRouter;
 use crate::tools::registry::ToolRegistry;
 use codex_extension_api::ExtensionDataInit;
+use codex_extension_api::SelectedPluginSnapshot;
 use codex_extension_api::ToolPolicy;
+use codex_mcp::ResolvedMcpCatalog;
+use codex_plugin::PluginLoadOutcome;
 use codex_protocol::openai_models::ToolMode;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::tool_policy::ToolPolicyCeiling;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 impl CodexThread {
@@ -39,7 +43,7 @@ pub(crate) fn capture(init: &mut ExtensionDataInit, source: &SessionSource) -> A
         None => inherited,
     };
     // MCP receives this startup snapshot, never the mutable extension store.
-    init.insert(policy.as_ref().clone());
+    let _ = init.insert(policy.as_ref().clone());
     policy
 }
 
@@ -51,7 +55,7 @@ pub(crate) fn empty_router(policy: Arc<ToolPolicy>) -> Option<ToolRouter> {
         ToolRegistry::with_tool_policy(policy),
         Vec::new(),
         ToolMode::Direct,
-        Default::default(),
+        BTreeMap::default(),
         None,
         &[],
     ))
@@ -66,12 +70,12 @@ pub(crate) fn empty_mcp_projection(
         return None;
     }
     // No capability can use MCP: do not start even required servers or contributors.
-    let mut config = config.to_mcp_config_with_loaded_plugins(&Default::default(), []);
-    config.mcp_server_catalog = Default::default();
+    let mut config = config.to_mcp_config_with_loaded_plugins(&PluginLoadOutcome::default(), []);
+    config.mcp_server_catalog = ResolvedMcpCatalog::default();
     config.apps_enabled = false;
     Some(McpRuntimeProjection {
         config,
         plugins_available: false,
-        selected_plugins: Default::default(),
+        selected_plugins: SelectedPluginSnapshot::default(),
     })
 }

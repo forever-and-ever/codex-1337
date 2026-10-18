@@ -83,19 +83,19 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
     )
     .await;
     let saved_account = auth.selected_account_id().expect("saved ChatGPT account");
-    let (mut session, mut turn) = make_session_and_context().await;
+    let (mut session, mut turn) = Box::pin(make_session_and_context()).await;
     let mut config = turn.config.as_ref().clone();
     let mut openai = config.model_provider.clone();
     openai.base_url = Some(format!("{}/v1", server.uri()));
     openai.supports_websockets = false;
-    config.model_providers.insert("openai".into(), openai);
+    let _ = config.model_providers.insert("openai".into(), openai);
     config.model_provider_id = "claude_subscription".into();
     config.model_provider = ModelProviderInfo {
         adapter: ModelProviderAdapter::ClaudeSubscription,
         name: "Claude subscription".into(),
         ..Default::default()
     };
-    config.model_providers.insert(
+    let _ = config.model_providers.insert(
         config.model_provider_id.clone(),
         config.model_provider.clone(),
     );
@@ -141,12 +141,12 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
     .await;
     let context = GuardianReviewContext::from(Arc::new(turn));
     let session = Arc::new(session);
-    let route = ReviewerRoute::resolve(&session, &context).await;
+    let route = Box::pin(ReviewerRoute::resolve(&session, &context)).await;
     assert!(matches!(
         &route,
         ReviewerRoute::ChatgptAutoReview { account_id } if account_id == &saved_account
     ));
-    let (outcome, _) = run_guardian_review_session_before_deadline(
+    let (outcome, _) = Box::pin(run_guardian_review_session_before_deadline(
         session,
         context,
         GuardianApprovalRequest::ExecCommand {
@@ -168,7 +168,7 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
         /*external_cancel*/ None,
         Instant::now() + Duration::from_secs(15),
         &route,
-    )
+    ))
     .await;
     assert!(
         matches!(outcome, GuardianReviewOutcome::Completed(_)),
@@ -206,7 +206,8 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
     // A transport failure is not a verdict. The fallback must preserve the review's
     // route across retries, and an exhausted deadline must not consume its warning.
     for time_remains in [true, false] {
-        let (session, turn, rx) = crate::session::tests::make_session_and_context_with_rx().await;
+        let (session, turn, rx) =
+            Box::pin(crate::session::tests::make_session_and_context_with_rx()).await;
         let context = GuardianReviewContext::from(turn);
         let account_id = "reviewer-account".to_owned();
         let chosen = ReviewerRoute::ChatgptAutoReview {

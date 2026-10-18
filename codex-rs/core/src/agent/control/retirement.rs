@@ -1,10 +1,15 @@
 //! Retirement changes family membership, never conversation history.
-use super::*;
+use super::LocalAgentControl;
 use crate::state::ActiveTurn;
 use codex_agent_graph_store::AgentGraphStore;
 use codex_agent_graph_store::ThreadSpawnEdgeStatus;
+use codex_protocol::AgentPath;
+use codex_protocol::ThreadId;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result as CodexResult;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use tracing::warn;
 
 async fn retirement_descendants(
     root: ThreadId,
@@ -68,7 +73,7 @@ impl LocalAgentControl {
         caller: ThreadId,
         target: ThreadId,
     ) -> CodexResult<Vec<ThreadId>> {
-        let _lifecycle = self.runtime.lifecycle.write().await;
+        let lifecycle = self.runtime.lifecycle.write().await;
         let state = self.runtime.upgrade()?;
         let graph = state.agent_graph_store();
         let mut live_children = HashMap::<ThreadId, Vec<ThreadId>>::new();
@@ -153,9 +158,9 @@ impl LocalAgentControl {
         }
         drop(admission);
         for id in &ids {
-            state.remove_thread(id).await;
+            let _ = state.remove_thread(id).await;
         }
-        drop(_lifecycle);
+        drop(lifecycle);
         for thread in threads {
             let id = thread.session.thread_id;
             if let Err(error) = thread.shutdown_and_wait().await {

@@ -118,7 +118,7 @@ impl LocalAgentControl {
         {
             return replay(&request_id, &payload_sha256, record);
         }
-        let admitted = async {
+        let admitted = Box::pin(async {
             if spawn.config.ephemeral || parent.session.live_thread().is_none() {
                 return Err(FarmAttemptError::Preclaim(CodexErr::InvalidRequest(
                     "farm requires persistent parent and child conversations".into(),
@@ -129,7 +129,7 @@ impl LocalAgentControl {
                 .get_agent_path()
                 .unwrap_or_else(AgentPath::root);
             if let Some(name) = &task_name {
-                parent_path
+                let _ = parent_path
                     .join(name)
                     .map_err(CodexErr::InvalidRequest)
                     .map_err(FarmAttemptError::Preclaim)?;
@@ -194,7 +194,7 @@ impl LocalAgentControl {
                         return replay(&request_id, &payload_sha256, record)
                             .map_err(FarmAttemptError::Outcome);
                     }
-                    FarmRequestClaim::PathOccupied => continue,
+                    FarmRequestClaim::PathOccupied => {}
                     FarmRequestClaim::Claimed => {
                         let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_path, .. }) =
                             &mut spawn.source
@@ -207,17 +207,14 @@ impl LocalAgentControl {
                     }
                 }
             }
-            let reservation = match reserved {
-                Some(reservation) => reservation,
-                None => {
+            let Some(reservation) = reserved else {
                     return Err(FarmAttemptError::Preclaim(CodexErr::InvalidRequest(
                         "No available farm child path".into(),
                     )));
-                }
-            };
+                };
             let startup = Arc::new(SessionStartup::default());
             let startup_guard = SessionStartupGuard::new(Arc::clone(&startup));
-            let result = async {
+            let result = Box::pin(async {
                 parent
                     .session
                     .record_user_delegation(authorization)
@@ -228,7 +225,7 @@ impl LocalAgentControl {
                 let AgentInput::UserInput(input) = spawn.input else {
                     return Err(CodexErr::InvalidRequest("farm requires user input".into()));
                 };
-                let (child, _) = self
+                let (child, _) = Box::pin(self
                     .spawn_agent_reserved(
                         spawn.config,
                         SpawnInitialInput::UserInput(input),
@@ -238,7 +235,7 @@ impl LocalAgentControl {
                             reservation,
                             startup: Arc::clone(&startup),
                         },
-                    )
+                    ))
                     .await?;
                 // Successful construction has transferred lifetime to the child runtime.
                 startup.persistence.lock().await.commit();
@@ -271,7 +268,7 @@ impl LocalAgentControl {
                         CodexErr::Fatal(format!("could not accept farm receipt: {error}"))
                     })?;
                 Ok::<_, CodexErr>(receipt)
-            }
+            })
             .await;
             match result {
                 Ok(receipt) => Ok(receipt),
@@ -317,7 +314,7 @@ impl LocalAgentControl {
                     }))
                 }
             }
-        }
+        })
         .await;
         match admitted {
             Err(FarmAttemptError::Preclaim(error)) => {

@@ -381,7 +381,7 @@ fn census_exec(
 }
 
 /// Splits a description rendered by `codex_code_mode::build_exec_tool_description` at its
-/// nested tool headings: `### \`name\``, optionally followed by ` (\`raw name\`)`.
+/// nested tool headings: ``### `name` ``, optionally followed by `` (`raw name`)``.
 fn exec_sections(description: &str) -> (&str, Vec<(&str, &str)>) {
     let mut starts = Vec::new();
     let mut offset = 0;
@@ -469,6 +469,10 @@ impl CensusBudget {
         clippy::expect_used,
         reason = "tool declarations serialize as UTF-8 JSON; only our bounded writer may refuse"
     )]
+    #[expect(
+        clippy::panic,
+        reason = "Tool schemas have infallible JSON representations; CensusWriter reports its only recoverable error above"
+    )]
     fn serialized(&mut self, value: &impl Serialize) -> CensusCount {
         if self.bytes == 0 || self.calls == 0 {
             return CensusCount::Omitted(CensusOmission::WorkLimit);
@@ -513,6 +517,7 @@ impl std::io::Write for CensusWriter {
 
 /// Injected fragments open with a tag or a heading; anything else shows its first line.
 pub(super) fn context_label(text: &str) -> String {
+    const WIDTH: usize = 60;
     if text.starts_with("<instruction_diff>")
         && let Some(section) = text.lines().find_map(|line| {
             line.strip_prefix("--- ")
@@ -533,7 +538,6 @@ pub(super) fn context_label(text: &str) -> String {
     if let Some((tag, _)) = line.strip_prefix('<').and_then(|rest| rest.split_once('>')) {
         return tag.to_string();
     }
-    const WIDTH: usize = 60;
     match line.char_indices().nth(WIDTH) {
         Some((end, _)) => format!("{}…", &line[..end]),
         None => line.to_string(),

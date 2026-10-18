@@ -5,7 +5,7 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
-    let (session, turn, events) = make_session_and_context_with_rx().await;
+    let (session, turn, events) = Box::pin(make_session_and_context_with_rx()).await;
     let service = &session.services.code_mode_service;
     let start = service
         .transcript
@@ -185,19 +185,11 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
     let receiving_queue = Arc::new(tokio::sync::Mutex::new(crate::state::TurnState::default()));
     service
         .transcript
-        .notification(
-            owner.clone(),
-            "exec-1".into(),
-            Arc::downgrade(&receiving_queue),
-        )
+        .notification(&owner, "exec-1".into(), Arc::downgrade(&receiving_queue))
         .accepted();
     service
         .transcript
-        .notification(
-            owner.clone(),
-            "exec-1".into(),
-            Arc::downgrade(&receiving_queue),
-        )
+        .notification(&owner, "exec-1".into(), Arc::downgrade(&receiving_queue))
         .accepted();
     service
         .transcript
@@ -234,7 +226,7 @@ async fn early_terminal_and_late_capture_have_one_execution_lifetime() {
 
 #[tokio::test]
 async fn failed_allocation_closes_without_fabricating_a_runtime_cell() {
-    let (session, turn, events) = make_session_and_context_with_rx().await;
+    let (session, turn, events) = Box::pin(make_session_and_context_with_rx()).await;
     let service = &session.services.code_mode_service;
     service
         .transcript
@@ -290,7 +282,7 @@ async fn failed_allocation_closes_without_fabricating_a_runtime_cell() {
     reason = "the witness deliberately blocks admission while teardown must cancel its drain"
 )]
 async fn service_teardown_cancels_blocked_transcript_admission() {
-    let (session, turn, _) = make_session_and_context_with_rx().await;
+    let (session, turn, _) = Box::pin(make_session_and_context_with_rx()).await;
     let service = &session.services.code_mode_service;
     let starting = service
         .transcript

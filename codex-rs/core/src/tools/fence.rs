@@ -4,6 +4,7 @@
 //! published by the dispatch task, never by the response collector (which drains
 //! only after sampling ends). Dropping a dispatch fails its dependents closed.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -103,7 +104,7 @@ impl Admission {
     }
 
     pub(super) fn finish(&self, verdict: Verdict) {
-        self.completion.send_replace(Some(
+        let _ = self.completion.send_replace(Some(
             verdict.map_err(|reason| format!("{}: {reason}", self.call_id)),
         ));
     }
@@ -274,7 +275,7 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
             description: "Barrier for client-dispatched tool calls within this model response; provider-hosted tools are outside its scope. Calls before it must all finish successfully in the foreground before any call after it starts. Failure, rejection, cancellation, explicit backgrounding, or a yielded exec skips all following calls. Does not join background work or fence calls from earlier responses. Calls within each stage may run concurrently; use files for intermediate data. Takes {}.".into(),
             strict: true,
             defer_loading: None,
-            parameters: JsonSchema::object(Default::default(), Some(Vec::new()), Some(false.into())),
+            parameters: JsonSchema::object(BTreeMap::new(), Some(Vec::new()), Some(false.into())),
             output_schema: None,
         })
     }
@@ -283,6 +284,10 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
     where
         ToolInvocation: 'a,
     {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Empty {}
+
         Box::pin(async move {
             if matches!(
                 invocation.source,
@@ -295,10 +300,7 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
             let super::context::ToolPayload::Function { arguments } = invocation.payload else {
                 return Err(FunctionCallError::RespondToModel("fence expects {}".into()));
             };
-            #[derive(serde::Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct Empty {}
-            serde_json::from_str::<Empty>(&arguments)
+            let _ = serde_json::from_str::<Empty>(&arguments)
                 .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
             Ok(Box::new(FunctionToolOutput::from_text(
                 "Fence passed".into(),

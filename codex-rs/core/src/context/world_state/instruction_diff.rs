@@ -63,7 +63,7 @@ impl Entry {
         let (current, state, rendered) = match amendment {
             Amendment::Unified => {
                 let (state, full) = section.render_diff(PreviousSectionState::Absent);
-                let Some(current) = canonical(&full) else {
+                let Canonical::Instruction(current) = canonical(&full) else {
                     // Native declarations are not replaceable instruction text.
                     return section.render_diff(previous);
                 };
@@ -144,7 +144,7 @@ impl Entry {
                     .push(Text::from_fragment(fragment.as_ref()).fingerprint());
             }
         }
-        snapshot
+        let _ = snapshot
             .sections
             .insert(format!("{STATE_PREFIX}{id}"), revision.into_value());
         (state, updates)
@@ -158,7 +158,7 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        self.sections.insert(
+        let _ = self.sections.insert(
             id,
             Entry::Instruction(Box::new(section), Amendment::Unified),
         );
@@ -178,7 +178,9 @@ impl Authority {
             "user" => Self::User,
             "developer" => Self::Developer,
             "system" => Self::System,
-            _ => panic!("instruction section has non-instruction role: {role}"),
+            _ => unreachable!(
+                "instruction sections only have user, developer, or system authority, got {role}"
+            ),
         }
     }
 
@@ -299,21 +301,26 @@ pub(super) fn retire_missing(
             prior.lineage.push(removal.fingerprint());
             updates.push(WorldStateUpdate::fragment(removal));
         }
-        snapshot.sections.insert(key.clone(), prior.into_value());
+        let _ = snapshot.sections.insert(key.clone(), prior.into_value());
     }
     updates
 }
 
-fn canonical(updates: &[WorldStateUpdate]) -> Option<Option<Text>> {
+enum Canonical {
+    Opaque,
+    Instruction(Option<Text>),
+}
+
+fn canonical(updates: &[WorldStateUpdate]) -> Canonical {
     match updates {
-        [] => Some(None),
+        [] => Canonical::Instruction(None),
         [
             WorldStateUpdate {
                 content: WorldStateUpdateContent::Fragment(fragment),
                 ..
             },
-        ] => Some(Some(Text::from_fragment(fragment.as_ref()))),
-        _ => None,
+        ] => Canonical::Instruction(Some(Text::from_fragment(fragment.as_ref()))),
+        _ => Canonical::Opaque,
     }
 }
 

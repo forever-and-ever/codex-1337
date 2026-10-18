@@ -222,7 +222,7 @@ impl CodexThread {
             let mut state = watches.lock();
             match &mut *state {
                 WatchState::Open(watchers) => {
-                    watchers.insert(
+                    let _ = watchers.insert(
                         id,
                         Watcher {
                             pattern: pattern.clone(),
@@ -253,7 +253,7 @@ impl CodexThread {
 impl Drop for TerminalWatch {
     fn drop(&mut self) {
         if let WatchState::Open(watchers) = &mut *self.watches.lock() {
-            watchers.remove(&self.id);
+            let _ = watchers.remove(&self.id);
         }
     }
 }

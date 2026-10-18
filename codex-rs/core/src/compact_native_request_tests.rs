@@ -58,7 +58,8 @@ async fn unusable_completions_record_usage_and_name_their_rung_escalation() {
             },
         )
     };
-    let (sess, context, rx) = crate::session::tests::make_session_and_context_with_rx().await;
+    let (sess, context, rx) =
+        Box::pin(crate::session::tests::make_session_and_context_with_rx()).await;
     for (stop_reason, refused) in [
         ("model_context_window_exceeded", true),
         ("max_tokens", false),

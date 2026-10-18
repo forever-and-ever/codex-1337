@@ -45,7 +45,7 @@ fn conversation_name(adapter: ModelProviderAdapter) -> &'static str {
 impl ChatgptDelegate {
     pub(crate) fn install(session: &Arc<Session>, config: &Config) {
         if config.model_provider.adapter.borrows_chatgpt() {
-            session
+            let _ = session
                 .services
                 .thread_extension_data
                 .insert(Self(Arc::downgrade(session)));
@@ -58,7 +58,7 @@ impl ChatgptDelegate {
             .upgrade()
             .ok_or(ChatgptDelegateError::ConversationUnavailable)?;
         let config = session.get_config().await;
-        let (candidate, auth, manager) = borrow_chatgpt(&session, &config).await?;
+        let (candidate, auth, manager) = Box::pin(borrow_chatgpt(&session, &config)).await?;
         let model = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
             manager
                 .list_models(

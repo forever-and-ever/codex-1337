@@ -136,7 +136,7 @@ impl Drop for ChildLease {
             if state.aliases.get(&self.call).is_some_and(|alias| {
                 matches!(alias.lifetime, AliasLifetime::Child) && !alias.pending_process
             }) {
-                state.aliases.remove(&self.call);
+                let _ = state.aliases.remove(&self.call);
             }
             registry.cleanup_needed.notify_one();
         }
@@ -145,25 +145,23 @@ impl Drop for ChildLease {
 
 impl ExecutionStart {
     pub(super) fn scope(&self) -> Arc<ExecutionScope> {
-        Arc::clone(
-            self.0
-                .as_ref()
-                .unwrap_or_else(|| panic!("execution start was transferred")),
-        )
+        Arc::clone(self.0.as_ref().unwrap_or_else(|| {
+            unreachable!("an execution start owns its scope until allocated consumes the start")
+        }))
     }
 
     pub(super) async fn allocated(mut self, cell: &CellId) {
         let scope = self.scope();
         scope.allocate(cell);
         scope.record(&scope.turn, CodeModeEvent::Allocated).await;
-        scope.allocated.send_replace(true);
-        self.0.take();
+        let _ = scope.allocated.send_replace(true);
+        let _ = self.0.take();
     }
 
     pub(super) async fn failed(self) {
         let scope = self.scope();
         scope.finish(CodeModeStatus::Failed);
-        scope.allocated.send_replace(true);
+        let _ = scope.allocated.send_replace(true);
         scope.terminal_admitted().await;
     }
 }
@@ -172,7 +170,7 @@ impl Drop for ExecutionStart {
     fn drop(&mut self) {
         if let Some(scope) = self.0.take() {
             scope.abandon();
-            scope.allocated.send_replace(true);
+            let _ = scope.allocated.send_replace(true);
         }
     }
 }
@@ -191,10 +189,10 @@ impl TranscriptRegistry {
         shutdown: CancellationToken,
     ) -> ExecutionStart {
         let draining_shutdown = shutdown.clone();
-        self.cleanup_started.get_or_init(|| {
+        let () = self.cleanup_started.get_or_init(|| {
             let registry = Arc::downgrade(self);
             let cleanup_needed = Arc::clone(&self.cleanup_needed);
-            self.tasks.spawn(async move {
+            drop(self.tasks.spawn(async move {
                 loop {
                     tokio::select! {
                         () = shutdown.cancelled() => break,
@@ -226,10 +224,12 @@ impl TranscriptRegistry {
                         }
                     }
                 }
-            });
+            }));
         });
-        let thread_id = session
-            .upgrade().map_or_else(|| panic!("execution requires its owning session"), |session| session.thread_id);
+        let thread_id = session.upgrade().map_or_else(
+            || unreachable!("execution admission runs under its live owning session"),
+            |session| session.thread_id,
+        );
         let scope = Arc::new(ExecutionScope {
             owner: Mutex::new(CodeModeOwner {
                 thread_id,
@@ -248,7 +248,8 @@ impl TranscriptRegistry {
             allocated: watch::channel(false).0,
             admitted: watch::channel(false).0,
         });
-        self.state
+        let _ = self
+            .state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .active
@@ -264,7 +265,7 @@ impl TranscriptRegistry {
         );
         let starting = ExecutionStart(Some(Arc::clone(&scope)));
         let draining = Arc::clone(&scope);
-        self.tasks.spawn(async move {
+        drop(self.tasks.spawn(async move {
             let admission = async {
                 draining
                     .record(
@@ -275,7 +276,7 @@ impl TranscriptRegistry {
                         },
                     )
                     .await;
-                draining.opened.send_replace(true);
+                let _ = draining.opened.send_replace(true);
                 let _ = draining
                     .allocated
                     .subscribe()
@@ -320,7 +321,7 @@ impl TranscriptRegistry {
                 () = admission => {},
             }
             if let Some(registry) = draining.registry.upgrade() {
-                registry
+                let _ = registry
                     .state
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
@@ -328,10 +329,10 @@ impl TranscriptRegistry {
                     .remove(&draining.owner().exec_call_id);
                 registry.cleanup_needed.notify_one();
             }
-            draining.opened.send_replace(true);
-            draining.allocated.send_replace(true);
-            draining.admitted.send_replace(true);
-        });
+            let _ = draining.opened.send_replace(true);
+            let _ = draining.allocated.send_replace(true);
+            let _ = draining.admitted.send_replace(true);
+        }));
         let _ = scope.opened.subscribe().wait_for(|opened| *opened).await;
         starting
     }
@@ -343,7 +344,8 @@ impl TranscriptRegistry {
         turn: &Arc<TurnContext>,
         lifetime: AliasLifetime,
     ) {
-        self.state
+        let _ = self
+            .state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .aliases
@@ -413,12 +415,12 @@ impl TranscriptRegistry {
                 CaptureOrigin::Returned => *returned = true,
                 CaptureOrigin::Notification => {
                     *notifications = notifications.checked_sub(1).unwrap_or_else(|| {
-                        panic!("notification capture requires its admitted lease")
+                        unreachable!("each notification release consumes one previously admitted capture lease")
                     });
                 }
             }
             if *returned && *notifications == 0 {
-                state.aliases.remove(call);
+                let _ = state.aliases.remove(call);
             }
         }
         self.cleanup_needed.notify_one();
@@ -431,7 +433,7 @@ impl TranscriptRegistry {
             .get(call)
             .is_some_and(|alias| matches!(alias.lifetime, AliasLifetime::Child))
         {
-            state.aliases.remove(call);
+            let _ = state.aliases.remove(call);
         }
         self.cleanup_needed.notify_one();
     }
@@ -473,9 +475,9 @@ impl TranscriptRegistry {
             .collect::<Vec<_>>();
         for scope in scopes {
             scope.finish(CodeModeStatus::Interrupted);
-            scope.allocated.send_replace(true);
+            let _ = scope.allocated.send_replace(true);
         }
-        self.tasks.close();
+        let _ = self.tasks.close();
         self.tasks.wait().await;
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         state.active.clear();
@@ -506,7 +508,7 @@ impl ExecutionScope {
                 .state
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            state.cells.insert(cell.clone(), Arc::downgrade(self));
+            let _ = state.cells.insert(cell.clone(), Arc::downgrade(self));
             for alias in state.aliases.values_mut() {
                 if alias.owner.exec_call_id == owner.exec_call_id {
                     alias.owner = owner.clone();
@@ -582,7 +584,7 @@ impl ExecutionScope {
 impl TranscriptRegistry {
     pub(super) fn notification(
         self: &Arc<Self>,
-        owner: CodeModeOwner,
+        owner: &CodeModeOwner,
         call: String,
         queue: Weak<tokio::sync::Mutex<crate::state::TurnState>>,
     ) -> NotificationLease {
@@ -615,7 +617,7 @@ impl TranscriptRegistry {
             "conflicting capture ownership"
         );
         let AliasLifetime::Capture { notifications, .. } = &mut alias.lifetime else {
-            panic!("notification cannot borrow a child alias")
+            unreachable!("notifications capture only exec/wait aliases, never nested child calls")
         };
         *notifications += 1;
         alias.anchor = CaptureAnchor::Queue(queue);

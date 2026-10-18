@@ -7,13 +7,14 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::HashSet;
 
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix_atomically() {
-    let (session, context) = make_session_and_context().await;
+    let (session, context) = Box::pin(make_session_and_context()).await;
     let session = Arc::new(session);
     let context = Arc::new(context);
     let step = session
@@ -46,7 +47,7 @@ async fn native_checkpoint_swap_retains_concurrent_tail_and_rejects_stale_prefix
     }))
     .unwrap();
     let metadata = || CompactedHistoryMetadata {
-        input_goal_ids: Default::default(),
+        input_goal_ids: HashSet::default(),
         source_history: Some(source.clone()),
         message: String::new(),
         window: CompactionWindow::Advance,

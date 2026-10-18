@@ -18,7 +18,7 @@ impl Session {
         item: ResponseItemEnvelope,
     ) -> Result<(), Box<ResponseItemEnvelope>> {
         let ResponseItem::CustomToolCallOutput { call_id, .. } = &item.item else {
-            panic!("Code Mode notification requires its existing custom output payload");
+            unreachable!("Code Mode notify constructs its custom output payload before injection");
         };
         let mut active = self.active_turn.lock().await;
         let Some(active) = active.as_mut() else {
