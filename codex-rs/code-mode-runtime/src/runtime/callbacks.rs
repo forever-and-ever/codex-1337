@@ -43,7 +43,7 @@ pub(super) fn tool_callback(
             return;
         };
         // Input serialization can call exit() from a getter or toJSON.
-        if state.exit_requested {
+        if state.exit_requested.is_some() {
             return;
         }
         let Some(tool) = state.enabled_tools.get(tool_index) else {
@@ -95,19 +95,37 @@ pub(super) fn text_callback(
     } else {
         args.get(0)
     };
-    let text = match serialize_text(scope, value, args.get(1)) {
-        Ok((text, _)) => text,
+    let options = match super::native_result::text_options(scope, args.get(1)) {
+        Ok(options) => options,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
             return;
         }
     };
+    let max_tokens = options.max_tokens;
+    let mut sections =
+        match super::native_result::serialize_text_sections(scope, value, options.metadata) {
+            Ok((sections, _)) => sections,
+            Err(error_text) => {
+                throw_type_error(scope, &error_text);
+                return;
+            }
+        };
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-            FunctionCallOutputContentItem::InputText { text },
-        ));
+        let item = if sections.len() == 1 {
+            FunctionCallOutputContentItem::InputText {
+                text: sections.remove(0),
+                max_tokens,
+            }
+        } else {
+            FunctionCallOutputContentItem::InputTextBatch {
+                sections,
+                max_tokens,
+            }
+        };
+        let _ = state.event_tx.send(RuntimeEvent::ContentItem(item));
     }
     retval.set(v8::undefined(scope).into());
 }
@@ -127,7 +145,7 @@ pub(super) fn audio_callback(
         Err(()) => return,
     };
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(audio_item));
     }
@@ -162,7 +180,7 @@ pub(super) fn image_callback(
         Err(()) => return,
     };
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
     }
@@ -191,12 +209,15 @@ pub(super) fn generated_image_callback(
         Err(()) => return,
     };
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
         if let Some(text) = output_hint {
             let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-                FunctionCallOutputContentItem::InputText { text },
+                FunctionCallOutputContentItem::InputText {
+                    text,
+                    max_tokens: None,
+                },
             ));
         }
     }
@@ -251,7 +272,7 @@ pub(super) fn store_callback(
         }
     };
     if let Some(state) = scope.get_slot_mut::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let serialized = Arc::new(serialized);
         state
@@ -298,7 +319,18 @@ pub(super) fn notify_callback(
     } else {
         args.get(0)
     };
-    let (text, native_execution) = match serialize_text(scope, value, args.get(1)) {
+    let options = match super::native_result::text_options(scope, args.get(1)) {
+        Ok(options) => options,
+        Err(error_text) => {
+            throw_type_error(scope, &error_text);
+            return;
+        }
+    };
+    if options.max_tokens.is_some() {
+        throw_type_error(scope, "max_tokens is only supported by text, not notify");
+        return;
+    }
+    let (text, native_execution) = match serialize_text(scope, value, options.metadata) {
         Ok(output) => output,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
@@ -310,7 +342,7 @@ pub(super) fn notify_callback(
         return;
     }
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::Notify {
             call_id: state.tool_call_id.clone(),
@@ -356,7 +388,7 @@ pub(super) fn yield_control_callback(
     _retval: v8::ReturnValue<v8::Value>,
 ) {
     if let Some(state) = scope.get_slot::<RuntimeState>()
-        && !state.exit_requested
+        && state.exit_requested.is_none()
     {
         let _ = state.event_tx.send(RuntimeEvent::YieldRequested);
     }
@@ -368,7 +400,23 @@ pub(super) fn exit_callback(
     _retval: v8::ReturnValue<v8::Value>,
 ) {
     if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
-        state.exit_requested = true;
+        state.exit_requested.get_or_insert(Ok(()));
+    }
+    scope.terminate_execution();
+}
+
+pub(super) fn fail_callback(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments,
+    _retval: v8::ReturnValue<v8::Value>,
+) {
+    if !args.get(0).is_string() {
+        throw_type_error(scope, "fail expects a message string");
+        return;
+    }
+    let message = args.get(0).to_rust_string_lossy(scope);
+    if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
+        state.exit_requested.get_or_insert(Err(message));
     }
     scope.terminate_execution();
 }

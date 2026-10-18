@@ -68,7 +68,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
             ExecuteRequest {
                 enabled_tools: vec![echo_tool()],
                 source: r#"await tools.echo({}); text("done");"#.to_string(),
-                yield_time_ms: Some(60_000),
+                yield_time_ms: Some(3_600_000),
                 ..execute_request("")
             },
             delegate.clone(),
@@ -97,7 +97,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
                 .wait(
                     WaitRequest {
                         cell_id: cell_id("1"),
-                        yield_time_ms: 60_000,
+                        yield_time_ms: 3_600_000,
                     },
                     Some(wait_signal),
                 )
@@ -124,7 +124,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
                 .wait(
                     WaitRequest {
                         cell_id: cell_id("1"),
-                        yield_time_ms: 60_000,
+                        yield_time_ms: 3_600_000,
                     },
                     /*preempt*/ None,
                 )
@@ -137,6 +137,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -171,6 +172,7 @@ async fn execute_waits_for_nested_tool_during_yield_grace() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -252,6 +254,7 @@ async fn execute_and_wait_clamp_yield_grace_without_stopping_the_cell() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -304,6 +307,7 @@ async fn wait_waits_for_nested_tool_during_yield_grace() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -570,6 +574,7 @@ async fn synchronous_exit_returns_successfully() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
             error_text: None,
@@ -579,7 +584,7 @@ async fn synchronous_exit_returns_successfully() {
 
 #[tokio::test]
 async fn exit_stops_the_whole_cell_and_preserves_only_prior_writes() {
-    for (label, source) in [
+    let sources = [
         ("exit inside infinite loop", r#"for (;;) { exit(); }"#),
         ("infinite loop after exit", r#"exit(); for (;;) {}"#),
         (
@@ -642,7 +647,14 @@ throw {
     toString() { for (;;) {} }
 };"#,
         ),
-    ] {
+    ];
+    for (label, source, failure) in sources.into_iter().flat_map(|(label, source)| {
+        [None, Some("producer failed")].map(move |failure| (label, source, failure))
+    }) {
+        let source = match failure {
+            Some(message) => source.replace("exit()", &format!("fail({message:?})")),
+            None => source.to_owned(),
+        };
         let service = InProcessCodeModeSession::new();
         let response = tokio::time::timeout(
             Duration::from_secs(5),
@@ -665,9 +677,10 @@ throw {
                 code_mode_host_duration: None,
                 cell_id: cell_id("1"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "before".to_string(),
                 }],
-                error_text: None,
+                error_text: failure.map(str::to_owned),
             },
             "{label}"
         );
@@ -686,6 +699,7 @@ throw {
                 code_mode_host_duration: None,
                 cell_id: cell_id("2"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "before".to_string(),
                 }],
                 error_text: None,
@@ -730,6 +744,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before yield".to_string(),
             }],
         }
@@ -750,6 +765,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after tool".to_string(),
             }],
             error_text: None,
@@ -768,6 +784,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after tool".to_string(),
             }],
             error_text: None,
@@ -824,6 +841,7 @@ async fn stored_values_are_shared_between_cells_but_not_sessions() {
             code_mode_host_duration: None,
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "visible".to_string(),
             }],
             error_text: None,
@@ -835,6 +853,7 @@ async fn stored_values_are_shared_between_cells_but_not_sessions() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "undefined".to_string(),
             }],
             error_text: None,
@@ -872,10 +891,12 @@ text(load("key"));
             cell_id: cell_id("1"),
             content_items: vec![
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "Unable to store \"key\". Only plain serializable objects can be stored."
                         .to_string(),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "null".to_string(),
                 },
             ],
@@ -975,6 +996,7 @@ store("healthy", {[keys[0]]: "null"});
             (content_items, error_text),
             (
                 vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: expected_text.to_string()
                 }],
                 expected_error.map(str::to_string)
@@ -1053,6 +1075,7 @@ async fn execute_to_pending_returns_completed_for_synchronous_results() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -1084,6 +1107,7 @@ async fn execute_to_pending_returns_once_the_runtime_is_quiescent() {
         ExecuteToPendingOutcome::Pending {
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
             pending_tool_call_ids: Vec::new(),
@@ -1263,6 +1287,7 @@ await new Promise(() => {});
         WaitToPendingOutcome::LiveCell(ExecuteToPendingOutcome::Pending {
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after".to_string(),
             }],
             pending_tool_call_ids: Vec::new(),
@@ -1331,6 +1356,7 @@ text("done");
                 code_mode_host_duration: None,
                 cell_id: cell_id("1"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "done".to_string(),
                 }],
                 error_text: None,
@@ -1395,6 +1421,14 @@ async fn global_scope_contains_only_allowed_items() {
             ..echo_tool()
         },
     ));
+    enabled_tools.push(codex_code_mode_protocol::augment_tool_definition(
+        ToolDefinition {
+            name: "other_echo".to_string(),
+            tool_name: ToolName::plain("other.echo"),
+            description: "Dotted spelling collision".to_string(),
+            ..echo_tool()
+        },
+    ));
     let metadata = enabled_tools
         .iter()
         .cloned()
@@ -1411,6 +1445,73 @@ async fn global_scope_contains_only_allowed_items() {
             ExecuteRequest {
                 enabled_tools,
                 source: r#"
+// These cases cross JS/native boundaries, including decoder state across calls.
+const equal = (actual, expected) => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(JSON.stringify({actual, expected}));
+  }
+};
+const rejects = (run, name) => {
+  try { run(); } catch (error) { equal(error.name, name); return; }
+  throw new Error(`Expected ${name}`);
+};
+const encoder = new TextEncoder();
+equal(Array.from(encoder.encode("A😀\ud800é")), [65,240,159,152,128,239,191,189,195,169]);
+equal(encoder.encode(undefined).length, 0);
+const destination = new Uint8Array(7).fill(42);
+equal(encoder.encodeInto("😀éZ", destination.subarray(1,6)), {read:2,written:4});
+equal(Array.from(destination), [42,240,159,152,128,42,42]);
+equal(encoder.encodeInto("é", new Uint8Array(1)), {read:0,written:0});
+equal(encoder.encodeInto("\ud800", new Uint8Array(3)), {read:1,written:3});
+rejects(() => encoder.encodeInto("x", new Uint16Array(4)), "TypeError");
+rejects(() => encoder.encode(Symbol()), "TypeError");
+const decoder = new TextDecoder("  UtF-8 ");
+equal(decoder.encoding, "utf-8");
+equal([decoder.fatal,decoder.ignoreBOM], [false,false]);
+equal(decoder.decode(new Uint8Array([239]), {stream:true}), "");
+equal(decoder.decode(new Uint8Array([187,191,240,159]), {stream:true}), "");
+equal(decoder.decode(new Uint8Array([152,128])), "😀");
+equal(decoder.decode(new Uint8Array([239,187,191,65])), "A");
+equal(new TextDecoder("utf-8", {ignoreBOM:true}).decode(new Uint8Array([239,187,191,65])), "\ufeffA");
+equal(decoder.decode(new Uint8Array([226]), {stream:true}), "");
+equal(decoder.decode(), "�");
+equal(decoder.decode(new Uint8Array([192,175])), "��");
+const fatal = new TextDecoder("utf-8", {fatal:true});
+equal(fatal.decode(new Uint8Array([226]), {stream:true}), "");
+rejects(() => fatal.decode(), "TypeError");
+equal(fatal.decode(encoder.encode("recovered")), "recovered");
+rejects(() => fatal.decode(new Uint8Array([239,187,191,255]), {stream:true}), "TypeError");
+equal(fatal.decode(new Uint8Array([239,187,191,65])), "A");
+const latin = new TextDecoder("latin1");
+equal(latin.encoding, "windows-1252");
+equal(latin.decode(new Uint8Array([128,233])), "€é");
+const utf16 = new TextDecoder("utf-16le");
+equal(utf16.decode(new Uint8Array([255]), {stream:true}), "");
+equal(utf16.decode(new Uint8Array([254,61,216]), {stream:true}), "");
+equal(utf16.decode(new Uint8Array([0,222])), "😀");
+const jis = new TextDecoder("iso-2022-jp");
+equal(jis.decode(new Uint8Array([27,36]), {stream:true}), "");
+equal(jis.decode(new Uint8Array([66,36]), {stream:true}), "");
+equal(jis.decode(new Uint8Array([34,27,40,66])), "あ");
+const viewed = new Uint8Array([42,195,169,42]);
+equal(decoder.decode(new DataView(viewed.buffer,1,2)), "é");
+equal(decoder.decode(viewed.subarray(1,3)), "é");
+equal(decoder.decode(encoder.encode("buffer").buffer), "buffer");
+rejects(() => decoder.decode(null), "TypeError");
+rejects(() => new TextDecoder("replacement"), "RangeError");
+rejects(() => new TextDecoder("not-an-encoding"), "RangeError");
+equal(btoa("\x00\x80\xff"), "AID/");
+equal(atob(" \tAI\nD/\r"), "\x00\x80\xff");
+equal([atob("Zg"),atob("Zg=="),atob("Zh==")], ["f","f","f"]);
+equal(atob(""), "");
+for (const invalid of ["A", "Zg=", "Zg===", "Zg==x", "Zg-_", "\u00a0Zg=="]) {
+  rejects(() => atob(invalid), "InvalidCharacterError");
+}
+rejects(() => btoa("€"), "InvalidCharacterError");
+rejects(() => btoa("\ud800"), "InvalidCharacterError");
+rejects(() => atob(), "TypeError");
+equal(Object.prototype.toString.call(encoder), "[object TextEncoder]");
+equal(Object.prototype.toString.call(decoder), "[object TextDecoder]");
 text(Object.getOwnPropertyNames(globalThis).sort());
 const page = search_tools("ECHO", {namespace: "mcp__sample"});
 text(page);
@@ -1425,6 +1526,9 @@ text(ALL_TOOLS.find(tool => tool.name === page.matches[0].name));
 text(describe_tool(page.matches[0].name));
 text(describe_tool(page.matches[0].name, {detail: "output"}));
 text(describe_tool(page.matches[0].name, {detail: "contract"}));
+text(describe_tool("tools." + page.matches[0].name));
+text(describe_tool("tools.mcp__sample.echo_00"));
+text(describe_tool("mcp__sample__.echo-00"));
 text(describe_tool("other__echo", {detail: "output"}));
 text(describe_tool(page.matches[0].name, {detail: "schema"}));
 text(await tools[page.matches[0].name]({message: "same input"}));
@@ -1434,6 +1538,17 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
       () => describe_tool(page.matches[0].name, {output: true})].map(run => {
     try {run(); return false;} catch {return true;}
 }));
+text([
+    describe_tool("other_echo") === describe_tool("tools.other_echo"),
+    typeof tools["other.echo"],
+    ...["other.echo", "other__ech"].map(name => {
+        try {describe_tool(name); return false;}
+        catch (error) {
+            return String(error).includes("Did you mean:")
+                && String(error).includes("other__echo");
+        }
+    })
+]);
 "#
                 .to_string(),
                 yield_time_ms: None,
@@ -1456,7 +1571,7 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
     else {
         panic!("global scope inspection failed unexpectedly: {response:?}");
     };
-    let Some(FunctionCallOutputContentItem::InputText { text }) = content_items.first() else {
+    let Some(FunctionCallOutputContentItem::InputText { text, .. }) = content_items.first() else {
         panic!("global scope inspection returned unexpected output: {content_items:?}");
     };
     let globals = serde_json::from_str::<Vec<String>>(text)
@@ -1506,6 +1621,8 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
         "Symbol",
         "SyntaxError",
         "Temporal",
+        "TextDecoder",
+        "TextEncoder",
         "TypeError",
         "URIError",
         "Uint16Array",
@@ -1519,6 +1636,8 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
         "add_content",
         "as_settled",
         "audio",
+        "atob",
+        "btoa",
         "decodeURI",
         "decodeURIComponent",
         "describe_tool",
@@ -1527,6 +1646,7 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
         "escape",
         "exit",
         "eval",
+        "fail",
         "generatedImage",
         "globalThis",
         "image",
@@ -1563,7 +1683,7 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
     let actual = content_items[1..]
         .iter()
         .map(|item| {
-            let FunctionCallOutputContentItem::InputText { text } = item else {
+            let FunctionCallOutputContentItem::InputText { text, .. } = item else {
                 panic!("unexpected discovery output: {item:?}");
             };
             serde_json::from_str::<JsonValue>(text).unwrap_or_else(|_| serde_json::json!(text))
@@ -1584,10 +1704,14 @@ text([() => describe_tool("missing"), () => search_tools("", {limit: 0}),
             serde_json::json!(full_description),
             serde_json::json!(output_description),
             serde_json::json!(full_description),
+            serde_json::json!(full_description),
+            serde_json::json!(full_description),
+            serde_json::json!(full_description),
             serde_json::json!("other__echo: no declared output schema"),
             schemas,
             JsonValue::Null,
             serde_json::json!([true, true, true, true, true]),
+            serde_json::json!([true, "undefined", true, true]),
         ]
     );
     assert!(metadata[0]["description"].as_str().unwrap().chars().count() <= 160);
@@ -1613,6 +1737,7 @@ async fn v8_console_is_not_exposed_on_global_this() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "false".to_string(),
             }],
             error_text: None,
@@ -1654,6 +1779,7 @@ text(value);
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "jeudi 2 janvier \u{e0} 03:04:05".to_string(),
             }],
             error_text: None,
@@ -1694,6 +1820,7 @@ text(formatter.format(new Date("2025-01-02T03:04:05Z")));
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "jeudi 2 janvier \u{e0} 03:04:05".to_string(),
             }],
             error_text: None,
@@ -1731,6 +1858,7 @@ text(JSON.stringify(returnsUndefined));
             cell_id: cell_id("1"),
             content_items: vec![
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "first".to_string(),
                 },
                 FunctionCallOutputContentItem::InputImage {
@@ -1741,6 +1869,7 @@ text(JSON.stringify(returnsUndefined));
                     audio_url: "data:audio/wav;base64,YXVkaW8=".to_string(),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "[true,true,true,true]".to_string(),
                 },
             ],
@@ -1769,6 +1898,7 @@ async fn text_helper_serializes_objects() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: r#"{"json":true}"#.to_string(),
             }],
             error_text: None,
@@ -1968,6 +2098,7 @@ generatedImage({
                     detail: Some(crate::DEFAULT_IMAGE_DETAIL),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "generated image save hint".to_string(),
                 },
             ],

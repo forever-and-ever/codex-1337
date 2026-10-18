@@ -120,8 +120,8 @@ impl Drop for Admission {
     }
 }
 
-/// One call and its nested work share an irreversible fence verdict. Catching a
-/// JavaScript exception does not erase a failed prerequisite or background work.
+/// A foreground call owns its verdict. Nested work contributes lifetime and
+/// detachment, while handled tool errors remain data for the enclosing cell.
 #[derive(Clone, Default)]
 pub(crate) struct Prerequisite(Arc<Mutex<CallState>>);
 
@@ -135,6 +135,11 @@ impl Default for CallState {
     fn default() -> Self {
         Self::Foreground(0)
     }
+}
+
+enum Dispatch {
+    Direct(Prerequisite),
+    Nested(Prerequisite),
 }
 
 pub(crate) struct CallMember(Option<Prerequisite>);
@@ -165,16 +170,20 @@ impl Drop for CallMember {
 }
 
 tokio::task_local! {
-    static CURRENT_CALL: Prerequisite;
+    static CURRENT_CALL: Dispatch;
 }
 
 impl Prerequisite {
     pub(crate) fn current() -> Self {
-        CURRENT_CALL.try_with(Clone::clone).unwrap_or_default()
+        CURRENT_CALL
+            .try_with(|dispatch| match dispatch {
+                Dispatch::Direct(call) | Dispatch::Nested(call) => call.clone(),
+            })
+            .unwrap_or_default()
     }
 
     pub(crate) fn enter<T>(&self, f: impl FnOnce() -> T) -> T {
-        CURRENT_CALL.sync_scope(self.clone(), f)
+        CURRENT_CALL.sync_scope(Dispatch::Nested(self.clone()), f)
     }
 
     pub(super) async fn run(
@@ -183,26 +192,38 @@ impl Prerequisite {
         cancellation: CancellationToken,
         future: impl Future<Output = Result<super::registry::AnyToolResult, FunctionCallError>>,
     ) -> Result<super::registry::AnyToolResult, FunctionCallError> {
+        let dispatch = if admission.is_some() {
+            Dispatch::Direct(self.clone())
+        } else {
+            Dispatch::Nested(self.clone())
+        };
         let result = async {
             if let Some(admission) = admission.as_mut() {
                 admission.wait().or_cancel_tool(&cancellation).await??;
             }
-            CURRENT_CALL.scope(self.clone(), future).await
+            CURRENT_CALL.scope(dispatch, future).await
         }
         .await;
-        let verdict = self.finish(
-            result
-                .as_ref()
-                .is_ok_and(|result| result.result.success_for_logging()),
-        );
+        let failed =
+            cancellation.is_cancelled() || matches!(&result, Err(FunctionCallError::Fatal(_)));
         if let Some(admission) = &admission {
-            admission.finish(verdict);
+            admission.finish(
+                self.finish(
+                    !failed
+                        && result
+                            .as_ref()
+                            .is_ok_and(|result| result.result.success_for_logging()),
+                ),
+            );
+        } else if failed {
+            let _ = self.finish(/*success*/ false);
         }
         result
     }
 
     pub(crate) fn detached() {
-        let _ = CURRENT_CALL.try_with(|call| {
+        let _ = CURRENT_CALL.try_with(|dispatch| {
+            let (Dispatch::Direct(call) | Dispatch::Nested(call)) = dispatch;
             *call
                 .0
                 .lock()
@@ -243,8 +264,16 @@ impl Prerequisite {
         if result.process_id.is_some() {
             Self::detached();
         } else if result.exit_code.is_some_and(|code| code != 0) {
-            let _ = Self::current().finish(/*success*/ false);
+            Self::direct_failure();
         }
+    }
+
+    pub(crate) fn direct_failure() {
+        let _ = CURRENT_CALL.try_with(|dispatch| {
+            if let Dispatch::Direct(call) = dispatch {
+                let _ = call.finish(/*success*/ false);
+            }
+        });
     }
 }
 
@@ -275,7 +304,7 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
     fn spec(&self) -> ToolSpec {
         ToolSpec::Function(ResponsesApiTool {
             name: "fence".into(),
-            description: "Barrier for client-dispatched tool calls within this model response; provider-hosted tools are outside its scope. Calls before it must all finish successfully in the foreground before any call after it starts. Failure, rejection, cancellation, explicit backgrounding, or a yielded exec skips all following calls. Does not join background work or fence calls from earlier responses. Calls within each stage may run concurrently; use files for intermediate data. Takes {}.".into(),
+            description: "Barrier for client-dispatched tool calls within this model response; provider-hosted tools are outside its scope. Calls before it must all finish successfully in the foreground before any call after it starts. A cell succeeds on its own successful foreground completion: caught tool errors and handled nonzero exits do not fail it. Inspect collected outcomes and call fail(message) when they must reject the stage. Uncaught errors, failed direct tools, rejection, cancellation, lost dispatch, unawaited work, explicit backgrounding, or a yielded exec skip all following calls. Does not join background work or fence calls from earlier responses. Calls within each stage may run concurrently; use files for intermediate data. Takes {}.".into(),
             strict: true,
             defer_loading: None,
             parameters: JsonSchema::object(BTreeMap::new(), Some(Vec::new()), Some(false.into())),

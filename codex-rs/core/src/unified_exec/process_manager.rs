@@ -448,40 +448,31 @@ fn terminate_process_on_network_denial(
 }
 
 impl UnifiedExecProcessManager {
+    #[expect(
+        clippy::expect_used,
+        reason = "process identities cannot wrap without aliasing an old terminal"
+    )]
     pub(crate) async fn allocate_process_id(&self) -> i32 {
-        loop {
-            let mut store = self.process_store.lock().await;
-
-            let process_id = if should_use_deterministic_process_ids() {
-                // test or deterministic mode
-                store
-                    .reserved_process_ids
-                    .iter()
-                    .copied()
-                    .max()
-                    .map(|m| std::cmp::max(m, 999) + 1)
-                    .unwrap_or(1000)
+        let mut store = self.process_store.lock().await;
+        let last = store.last_process_id.unwrap_or_else(|| {
+            if should_use_deterministic_process_ids() {
+                999
             } else {
-                // production mode → random
-                rand::rng().random_range(1_000..100_000)
-            };
-
-            if store.reserved_process_ids.contains(&process_id) {
-                continue;
+                rand::rng().random_range(999..100_000)
             }
-
-            store.reserved_process_ids.insert(process_id);
-            return process_id;
-        }
+        });
+        // An old session ID must never acquire a different terminal, even after receipt eviction.
+        let process_id = last
+            .checked_add(1)
+            .expect("unified exec process identity exhausted");
+        store.last_process_id = Some(process_id);
+        process_id
     }
 
     pub(crate) async fn release_process_id(&self, process_id: i32) {
         let removed = {
             let mut store = self.process_store.lock().await;
             let entry = store.processes.remove(&process_id);
-            if !should_use_deterministic_process_ids() {
-                store.reserved_process_ids.remove(&process_id);
-            }
             entry
         };
         if let Some(entry) = removed {
@@ -743,21 +734,20 @@ impl UnifiedExecProcessManager {
                         )
                         .await
                     {
+                        self.release_process_id(process_id).await;
                         return Err(fail_process_with_message(entry.process.as_ref(), message));
                     }
                     if !completion
                         .as_ref()
                         .is_some_and(|completion| completion.timed_out)
                     {
-                        process
-                            .check_for_sandbox_denial_with_text(&text)
-                            .await
-                            .map_err(|err| {
-                                err.with_output_collection_metadata(
-                                    original_token_count,
-                                    output_omitted_bytes,
-                                )
-                            })?;
+                        if let Err(err) = process.check_for_sandbox_denial_with_text(&text).await {
+                            self.release_process_id(process_id).await;
+                            return Err(err.with_output_collection_metadata(
+                                original_token_count,
+                                output_omitted_bytes,
+                            ));
+                        }
                     }
                     let metrics_sidecar = entry
                         .plugin_metrics_sidecar
@@ -826,7 +816,6 @@ impl UnifiedExecProcessManager {
             )
             .await;
 
-            self.release_process_id(request.process_id).await;
             process
                 .check_for_sandbox_denial_with_text(&text)
                 .await
@@ -858,6 +847,8 @@ impl UnifiedExecProcessManager {
             }),
         };
 
+        self.retain_completion(request.process_id, &process, context, &response)
+            .await;
         Ok(response)
     }
 
@@ -907,26 +898,35 @@ impl UnifiedExecProcessManager {
         // draining output buffer and process lifecycle.
         let locked_process = {
             let store = self.process_store.lock().await;
-            let entry = store
-                .processes
-                .get(&process_id)
-                .ok_or(UnifiedExecError::UnknownProcessId { process_id })?;
-            // Capture the original call even if this interaction is cancelled while queued.
-            if let Some(call_id) = trace_id(&entry.call_id) {
-                tracing::Span::current().record("original_exec_call_id", call_id);
-            }
-            Arc::clone(&entry.process)
+            store.processes.get(&process_id).and_then(|entry| {
+                entry
+                    .session
+                    .ptr_eq(&Arc::downgrade(&context.session))
+                    .then(|| {
+                        // Capture the original call even if this interaction is cancelled while queued.
+                        if let Some(call_id) = trace_id(&entry.call_id) {
+                            tracing::Span::current().record("original_exec_call_id", call_id);
+                        }
+                        Arc::clone(&entry.process)
+                    })
+            })
+        };
+        let Some(locked_process) = locked_process else {
+            return self.completed_poll(context, &request).await;
         };
         let _interaction_guard = locked_process.interaction_lock().lock_owned().await;
         // A queued write must observe strict review enabled while it was waiting.
         let strict_auto_review = context.step_context.turn.strict_auto_review_enabled();
         let approval = {
             let store = self.process_store.lock().await;
-            let entry = store
+            let Some(entry) = store
                 .processes
                 .get(&process_id)
                 .filter(|entry| Arc::ptr_eq(&entry.process, &locked_process))
-                .ok_or(UnifiedExecError::UnknownProcessId { process_id })?;
+            else {
+                drop(store);
+                return self.completed_poll(context, &request).await;
+            };
             entry.stdin_approval(context, request.input, strict_auto_review)?
         };
         if let Some((approval, approval_reason)) = approval {
@@ -1040,8 +1040,16 @@ impl UnifiedExecProcessManager {
         };
         let start = Instant::now();
         let deadline = start + Duration::from_millis(yield_time_ms);
-        let collected_output =
-            Self::collect_output_until_deadline(&output, pause_state, deadline).await;
+        let collected_output = super::output_collection::collect(
+            &output,
+            pause_state,
+            deadline,
+            context
+                .poll_interjection
+                .as_ref()
+                .filter(|_| request.input.is_empty()),
+        )
+        .await;
         let wall_time = Instant::now().saturating_duration_since(start);
 
         let original_token_count = usize::try_from(approx_tokens_from_byte_count(
@@ -1088,6 +1096,7 @@ impl UnifiedExecProcessManager {
                 if let Err(message) =
                     finish_network_approval_after_process_exit_for_entry(&entry).await
                 {
+                    self.release_process_id(request.process_id).await;
                     return Err(fail_process_with_message(entry.process.as_ref(), message));
                 }
                 (None, exit_code)
@@ -1134,6 +1143,8 @@ impl UnifiedExecProcessManager {
                 .await;
         }
 
+        self.retain_completion(request.process_id, &process, context, &response)
+            .await;
         Ok(response)
     }
 
@@ -1168,9 +1179,8 @@ impl UnifiedExecProcessManager {
                     process_id,
                 };
             }
-            let Some(entry) = store.remove(process_id) else {
-                return ProcessStatus::Unknown;
-            };
+            // Keep the identity pollable until the validated receipt replaces it.
+            let entry = entry.clone();
             ProcessStatus::Exited {
                 exit_code,
                 entry: Box::new(entry),
@@ -1586,165 +1596,12 @@ impl UnifiedExecProcessManager {
         result
     }
 
-    #[tracing::instrument(
-        name = "unified_exec.collect_output",
-        level = "info",
-        skip_all,
-        fields(
-            outcome = tracing::field::Empty,
-            stop_reason = tracing::field::Empty,
-            exit_signaled = tracing::field::Empty,
-            output_closed = tracing::field::Empty,
-        )
-    )]
     pub(super) async fn collect_output_until_deadline<const MAX_BYTES: usize>(
         output: &OutputHandles<MAX_BYTES>,
-        mut pause_state: Option<watch::Receiver<bool>>,
-        mut deadline: Instant,
+        pause_state: Option<watch::Receiver<bool>>,
+        deadline: Instant,
     ) -> HeadTailBuffer<MAX_BYTES> {
-        const POST_EXIT_CLOSE_WAIT_CAP: Duration = Duration::from_millis(50);
-
-        enum StopReason {
-            OutputClosed,
-            Deadline,
-            PostExitDeadline,
-        }
-
-        let OutputHandles {
-            output_buffer,
-            output_notify,
-            output_closed,
-            output_closed_notify,
-            cancellation_token,
-            ..
-        } = output;
-        let mut collected = HeadTailBuffer::default();
-        let mut exit_signal_received = cancellation_token.is_cancelled();
-        let mut post_exit_deadline: Option<Instant> = None;
-        let stop_reason = loop {
-            Self::extend_deadlines_while_paused(
-                &mut pause_state,
-                &mut deadline,
-                &mut post_exit_deadline,
-            )
-            .await;
-            let drained_output: HeadTailBuffer<MAX_BYTES>;
-            let has_drained_output: bool;
-            let mut wait_for_output = None;
-            {
-                let mut guard = output_buffer.lock().await;
-                drained_output = std::mem::take(&mut guard.pending);
-                has_drained_output =
-                    drained_output.retained_bytes() > 0 || drained_output.omitted_bytes() > 0;
-                if !has_drained_output {
-                    wait_for_output = Some(output_notify.notified());
-                }
-            }
-
-            if !has_drained_output {
-                exit_signal_received |= cancellation_token.is_cancelled();
-                if exit_signal_received && output_closed.load(Ordering::Acquire) {
-                    break StopReason::OutputClosed;
-                }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining == Duration::ZERO {
-                    break StopReason::Deadline;
-                }
-
-                if exit_signal_received {
-                    let now = Instant::now();
-                    let close_wait_deadline = *post_exit_deadline
-                        .get_or_insert_with(|| now + remaining.min(POST_EXIT_CLOSE_WAIT_CAP));
-                    let close_wait_remaining = close_wait_deadline.saturating_duration_since(now);
-                    if close_wait_remaining == Duration::ZERO {
-                        break StopReason::PostExitDeadline;
-                    }
-                    let notified = wait_for_output.unwrap_or_else(|| output_notify.notified());
-                    let closed = output_closed_notify.notified();
-                    tokio::pin!(notified);
-                    tokio::pin!(closed);
-                    tokio::select! {
-                        _ = &mut notified => {}
-                        _ = &mut closed => {}
-                        _ = tokio::time::sleep(close_wait_remaining) => break StopReason::PostExitDeadline,
-                        _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
-                    }
-                    continue;
-                }
-
-                let notified = wait_for_output.unwrap_or_else(|| output_notify.notified());
-                tokio::pin!(notified);
-                let exit_notified = cancellation_token.cancelled();
-                tokio::pin!(exit_notified);
-                tokio::select! {
-                    _ = &mut notified => {}
-                    _ = &mut exit_notified => exit_signal_received = true,
-                    _ = tokio::time::sleep(remaining) => break StopReason::Deadline,
-                    _ = Self::wait_for_pause_change(pause_state.as_ref()) => {}
-                }
-                continue;
-            }
-
-            collected.push_buffer(drained_output);
-
-            exit_signal_received |= cancellation_token.is_cancelled();
-            if Instant::now() >= deadline {
-                break StopReason::Deadline;
-            }
-        };
-
-        let span = tracing::Span::current();
-        span.record(
-            "stop_reason",
-            match stop_reason {
-                StopReason::OutputClosed => "output_closed",
-                StopReason::Deadline => "deadline",
-                StopReason::PostExitDeadline => "post_exit_deadline",
-            },
-        );
-        span.record(
-            "exit_signaled",
-            exit_signal_received || cancellation_token.is_cancelled(),
-        );
-        span.record("output_closed", output_closed.load(Ordering::Acquire));
-        span.record("outcome", "completed");
-        collected
-    }
-
-    async fn extend_deadlines_while_paused(
-        pause_state: &mut Option<watch::Receiver<bool>>,
-        deadline: &mut Instant,
-        post_exit_deadline: &mut Option<Instant>,
-    ) {
-        let Some(receiver) = pause_state.as_mut() else {
-            return;
-        };
-        if !*receiver.borrow() {
-            return;
-        }
-
-        let paused_at = Instant::now();
-        while *receiver.borrow() {
-            if receiver.changed().await.is_err() {
-                break;
-            }
-        }
-
-        let paused_for = paused_at.elapsed();
-        *deadline += paused_for;
-        if let Some(post_exit_deadline) = post_exit_deadline.as_mut() {
-            *post_exit_deadline += paused_for;
-        }
-    }
-
-    async fn wait_for_pause_change(pause_state: Option<&watch::Receiver<bool>>) {
-        match pause_state {
-            Some(pause_state) => {
-                let mut receiver = pause_state.clone();
-                let _ = receiver.changed().await;
-            }
-            None => std::future::pending::<()>().await,
-        }
+        super::output_collection::collect(output, pause_state, deadline, None).await
     }
 
     fn prune_processes_if_needed(store: &mut ProcessStore) -> Option<ProcessEntry> {
@@ -1781,7 +1638,7 @@ impl UnifiedExecProcessManager {
                 .map(|process| process.interaction_lock())
                 && let Ok(_interaction_guard) = interaction_lock.try_lock_owned()
             {
-                return store.remove(process_id);
+                return store.processes.remove(&process_id);
             }
             found_locked_exited_process |= candidate_has_exited
                 || candidate_process.is_some_and(|process| process.has_exited());
@@ -1828,7 +1685,7 @@ impl UnifiedExecProcessManager {
                 .drain()
                 .map(|(_, entry)| entry)
                 .collect();
-            processes.reserved_process_ids.clear();
+            processes.completions.clear();
             entries
         };
 
@@ -1894,7 +1751,7 @@ impl UnifiedExecProcessManager {
             if entry.initial_exec_command_active.load(Ordering::Acquire) {
                 return true;
             }
-            let Some(entry) = store.remove(process_id) else {
+            let Some(entry) = store.processes.remove(&process_id) else {
                 return false;
             };
             entry

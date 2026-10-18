@@ -561,7 +561,10 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
 
     let call_id = "exec-command-environment-shell-policy";
     let command = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
+        core_test_support::TestTargetOs::Linux => {
+            r#"[[ -n "$BASH_VERSION" ]] || exit 71; printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#
+        }
+        core_test_support::TestTargetOs::MacOs => {
             r#"printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#
         }
         core_test_support::TestTargetOs::Windows => {
@@ -573,7 +576,7 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         "login": false,
         "yield_time_ms": 5_000,
     });
-    mount_sse_sequence(
+    let log = mount_sse_sequence(
         harness.server(),
         vec![
             sse(vec![
@@ -600,6 +603,9 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         output.output.trim(),
         concat!("preserved:missing:missing:", env!("CARGO_PKG_VERSION")),
     );
+    if matches!(core_test_support::test_target_os(), core_test_support::TestTargetOs::Linux) {
+        assert!(log.requests()[0].body_json().to_string().contains("<shell>bash</shell>"));
+    }
     Ok(())
     })
     .await
@@ -2256,12 +2262,16 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
 
     let server = start_mock_server().await;
     mock_server::run(&[&server], async {
-        let mut builder = test_codex();
+        let mut builder = test_codex().with_config(|config| {
+            config.features.disable(Feature::InstantInterrupt).expect("disable instant interruption");
+        });
         let test = builder.build_with_auto_env(&server).await?;
 
         let start_call_id = "uexec-cat-start";
         let send_call_id = "uexec-cat-send";
         let exit_call_id = "uexec-cat-exit";
+        let poll_call_id = "uexec-cat-poll";
+        let receipt_call_id = "uexec-cat-receipt";
 
         let start_args = serde_json::json!({
             "cmd": "/bin/cat",
@@ -2299,6 +2309,18 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
                 ev_completed("resp-2"),
             ]),
             sse(vec![
+                ev_response_created("resp-poll"),
+                ev_function_call(
+                    poll_call_id,
+                    "write_stdin",
+                    &serde_json::json!({
+                        "session_id": 1000,
+                        "yield_time_ms": 3_600_000,
+                    }).to_string(),
+                ),
+                ev_completed("resp-poll"),
+            ]),
+            sse(vec![
                 ev_response_created("resp-3"),
                 ev_function_call(
                     exit_call_id,
@@ -2308,8 +2330,21 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
                 ev_completed("resp-3"),
             ]),
             sse(vec![
-                ev_assistant_message("msg-1", "all done"),
+                ev_response_created("resp-4"),
+                ev_function_call(
+                    receipt_call_id,
+                    "write_stdin",
+                    &serde_json::json!({
+                        "session_id": 1000,
+                        "yield_time_ms": 3_600_000,
+                    })
+                    .to_string(),
+                ),
                 ev_completed("resp-4"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "all done"),
+                ev_completed("resp-5"),
             ]),
         ];
         let request_log = mount_sse_sequence(&server, responses).await;
@@ -2326,6 +2361,16 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
         loop {
             let event = wait_for_event(&test.codex, |_| true).await;
             match event {
+                EventMsg::RawResponseItem(raw)
+                    if matches!(&raw.item, ResponseItem::FunctionCall { call_id, .. } if call_id == poll_call_id) =>
+                {
+                    test.codex.start_or_steer_turn(
+                        TurnInputRequest::user_input(vec![UserInput::Text {
+                            text: "release the observation, not the terminal".into(),
+                            text_elements: Vec::new(),
+                        }])
+                    ).await?;
+                }
                 EventMsg::TerminalInteraction(event)
                     if event.call_id == start_call_id
                         && event.stdin
@@ -2398,6 +2443,12 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
             "write_stdin should not include exit_code while process is running"
         );
 
+        let interrupted_poll = outputs.get(poll_call_id).expect("steered direct empty poll");
+        assert_eq!(interrupted_poll.process_id.as_ref(), Some(&process_id));
+        assert_eq!(interrupted_poll.exit_code, None);
+        assert!(bodies.last().expect("final model request").to_string()
+            .contains("release the observation, not the terminal"));
+
         let exit_output = outputs
             .get(exit_call_id)
             .expect("missing exit metadata output");
@@ -2409,6 +2460,12 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
             .exit_code
             .expect("expected exit_code after sending EOF");
         assert_eq!(exit_code, 0, "cat should exit cleanly after EOF");
+        let receipt = outputs
+            .get(receipt_call_id)
+            .expect("retained completion receipt");
+        assert_eq!(receipt.exit_code, Some(exit_code));
+        assert!(receipt.process_id.is_none());
+        assert!(receipt.output.contains("hello unified exec"));
 
         Ok(())
     })

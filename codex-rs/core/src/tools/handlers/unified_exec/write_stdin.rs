@@ -1,6 +1,7 @@
 use crate::function_tool::FunctionCallError;
 use codex_features::Feature;
 
+use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
@@ -22,8 +23,6 @@ use serde::Deserialize;
 use super::super::shell_spec::create_write_stdin_tool;
 use super::post_unified_exec_tool_use_payload;
 
-mod cell;
-
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
     // The model is trained on `session_id`.
@@ -37,9 +36,7 @@ struct WriteStdinArgs {
 }
 
 #[derive(Default)]
-pub struct WriteStdinHandler {
-    caller: cell::Caller,
-}
+pub struct WriteStdinHandler;
 
 impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     fn tool_name(&self) -> ToolName {
@@ -47,7 +44,7 @@ impl ToolExecutor<ToolInvocation> for WriteStdinHandler {
     }
 
     fn spec(&self) -> ToolSpec {
-        self.caller.spec(create_write_stdin_tool())
+        create_write_stdin_tool()
     }
 
     fn supports_parallel_tool_calls(&self) -> bool {
@@ -74,6 +71,7 @@ impl WriteStdinHandler {
             cancellation_token,
             call_id,
             tool_name,
+            source,
             payload,
             ..
         } = invocation;
@@ -100,13 +98,22 @@ impl WriteStdinHandler {
                 "unified exec is unavailable in this session",
             )?;
         }
-        let context = UnifiedExecContext::new(
+        // A cell owns yielding. Its originating step's latched news must not turn
+        // a surviving nested script into a tight loop of immediately yielded polls.
+        let poll_interjection = match source {
+            ToolCallSource::CodeMode { .. } => None,
+            ToolCallSource::Direct | ToolCallSource::DirectAgentMessage(_) => {
+                Some(step_context.interjection.news().clone())
+            }
+        };
+        let mut context = UnifiedExecContext::new(
             session.clone(),
             step_context,
             cancellation_token,
             call_id,
             tool_name,
         );
+        context.poll_interjection = poll_interjection;
         let response = session
             .services
             .unified_exec_manager
@@ -115,7 +122,7 @@ impl WriteStdinHandler {
                 WriteStdinRequest {
                     process_id: args.session_id,
                     input: &args.chars,
-                    yield_time_ms: self.caller.yield_time_ms(&args.chars, args.yield_time_ms),
+                    yield_time_ms: args.yield_time_ms,
                     max_output_tokens: args.max_output_tokens,
                     truncation_policy: context
                         .step_context

@@ -18,7 +18,6 @@ pub(crate) use self::types::CellEvent;
 pub(crate) use self::types::CellId;
 pub(crate) use self::types::CreateCellRequest;
 pub(crate) use self::types::Error;
-pub(crate) use self::types::ImageDetail;
 pub(crate) use self::types::NestedToolCall;
 pub(crate) use self::types::Observation;
 pub(crate) use self::types::ObserveMode;

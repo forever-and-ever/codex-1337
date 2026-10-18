@@ -75,6 +75,7 @@ fn maps_text_image_audio_and_terminal_error_without_losing_details() {
         cell_id: CellId::new("cell".to_string()),
         content_items: vec![
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "hello".to_string(),
             },
             FunctionCallOutputContentItem::InputImage {
@@ -96,6 +97,7 @@ fn maps_text_image_audio_and_terminal_error_without_losing_details() {
             content_items: vec![
                 proto::ContentItem {
                     item: Some(proto::content_item::Item::Text(proto::TextContent {
+                        max_tokens: None,
                         text: "hello".to_string(),
                     })),
                 },

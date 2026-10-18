@@ -17,6 +17,13 @@ pub const DEFAULT_IMAGE_DETAIL: ImageDetail = ImageDetail::High;
 pub enum FunctionCallOutputContentItem {
     InputText {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_tokens: Option<u64>,
+    },
+    InputTextBatch {
+        sections: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_tokens: Option<u64>,
     },
     InputImage {
         image_url: String,

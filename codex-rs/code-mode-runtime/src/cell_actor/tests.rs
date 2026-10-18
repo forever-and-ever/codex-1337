@@ -232,6 +232,7 @@ async fn yield_timer_preempts_buffered_runtime_output() {
         .event_tx
         .send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "queued output".to_string(),
             },
         ))
@@ -249,7 +250,8 @@ async fn yield_timer_preempts_buffered_runtime_output() {
     assert_eq!(
         termination.await,
         Ok(CellEvent::Terminated {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "queued output".to_string(),
             }],
         })
@@ -266,6 +268,7 @@ async fn queued_termination_preempts_unobserved_runtime_completion() {
         .event_tx
         .send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "queued output".to_string(),
             },
         ))
@@ -281,7 +284,8 @@ async fn queued_termination_preempts_unobserved_runtime_completion() {
     let termination = harness.handle.terminate();
 
     let terminated = Ok(CellEvent::Terminated {
-        content_items: vec![OutputItem::Text {
+        content_items: vec![OutputItem::InputText {
+            max_tokens: None,
             text: "queued output".to_string(),
         }],
     });
@@ -309,6 +313,7 @@ async fn observation_dropped_before_dequeue_does_not_consume_output() {
         .event_tx
         .send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "survives pre-dequeue cancellation".to_string(),
             },
         ))
@@ -329,7 +334,8 @@ async fn observation_dropped_before_dequeue_does_not_consume_output() {
             .observe(ObserveMode::YieldAfter(Duration::ZERO))
             .await,
         Ok(CellEvent::Yielded {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "survives pre-dequeue cancellation".to_string(),
             }],
         })
@@ -371,6 +377,7 @@ async fn dropped_yield_observer_preserves_output_for_the_next_observation() {
         .event_tx
         .send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "survives active cancellation".to_string(),
             },
         ))
@@ -391,7 +398,8 @@ async fn dropped_yield_observer_preserves_output_for_the_next_observation() {
             .observe(ObserveMode::YieldAfter(Duration::ZERO))
             .await,
         Ok(CellEvent::Yielded {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "survives active cancellation".to_string(),
             }],
         })
@@ -568,7 +576,8 @@ fn failed_completion_delivery_rebuffers_the_event() {
 fn buffered_initial_yield_precedes_buffered_completion_for_yield_observer() {
     let cell_state = CellState::new(CancellationToken::new());
     let completion = CellEvent::Completed {
-        content_items: vec![OutputItem::Text {
+        content_items: vec![OutputItem::InputText {
+            max_tokens: None,
             text: "after".to_string(),
         }],
         error_text: None,
@@ -576,7 +585,8 @@ fn buffered_initial_yield_precedes_buffered_completion_for_yield_observer() {
     assert_eq!(
         cell_state.commit_completion(
             completion.clone(),
-            Some(vec![OutputItem::Text {
+            Some(vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }]),
             || {}
@@ -596,7 +606,8 @@ fn buffered_initial_yield_precedes_buffered_completion_for_yield_observer() {
     assert_eq!(
         response_rx.try_recv(),
         Ok(Ok(CellEvent::Yielded {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
         }))
@@ -616,12 +627,14 @@ fn pending_observer_merges_initial_yield_and_completion_output() {
     assert_eq!(
         cell_state.commit_completion(
             CellEvent::Completed {
-                content_items: vec![OutputItem::Text {
+                content_items: vec![OutputItem::InputText {
+                    max_tokens: None,
                     text: "after".to_string(),
                 }],
                 error_text: None,
             },
-            Some(vec![OutputItem::Text {
+            Some(vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }]),
             || {}
@@ -642,10 +655,12 @@ fn pending_observer_merges_initial_yield_and_completion_output() {
         response_rx.try_recv(),
         Ok(Ok(CellEvent::Completed {
             content_items: vec![
-                OutputItem::Text {
+                OutputItem::InputText {
+                    max_tokens: None,
                     text: "before".to_string(),
                 },
-                OutputItem::Text {
+                OutputItem::InputText {
+                    max_tokens: None,
                     text: "after".to_string(),
                 },
             ],
@@ -658,7 +673,8 @@ fn pending_observer_merges_initial_yield_and_completion_output() {
 fn dropped_pending_observation_preserves_the_initial_yield_boundary() {
     let cell_state = CellState::new(CancellationToken::new());
     let completion = CellEvent::Completed {
-        content_items: vec![OutputItem::Text {
+        content_items: vec![OutputItem::InputText {
+            max_tokens: None,
             text: "after".to_string(),
         }],
         error_text: None,
@@ -666,7 +682,8 @@ fn dropped_pending_observation_preserves_the_initial_yield_boundary() {
     assert_eq!(
         cell_state.commit_completion(
             completion.clone(),
-            Some(vec![OutputItem::Text {
+            Some(vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }]),
             || {}
@@ -693,7 +710,8 @@ fn dropped_pending_observation_preserves_the_initial_yield_boundary() {
     assert_eq!(
         response_rx.try_recv(),
         Ok(Ok(CellEvent::Yielded {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
         }))

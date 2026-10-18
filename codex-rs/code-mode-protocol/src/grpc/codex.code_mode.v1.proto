@@ -278,11 +278,18 @@ message ContentItem {
     TextContent text = 1;
     ImageContent image = 2;
     AudioContent audio = 3;
+    TextBatchContent text_batch = 4;
   }
 }
 
 message TextContent {
   string text = 1;
+  optional uint64 max_tokens = 2;
+}
+
+message TextBatchContent {
+  repeated string sections = 1;
+  optional uint64 max_tokens = 2;
 }
 
 message ImageContent {

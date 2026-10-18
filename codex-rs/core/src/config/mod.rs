@@ -1124,7 +1124,7 @@ pub struct Config {
     pub code_mode: CodeModeConfig,
 
     /// Maximum poll window for background terminal output (`write_stdin`), in milliseconds.
-    /// Default: `300000` (5 minutes).
+    /// Default: `3600000` (60 minutes).
     pub background_terminal_max_timeout: u64,
 
     /// Idle timeout for unsubscribed app-server threads, resolved at server startup.
@@ -1201,7 +1201,8 @@ pub struct ToolRegistryConfig {
     pub turn_metadata_includes_tool_info: bool,
 }
 
-const DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS: NonZeroU64 = NonZeroU64::new(600_000).expect("nonzero");
+const DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS: NonZeroU64 =
+    NonZeroU64::new(3_600_000).expect("nonzero");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {

@@ -1328,11 +1328,10 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     if features.enabled(Feature::UnifiedExec) {
         if effective_tool_mode(turn_context, context.model_info) == ToolMode::CodeModeOnly {
             registry.add(ExecCommandHandler::cell(options));
-            registry.add(WriteStdinHandler::cell());
         } else {
             registry.add(ExecCommandHandler::new(options));
-            registry.add(WriteStdinHandler::default());
         }
+        registry.add(WriteStdinHandler);
     } else {
         // Managed requirements are the only configuration path that can keep
         // unified exec disabled. Preserve command execution without exposing a
@@ -1369,12 +1368,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
     }
-    // Ephemeral side conversations still have a resident status display.
-    if !turn_context.session_source.is_internal()
-        && !crate::guardian::is_basic_session_source(&turn_context.session_source)
-    {
-        registry.add(WorkStatusHandler);
-    }
+    registry.add(WorkStatusHandler);
 
     if features.enabled(Feature::DeferredExecutor) {
         registry.add(

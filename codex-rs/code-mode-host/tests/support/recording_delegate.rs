@@ -33,11 +33,18 @@ impl CodeModeSessionDelegate for RecordingDelegate {
         invocation: CodeModeNestedToolCall,
         _cancellation: CancellationToken,
     ) -> ToolInvocationFuture<'a> {
+        let native = invocation.tool_name == codex_protocol::ToolName::plain("exec_command");
         self.invocations
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(invocation);
-        Box::pin(async { Ok(json!({ "value": "output" })) })
+        Box::pin(async move {
+            Ok(if native {
+                json!({"wall_time_seconds":0.0,"exit_code":0,"output":"output"})
+            } else {
+                json!({ "value": "output" })
+            })
+        })
     }
 
     fn notify<'a>(

@@ -1,3 +1,4 @@
+use codex_code_mode_protocol::FunctionCallOutputContentItem;
 use codex_code_mode_protocol::NoopCodeModeSessionDelegate;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -284,6 +285,7 @@ async fn yields_and_resumes() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
         }
@@ -303,6 +305,7 @@ async fn yields_and_resumes() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after".to_string(),
             }],
             error_text: None,
@@ -354,6 +357,7 @@ text("after");
                 code_mode_host_duration: None,
                 cell_id: cell_id("1"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "after".to_string(),
                 }],
                 error_text: None,
@@ -403,6 +407,7 @@ async fn observed_natural_completion_wins_over_termination() {
             };
             if content_items
                 == vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "true".to_string(),
                 }]
             {
@@ -419,6 +424,7 @@ async fn observed_natural_completion_wins_over_termination() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -643,6 +649,7 @@ async fn natural_completion_cleans_up_callbacks_before_responding() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,

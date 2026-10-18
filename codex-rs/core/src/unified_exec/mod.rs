@@ -24,7 +24,6 @@
 //! - `process_manager.rs`: orchestration (approvals, sandboxing, reuse) and request handling.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Weak;
 
@@ -46,10 +45,12 @@ use crate::tools::network_approval::DeferredNetworkApproval;
 use codex_core_plugins::PluginMetricsSidecar;
 
 mod async_watcher;
+mod completion_receipts;
 mod errors;
 mod head_tail_buffer;
 mod initial_wait;
 mod oneshot;
+mod output_collection;
 mod process;
 mod process_manager;
 mod process_state;
@@ -71,9 +72,9 @@ pub(crate) use stdin_approval::TerminalSandboxSource;
 pub(crate) const MIN_YIELD_TIME_MS: u64 = 250;
 pub(crate) const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS: u64 = 10_000;
 // Minimum yield time for an empty `write_stdin`.
-pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 5_000;
+pub(crate) const MIN_EMPTY_YIELD_TIME_MS: u64 = 60_000;
 pub(crate) const MAX_YIELD_TIME_MS: u64 = 30_000;
-pub(crate) const DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS: u64 = 300_000;
+pub(crate) const DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS: u64 = 3_600_000;
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_TOKENS: usize = UNIFIED_EXEC_OUTPUT_MAX_BYTES / 4;
@@ -91,6 +92,7 @@ pub(crate) struct UnifiedExecContext {
     pub cancellation_token: CancellationToken,
     pub call_id: String,
     pub tool_name: codex_tools::ToolName,
+    pub(crate) poll_interjection: Option<CancellationToken>,
 }
 
 impl UnifiedExecContext {
@@ -107,6 +109,7 @@ impl UnifiedExecContext {
             cancellation_token,
             call_id,
             tool_name: tool_name.with_default_namespace(),
+            poll_interjection: None,
         }
     }
 }
@@ -155,16 +158,8 @@ impl std::fmt::Debug for WriteStdinInteractionEvent<'_> {
 #[derive(Default)]
 pub(crate) struct ProcessStore {
     processes: HashMap<i32, ProcessEntry>,
-    reserved_process_ids: HashSet<i32>,
-}
-
-impl ProcessStore {
-    fn remove(&mut self, process_id: i32) -> Option<ProcessEntry> {
-        if !process_manager::should_use_deterministic_process_ids() {
-            self.reserved_process_ids.remove(&process_id);
-        }
-        self.processes.remove(&process_id)
-    }
+    last_process_id: Option<i32>,
+    completions: completion_receipts::CompletionReceipts,
 }
 
 pub(crate) struct UnifiedExecProcessManager {
@@ -188,6 +183,7 @@ impl Default for UnifiedExecProcessManager {
     }
 }
 
+#[derive(Clone)]
 struct ProcessEntry {
     process: Arc<UnifiedExecProcess>,
     plugin_metrics_sidecar: Option<SharedPluginMetricsSidecar>,

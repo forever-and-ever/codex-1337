@@ -111,6 +111,7 @@ fn text_response(
         code_mode_host_duration,
         cell_id: cell_id(cell),
         content_items: vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: value.to_string(),
         }],
         error_text: None,
@@ -245,6 +246,7 @@ async fn completed_waits_drain_pending_notifications_before_returning() -> Resul
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,

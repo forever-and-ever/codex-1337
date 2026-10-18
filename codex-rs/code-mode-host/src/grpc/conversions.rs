@@ -144,9 +144,16 @@ pub(super) fn wait_response(
 
 fn content_item(item: FunctionCallOutputContentItem) -> proto::ContentItem {
     let item = match item {
-        FunctionCallOutputContentItem::InputText { text } => {
-            proto::content_item::Item::Text(proto::TextContent { text })
+        FunctionCallOutputContentItem::InputText { text, max_tokens } => {
+            proto::content_item::Item::Text(proto::TextContent { text, max_tokens })
         }
+        FunctionCallOutputContentItem::InputTextBatch {
+            sections,
+            max_tokens,
+        } => proto::content_item::Item::TextBatch(proto::TextBatchContent {
+            sections,
+            max_tokens,
+        }),
         FunctionCallOutputContentItem::InputImage { image_url, detail } => {
             proto::content_item::Item::Image(proto::ImageContent {
                 image_url,

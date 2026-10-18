@@ -190,6 +190,7 @@ async fn reconnected_execution_maps_started_and_initial_response_ids() {
         code_mode_host_duration: None,
         cell_id: wire_id.clone(),
         content_items: vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: "result".to_string(),
         }],
         error_text: None,
@@ -212,6 +213,7 @@ async fn reconnected_execution_maps_started_and_initial_response_ids() {
             code_mode_host_duration: None,
             cell_id: public_id,
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "result".to_string(),
             }],
             error_text: None,

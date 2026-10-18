@@ -18,7 +18,6 @@ use self::callbacks::report_task_result;
 use self::callbacks::spawn_notification;
 use self::callbacks::spawn_tool;
 use self::conversions::cell_tool_kind;
-use self::conversions::output_item;
 use self::conversions::runtime_request;
 use self::types::CellCommand;
 pub(crate) use self::types::CellError;
@@ -391,7 +390,7 @@ async fn run_cell<H: CellHost>(
                             runtime_paused = false;
                         }
                     }
-                    RuntimeEvent::ContentItem(item) => content_items.push(output_item(item)),
+                    RuntimeEvent::ContentItem(item) => content_items.push(item),
                     RuntimeEvent::YieldRequested => {
                         let yield_observer = matches!(
                             observer.as_ref().map(|observer| observer.observation.mode),

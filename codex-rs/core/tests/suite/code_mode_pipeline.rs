@@ -23,8 +23,14 @@ use super::text_item;
 #[test_case("python", "import pathlib\npathlib.Path('input').write_text('40')", true; "python_pipeline")]
 #[test_case("bash", "printf 40 > input", true; "bash_pipeline")]
 #[test_case("python", "raise RuntimeError('producer failed')", false; "process_failure")]
-#[test_case("exec", "await tools.exec_command({cmd: 'exit 7'});", false; "nested_failure")]
-#[test_case("exec", "try { await fs.readFile('missing'); } catch (_) {}", false; "caught_failure")]
+#[test_case("exec", "const r = await tools.exec_command({cmd: 'exit 7'}); if (r.exit_code !== 7) fail('wrong exit'); await fs.writeFile('input', '40');", true; "handled_process_failure")]
+#[test_case("exec", "try { await fs.readFile('missing'); } catch (_) {} await fs.writeFile('input', '40');", true; "caught_tool_failure")]
+#[test_case("exec", "await fs.readFile('missing');", false; "uncaught_tool_failure")]
+#[test_case("exec", "fail('producer failed');", false; "explicit_failure")]
+#[test_case("exec", "try { fail('producer failed'); } catch (_) { exit(); } finally { exit(); }", false; "terminal_failure")]
+#[test_case("exec", "await Promise.resolve(); fail('producer failed');", false; "async_terminal_failure")]
+#[test_case("exec", "tools.exec_command({cmd: 'sleep 0.1'});", false; "unawaited_work")]
+#[test_case("exec", "await tools.exec_command({cmd: 'true', background: true});", false; "nested_background")]
 #[test_case("bash", "# @exec: {\"background\":true}\ntrue", false; "explicit_background")]
 #[test_case("exec", "yield_control(); await new Promise(r => setTimeout(r, 100));", false; "yielded_cell")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -166,7 +172,7 @@ text('authority and bounds preserved');
 ",
                     ),
                     ev_function_call("barrier", "fence", "{}"),
-                    ev_custom_tool_call("skipped", "exec", "text('must not execute');"),
+                    ev_custom_tool_call("recovered", "exec", "text('handled errors recovered');"),
                     ev_completed("fs"),
                 ]),
                 sse(vec![
@@ -242,12 +248,12 @@ text('authority and bounds preserved');
         }));
         let output = custom_tool_output_items(&request, "filesystem");
         assert_eq!(text_item(&output, 1), "authority and bounds preserved");
-        assert!(
-            request.custom_tool_call_output("skipped")["output"]
-                .as_str()
-                .unwrap()
-                .contains("Skipped by fence")
+        assert_eq!(
+            request.function_call_output("barrier")["output"],
+            "Fence passed"
         );
+        let recovered = custom_tool_output_items(&request, "recovered");
+        assert_eq!(text_item(&recovered, 1), "handled errors recovered");
         assert_eq!(
             test.fs()
                 .read_file(

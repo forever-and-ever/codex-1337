@@ -1,6 +1,7 @@
 mod audio;
 mod callbacks;
 mod discovery;
+mod encoding;
 mod globals;
 mod module_loader;
 mod native_result;
@@ -160,7 +161,8 @@ pub(super) struct RuntimeState {
     next_timeout_id: u64,
     tool_call_id: String,
     runtime_command_tx: std_mpsc::Sender<RuntimeCommand>,
-    exit_requested: bool,
+    // One terminal request owns both effect suppression and the cell outcome.
+    exit_requested: Option<Result<(), String>>,
     /// Codex-1337: `sh` calls the cell outlives.
     sh_calls: Vec<v8::Global<v8::Promise>>,
 }
@@ -208,7 +210,7 @@ fn run_runtime(
         next_timeout_id: 1,
         tool_call_id: config.tool_call_id,
         runtime_command_tx,
-        exit_requested: false,
+        exit_requested: None,
         sh_calls: Vec::new(),
     });
 
@@ -321,7 +323,10 @@ fn send_scope_result(
     let stored_value_writes = state
         .map(|state| state.stored_value_writes.clone())
         .unwrap_or_default();
-    let error_text = error_text.filter(|_| !state.is_some_and(|state| state.exit_requested));
+    let error_text = match state.and_then(|state| state.exit_requested.as_ref()) {
+        Some(outcome) => outcome.clone().err(),
+        None => error_text,
+    };
     send_result(event_tx, stored_value_writes, error_text);
 }
 
@@ -526,7 +531,7 @@ await new Promise(() => {});
             .await
             .unwrap()
             .unwrap();
-        let RuntimeEvent::ContentItem(FunctionCallOutputContentItem::InputText { text }) =
+        let RuntimeEvent::ContentItem(FunctionCallOutputContentItem::InputText { text, .. }) =
             content_event
         else {
             panic!("expected resumed runtime output");
@@ -599,6 +604,7 @@ setTimeout(() => text("late"), 3_600_000);
         assert_eq!(
             output,
             vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string()
             }]
         );

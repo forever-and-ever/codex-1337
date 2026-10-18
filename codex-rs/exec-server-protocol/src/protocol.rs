@@ -261,7 +261,8 @@ impl EnvironmentInfo {
         let temp_dir = normalize_temp_path(std::env::temp_dir().into_os_string());
 
         Self {
-            shell: codex_shell_command::shell_detect::default_user_shell().into(),
+            // TELOS(agent-bash): advertise the same agent shell used by local sessions.
+            shell: codex_shell_command::agent_shell::default_shell().into(),
             executor_version: unknown_executor_version(),
             provider_id: None,
             cwd: cwd.and_then(|cwd| PathUri::from_host_native_path(cwd).ok()),

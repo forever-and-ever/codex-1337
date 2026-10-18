@@ -826,7 +826,7 @@ if (!(bytes instanceof Uint8Array) || String(bytes) !== '0,255,10,128') throw ne
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    assert_eq!(items.len(), 9);
+    assert_eq!(items.len(), 12);
     assert_regex_match(
         concat!(r"(?s)\A", r"Script completed\nOutput:\n\z"),
         text_item(&items, /*index*/ 0),
@@ -852,11 +852,14 @@ if (!(bytes instanceof Uint8Array) || String(bytes) !== '0,255,10,128') throw ne
         }
     }
     // `sh` prints a rejected call in its slot, and the cell outlives a call left unawaited.
+    assert_eq!(text_item(&items, /*index*/ 7), "[1]\none");
     assert_regex_match(
-        r"(?s)\A\[1\]\none\n\[2\] Error\n.*cmd.*\n\[3\] Exit 3\n\[4\]\ntwo\z",
-        text_item(&items, /*index*/ 7),
+        r"(?s)\A\[2\] Error\n.*cmd.*\z",
+        text_item(&items, /*index*/ 8),
     );
-    assert_eq!(text_item(&items, /*index*/ 8), "unawaited");
+    assert_eq!(text_item(&items, /*index*/ 9), "[3] Exit 3");
+    assert_eq!(text_item(&items, /*index*/ 10), "[4]\ntwo");
+    assert_eq!(text_item(&items, /*index*/ 11), "unawaited");
     let parsed: Value = serde_json::from_str(text_item(&items, /*index*/ 2))?;
     assert!(
         parsed
@@ -4259,14 +4262,22 @@ const results = await Promise.all([
   }),
 ]);
 
-text(JSON.stringify([results[0].output.includes("code-alpha-ready"), results[1].output.includes("code-beta-ready")]));
+const receipts = await Promise.all(sessions.map(session => tools.write_stdin({
+  session_id: session.session_id,
+  yield_time_ms: 3600000,
+})));
+text(JSON.stringify([
+  results[0].output.includes("code-alpha-ready"),
+  results[1].output.includes("code-beta-ready"),
+  receipts.every(receipt => receipt.exit_code === 0 && receipt.session_id === undefined),
+]));
 "#,
     )
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let result: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
-    assert_eq!(result, serde_json::json!([true, true]));
+    assert_eq!(result, serde_json::json!([true, true, true]));
 
     // Process polling has its own invocation identity, even when both sessions share a cell.
     test.codex.flush_rollout().await?;
@@ -4383,11 +4394,10 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
-    assert_regex_match(
-        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
-        output,
-    );
+    let notice = text_item(&items, /*index*/ 1);
+    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    let output = text_item(&items, /*index*/ 2);
+    assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
     Ok(())
 }
@@ -4420,20 +4430,19 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let notice = text_item(&items, /*index*/ 1);
+    assert!(notice.contains("requested output cap 25000 tokens reduced by model policy"));
+    let output = text_item(&items, /*index*/ 2);
     // The nested 20,000-token budget leaves about 80,000 characters. This
-    // ceiling independently proves that history applied its smaller cap.
+    // ceiling independently proves the emitted sections honor the smaller model cap.
     assert!(
         output.len() < 60_000,
         "expected history to truncate the emitted value, got {} bytes",
         output.len()
     );
     // The boolean describes the nested result; the marker below comes from
-    // history truncating the value emitted with `text` afterward.
-    assert_regex_match(
-        r"(?s)^Variable truncated: True\. Variable: .*…\d+ tokens truncated…A+$",
-        output,
-    );
+    // section budgeting after `text` emits the value.
+    assert_regex_match(r"(?s)^Variable truncated: True\. Variable: .*…A+$", output);
 
     Ok(())
 }
@@ -4469,7 +4478,9 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let notice = text_item(&items, /*index*/ 1);
+    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    let output = text_item(&items, /*index*/ 2);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
     assert!(
@@ -4477,10 +4488,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
         "expected configured history cap to truncate the emitted value, got {} bytes",
         output.len()
     );
-    assert_regex_match(
-        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
-        output,
-    );
+    assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
     Ok(())
 }
@@ -4513,11 +4521,10 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
-    assert_regex_match(
-        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
-        output,
-    );
+    let notice = text_item(&items, /*index*/ 1);
+    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    let output = text_item(&items, /*index*/ 2);
+    assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
     Ok(())
 }
@@ -4552,7 +4559,9 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
-    let output = text_item(&items, /*index*/ 1);
+    let notice = text_item(&items, /*index*/ 1);
+    assert!(notice.contains("requested output cap 20000 tokens reduced by model policy"));
+    let output = text_item(&items, /*index*/ 2);
     // The 50-token override must shrink this 50,000-character value far below
     // what the default 10,000-token history cap would retain.
     assert!(
@@ -4560,10 +4569,7 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
         "expected configured history cap to truncate the emitted value, got {} bytes",
         output.len()
     );
-    assert_regex_match(
-        r"^Variable truncated: False\. Variable: x+…\d+ tokens truncated…x+$",
-        output,
-    );
+    assert_regex_match(r"^Variable truncated: False\. Variable: x+…x+$", output);
 
     Ok(())
 }
@@ -4575,26 +4581,53 @@ text(`Variable truncated: ${resultVariableWasTruncated ? "True" : "False"}. Vari
 async fn code_mode_exec_outer_limit_truncates_emitted_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
+    let code = r#"// @exec: {"max_output_tokens": 12}
+await tools.exec_command({cmd: "printf 'UNPRINTED_NESTED_OUTPUT'"});
+text("FIRST:" + "a".repeat(120) + ":FIRST", {max_tokens: 4});
+text("MIDDLE:" + "b".repeat(120) + ":MIDDLE", {max_tokens: 10});
+text("LAST:" + "c".repeat(120) + ":LAST", {max_tokens: 10});
+"#;
     let server = responses::start_mock_server().await;
     let (test, second_mock) = run_code_mode_turn(
         &server,
-        "use exec_command from code mode",
-        r#"// @exec: {"max_output_tokens": 5}
-const result = await tools.exec_command({
-  cmd: "printf '0123456789012345678901234567890123456789'"
-});
-text(result);
-"#,
+        "emit three bounded sections and preserve their recovery",
+        code,
     )
     .await?;
 
-    assert_eq!(
-        text_item(
-            &custom_tool_output_items(&second_mock.single_request(), "call-1"),
-            /*index*/ 1
-        ),
-        "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789"
-    );
+    let request = second_mock.single_request();
+    let output = custom_tool_output_items(&request, "call-1");
+    assert_eq!(output.len(), 5, "unexpected code-mode output: {output:?}");
+    let notice = text_item(&output, 1);
+    assert!(notice.contains("truncated 3 text sections"));
+    assert!(notice.contains("shared 48-byte"));
+    assert!(notice.contains("emission-capped demand 40"));
+    let sections = [
+        text_item(&output, 2),
+        text_item(&output, 3),
+        text_item(&output, 4),
+    ];
+    for (section, identity) in sections.iter().zip(["FIRST", "MIDDLE", "LAST"]) {
+        assert!(section.starts_with(identity), "{section}");
+        assert!(section.ends_with(identity), "{section}");
+        assert!(section.contains('…'), "{section}");
+    }
+    assert!(sections.iter().map(|section| section.len()).sum::<usize>() <= 48);
+    assert!(output.iter().all(|item| item.get("max_tokens").is_none()));
+
+    let artifact = notice
+        .split_once("Truncated emitted text: ")
+        .expect("truncation must expose its precise recovery artifact")
+        .1
+        .split_once(" (Codex host filesystem;")
+        .expect("recovery must disclose its filesystem environment")
+        .0;
+    let retained = std::fs::read_to_string(artifact)?;
+    for (identity, fill) in [("FIRST", 'a'), ("MIDDLE", 'b'), ("LAST", 'c')] {
+        let full = format!("{identity}:{}:{identity}", fill.to_string().repeat(120));
+        assert!(retained.contains(&full));
+    }
+    assert!(!retained.contains("UNPRINTED_NESTED_OUTPUT"));
 
     let measured_item = tool_output_measurements(&test, /*count*/ 1)
         .await?

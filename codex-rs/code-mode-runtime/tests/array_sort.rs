@@ -77,6 +77,7 @@ text(JSON.stringify([3, 1, 2].sort((a, b) => a - b)));
             code_mode_host_duration: None,
             cell_id,
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "[1,2,3]".to_string(),
             }],
             error_text: None,

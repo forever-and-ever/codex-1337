@@ -26,28 +26,41 @@ pub(super) fn brand(
     Ok(())
 }
 
+pub(super) struct TextOptions {
+    pub(super) metadata: ExecutionOutputMetadata,
+    pub(super) max_tokens: Option<u64>,
+}
+
 pub(super) fn serialize_text(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
-    options: v8::Local<'_, v8::Value>,
+    metadata: ExecutionOutputMetadata,
 ) -> Result<(String, bool), String> {
-    let metadata = output_metadata(scope, options)?;
+    serialize_text_sections(scope, value, metadata)
+        .map(|(sections, native)| (codex_protocol::join_execution_sections(sections), native))
+}
+
+pub(super) fn serialize_text_sections(
+    scope: &mut v8::PinScope<'_, '_>,
+    value: v8::Local<'_, v8::Value>,
+    metadata: ExecutionOutputMetadata,
+) -> Result<(Vec<String>, bool), String> {
     if let Some(result) = native_result(scope, value)
         && let Some(text) = result.render(metadata)
     {
-        return Ok((text, true));
+        return Ok((vec![text], true));
     }
-    if let Some(text) = native_batch(scope, value, metadata) {
-        return Ok((text, true));
+    if let Some(sections) = native_batch(scope, value, metadata) {
+        return Ok((sections, true));
     }
-    serialize_output_text(scope, value).map(|text| (text, false))
+    serialize_output_text(scope, value).map(|text| (vec![text], false))
 }
 
 fn native_batch(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
     metadata: ExecutionOutputMetadata,
-) -> Option<String> {
+) -> Option<Vec<String>> {
     let array = v8::Local::<v8::Array>::try_from(value).ok()?;
     let length = array.length();
     if length == 0 {
@@ -69,7 +82,7 @@ fn native_batch(
         return None;
     }
     let value_key = v8::String::new(scope, "value")?;
-    SettledExecution::render_batch(
+    SettledExecution::render_batch_sections(
         (0..length).map(|index| {
             v8::scope!(let scope, scope);
             let key = v8::String::new(scope, &index.to_string())?;
@@ -85,15 +98,19 @@ fn native_batch(
     )
 }
 
-fn output_metadata(
+pub(super) fn text_options(
     scope: &mut v8::PinScope<'_, '_>,
     options: v8::Local<'_, v8::Value>,
-) -> Result<ExecutionOutputMetadata, String> {
+) -> Result<TextOptions, String> {
     if options.is_undefined() {
-        return Ok(ExecutionOutputMetadata::Hidden);
+        return Ok(TextOptions {
+            metadata: ExecutionOutputMetadata::Hidden,
+            max_tokens: None,
+        });
     }
-    let invalid =
-        || "text/notify options must be an object with optional boolean metadata".to_string();
+    let invalid = || {
+        "text/notify options must be an object with optional boolean metadata; text also accepts nonnegative safe-integer max_tokens".to_string()
+    };
     if options.is_array() || options.is_null() || options.is_function() {
         return Err(invalid());
     }
@@ -109,23 +126,59 @@ fn output_metadata(
         .ok_or_else(invalid)?;
     for index in 0..keys.length() {
         let key = keys.get_index(scope, index).ok_or_else(invalid)?;
-        if !key.is_string() || key.to_rust_string_lossy(scope) != "metadata" {
+        if !key.is_string()
+            || !matches!(
+                key.to_rust_string_lossy(scope).as_str(),
+                "metadata" | "max_tokens"
+            )
+        {
             return Err(invalid());
         }
     }
     let key = v8::String::new(scope, "metadata").ok_or_else(invalid)?;
     let metadata = object.get(scope, key.into()).ok_or_else(invalid)?;
-    if metadata.is_undefined() {
-        Ok(ExecutionOutputMetadata::Hidden)
+    let metadata = if metadata.is_undefined() {
+        ExecutionOutputMetadata::Hidden
     } else if metadata.is_boolean() {
-        Ok(if metadata.boolean_value(scope) {
+        if metadata.boolean_value(scope) {
             ExecutionOutputMetadata::Included
         } else {
             ExecutionOutputMetadata::Hidden
-        })
+        }
     } else {
-        Err(invalid())
+        return Err(invalid());
+    };
+    let max_tokens = output_max_tokens(scope, object)?;
+    Ok(TextOptions {
+        metadata,
+        max_tokens,
+    })
+}
+
+fn output_max_tokens(
+    scope: &mut v8::PinScope<'_, '_>,
+    object: v8::Local<'_, v8::Object>,
+) -> Result<Option<u64>, String> {
+    let invalid = || "text max_tokens must be a nonnegative safe integer".to_string();
+    let key = v8::String::new(scope, "max_tokens").ok_or_else(invalid)?;
+    let value = object.get(scope, key.into()).ok_or_else(invalid)?;
+    if value.is_undefined() {
+        return Ok(None);
     }
+    if !value.is_number() {
+        return Err(invalid());
+    }
+    let number = value.number_value(scope).ok_or_else(invalid)?;
+    if !number.is_finite()
+        || number < 0.0
+        || number.fract() != 0.0
+        || number > 9_007_199_254_740_991.0
+    {
+        return Err(invalid());
+    }
+    u64::try_from(value.integer_value(scope).ok_or_else(invalid)?)
+        .map(Some)
+        .map_err(|_| invalid())
 }
 
 pub(super) fn native_result(

@@ -80,7 +80,8 @@ async fn reports_cell_actor_panics_to_the_owner() {
     assert_eq!(
         started.initial_event().await,
         Ok(CellEvent::Completed {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -105,7 +106,8 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
         execution_context: opentelemetry::Context::new(),
     };
     let completion = CellEvent::Completed {
-        content_items: vec![OutputItem::Text {
+        content_items: vec![OutputItem::InputText {
+            max_tokens: None,
             text: "uncommitted output".to_string(),
         }],
         error_text: None,
@@ -161,7 +163,8 @@ async fn termination_rejects_a_waiting_store_commit_before_the_next_cell_can_loa
     assert_eq!(
         reader.initial_event().await,
         Ok(CellEvent::Completed {
-            content_items: vec![OutputItem::Text {
+            content_items: vec![OutputItem::InputText {
+                max_tokens: None,
                 text: "undefined".to_string(),
             }],
             error_text: None,

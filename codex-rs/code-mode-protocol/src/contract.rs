@@ -10,10 +10,8 @@ use crate::ToolDefinition;
 use crate::normalize_code_mode_identifier;
 
 pub(crate) fn render(tool: &ToolDefinition) -> String {
-    let mut text = tool.description.trim().to_owned();
-    let _ = write!(
-        text,
-        "\n\nCall: await tools.{}(",
+    let mut text = format!(
+        "Call: await tools.{}(",
         normalize_code_mode_identifier(&tool.name)
     );
     text.push_str(match tool.kind {
@@ -33,6 +31,11 @@ pub(crate) fn render(tool: &ToolDefinition) -> String {
         }
     } else {
         text.push_str("\nReturns: no declared shape.");
+    }
+    let description = tool.description.trim();
+    if !description.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(description);
     }
     text
 }

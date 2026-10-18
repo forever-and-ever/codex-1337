@@ -34,7 +34,7 @@ pub(super) fn schedule_timeout(
         .get_slot_mut::<RuntimeState>()
         .ok_or_else(|| "runtime state unavailable".to_string())?;
     // Converting the delay can execute JavaScript that calls exit().
-    if state.exit_requested {
+    if state.exit_requested.is_some() {
         return Ok(None);
     }
     let timeout_id = state.next_timeout_id;
@@ -67,7 +67,7 @@ pub(super) fn clear_timeout(
     let Some(state) = scope.get_slot_mut::<RuntimeState>() else {
         return Err("runtime state unavailable".to_string());
     };
-    if !state.exit_requested {
+    if state.exit_requested.is_none() {
         state.pending_timeouts.remove(&timeout_id);
     }
     Ok(())

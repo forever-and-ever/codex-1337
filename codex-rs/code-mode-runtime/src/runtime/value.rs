@@ -220,6 +220,7 @@ pub(super) fn normalize_output_audio(
         // Tiny tool-generated clips cannot be encoded reliably by audio models.
         if wav_duration_seconds(&audio_url).is_some_and(|duration| duration < 0.025) {
             return Ok(FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "Audio output omitted because the clip is shorter than 25 ms; use a longer clip."
                     .to_string(),
             });
@@ -367,9 +368,9 @@ pub(super) fn value_to_error_text(
     // returning here. Never enter a user-defined toString() after that.
     if scope
         .get_slot::<RuntimeState>()
-        .is_some_and(|state| state.exit_requested)
+        .is_some_and(|state| state.exit_requested.is_some())
     {
-        // send_scope_result reports this as successful exit and preserves prior stores.
+        // send_scope_result owns the requested terminal outcome and prior stores.
         return String::new();
     }
     value.to_rust_string_lossy(scope)

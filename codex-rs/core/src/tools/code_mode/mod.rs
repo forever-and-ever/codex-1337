@@ -8,6 +8,7 @@ pub(crate) use lifecycle::ProcessWait;
 mod execute_handler;
 pub(crate) mod execute_spec;
 mod output;
+mod output_sections;
 mod response_adapter;
 mod telemetry;
 mod tool_definitions;
@@ -27,7 +28,6 @@ use codex_code_mode::CodeModeSessionProvider;
 use codex_code_mode::CodeModeToolKind;
 use codex_code_mode::RuntimeResponse;
 use codex_protocol::ThreadId;
-use codex_protocol::models::FunctionCallOutputContentItem;
 use futures::future::join_all;
 use serde_json::Value as JsonValue;
 use tokio::sync::OnceCell;
@@ -46,13 +46,8 @@ use crate::tools::context::ToolPayload;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
-use crate::unified_exec::resolve_max_tokens;
 use codex_protocol::openai_models::ToolMode;
 use codex_tools::ToolName;
-use codex_utils_audio::estimate_audio_token_count;
-use codex_utils_output_truncation::TruncationPolicy;
-use codex_utils_output_truncation::formatted_truncate_text_content_items_with_policy;
-use codex_utils_output_truncation::truncate_function_output_items_with_policy;
 
 use delegate::CodeModeCellDelegate;
 use delegate::CodeModeDispatchBroker;
@@ -86,6 +81,7 @@ pub(crate) struct CodeModeService {
     dispatch_broker: Arc<CodeModeDispatchBroker>,
     shutdown_token: CancellationToken,
     unavailable_warning_emitted: AtomicBool,
+    output_retention: output_sections::OutputRetention,
 }
 
 impl CodeModeService {
@@ -104,6 +100,7 @@ impl CodeModeService {
             dispatch_broker,
             shutdown_token: CancellationToken::new(),
             unavailable_warning_emitted: AtomicBool::new(false),
+            output_retention: output_sections::OutputRetention::default(),
         }
     }
 
@@ -261,6 +258,7 @@ impl CodeModeService {
             Err(_) => Ok(()),
         };
         self.transcript.shutdown().await;
+        self.output_retention.clear();
         result
     }
 
@@ -333,6 +331,7 @@ fn handle_runtime_response(
     model_info: &codex_protocol::openai_models::ModelInfo,
     response: RuntimeResponse,
     max_output_tokens: Option<usize>,
+    retention: &output_sections::OutputRetention,
     wall_time: Duration,
     experimental_show_cell_overhead: bool,
 ) -> CodeModeToolOutput {
@@ -346,7 +345,7 @@ fn handle_runtime_response(
     let supports_original = can_request_original_image_detail(model_info);
     let host_duration = response.code_mode_host_duration();
 
-    let (content_items, error_text) = match response {
+    let (mut content_items, error_text) = match response {
         RuntimeResponse::Yielded { content_items, .. }
         | RuntimeResponse::Terminated { content_items, .. } => (content_items, None),
         RuntimeResponse::Result {
@@ -355,15 +354,21 @@ fn handle_runtime_response(
             ..
         } => (content_items, error_text),
     };
-    let mut content_items = into_function_call_output_content_items(content_items);
-    sanitize_image_detail_items(supports_original, &mut content_items);
     let success = error_text.is_none();
     if let Some(error_text) = error_text {
-        content_items.push(FunctionCallOutputContentItem::InputText {
+        content_items.push(codex_code_mode::FunctionCallOutputContentItem::InputText {
             text: format!("Script error:\n{error_text}"),
+            max_tokens: None,
         });
     }
-    content_items = truncate_code_mode_result(content_items, max_output_tokens);
+    let mut content_items =
+        into_function_call_output_content_items(output_sections::truncate_sections(
+            content_items,
+            max_output_tokens,
+            model_info.truncation_policy.into(),
+            retention,
+        ));
+    sanitize_image_detail_items(supports_original, &mut content_items);
     CodeModeToolOutput::new(
         FunctionToolOutput::from_content(content_items, Some(success)),
         script_status,
@@ -391,24 +396,6 @@ fn format_script_status(response: &RuntimeResponse) -> String {
             }
         }
     }
-}
-
-fn truncate_code_mode_result(
-    items: Vec<FunctionCallOutputContentItem>,
-    max_output_tokens: Option<usize>,
-) -> Vec<FunctionCallOutputContentItem> {
-    let max_output_tokens = resolve_max_tokens(max_output_tokens);
-    let policy = TruncationPolicy::Tokens(max_output_tokens);
-    if items
-        .iter()
-        .all(|item| matches!(item, FunctionCallOutputContentItem::InputText { .. }))
-    {
-        let (truncated_items, _) =
-            formatted_truncate_text_content_items_with_policy(&items, policy);
-        return truncated_items;
-    }
-
-    truncate_function_output_items_with_policy(&items, policy, estimate_audio_token_count)
 }
 
 // Submit synchronously so the recorder sees the call before the cell's dispatch gate closes.
@@ -542,7 +529,6 @@ mod tests {
     use std::sync::Arc;
 
     use super::build_nested_tool_payload;
-    use super::truncate_code_mode_result;
     use crate::session::step_context::StepContext;
     use crate::session::tests::make_session_and_context;
     use crate::tools::context::ToolPayload;
@@ -551,7 +537,6 @@ mod tests {
     use crate::tools::router::ToolRouter;
     use crate::turn_diff_tracker::TurnDiffTracker;
     use codex_code_mode::CodeModeToolKind;
-    use codex_protocol::models::FunctionCallOutputContentItem;
     use codex_protocol::openai_models::ToolMode;
     use codex_tools::ToolName;
     use serde_json::json;
@@ -620,35 +605,186 @@ mod tests {
     }
 
     #[test]
-    fn truncated_text_output_starts_with_warning() {
-        let items = vec![FunctionCallOutputContentItem::InputText {
-            text: "0123456789012345678901234567890123456789".to_string(),
-        }];
+    fn truncated_sections_share_the_budget_and_recover_only_truncated_text() {
+        use super::output_sections::OutputRetention;
+        use super::output_sections::truncate_sections;
+        use codex_code_mode::FunctionCallOutputContentItem as Item;
 
-        assert_eq!(
-            truncate_code_mode_result(items, Some(5)),
-            vec![FunctionCallOutputContentItem::InputText {
-                text: concat!(
-                    "Warning: truncated output (original token count: 10)\n",
-                    "Total output lines: 1\n\n",
-                    "0123456789…5 tokens truncated…0123456789"
-                )
-                .to_string(),
-            }]
+        let runtime = tempfile::tempdir().expect("test runtime");
+        let retention =
+            OutputRetention::in_test_runtime(runtime.path().to_path_buf()).expect("retention");
+        let first = format!("first-head{}first-tail", "A".repeat(100));
+        let second = format!("βhead{}βtail", "β".repeat(100));
+        let middle = format!("middle-head{}middle-tail", "M".repeat(100));
+        let last = format!("last-head{}last-tail", "L".repeat(100));
+        let media = vec![
+            Item::InputImage {
+                image_url: "data:image/png;base64,image".to_string(),
+                detail: None,
+            },
+            Item::InputAudio {
+                audio_url: "data:audio/wav;base64,audio".to_string(),
+            },
+        ];
+        let output = truncate_sections(
+            vec![
+                Item::InputText {
+                    text: first.clone(),
+                    max_tokens: Some(4),
+                },
+                media[0].clone(),
+                Item::InputTextBatch {
+                    sections: vec![second.clone(), middle.clone(), last.clone()],
+                    max_tokens: Some(12),
+                },
+                media[1].clone(),
+                Item::InputText {
+                    text: "tiny".to_string(),
+                    max_tokens: None,
+                },
+            ],
+            Some(16),
+            codex_protocol::protocol::TruncationPolicy::Tokens(10_000),
+            &retention,
         );
-    }
-
-    #[test]
-    fn over_budget_audio_output_is_omitted() {
-        let items = vec![FunctionCallOutputContentItem::InputAudio {
-            audio_url: format!("data:audio/wav;base64,{}", "A".repeat(100)),
-        }];
-
+        let Item::InputText { text: notice, .. } = &output[0] else {
+            panic!("missing notice")
+        };
+        assert!(notice.starts_with("Warning: truncated 4 text sections"));
+        assert!(notice.contains("Section 1: 120 bytes → 15 bytes"));
+        let path = std::path::PathBuf::from(
+            notice
+                .lines()
+                .find_map(|line| line.strip_prefix("Truncated emitted text: "))
+                .expect("recovery path")
+                .split_once(" (Codex host filesystem")
+                .expect("host location")
+                .0,
+        );
+        let retained = std::fs::read_to_string(&path).expect("read recovery");
+        assert!(retained.contains(&first));
+        assert!(retained.contains(&second));
+        assert!(retained.contains(&middle));
+        assert!(retained.contains(&last));
+        assert!(!retained.contains("tiny"));
+        assert!(!retained.contains("data:image"));
+        assert_eq!(output[2], media[0]);
+        assert_eq!(output[6], media[1]);
+        let snippets: Vec<_> = output
+            .iter()
+            .skip(1)
+            .filter_map(|item| match item {
+                Item::InputText { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(snippets.iter().map(|text| text.len()).sum::<usize>() <= 64);
+        assert!(snippets[0].starts_with("first"));
+        assert!(snippets[0].ends_with("tail"));
+        assert!(snippets[1].starts_with("βhead"));
+        assert!(snippets[1].ends_with("βtail"));
+        assert!(snippets[2].starts_with("middle"));
+        assert!(snippets[2].ends_with("tail"));
+        assert_eq!(snippets[4], "tiny");
+        let group_only = truncate_sections(
+            vec![Item::InputTextBatch {
+                sections: vec![second, middle, last],
+                max_tokens: Some(12),
+            }],
+            Some(1000),
+            codex_protocol::protocol::TruncationPolicy::Tokens(10_000),
+            &retention,
+        );
+        let group_bytes = group_only
+            .iter()
+            .skip(1)
+            .map(|item| match item {
+                Item::InputText { text, .. } => text.len(),
+                _ => panic!("unflattened batch"),
+            })
+            .sum::<usize>();
+        assert!(
+            group_bytes <= 48,
+            "the emission cap must not multiply by the batch size"
+        );
+        // A zero allocation still identifies a nonempty omitted section. History
+        // drops empty text items, which used to silently renumber later sections.
+        let clipped = truncate_sections(
+            vec![
+                Item::InputText {
+                    text: String::new(),
+                    max_tokens: None,
+                },
+                Item::InputText {
+                    text: "αβ".to_string(),
+                    max_tokens: None,
+                },
+                Item::InputText {
+                    text: "second".to_string(),
+                    max_tokens: None,
+                },
+            ],
+            Some(1000),
+            codex_protocol::protocol::TruncationPolicy::Bytes(1),
+            &retention,
+        );
+        let Item::InputText { text: notice, .. } = &clipped[0] else {
+            panic!("missing reduction notice")
+        };
+        assert!(notice.contains(
+            "requested output cap 1000 tokens reduced by model policy to 1 approximate text bytes"
+        ));
+        assert!(notice.contains("truncated 2 text sections"));
+        assert_eq!(clipped.len(), 3);
+        for item in &clipped[1..] {
+            assert!(matches!(item, Item::InputText { text, .. } if text == "…"));
+        }
+        let capped = truncate_sections(
+            vec![Item::InputText {
+                text: "tiny".to_string(),
+                max_tokens: None,
+            }],
+            Some(1000),
+            codex_protocol::protocol::TruncationPolicy::Tokens(1),
+            &retention,
+        );
+        assert!(
+            matches!(&capped[0], Item::InputText { text, .. } if text.starts_with("Warning: requested output cap"))
+        );
+        assert!(matches!(&capped[1], Item::InputText { text, .. } if text == "tiny"));
+        let implicit = truncate_sections(
+            vec![Item::InputText {
+                text: "tiny".to_string(),
+                max_tokens: None,
+            }],
+            None,
+            codex_protocol::protocol::TruncationPolicy::Tokens(1),
+            &retention,
+        );
         assert_eq!(
-            truncate_code_mode_result(items, Some(5)),
-            vec![FunctionCallOutputContentItem::InputText {
-                text: "[omitted 1 audio items ...]".to_string(),
-            }]
+            implicit.len(),
+            1,
+            "an implicit default is not a reduced request"
+        );
+        assert!(matches!(&implicit[0], Item::InputText { text, .. } if text == "tiny"));
+        for _ in 0..32 {
+            truncate_sections(
+                vec![Item::InputText {
+                    text: "x".repeat(100),
+                    max_tokens: None,
+                }],
+                Some(1),
+                codex_protocol::protocol::TruncationPolicy::Tokens(10_000),
+                &retention,
+            );
+        }
+        assert!(!path.exists(), "oldest artifact must be evicted");
+        let directory = path.parent().expect("retention directory").to_path_buf();
+        assert!(directory.exists());
+        retention.clear();
+        assert!(
+            !directory.exists(),
+            "thread shutdown must remove retained output"
         );
     }
 }

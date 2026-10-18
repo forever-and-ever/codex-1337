@@ -17,6 +17,7 @@ base64 = { workspace = true }
 codex-code-mode-protocol = { workspace = true }
 codex-protocol = { workspace = true }
 deno_core_icudata = { workspace = true }
+encoding_rs = { workspace = true }
 futures = { workspace = true }
 opentelemetry = { workspace = true }
 serde = { workspace = true }

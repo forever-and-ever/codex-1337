@@ -551,46 +551,118 @@ async fn unified_exec_pause_blocks_yield_timeout() -> anyhow::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn reusing_completed_process_returns_unknown_process() -> anyhow::Result<()> {
+async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -> anyhow::Result<()>
+{
     skip_if_sandbox!(Ok(()));
 
     let (session, turn) = test_session_and_turn().await;
-
+    let manager = &session.services.unified_exec_manager;
     let open_shell = exec_command(
-        &session, &turn, "bash -i", /*yield_time_ms*/ 2_500, /*workdir*/ None,
+        &session, &turn, "bash -i", /*yield_time_ms*/ 250, /*workdir*/ None,
     )
     .await?;
     let process_id = open_shell.process_id.expect("expected process id");
-
-    write_stdin(
-        &session, &turn, process_id, "exit\n", /*yield_time_ms*/ 2_500,
+    let process = Arc::clone(&manager.process_store.lock().await.processes[&process_id].process);
+    let waiting = write_stdin(
+        &session,
+        &turn,
+        process_id,
+        "printf '%20000s' ''; printf 'completion-tail\\n'; read -r gate; exit 17\n",
+        /*yield_time_ms*/ 250,
     )
     .await?;
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let err = write_stdin(&session, &turn, process_id, "", /*yield_time_ms*/ 100)
-        .await
-        .expect_err("expected unknown process error");
-
-    match err {
-        UnifiedExecError::UnknownProcessId { process_id: err_id } => {
-            assert_eq!(err_id, process_id, "process id should match request");
+    assert_eq!(waiting.process_id, Some(process_id));
+    let release = async {
+        while process.interaction_lock().try_lock_owned().is_ok() {
+            tokio::task::yield_now().await;
         }
-        other => panic!("expected UnknownProcessId, got {other:?}"),
-    }
+        process.write(b"release\n").await
+    };
+    let (completed, queued, released) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            write_stdin(&session, &turn, process_id, "", 3_600_000),
+            write_stdin(&session, &turn, process_id, "", 100),
+            release
+        )
+    })
+    .await?;
+    released?;
+    let completed = completed?;
+    assert_eq!(completed.exit_code, Some(17));
+    let queued = queued?;
+    assert_eq!(queued.exit_code, completed.exit_code);
+    assert!(queued.hook_context.is_none());
 
+    // Finalization removes stdin authority, not completion evidence. Concurrent observers
+    // must see the same outcome, and replay must not re-emit completion hooks.
+    let (first, second) = tokio::join!(
+        write_stdin(&session, &turn, process_id, "", 3_600_000),
+        write_stdin(&session, &turn, process_id, "", 100)
+    );
+    for receipt in [first?, second?] {
+        assert_eq!(receipt.exit_code, Some(17));
+        assert_eq!(receipt.process_id, None);
+        assert!(
+            receipt
+                .raw_output
+                .windows(b"completion-tail".len())
+                .any(|part| part == b"completion-tail")
+        );
+        assert!(receipt.raw_output.len() < 17 * 1024);
+        assert!(receipt.raw_output.starts_with(b"... "));
+        assert!(receipt.output_omitted_bytes.is_some());
+        assert!(receipt.hook_context.is_none());
+    }
+    assert!(matches!(
+        write_stdin(&session, &turn, process_id, "echo never replayed\n", 250).await,
+        Err(UnifiedExecError::UnknownProcessId { process_id: id }) if id == process_id
+    ));
+    assert!(manager.process_store.lock().await.processes.is_empty());
+
+    let (foreign, foreign_turn) = test_session_and_turn().await;
+    let foreign_context = UnifiedExecContext::new(
+        foreign,
+        crate::session::step_context::StepContext::for_test(foreign_turn),
+        tokio_util::sync::CancellationToken::new(),
+        "foreign".into(),
+        codex_tools::ToolName::plain("write_stdin"),
+    );
     assert!(
-        session
-            .services
-            .unified_exec_manager
-            .process_store
-            .lock()
+        manager
+            .completed_poll(
+                &foreign_context,
+                &WriteStdinRequest {
+                    process_id,
+                    input: "",
+                    yield_time_ms: 250,
+                    max_output_tokens: None,
+                    truncation_policy: TruncationPolicy::Tokens(10_000),
+                    interaction_event: None,
+                }
+            )
             .await
-            .processes
-            .is_empty()
+            .is_err()
     );
 
+    // Evicting evidence cannot turn a stale session ID into authority over a new process.
+    let context = UnifiedExecContext::new(
+        Arc::clone(&session),
+        crate::session::step_context::StepContext::for_test(Arc::clone(&turn)),
+        tokio_util::sync::CancellationToken::new(),
+        "receipt".into(),
+        codex_tools::ToolName::plain("write_stdin"),
+    );
+    for _ in 0..64 {
+        let id = manager.allocate_process_id().await;
+        manager
+            .retain_completion(id, &process, &context, &completed)
+            .await;
+    }
+    assert!(matches!(
+        write_stdin(&session, &turn, process_id, "", 250).await,
+        Err(UnifiedExecError::UnknownProcessId { process_id: id }) if id == process_id
+    ));
+    assert!(manager.allocate_process_id().await > process_id + 64);
     Ok(())
 }
 

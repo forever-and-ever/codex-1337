@@ -367,7 +367,7 @@ impl CodeModeSessionDelegate for CodeModeCellDelegate {
                     Err("code mode nested tool call cancelled".to_string())
                 }
             };
-            if result.is_ok() {
+            if !cancellation_token.is_cancelled() {
                 member.complete();
             }
             result

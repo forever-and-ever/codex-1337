@@ -18,9 +18,9 @@ const DEFERRED_NESTED_TOOLS_GUIDANCE: &str = "The inventory names every currentl
 const TOOL_DISCOVERY_GUIDANCE: &str = r#"Discovery (synchronous):
 - ALL_TOOLS: current name-and-purpose inventory.
 - search_tools(query, options?): case-insensitive literal words must all match a name or purpose; empty query browses. Optional namespace restricts callable prefix (functions for plain tools), limit defaults to 8 and is capped at 20, offset defaults to 0. Returns matches, truncated, next_offset; continue with the same query and next_offset.
-- describe_tool(name, options?): exact callable name required. Returns the complete instructions and schema-derived parameter contract. Optional detail is contract (default), output (complete return shape), or schema (raw machine schemas). Read a missing contract before calling; inspect output before using unfamiliar result fields.
+- describe_tool(name, options?): exact canonical names take precedence; accepts a tools. prefix and unambiguous exact namespace dot spellings. Aliases resolve descriptions only: invoke the canonical tools member shown in the contract. No fuzzy matching or disabled-tool lookup. Returns the complete instructions and schema-derived parameter contract. Optional detail is contract (default), output (complete return shape), or schema (raw machine schemas). Read a missing contract before calling; inspect output before using unfamiliar result fields.
 Print bounded search results, not the whole catalogue."#;
-const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Output: text/notify render directly returned exec_command/write_stdin results as literal output plus required execution state; dense nonempty arrays of only these results get ordinal headers. Default mode coalesces consecutive empty successes; metadata=true retains each result's metadata. JavaScript fields never change. Strings remain literal (including result.output and JSON.stringify); other values use generic serialization."#;
+const EXECUTION_OUTPUT_GUIDANCE: &str = r#"Output: text/notify render directly returned exec_command/write_stdin results as literal output plus required execution state; dense nonempty arrays of only these results get ordinal headers. Default mode coalesces consecutive empty successes; metadata=true retains each result's metadata. JavaScript fields never change. Strings remain literal (including result.output and JSON.stringify); other values use generic serialization. Each nonempty emitted text item is a section; native result arrays and sh preserve separate indexed result/coalesced-empty sections, and a text emission cap covers its whole batch; truncation fairly shares the exec/wait approximate text budget across sections, preserving their head/tail and disclosing effective caps. Model policy may reduce the requested cap; every reduction is disclosed. Media, bounded recovery notices and minimum omission markers are outside that text budget; history preserves the budgeted result. Truncated emitted text alone is recoverable at the reported Codex-host path (not necessarily reachable from a remote executor): at most 16 MiB/artifact, 64 MiB and 32 artifacts/thread, oldest evicted first, removed on thread-service shutdown. Recovery cannot restore bytes discarded by a nested tool; storage failures and oversized artifacts are reported explicitly."#;
 pub const TOOL_SEARCH_GUIDANCE: &str = r#"Use `await tools.tool_search({query: "...", limit: 8})` for ranked discovery of deferred tools. It returns `{tools: [{name, description}]}` with callable names and compact purpose summaries. Use `describe_tool(name)` for a missing contract before calling a tool."#;
 const LEGACY_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value, detail?)`: append an image. Value is a base64 data URL, an object with image_url and optional detail, or an individual MCP image block (image(result.content[0])). Detail is auto, low, high, original, or null; the second argument overrides embedded detail, including MCP _meta[\"codex/imageDetail\"]."#;
 const UNIFIED_IMAGE_HELPER_DESCRIPTION: &str = r#"`image(value)`: append an image. Value is a base64 data URL, an object with image_url, or an individual MCP image block (image(result.content[0]))."#;
@@ -28,21 +28,21 @@ const AUDIO_HELPER_DESCRIPTION: &str = r#"`audio(value)`: append audio. Value is
 const GENERATED_IMAGE_HELPER_DESCRIPTION: &str = r#"`generatedImage(result)`: append a generated image. Result requires image_url and may include an output_hint string. HTTP(S) URLs are unsupported."#;
 const EXEC_DESCRIPTION_TEMPLATE: &str = r#"Execute raw JavaScript in a fresh V8 async module. No JSON envelope, Markdown fences, Node, direct network, or console. Call nested tools with await tools.NAME(args); freeform tools take a string. Tool permissions and approvals still apply.
 Await every operation: finishing the module destroys its isolate and discards outstanding promises. exec blocks until completion, yield_control(), new input, or {{ max_yield_time_ms }} ms; a returned cell ID means work continues. Resume with wait only after receiving that ID.
-Optional first line: // @exec: {"max_output_tokens": 1000}. Default output budget: 10000 tokens.
+Optional first line: // @exec: {"max_output_tokens": 1000}. Default output budget: 10000 tokens, subject to model policy.
 Output enters context only when explicitly emitted:
-- text(value, options?): append output; notify(value, options?): emit immediately. Optional metadata=true includes native execution metadata.
+- text(value, {metadata?, max_tokens?}?): append one output section; max_tokens is an optional nonnegative safe-integer total cap for this emission. notify(value, {metadata?}?): emit immediately. metadata=true includes native execution metadata.
 - yield_control(): emit accumulated output and hand control back while this cell keeps running.
-- exit(): end successfully now.
+- exit(): end successfully now. fail(message): end unsuccessfully now with a message string; neither helper can be caught.
 {{ sh_helper }}
 {{ media_helpers }}
 - store(key, value), load(key): retain serializable values by string key across cells; missing keys return undefined.
 - setTimeout(callback, delayMs?), clearTimeout(id?): schedule/cancel timers. Timers alone do not keep the isolate alive; await a promise when waiting."#;
-const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A fence fails on background/yielded work or any failed prerequisite, including nested calls; caught errors do not erase failures.";
+const EXECUTION_ORDER_GUIDANCE: &str = "- `exec` and `wait` may be batched with other top-level calls. They do not impose ordering: put `fence({})` between dependent stages. A cell succeeds on its own successful foreground completion; caught nested tool errors and handled nonzero process exits are data. Inspect collected outcomes and call fail(message) when they must reject the stage. Uncaught errors, cancellation, host failure or uncertainty, unawaited work, and any background/yielded work still fail the fence. Direct top-level tools retain their own failure verdicts.";
 const WAIT_DESCRIPTION_TEMPLATE: &str = r#"- Use `wait` only after `exec` returns `Script running with cell ID ...`.
 - `cell_id` identifies the running `exec` cell to resume.
 - `wait` blocks until the script finishes or calls `yield_control()`.
 - `wait` returns early when new user or agent input arrives, or after {{ max_yield_time_ms }} ms; the script keeps running.
-- `max_tokens` limits how much new output this wait call returns. Defaults to 10000 tokens.
+- `max_tokens` limits how much new output this wait call returns. Defaults to 10000 tokens, subject to model policy.
 - `terminate: true` stops the running cell; false or omitted waits for output.
 - `wait` returns only the new output since the last yield, or the final completion or termination result for that cell.
 - If the cell is still running, `wait` may yield again with the same `cell_id`.
@@ -490,7 +490,14 @@ mod tests {
         };
 
         let description = augment_tool_definition(definition.clone()).description;
+        assert!(
+            description.starts_with("Call: await tools.hidden_dynamic_tool(args).\nParameters:")
+        );
         assert!(!description.contains("declare const tools"));
+        assert!(
+            description.find("city (required)").unwrap() < description.find("Returns:").unwrap()
+        );
+        assert!(description.ends_with("\n\nTest tool"));
         assert!(description.contains("city (required): string"));
         // A large return type must not consume the input contract's independent budget.
         let mut large_output = definition;

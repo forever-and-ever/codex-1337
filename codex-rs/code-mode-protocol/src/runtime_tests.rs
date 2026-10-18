@@ -17,6 +17,7 @@ use crate::host::WireWaitOutcome;
 #[test]
 fn code_mode_host_duration_survives_runtime_and_stdio_serialization() {
     let content_items = vec![FunctionCallOutputContentItem::InputText {
+        max_tokens: None,
         text: "output".to_string(),
     }];
     for response in [

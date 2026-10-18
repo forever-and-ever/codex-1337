@@ -24,6 +24,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: upstream tests assume the verbose envelope; 0.162 edits `unified_exec.rs` (3 commits), `approvals.rs` (4) and `code_mode.rs` (5) suites, including #50402 (`aggregated_output`).
 - Evidence: 9ad927f511, 799b7a0998, 046e18a297.
 
+### recoverable-output
+
+- Telos: batching must not erase a middle command or require re-running work to recover emitted text.
+- Holds: each nonempty text emission is a section; native execution arrays and `sh` preserve indexed result or coalesced-empty sections. An emission cap covers its entire batch, and a shared observation budget is fairly apportioned across all sections after model-policy reduction. Every reduced requested cap is disclosed. Truncated sections keep UTF-8-safe heads and tails; tiny budgets keep an omission marker rather than erasing section identity. Media, bounded notices and minimum markers are outside the text payload allowance. A finite allowance derived from the finished output prevents history recording or replay from truncating it again. Only truncated emitted text is retained, never unprinted variables or bytes a nested tool already discarded. Recovery uses private leased Codex-runtime artifacts, at most 16 MiB each and 64 MiB / 32 artifacts per thread, FIFO-evicted and removed on thread-service shutdown; abandoned artifacts require the owned lease marker before reaping. Storage failure is disclosed. Host-local paths do not grant a remote executor access.
+- Owners: `codex-rs/core/src/tools/code_mode/output_sections.rs`, `output.rs` and `response_adapter.rs`; `codex-rs/code-mode-runtime/src/runtime/native_result.rs` and `sh.rs`; `codex-rs/code-mode-protocol/src/response.rs` and `grpc/codex.code_mode.v1.proto`; `codex-rs/protocol/src/native_execution_result.rs`.
+- Tripwire: `truncated_sections_share_the_budget_and_recover_only_truncated_text` (`codex-rs/core/src/tools/code_mode/mod.rs`), `completed_timing_preserves_content_and_distinguishes_zero_from_unavailable` (`output_tests.rs`), `code_mode_exec_outer_limit_truncates_emitted_output` and the nested-limit cases (`codex-rs/core/tests/suite/code_mode.rs`); native presentation and host gRPC/stdio round trips cover the grouped wire shape.
+- Pressure: flattening batches before budgeting, prefix-only history truncation and lost transport metadata silently undo recoverability; temporary files without custody leak data or delete another session's live output.
+- Evidence: owner implementation decision, 2026-10-18.
+
 ### mcp-roster
 
 - Telos: retain a broad tool catalogue without charging every conversation for every full schema. The short eager roster's per-tool context cost is intentional.
@@ -45,7 +54,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### compact-contracts
 
 - Telos: discovery shows a compact summary; full contracts and output schemas cost tokens only when requested.
-- Holds: `search_tools` and `ALL_TOOLS` give a name and one purpose sentence of at most 160 characters. `describe_tool` derives deterministic porcelain from the executable schemas: required and optional parameters, defaults, variants, constraints and return shape. References are expanded once per schema; input constraints are never silently budget-clipped. The obsolete Code Mode rendering-budget knob is removed; native MCP schema compaction is unchanged. `{detail: "output"}` discloses the complete declared result and `{detail: "schema"}` returns the retained machine schemas. MCP result fields are disclosed on demand, not repeated as a standing TypeScript preamble. For an unchanged catalogue, Code Mode discovery, contract lookup and first use never promote contracts into standing declarations or rewrite earlier context; their model-visible outputs append to history.
+- Holds: `search_tools` and `ALL_TOOLS` give a name and one purpose sentence of at most 160 characters. `describe_tool` accepts canonical enabled-tool names and only unambiguous exact aliases such as `tools.NAME` or namespace dots; aliases never create callable bindings or promote tools. It derives deterministic porcelain from the executable schemas, placing invocation, parameters and return shape before extended prose: required and optional parameters, defaults, variants, constraints and return shape. References are expanded once per schema; input constraints are never silently budget-clipped. The obsolete Code Mode rendering-budget knob is removed; native MCP schema compaction is unchanged. `{detail: "output"}` discloses the complete declared result and `{detail: "schema"}` returns the retained machine schemas. MCP result fields are disclosed on demand, not repeated as a standing TypeScript preamble. For an unchanged catalogue, Code Mode discovery, contract lookup and first use never promote contracts into standing declarations or rewrite earlier context; their model-visible outputs append to history.
 - Owners: `codex-rs/code-mode-protocol/src/discovery.rs` (`EnabledToolMetadata`, `compact_tool_summary`), `codex-rs/code-mode-protocol/src/contract.rs`, `codex-rs/code-mode-protocol/src/presentation.rs`, `codex-rs/code-mode-runtime/src/runtime/discovery.rs`, `codex-rs/core/src/tools/handlers/mcp.rs`, `codex-rs/core/src/tools/code_mode/execute_handler.rs`.
 - Tripwire: `global_scope_contains_only_allowed_items` (`codex-rs/code-mode-runtime/src/service_tests.rs`) pins every discovery output; `contract_retains_shared_references_and_required_branches` (`codex-rs/code-mode-protocol/src/description.rs`); `mcp_code_mode_definitions_are_cached_lazily` (`codex-rs/core/src/tools/handlers/mcp.rs`) asserts the kept output schema. Request-level declaration stability across lookup and first use: unverified.
 - Pressure: 0.162 #51209 returns TypeScript declarations from ranked `tool_search` and edits `execute_handler.rs`; #50687 changes MCP deferral in `handlers/mcp.rs`.
@@ -72,9 +81,9 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### human-only-facts
 
 - Telos: facts shown to the human cost no model tokens and leave the cached prefix unchanged.
-- Holds: Code Mode ownership, MCP edit receipts, work status, the Preamble census, token bills, reasoning-token Thoughts and prompt-cache estimates travel as events or `TurnItem`s, never as `ResponseItem`s; `take_file_changes` strips receipts from the model-visible MCP result.
+- Holds: Code Mode ownership, MCP edit receipts, work status, the Preamble census, token bills, reasoning-token Thoughts and prompt-cache estimates travel as events or `TurnItem`s, never as `ResponseItem`s; `take_file_changes` strips receipts from the model-visible MCP result. Cosmetic status is registered in every session; suppressed roles accept a no-op. Malformed updates return warnings and overlong text is normalized and truncated, never allowed to abort a Code Mode cell.
 - Owners: `codex-rs/protocol/src/code_mode.rs` (`CodeModeOwner`, `CodeModeOwned`), `codex-rs/protocol/src/mcp_file_changes.rs` (`FileChangeReceipt`, `take_file_changes`), `codex-rs/core/src/mcp_tool_call.rs`, `codex-rs/core/src/tools/handlers/work_status.rs`, `codex-rs/protocol/src/preamble.rs` (`PreambleItem`), `codex-rs/protocol/src/items.rs` (`TurnItem`), `codex-rs/rollout/src/policy.rs`, `codex-rs/core/src/session/response_thought.rs`.
-- Tripwire: receipts: `mcp_receipt_survives_event_bounds_without_entering_model_result` (`codex-rs/core/src/mcp_tool_call_tests.rs`), `receipt_capture_is_private_and_rejection_does_not_change_tool_failure` (`codex-rs/protocol/src/mcp_file_changes_tests.rs`). Other facts: none; only the type split guards them.
+- Tripwire: receipts: `mcp_receipt_survives_event_bounds_without_entering_model_result` (`codex-rs/core/src/mcp_tool_call_tests.rs`), `receipt_capture_is_private_and_rejection_does_not_change_tool_failure` (`codex-rs/protocol/src/mcp_file_changes_tests.rs`). Status: `work_status_replaces_activity_without_entering_history` (`codex-rs/core/tests/suite/work_status.rs`); other facts rely on the type split.
 - Pressure: 0.162 #50458 (truncated MCP results in paginated history) and #50435 (tool definitions in rollout history) edit `mcp_tool_call.rs`, `rollout/src/policy.rs` and `protocol/src/models.rs`.
 - Evidence: 67c459e3df, 900acaab71, dba3834511, 40394ab352.
 
@@ -90,29 +99,38 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### turn-economy
 
 - Telos: the model spends a round trip only when there is news.
-- Holds: Code Mode `exec` and `wait` return only when the cell finishes or yields, user input or released mail arrives, or `[features.code_mode] max_yield_time_ms` (default 600000) expires, and ignore the model's `yield_time_ms`; in Code Mode Only, `exec_command` waits for exit unless `background` is set, and an empty `write_stdin` from a cell reports a running process no sooner than 60 s; ordinary family mail wakes idle recipients and batches for one fixed window while at least two subagents are active anywhere in the family; `wait_agent` observes released mail without adding another hold; Code Mode exposes `clock.sleep`.
-- Owners: `codex-rs/core/src/session/input_queue/interjection.rs` (`Interjection`), `codex-rs/core/src/tools/code_mode/wait_handler.rs`, `codex-rs/core/src/tools/code_mode/execute_handler.rs`, `codex-rs/core/src/session/input_queue/mailbox_batch.rs`, `codex-rs/core/src/unified_exec/initial_wait.rs` (`InitialWait`), `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`, `codex-rs/core/src/tools/handlers/unified_exec/write_stdin/cell.rs` (`EMPTY_WRITE_FLOOR_MS`), `codex-rs/core/src/tools/spec_plan.rs`.
-- Tripwire: `interjections_yield_exec_and_wait_without_stopping_the_cell` and `wait_agent_wake_preserves_mail_and_steers` (`codex-rs/core/tests/suite/pending_input.rs`), `code_mode_can_return_exec_command_output` (`codex-rs/core/tests/suite/code_mode.rs`), `sleep_tool_uses_configured_time_provider` (`codex-rs/core/tests/suite/current_time_reminder.rs`). The 60 s floor: none.
+- Holds: Code Mode `exec` and `wait` return only when the cell finishes or yields, user input or released mail arrives, or `[features.code_mode] max_yield_time_ms` (default 3600000) expires, and ignore the model's `yield_time_ms`; in Code Mode Only, `exec_command` waits for exit unless `background` is set, and empty `write_stdin` normally waits at least 60 s, returning sooner on completion or interjection; terminal polling permits a one-hour window while nonempty input remains responsive. Direct empty polls yield to steering without discarding drained bytes or terminating the process; nested polls remain governed by their cell's continuation, not its originating step's latched signal; completed-process observations retain a bounded terminal receipt, never stdin authority, within the owning session and process-manager lifetime. Repeated empty polls may replay the terminal tail without repeating hooks; evicted IDs are never reused in that manager; ordinary family mail wakes idle recipients and batches for one fixed window while at least two subagents are active anywhere in the family; `wait_agent` observes released mail without adding another hold; Code Mode exposes `clock.sleep`.
+- Owners: `codex-rs/core/src/session/input_queue/interjection.rs` (`Interjection`), `codex-rs/core/src/tools/code_mode/wait_handler.rs`, `codex-rs/core/src/tools/code_mode/execute_handler.rs`, `codex-rs/core/src/session/input_queue/mailbox_batch.rs`, `codex-rs/core/src/unified_exec/initial_wait.rs` (`InitialWait`), `codex-rs/core/src/unified_exec/completion_receipts.rs`, `codex-rs/core/src/unified_exec/output_collection.rs`, `codex-rs/core/src/tools/handlers/unified_exec/exec_command/cell.rs`, `codex-rs/core/src/unified_exec/mod.rs` (`MIN_EMPTY_YIELD_TIME_MS`), `codex-rs/core/src/tools/spec_plan.rs`.
+- Tripwire: `interjections_yield_exec_and_wait_without_stopping_the_cell` and `wait_agent_wake_preserves_mail_and_steers` (`codex-rs/core/tests/suite/pending_input.rs`), `code_mode_can_return_exec_command_output` (`codex-rs/core/tests/suite/code_mode.rs`), `sleep_tool_uses_configured_time_provider` (`codex-rs/core/tests/suite/current_time_reminder.rs`). Direct-poll steering and receipt replay: `write_stdin_returns_exit_metadata_and_clears_session` (`codex-rs/core/tests/suite/unified_exec.rs`). The 60 s floor is a constructor clamp, not a wall-clock test.
 - Pressure: 0.162 #51812 enables `instant_interrupt` by default, which decides whether an `Interjection` cuts off streaming, and edits `pending_input.rs`; #51209 edits `code_mode/mod.rs` and `execute_handler.rs`; #51332 edits `multi_agents_v2/wait.rs`; #50962 and #50741 edit `exec_command.rs` and `write_stdin.rs`.
 - Evidence: 25226df915, 2d9f646044, 9050de4515, cc4701d2fe.
 
 ### local-coprocessor
 
 - Telos: local computation and bounded file transfers need no shell quoting or extra model turn.
-- Holds: raw Python and Bash source executes through the selected executor with ordinary execution policy, approval and cancellation; script execution does not acquire shell startup, snapshot or command-prefix approval semantics. Code Mode filesystem helpers use the captured step's environment and granted permissions, never the host's ambient filesystem authority; each transfer is bounded to 1 MiB.
-- Owners: `codex-rs/core/src/tools/script_exec.rs` (`ExecutionMode`), `codex-rs/core/src/tools/handlers/script_exec/`, `codex-rs/core/src/exec_policy/script_exec.rs`, `codex-rs/core/src/tools/handlers/code_mode_fs.rs`, `codex-rs/code-mode-runtime/src/runtime/filesystem.rs`; seams in `tools/spec_plan.rs`, `tools/handlers/unified_exec/exec_command.rs`, `tools/runtimes/unified_exec.rs` and `unified_exec/process_manager.rs` under `codex-rs/core/src/`.
-- Tripwire: `raw_script_execution_contract` (`codex-rs/core/tests/suite/raw_script_exec.rs`), `filesystem_authority_and_transfer_bounds` (`codex-rs/core/tests/suite/code_mode_pipeline.rs`).
+- Holds: raw Python and Bash source executes through the selected executor with ordinary execution policy, approval and cancellation; script execution does not acquire shell startup, snapshot or command-prefix approval semantics. Code Mode filesystem helpers use the captured step's environment and granted permissions, never the host's ambient filesystem authority; each transfer is bounded to 1 MiB. The V8 runtime provides `TextEncoder`, `TextDecoder`, `atob` and `btoa` with streaming Unicode and Latin-1 Base64 semantics, not a browser or Node environment. Invalid Base64 raises an `Error` named `InvalidCharacterError`; there is no `DOMException` global.
+- Owners: `codex-rs/core/src/tools/script_exec.rs` (`ExecutionMode`), `codex-rs/core/src/tools/handlers/script_exec/`, `codex-rs/core/src/exec_policy/script_exec.rs`, `codex-rs/core/src/tools/handlers/code_mode_fs.rs`, `codex-rs/code-mode-runtime/src/runtime/filesystem.rs`, `codex-rs/code-mode-runtime/src/runtime/encoding.rs` and `encoding.js`; seams in `tools/spec_plan.rs`, `tools/handlers/unified_exec/exec_command.rs`, `tools/runtimes/unified_exec.rs` and `unified_exec/process_manager.rs` under `codex-rs/core/src/`.
+- Tripwire: `raw_script_execution_contract` (`codex-rs/core/tests/suite/raw_script_exec.rs`), `filesystem_authority_and_transfer_bounds` (`codex-rs/core/tests/suite/code_mode_pipeline.rs`); `global_scope_contains_only_allowed_items` and `decoder_state_follows_its_javascript_owner` (`codex-rs/code-mode-runtime/src/service_tests.rs`) cover encoding semantics and lifetime.
 - Pressure: changes to shell invocation, snapshot preparation, executor selection or turn permission grants must preserve script-versus-shell authority; Code Mode description overrides must not hide the filesystem helpers.
 - Evidence: 0dc126edd9, 0a51b60ef1.
+
+### agent-bash
+
+- Telos: agent command syntax does not depend on the human's choice of interactive shell.
+- Holds: supported Linux agent execution selects Bash for both session defaults and executor-reported shell context, independently of the human's login shell. Missing Bash fails execution rather than silently interpreting the source with another shell. Raw `bash` is Bash; `exec_command` and Code Mode's `sh` helper use the agent default unless an explicit override or an external executor's reported shell applies. Inherited environment, PATH, permission policy and cancellation retain their existing owners. Human-only TUI `!!` commands remain on the separate local-shell path.
+- Owners: `codex-rs/shell-command/src/agent_shell.rs`, with seams in `codex-rs/core/src/session/session.rs` and `codex-rs/exec-server-protocol/src/protocol.rs`; model-facing shell contract in `codex-rs/core/src/tools/handlers/shell_spec.rs`.
+- Tripwire: `exec_command_uses_installed_environment_shell_policy_with_explicit_overrides` (`codex-rs/core/tests/suite/unified_exec.rs`) couples executed Bash syntax, reported shell and selected-environment policy. Human-local authority remains covered by [client-only-shell](#client-only-shell).
+- Pressure: upstream default-shell detection follows the human's login shell; reusing it for agents silently changes syntax, startup behavior and glob expansion.
+- Evidence: owner doctrine decision, 2026-10-18.
 
 ### response-order-fences
 
 - Telos: dependent execution stages fit in one model response without racing or running after a failed prerequisite.
-- Holds: calls enter their response batch in stream order; a fence admits the next stage only after every preceding call has completed successfully. Cancellation, dropped calls, yielded cells, background processes and nested failures fail closed; catching a nested error does not erase it. Admission waits occur outside execution locks, and Code Mode coordinators hold no lock while their nested tools execute. A new model response starts a new batch.
+- Holds: calls enter their response batch in stream order; a fence admits the next stage only after every preceding call has completed successfully. A Code Mode cell owns its verdict: caught tool errors and handled nonzero process exits are data, not automatic stage failures. Uncaught exceptions and terminal `fail(message)` fail the cell; `fail` cannot be caught or undone by `exit`. Cancellation, dispatcher loss, fatal host failures, dropped or unawaited calls, any yielded cell and background work still fail closed. Direct top-level tools retain their own failure verdicts. Admission waits occur outside execution locks, and Code Mode coordinators hold no lock while their nested tools execute. A new model response starts a new batch.
 - Owners: `codex-rs/core/src/tools/fence.rs`, `codex-rs/core/src/tools/parallel.rs`, `codex-rs/core/src/stream_events_utils.rs`, `codex-rs/core/src/session/turn.rs`, `codex-rs/core/src/tools/code_mode/delegate.rs`, `codex-rs/core/src/tools/spec_plan.rs`, `codex-rs/code-mode-protocol/src/description.rs`.
 - Tripwire: `response_stage_pipeline` (`codex-rs/core/tests/suite/code_mode_pipeline.rs`) covers successful and failed stages; scheduler and cancellation cases live beside the fence implementation.
-- Pressure: stream dispatch, parallel-tool locking and Code Mode worker boundaries can lose ordering or nested failure attribution; model description overrides must retain the fence contract.
-- Evidence: 7e44726e4e.
+- Pressure: stream dispatch, parallel-tool locking and Code Mode worker boundaries can lose ordering or confuse handled data with the cell's terminal outcome; model description overrides must retain the fence contract.
+- Evidence: 7e44726e4e; owner cell-outcome doctrine decision, 2026-10-18.
 
 ### retained-goal-rules
 
@@ -543,6 +561,8 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/exec/src/cli.rs`: explicit-command-verbs
 - `codex-rs/exec/src/lib.rs`: explicit-command-verbs
 - `codex-rs/tui/src/cli.rs`: explicit-command-verbs
+- `codex-rs/code-mode-protocol/src/grpc/codex.code_mode.v1.proto`: recoverable-output
+- `codex-rs/code-mode-protocol/src/response.rs`: recoverable-output
 - `codex-rs/code-mode-protocol/src/description.rs`: mcp-roster, standing-context-trims, local-coprocessor, response-order-fences
 - `codex-rs/codex-mcp/src/binding.rs`: standing-context-trims
 - `codex-rs/codex-mcp/src/client_tool_catalog.rs`: catalog-at-model-boundaries
@@ -566,11 +586,16 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/code_mode/delegate.rs`: response-order-fences
 - `codex-rs/core/src/tools/code_mode/execute_handler.rs`: compact-contracts, turn-economy
 - `codex-rs/core/src/tools/code_mode/execute_spec.rs`: mcp-roster
-- `codex-rs/core/src/tools/code_mode/output.rs`: terse-exec-envelope
+- `codex-rs/core/src/tools/code_mode/output.rs`: terse-exec-envelope, recoverable-output
+- `codex-rs/core/src/tools/code_mode/response_adapter.rs`: recoverable-output
 - `codex-rs/core/src/tools/code_mode/wait_handler.rs`: turn-economy
 - `codex-rs/core/src/tools/context.rs`: terse-exec-envelope
 - `codex-rs/core/src/tools/handlers/mcp.rs`: compact-contracts
-- `codex-rs/core/src/tools/handlers/shell_spec.rs`: standing-context-trims
+- `codex-rs/core/src/tools/handlers/shell_spec.rs`: standing-context-trims, agent-bash
+- `codex-rs/shell-command/src/agent_shell.rs`: agent-bash
+- `codex-rs/code-mode-protocol/src/sh.rs`: agent-bash
+- `codex-rs/core/src/session/session.rs`: agent-bash
+- `codex-rs/exec-server-protocol/src/protocol.rs`: agent-bash
 - `codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs`: standing-context-trims, local-coprocessor
 - `codex-rs/core/src/tools/parallel.rs`: response-order-fences
 - `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor
@@ -725,7 +750,10 @@ Fork-owned files, absent upstream:
 - `codex-rs/code-mode-protocol/src/roster.rs`: mcp-roster
 - `codex-rs/code-mode-runtime/src/runtime/discovery.rs`: compact-contracts
 - `codex-rs/code-mode-runtime/src/runtime/filesystem.rs`: local-coprocessor
-- `codex-rs/code-mode-runtime/src/runtime/native_result.rs`: terse-exec-envelope
+- `codex-rs/code-mode-runtime/src/runtime/encoding.rs`: local-coprocessor
+- `codex-rs/code-mode-runtime/src/runtime/encoding.js`: local-coprocessor
+- `codex-rs/code-mode-runtime/src/runtime/sh.rs`: recoverable-output
+- `codex-rs/code-mode-runtime/src/runtime/native_result.rs`: terse-exec-envelope, recoverable-output
 - `codex-rs/codex-api/src/anthropic/cache.rs`: cache-ttl-and-warming
 - `codex-rs/codex-api/src/anthropic/client.rs`: backpressure-waits
 - `codex-rs/codex-api/src/anthropic/decoder.rs`: native-robustness, backpressure-waits
@@ -757,6 +785,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/session/preamble.rs`: token-bills
 - `codex-rs/core/src/session/context_inventory.rs`: token-bills
 - `codex-rs/core/src/session/tool_output_tokens.rs`: token-bills
+- `codex-rs/core/src/tools/code_mode/output_sections.rs`: recoverable-output
 - `codex-rs/core/src/tools/fence.rs`: response-order-fences
 - `codex-rs/core/src/tools/handlers/code_mode_fs.rs`: local-coprocessor
 - `codex-rs/core/src/tools/handlers/multi_agents_v2/retire_agent.rs`: server-hosted-agents
@@ -767,6 +796,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/core/src/tools/handlers/work_status.rs`: human-only-facts
 - `codex-rs/core/src/tools/script_exec.rs`: local-coprocessor
 - `codex-rs/core/src/unified_exec/initial_wait.rs`: turn-economy
+- `codex-rs/core/src/unified_exec/completion_receipts.rs`: turn-economy
+- `codex-rs/core/src/unified_exec/output_collection.rs`: turn-economy
 - `codex-rs/ext/goal/src/world_state.rs`: retained-goal-rules
 - `codex-rs/feature-floor/Cargo.toml`: one-dependency-graph
 - `codex-rs/history/src/tool_failure.rs`: stable-native-identities
@@ -775,7 +806,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/protocol/src/comms_gate.rs`: server-hosted-agents
 - `codex-rs/protocol/src/context_role.rs`: server-hosted-agents
 - `codex-rs/protocol/src/mcp_file_changes.rs`: human-only-facts
-- `codex-rs/protocol/src/native_execution_result.rs`: terse-exec-envelope
+- `codex-rs/protocol/src/native_execution_result.rs`: terse-exec-envelope, recoverable-output
 - `codex-rs/protocol/src/preamble.rs`: human-only-facts, token-bills
 - `codex-rs/state/src/runtime/farm_requests.rs`: server-hosted-agents
 - `codex-rs/state/src/runtime/thread_names.rs`: server-hosted-agents

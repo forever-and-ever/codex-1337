@@ -1482,10 +1482,11 @@ impl Session {
                 mcp_server_names.iter().map(String::as_str).collect(),
             );
 
+            // TELOS(agent-bash): the agent's syntax is not the human's login-shell preference.
             let default_shell = session_configuration
                 .user_shell_override
                 .clone()
-                .unwrap_or_else(shell::default_user_shell);
+                .unwrap_or_else(|| codex_shell_command::agent_shell::default_shell().into());
             let credential_broker_available = (config.features.enabled(Feature::NetworkProxy)
                 || config.features.enabled(Feature::CredentialMasking))
                 && config

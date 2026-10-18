@@ -8,6 +8,8 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ResponseInputItem;
 use codex_protocol::models::function_call_output_content_items_to_text;
+use codex_utils_audio::estimate_audio_token_count;
+use codex_utils_output_truncation::approx_token_count;
 
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolOutput;
@@ -64,6 +66,26 @@ impl ToolOutput for CodeModeToolOutput {
 
     fn success_for_logging(&self) -> bool {
         self.output.success_for_logging()
+    }
+
+    fn fallback_token_limit_override(&self) -> Option<usize> {
+        // TELOS(recoverable-output): the Code Mode boundary already apportioned the model's text budget.
+        // Preserve its sections, diagnostics and media through recording and replay:
+        // a second prefix truncation would erase later sections and recovery paths.
+        Some(
+            self.output
+                .body
+                .iter()
+                .map(|item| match item {
+                    FunctionCallOutputContentItem::InputText { text } => approx_token_count(text),
+                    FunctionCallOutputContentItem::InputAudio { audio_url } => {
+                        estimate_audio_token_count(audio_url)
+                    }
+                    FunctionCallOutputContentItem::InputImage { .. }
+                    | FunctionCallOutputContentItem::EncryptedContent { .. } => 0,
+                })
+                .fold(0, usize::saturating_add),
+        )
     }
 
     fn set_handler_duration_ms(&mut self, handler_duration_ms: u64) {

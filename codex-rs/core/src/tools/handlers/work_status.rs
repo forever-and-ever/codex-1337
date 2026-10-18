@@ -32,7 +32,7 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
         ToolSpec::Function(ResponsesApiTool {
             name: "update_work_status".into(),
             description: format!(
-                "Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most {} characters. Replaces the previous activity and clears when the turn ends. Never changes the goal.",
+                "Show what you are currently working on without posting a chat message. Use at the start of substantive work and when your activity changes, instead of routine progress-only chat updates. Keep it concrete, not private reasoning: a short, nonempty summary of at most {} characters. Whitespace is normalized; longer summaries are truncated with a warning. Malformed cosmetic updates are ignored with a warning rather than failing the call. Suppressed sessions accept updates without displaying them. Replaces the previous activity and clears when the turn ends. Never changes the goal.",
                 WorkStatus::MAX_ACTIVITY_CHARS
             ),
             strict: false,
@@ -54,25 +54,49 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
         ToolInvocation: 'a,
     {
         Box::pin(async move {
-            let ToolPayload::Function { arguments } = &invocation.payload else {
-                return Err(FunctionCallError::RespondToModel(
-                    "Expected function arguments.".into(),
-                ));
+            let reply = |text: String| {
+                Ok(boxed_tool_output(FunctionToolOutput::from_text(
+                    text,
+                    /*success*/ Some(true),
+                )))
             };
-            let update: Update = parse_arguments(arguments)?;
+            if invocation.turn.session_source.is_internal()
+                || crate::guardian::is_basic_session_source(&invocation.turn.session_source)
+            {
+                return reply("Work status suppressed for this session.".into());
+            }
+            let ToolPayload::Function { arguments } = &invocation.payload else {
+                return reply("Warning: work status ignored; expected function arguments.".into());
+            };
+            let update: Update = match parse_arguments(arguments) {
+                Ok(update) => update,
+                Err(error) => return reply(format!("Warning: work status ignored; {error}")),
+            };
+            let activity = match summary(&update.activity) {
+                Ok(activity) => activity,
+                Err(error) => return reply(format!("Warning: work status ignored; {error}")),
+            };
+            let truncated = activity.chars().count() > WorkStatus::MAX_ACTIVITY_CHARS;
             let status = WorkStatus {
                 turn_id: invocation.turn.sub_id.clone(),
-                activity: summary(&update.activity)?,
+                activity: activity
+                    .chars()
+                    .take(WorkStatus::MAX_ACTIVITY_CHARS)
+                    .collect(),
                 emitted_at: Some(chrono::Utc::now().timestamp()),
             };
             invocation
                 .session
                 .send_event(&invocation.turn, EventMsg::WorkStatusUpdated(status))
                 .await;
-            Ok(boxed_tool_output(FunctionToolOutput::from_text(
-                "Work status updated.".into(),
-                /*success*/ Some(true),
-            )))
+            reply(if truncated {
+                format!(
+                    "Warning: work status truncated to {} characters.",
+                    WorkStatus::MAX_ACTIVITY_CHARS
+                )
+            } else {
+                "Work status updated.".into()
+            })
         })
     }
 }
@@ -84,12 +108,6 @@ impl CoreToolRuntime for WorkStatusHandler {
 }
 
 fn summary(text: &str) -> Result<String, FunctionCallError> {
-    if text.chars().count() > WorkStatus::MAX_ACTIVITY_CHARS {
-        return Err(FunctionCallError::RespondToModel(format!(
-            "Keep each summary within {} characters.",
-            WorkStatus::MAX_ACTIVITY_CHARS
-        )));
-    }
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() || text.chars().any(char::is_control) {
         return Err(FunctionCallError::RespondToModel(

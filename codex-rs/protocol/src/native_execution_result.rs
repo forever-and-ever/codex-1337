@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Write as _;
 
 /// The structured result of native `exec_command` and `write_stdin` calls.
 #[derive(Debug, Deserialize, Serialize)]
@@ -37,13 +36,11 @@ impl SettledExecution {
         Some(compose(header, body))
     }
 
-    /// Reject the entire batch on an incompatible item; the caller emits only
-    /// after validation finishes. Items are consumed without retaining bodies.
-    pub fn render_batch(
+    pub fn render_batch_sections(
         calls: impl IntoIterator<Item = Option<Self>>,
         metadata: ExecutionOutputMetadata,
-    ) -> Option<String> {
-        let mut output = String::new();
+    ) -> Option<Vec<String>> {
+        let mut sections = Vec::new();
         let mut empty_start = None;
         let mut empty_end = 0;
         for (index, call) in calls.into_iter().enumerate() {
@@ -55,13 +52,10 @@ impl SettledExecution {
                 continue;
             }
             if let Some(start) = empty_start.take() {
-                append_empty_span(&mut output, start, empty_end);
+                append_empty_span(&mut sections, start, empty_end);
             }
             let (header, body) = call.parts(metadata)?;
-            if !output.is_empty() && !output.ends_with('\n') {
-                output.push('\n');
-            }
-            let _ = write!(output, "[{ordinal}]");
+            let mut output = format!("[{ordinal}]");
             if !header.is_empty() {
                 output.push(' ');
                 output.push_str(&header);
@@ -70,11 +64,12 @@ impl SettledExecution {
                 output.push('\n');
                 output.push_str(body);
             }
+            sections.push(output);
         }
         if let Some(start) = empty_start {
-            append_empty_span(&mut output, start, empty_end);
+            append_empty_span(&mut sections, start, empty_end);
         }
-        Some(output)
+        Some(sections)
     }
 
     fn parts(&self, metadata: ExecutionOutputMetadata) -> Option<(String, &str)> {
@@ -141,15 +136,23 @@ impl NativeExecutionResult {
     }
 }
 
-fn append_empty_span(output: &mut String, start: usize, end: usize) {
-    if !output.is_empty() && !output.ends_with('\n') {
-        output.push('\n');
-    }
-    if start == end {
-        let _ = write!(output, "[{start}] Completed");
+fn append_empty_span(sections: &mut Vec<String>, start: usize, end: usize) {
+    sections.push(if start == end {
+        format!("[{start}] Completed")
     } else {
-        let _ = write!(output, "[{start}–{end}] Completed");
+        format!("[{start}–{end}] Completed")
+    });
+}
+
+pub fn join_execution_sections(sections: impl IntoIterator<Item = String>) -> String {
+    let mut output = String::new();
+    for section in sections {
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(&section);
     }
+    output
 }
 
 fn compose(header: String, body: &str) -> String {
