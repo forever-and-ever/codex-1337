@@ -94,7 +94,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -126,7 +126,7 @@ impl App {
         if self.chat_widget.has_misalignment_policy_violation() {
             return;
         }
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -168,7 +168,7 @@ impl App {
         };
         let codex_home = app_server.codex_home_path(&self.config.codex_home);
         let fs = app_server.file_system();
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -219,7 +219,7 @@ impl App {
         mode: ThreadGoalSetMode,
     ) {
         if matches!(mode, ThreadGoalSetMode::ConfirmIfExists) {
-            let _ = self.request_server(
+            self.request_server(
                 app_server,
                 UiRequestScope::DisplayedThread(thread_id),
                 UiRequestKind::ReadOnly,
@@ -264,7 +264,7 @@ impl App {
         let codex_home = server.codex_home_path(&self.config.codex_home);
         let fs = server.file_system();
         let replacing_goal = matches!(mode, ThreadGoalSetMode::ReplaceExisting);
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,
@@ -278,7 +278,7 @@ impl App {
                     };
                 let result = async {
                     if replacing_goal {
-                        let _ = clear_goal(handle.clone(), thread_id).await?;
+                        clear_goal(handle.clone(), thread_id).await?;
                     }
                     let (status, token_budget) = match mode {
                         ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::ReplaceExisting => {
@@ -305,7 +305,7 @@ impl App {
                             format!("Goal {}", goal_status_label(response.goal.status)),
                             Some(goal_usage_summary(&response.goal)),
                         );
-                        let _ = app.chat_widget.maybe_send_next_queued_input();
+                        app.chat_widget.maybe_send_next_queued_input();
                     }
                     Ok(Err(error)) => app.chat_widget.add_error_message(error),
                     Err(error) => app.chat_widget.add_error_message(goal_request_error(
@@ -324,7 +324,7 @@ impl App {
         thread_id: ThreadId,
         status: ThreadGoalStatus,
     ) {
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,
@@ -350,7 +350,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,

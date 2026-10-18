@@ -15,7 +15,7 @@ pub(super) async fn select_transcript(
     app.transcript_cells = vec![Arc::new(PlainHistoryCell::new(vec![
         "select this transcript".into(),
     ]))];
-    let _ = app.render_owned_transcript(tui, Size::new(/*width*/ 80, /*height*/ 12))?;
+    app.render_owned_transcript(tui, Size::new(/*width*/ 80, /*height*/ 12))?;
     let presented =
         crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal).clone();
     // An unpresented revision must not replace the cells behind the retained hit areas.
@@ -25,13 +25,12 @@ pub(super) async fn select_transcript(
             "unpresented replacement".into(),
         ]))],
     );
-    let _ = app
-        .handle_tui_event(
-            tui,
-            app_server,
-            TuiEvent::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
-        )
-        .await?;
+    app.handle_tui_event(
+        tui,
+        app_server,
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)),
+    )
+    .await?;
     assert!(
         crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal)
             .content()
@@ -41,13 +40,12 @@ pub(super) async fn select_transcript(
             .contains("select this transcript")
     );
     for _ in 0..6 {
-        let _ = app
-            .handle_tui_event(
-                tui,
-                app_server,
-                TuiEvent::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
-            )
-            .await?;
+        app.handle_tui_event(
+            tui,
+            app_server,
+            TuiEvent::Key(KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT)),
+        )
+        .await?;
     }
     // Key routing changes interaction state, not the already presented frame.
     assert_eq!(

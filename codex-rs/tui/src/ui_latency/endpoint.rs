@@ -257,7 +257,7 @@ fn read_request(client: &mut UnixStream, deadline: Instant) -> io::Result<[u8; 8
     Ok(request)
 }
 fn serve(client: &mut UnixStream, shared: &Shared, metadata: &[u8; METADATA]) -> io::Result<()> {
-    let _ = peer(&*client)?;
+    peer(&*client)?;
     let deadline = Instant::now() + DEADLINE;
     match &read_request(client, deadline)? {
         b"UIR1DUMP" => {}
@@ -410,7 +410,7 @@ async fn query_path(path: &Path, pid: u32, start: u64, reset: bool) -> io::Resul
             .write_all(if reset { b"UIR1RSET" } else { b"UIR1DUMP" })
             .await?;
         let mut response = [0; WIRE];
-        let _ = client.read_exact(&mut response).await?;
+        client.read_exact(&mut response).await?;
         Ok::<_, io::Error>(response)
     })
     .await

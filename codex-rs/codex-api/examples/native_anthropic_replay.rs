@@ -311,7 +311,7 @@ fn native_frames(frames: &[Value], tools: &[AnthropicTool]) -> Result<Vec<Value>
                     frame["content_block"]["input"] =
                         json!({"arguments":frame["content_block"]["input"]});
                 }
-                let _ = functions.insert(index, None);
+                functions.insert(index, None);
             }
             Some("content_block_delta") if frame["delta"]["type"] == "input_json_delta" => {
                 if let Some(last) = index.and_then(|index| functions.get_mut(&index)) {
@@ -381,7 +381,7 @@ async fn main() -> Result<()> {
         .nth(1)
         .context("usage: native_anthropic_replay MODEL_INFO_JSON < corpus.jsonl")?;
     let mut bytes = Vec::new();
-    let _ = std::fs::File::open(path)?
+    std::fs::File::open(path)?
         .take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)?;
     ensure!(bytes.len() <= MAX_BYTES, "model fixture bound exceeded");

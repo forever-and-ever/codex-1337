@@ -29,7 +29,7 @@ async fn completed_turn_does_not_erase_local_or_in_flight_input() {
 
     chat.bottom_pane
         .set_composer_text("next turn".into(), Vec::new(), Vec::new());
-    let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(chat.composer_is_empty());
     assert!(!chat.ready_for_idle_restart());
     handle_turn_started(&mut chat, "turn-2");

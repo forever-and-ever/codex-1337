@@ -200,7 +200,7 @@ impl StateRuntime {
         rejection: &FarmRejection,
     ) -> anyhow::Result<FarmRequestRecord> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let _ = sqlx::query(
+        sqlx::query(
             "INSERT INTO thread_farm_requests (parent_thread_id, request_id, payload_sha256, state, rejection_kind, rejection_message) VALUES (?, ?, ?, 'rejected', ?, ?) ON CONFLICT (parent_thread_id, request_id) DO NOTHING",
         )
         .bind(parent.to_string()).bind(request_id).bind(payload_sha256)

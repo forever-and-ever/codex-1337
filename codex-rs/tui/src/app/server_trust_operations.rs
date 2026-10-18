@@ -94,7 +94,7 @@ impl TrustOperation {
                     consent.clone().send(handle, id).await?;
                 }
                 ResumeTrustConsent::Hooks { updates, .. } => {
-                    let _ = write_hook_trusts_typed(handle, updates.clone()).await?;
+                    write_hook_trusts_typed(handle, updates.clone()).await?;
                 }
             },
             TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
@@ -180,7 +180,7 @@ impl App {
             waiting = lane.waiting;
             waiting.push_front(lane.active);
         }
-        let _ = self.server_operations.lanes.insert(
+        self.server_operations.lanes.insert(
             OperationLane::Connection,
             SubmissionLane {
                 active,

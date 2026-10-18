@@ -47,7 +47,7 @@ async fn queued_edit_acknowledgement_preserves_the_original_threads_draft() -> R
             .await
             .input_state = input;
         app.chat_widget.apply_external_edit("current draft".into());
-        let _ = app.queued_messages.mutations.insert(
+        app.queued_messages.mutations.insert(
             original,
             queued_messages::QueueMutation {
                 item: item.clone(),
@@ -107,7 +107,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let applied = Arc::new(Mutex::new(Vec::new()));
     let (release, stalled) = oneshot::channel();
     let first_applied = Arc::clone(&applied);
-    let _ = app.request_server(
+    app.request_server(
         &server,
         UiRequestScope::Connection,
         UiRequestKind::ReadOnly,
@@ -115,7 +115,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         move |_| async move { Ok(stalled.await.expect("release stalled UI request")) },
         move |app, server, value| {
             first_applied.lock().unwrap().push(value.unwrap());
-            let _ = app.request_server(
+            app.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::ReadOnly,
@@ -131,7 +131,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     let successor_applied = Arc::clone(&applied);
     let prepared_after = Arc::clone(&applied);
-    let _ = app.request_server_prepared(
+    app.request_server_prepared(
         &server,
         UiRequestScope::Connection,
         UiRequestKind::ReadOnly,
@@ -167,7 +167,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         )
         .await?
         .expect("UI request completion");
-        let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
+        Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
     }
     assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
 
@@ -208,14 +208,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             assert!(release.is_closed(), "cancelled read future was not dropped");
             completion
         };
-        let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
+        Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
         assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
     }
 
     // Retiring the connection invalidates a completed request even when its
     // result has already reached the completion channel.
     let stale_applied = Arc::clone(&applied);
-    let _ = app.request_server(
+    app.request_server(
         &server,
         UiRequestScope::Connection,
         UiRequestKind::ReadOnly,
@@ -234,7 +234,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .expect("stale UI request completion");
     app.handle_submission_event(&server, turn_submissions::SubmissionEvent::Retire)
         .await;
-    let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, stale)).await?;
+    Box::pin(app.handle_server_completion(&mut tui, &mut server, stale)).await?;
     assert_eq!(*applied.lock().unwrap(), vec![1, 2, 3]);
     while events.try_recv().is_ok() {}
     let rich_inputs = |text: &str| {
@@ -267,7 +267,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let recovered_message = |app: &mut App| {
         let input = serde_json::to_value(app.chat_widget.capture_thread_input_state()).unwrap();
         let mut composer = input["composer"].clone();
-        let _ = composer.as_object_mut().unwrap().remove("pending_pastes");
+        composer.as_object_mut().unwrap().remove("pending_pastes");
         serde_json::from_value::<UserMessage>(composer).unwrap()
     };
     let rich_prompt = ChatWidget::submission_draft_from_inputs(
@@ -322,7 +322,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             break event;
         }
     };
-    let _ = Box::pin(app.handle_event(&mut tui, &mut server, edit)).await?;
+    Box::pin(app.handle_event(&mut tui, &mut server, edit)).await?;
     assert_eq!(
         app.chat_widget.composer_text_with_pending(),
         "waiting follow-up"
@@ -340,7 +340,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         "typing serviced while sending: {typed:?}"
     );
     // App events remain dispatchable as well as keys (including farm-style worker completions).
-    let _ = Box::pin(app.handle_event(
+    Box::pin(app.handle_event(
         &mut tui,
         &mut server,
         AppEvent::InsertHistoryCell(Box::new(PlainHistoryCell::new(vec![
@@ -396,13 +396,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(app.chat_widget.has_queued_follow_up_messages());
     assert!(!app.chat_widget.maybe_send_next_queued_input());
     for expected in ["unsent successor", "stalled ordinary prompt"] {
-        let _ = app
-            .handle_tui_event(
-                &mut tui,
-                &mut server,
-                TuiEvent::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
-            )
-            .await?;
+        app.handle_tui_event(
+            &mut tui,
+            &mut server,
+            TuiEvent::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
+        )
+        .await?;
         assert_eq!(app.chat_widget.composer_text_with_pending(), expected);
         if expected == "stalled ordinary prompt" {
             assert_eq!(recovered_message(&mut app), rich_prompt);
@@ -441,7 +440,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert_eq!(app.chat_widget.thread_id(), Some(other_id));
     app.chat_widget
         .apply_external_edit("other thread draft".into());
-    let _ = Box::pin(app.handle_event(
+    Box::pin(app.handle_event(
         &mut tui,
         &mut server,
         AppEvent::Submission(turn_submissions::SubmissionEvent::Retire),
@@ -475,13 +474,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     assert!(!app.chat_widget.maybe_send_next_queued_input());
     for expected in ["queued after disconnect", "disconnected send"] {
-        let _ = app
-            .handle_tui_event(
-                &mut tui,
-                &mut server,
-                TuiEvent::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
-            )
-            .await?;
+        app.handle_tui_event(
+            &mut tui,
+            &mut server,
+            TuiEvent::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
+        )
+        .await?;
         assert_eq!(app.chat_widget.composer_text_with_pending(), expected);
         let rich = ChatWidget::submission_draft_from_inputs(
             "fixture".into(),
@@ -684,7 +682,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             break event;
         }
     };
-    let _ = Box::pin(app.handle_event(&mut tui, &mut server, compact)).await?;
+    Box::pin(app.handle_event(&mut tui, &mut server, compact)).await?;
     app.handle_submission_event(&server, turn_submissions::SubmissionEvent::Retire)
         .await;
     assert!(
@@ -790,7 +788,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             .recv()
             .await
             .expect("accepted consent deadline");
-        let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
+        Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
     }
     time::resume();
     assert!(app.pending_configuration_is_uncertain());
@@ -990,23 +988,22 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .cwd
         .replace(app.config.cwd.to_path_buf());
     let resume_draft = recovered_message(&mut app);
-    let _ = app
-        .resume_target_session(
-            &mut tui,
-            &mut server,
-            SessionTarget {
-                path: None,
-                thread_id,
-                cwd: Some(app.config.cwd.to_path_buf()),
-                history_mode: None,
-            },
-        )
-        .await?;
+    app.resume_target_session(
+        &mut tui,
+        &mut server,
+        SessionTarget {
+            path: None,
+            thread_id,
+            cwd: Some(app.config.cwd.to_path_buf()),
+            history_mode: None,
+        },
+    )
+    .await?;
     Box::pin(time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "config/read").len() == config_reads_before_resume {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("owned resume metadata receipt"))).await?;
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("owned resume metadata receipt"))).await?;
                 }
                 () = tokio::task::yield_now() => {}
             }
@@ -1059,7 +1056,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         while resumes_for(acquisition_x) == 0 {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("liveness receipt"))).await?;
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("liveness receipt"))).await?;
                 }
                 () = tokio::task::yield_now() => {}
             }
@@ -1084,7 +1081,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         while resumes_for(acquisition_y) == 0 {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("unrelated liveness receipt"))).await?;
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("unrelated liveness receipt"))).await?;
                 }
                 () = tokio::task::yield_now() => {}
             }
@@ -1159,7 +1156,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
 
     // A real fork acquisition also retains its original resource-producing future after
     // cancellation; typing remains live and the source draft/lease cannot be replaced late.
-    let _ = server.thread_inject_items(other_id, vec![serde_json::from_value(serde_json::json!({
+    server.thread_inject_items(other_id, vec![serde_json::from_value(serde_json::json!({
         "type": "message", "role": "assistant", "content": [{ "type": "output_text", "text": "fork source" }]
     }))?]).await?;
     let forks_before = recorded_params(&requests, "thread/fork").len();
@@ -1172,7 +1169,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
                     app.handle_local_thread_completion(&mut server, completion.expect("fork settings snapshot receipt")).await?;
                 }
                 completion = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation"))).await?;
+                    Box::pin(app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation"))).await?;
                 }
                 () = tokio::task::yield_now() => {}
             }
@@ -1223,7 +1220,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .session
         .thread_id;
     app.ensure_thread_channel(closing_side).mark_live();
-    let _ = app.side_threads.insert(
+    app.side_threads.insert(
         closing_side,
         SideThreadState {
             parent_thread_id: other_id,
@@ -1257,8 +1254,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
                 .recv()
                 .await
                 .expect("owned partial-detach receipt");
-            let _ =
-                Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
+            Box::pin(app.handle_server_completion(&mut tui, &mut server, completion)).await?;
         }
         Ok::<_, color_eyre::Report>(())
     }))

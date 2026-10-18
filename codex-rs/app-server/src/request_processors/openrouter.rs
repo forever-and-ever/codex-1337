@@ -188,7 +188,7 @@ fn filter_value(filter: &EndpointFilter) -> toml_edit::Item {
         .iter()
         .map(EndpointSlug::as_str)
         .collect::<toml_edit::Array>();
-    let _ = table.insert(field, array.into());
+    table.insert(field, array.into());
     toml_edit::Item::Value(table.into())
 }
 
@@ -305,7 +305,7 @@ impl TurnRequestProcessor {
                 let state = fetch_state(&client, &key.path)
                     .await
                     .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
-                let _ = self.openrouter_key_cache.0.lock().await.insert(
+                self.openrouter_key_cache.0.lock().await.insert(
                     key.name.clone(),
                     CachedKeyStatus {
                         path: key.path.clone(),
@@ -347,7 +347,7 @@ impl TurnRequestProcessor {
         let bearer = read_key_file(params.path.as_path())
             .await
             .map_err(|error| invalid_request(error.to_string()))?;
-        let _ = client(&config)?
+        client(&config)?
             .key(&bearer)
             .await
             .map_err(|error| invalid_request(error.to_string()))?;
@@ -369,12 +369,11 @@ impl TurnRequestProcessor {
             edits.push(default_key(&params.name));
             preferences.default_key = Some(params.name.clone());
         }
-        let _ = preferences
+        preferences
             .key_files
             .insert(params.name.clone(), params.path);
         apply(&config, edits).await?;
-        let _ = self
-            .openrouter_key_cache
+        self.openrouter_key_cache
             .0
             .lock()
             .await
@@ -405,8 +404,7 @@ impl TurnRequestProcessor {
             });
         }
         apply(&config, edits).await?;
-        let _ = self
-            .openrouter_key_cache
+        self.openrouter_key_cache
             .0
             .lock()
             .await
@@ -598,7 +596,7 @@ impl TurnRequestProcessor {
             .await
             .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
         let preferences = preferences(config).await?;
-        let _ = key(&preferences, &name)?;
+        key(&preferences, &name)?;
         let is_openrouter = matches!(
             thread.config_snapshot().await.model_provider_adapter,
             ModelProviderAdapter::OpenRouter

@@ -39,8 +39,8 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         .find(|saved| saved.id == alarm.id);
     let Some(saved) = saved else {
         let mut registry = alarms.0.registry();
-        let _ = registry.alarms.remove(&alarm.id);
-        let _ = registry.watches.remove(&alarm.id);
+        registry.alarms.remove(&alarm.id);
+        registry.watches.remove(&alarm.id);
         drop(registry);
         alarms.publish(alarm.thread_id, None);
         return Ok(Delivery::Done);
@@ -66,8 +66,8 @@ pub(super) async fn deliver(alarms: &Alarms, alarm: &ThreadAlarm) -> Result<Deli
         .await
         .map_err(|err| err.to_string())?;
     let mut registry = alarms.0.registry();
-    let _ = registry.alarms.remove(&alarm.id);
-    let _ = registry.watches.remove(&alarm.id);
+    registry.alarms.remove(&alarm.id);
+    registry.watches.remove(&alarm.id);
     drop(registry);
     alarms.publish(alarm.thread_id, None);
     Ok(Delivery::Done)
@@ -236,11 +236,11 @@ pub(super) async fn run(alarms: Alarms, mut sounds: mpsc::UnboundedReceiver<(i64
         };
         match result {
             Ok(()) => {
-                let _ = retries.remove(&id);
+                retries.remove(&id);
             }
             Err(error) => {
                 tracing::warn!(alarm = id, %error, "alarm scheduler will retry");
-                let _ = retries.insert(
+                retries.insert(
                     id,
                     Retry {
                         at: Instant::now() + Duration::from_secs(60),

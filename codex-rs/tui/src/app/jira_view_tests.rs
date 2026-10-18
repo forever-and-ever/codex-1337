@@ -50,9 +50,9 @@ fn jira_browser_surface_snapshot() {
             }
             _ => {}
         }
-        let _ = terminal
+        terminal
             .draw(|frame| {
-                let _ = browser.render(frame.area(), frame.buffer_mut());
+                browser.render(frame.area(), frame.buffer_mut());
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -73,7 +73,7 @@ fn jira_browser_surface_snapshot() {
     // never index outside the buffer, even before the next full-size frame.
     for height in 0..18 {
         let area = Rect::new(/*x*/ 0, /*y*/ 0, /*width*/ 80, height);
-        let _ = browser.render(area, &mut Buffer::empty(area));
+        browser.render(area, &mut Buffer::empty(area));
     }
 }
 
@@ -101,7 +101,7 @@ fn jira_preview_tracks_hover_and_ignores_stale_reads() {
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 110, /*height*/ 22,
     );
-    let _ = browser.render(area, &mut Buffer::empty(area));
+    browser.render(area, &mut Buffer::empty(area));
     let row = browser.targets.rows[1].0;
     let hover = MouseEvent {
         kind: MouseEventKind::Moved,
@@ -159,6 +159,6 @@ fn jira_preview_tracks_hover_and_ignores_stale_reads() {
     let tiny = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 18, /*height*/ 8,
     );
-    let _ = browser.render(tiny, &mut Buffer::empty(tiny));
+    browser.render(tiny, &mut Buffer::empty(tiny));
     assert!(!browser.mouse_input(hover));
 }

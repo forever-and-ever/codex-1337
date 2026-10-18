@@ -633,7 +633,7 @@ impl App {
                 blank.session = session.clone();
             }
             if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                let _ = self.agents_overview.input_states.insert(thread_id, input);
+                self.agents_overview.input_states.insert(thread_id, input);
             }
         }
         if let Some(choice) = &ready.context.input.provider {
@@ -647,8 +647,7 @@ impl App {
         self.remember_launch_permissions();
         let thread_id = ready.started.session.thread_id;
         if !self.config.ephemeral && !matches!(self.app_server_target, AppServerTarget::Embedded) {
-            let _ = self
-                .agents_overview
+            self.agents_overview
                 .blank_sessions
                 .insert(thread_id, ready.started.clone());
         }
@@ -662,7 +661,7 @@ impl App {
             )
             .await
         {
-            let _ = self.agents_overview.blank_sessions.remove(&thread_id);
+            self.agents_overview.blank_sessions.remove(&thread_id);
             self.recover_fresh_input(&mut ready.context.input);
             self.chat_widget.add_error_message(format!(
                 "Failed to attach to fresh app-server thread: {error}"

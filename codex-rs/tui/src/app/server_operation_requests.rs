@@ -528,8 +528,7 @@ impl App {
                         || params.sandbox_policy.is_some()
                         || params.permissions.is_some();
                     if permissions_changed {
-                        let _ = self
-                            .agents_overview
+                        self.agents_overview
                             .requested_permission_profiles
                             .remove(&thread_id);
                     }

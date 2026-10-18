@@ -77,7 +77,6 @@ pub enum CensusOmission {
 }
 
 impl CensusCount {
-    #[must_use]
     pub fn counted(self) -> Option<u64> {
         match self {
             Self::Counted(tokens) => Some(tokens),

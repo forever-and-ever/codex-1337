@@ -191,7 +191,7 @@ pub(super) fn native_result(
         {
             return None;
         }
-        let _ = fields.insert(name, field);
+        fields.insert(name, field);
     }
     serde_json::from_value(Value::Object(fields)).ok()
 }

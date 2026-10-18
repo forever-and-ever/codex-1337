@@ -200,8 +200,7 @@ impl ChatWidget {
     }
 
     pub(crate) fn finish_claude_login_pending(&mut self) {
-        let _ = self
-            .bottom_pane
+        self.bottom_pane
             .dismiss_view_by_id(CLAUDE_LOGIN_PENDING_VIEW);
     }
 

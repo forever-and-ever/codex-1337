@@ -89,7 +89,7 @@ impl App {
         fallback_policy: AskForApproval,
         fallback_reviewer: ApprovalsReviewer,
     ) {
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
             turn_submissions::ui_requests::UiRequestKind::Mutation,
@@ -129,12 +129,10 @@ impl App {
                             .approvals_reviewer
                             .or_else(|| previous.and_then(|profile| profile.approvals_reviewer))
                             .or(Some(reviewer));
-                        let _ = app
-                            .agents_overview
+                        app.agents_overview
                             .selected_permission_profiles
                             .insert(thread_id, selection.profile_id.clone());
-                        let _ = app
-                            .agents_overview
+                        app.agents_overview
                             .requested_permission_profiles
                             .insert(thread_id, selection.clone());
                         if displayed {
@@ -237,7 +235,7 @@ impl App {
     {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
-        let _ = self.request_server(
+        self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::ReadOnly,
@@ -271,7 +269,7 @@ impl App {
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         let origin = self.current_displayed_thread_id();
         let cwd = self.chat_widget.config_ref().cwd.display().to_string();
-        let _ = self.request_server(
+        self.request_server(
                 app_server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,
@@ -334,7 +332,7 @@ impl App {
                         },
                     );
                     for (feature, effective_enabled) in feature_updates_to_apply {
-                        let _ = app.chat_widget
+                        app.chat_widget
                             .set_feature_enabled(feature, effective_enabled);
                     }
                     if show_memory_enable_notice {
@@ -423,7 +421,7 @@ impl App {
         let cwd = self.chat_widget.config_ref().cwd.display().to_string();
         let edits =
             crate::config_update::build_memory_settings_edits(use_memories, generate_memories);
-        let _ = self.request_server(
+        self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,
@@ -448,7 +446,7 @@ impl App {
                                 };
                                 let effective_generate = memories.generate_memories.unwrap_or(previous_generate);
                                 if app.current_displayed_thread_id() == origin {
-                                    let _ = app.sync_memory_state_from_effective_config(&effective_config);
+                                    app.sync_memory_state_from_effective_config(&effective_config);
                                 }
                                 app.queue_thread_memory_mode(server, origin, previous_generate, effective_generate);
                                 Ok(())
@@ -486,7 +484,7 @@ impl App {
         } else {
             ThreadMemoryMode::Disabled
         };
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,
@@ -524,7 +522,7 @@ impl App {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         self.app_event_tx.send(AppEvent::FollowTranscript);
-        let _ = self.request_server(
+        self.request_server(
             app_server,
             UiRequestScope::Connection,
             UiRequestKind::Mutation,
@@ -560,7 +558,7 @@ impl App {
         op: AppCommand,
     ) {
         let Some(thread_id) = self.active_thread_id else {
-            let _ = self.chat_widget.submit_op(op);
+            self.chat_widget.submit_op(op);
             return;
         };
         let AppCommand::OverrideTurnContext {

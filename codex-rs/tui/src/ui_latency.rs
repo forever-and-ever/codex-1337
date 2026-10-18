@@ -508,10 +508,10 @@ const _: () = assert!(size_of::<Shared>() + size_of::<Writer>() <= 64 * 1024);
 pub async fn benchmark<R>(active: bool, measure: impl FnOnce(&dyn Fn(bool), usize) -> R) -> R {
     let boundary = |nested: bool| {
         let _outer = enter(Stage::Maintenance);
-        let _ = std::hint::black_box(1_u64);
+        std::hint::black_box(1_u64);
         if nested {
             let _child = enter(Stage::FramePreparation);
-            let _ = std::hint::black_box(2_u64);
+            std::hint::black_box(2_u64);
         }
     };
     if active {

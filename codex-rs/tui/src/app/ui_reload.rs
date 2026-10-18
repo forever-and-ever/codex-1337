@@ -109,14 +109,14 @@ impl App {
         for (id, channel) in &self.thread_event_channels {
             let store = channel.store.lock().await;
             if let Some(input) = &store.input_state {
-                let _ = threads.insert(*id, input.clone());
+                threads.insert(*id, input.clone());
             }
         }
         let mut draft = self.chat_widget.capture_thread_input_state();
         if let Some(selected) = selected
             && let Some(input) = draft.take()
         {
-            let _ = threads.insert(selected, input);
+            threads.insert(selected, input);
         }
         let unstarted = if self.chat_widget.session_draft.is_some() {
             draft

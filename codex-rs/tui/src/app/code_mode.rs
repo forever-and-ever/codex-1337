@@ -194,7 +194,7 @@ impl App {
             if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                 overlay.regroup_cell_members(index..index + 1, &[]);
             }
-            let _ = self.transcript_cells.remove(index);
+            self.transcript_cells.remove(index);
         }
         if let Some(index) = page.iter().position(|cell| {
             cell.as_any()

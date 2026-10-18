@@ -62,7 +62,6 @@ pub struct TerminalWatch {
 pub struct TerminalExitProbe(Arc<UnifiedExecProcess>);
 
 impl TerminalExitProbe {
-    #[must_use]
     pub fn has_exited(&self) -> bool {
         self.0.has_exited()
     }
@@ -222,7 +221,7 @@ impl CodexThread {
             let mut state = watches.lock();
             match &mut *state {
                 WatchState::Open(watchers) => {
-                    let _ = watchers.insert(
+                    watchers.insert(
                         id,
                         Watcher {
                             pattern: pattern.clone(),
@@ -253,27 +252,23 @@ impl CodexThread {
 impl Drop for TerminalWatch {
     fn drop(&mut self) {
         if let WatchState::Open(watchers) = &mut *self.watches.lock() {
-            let _ = watchers.remove(&self.id);
+            watchers.remove(&self.id);
         }
     }
 }
 
 impl TerminalWatch {
-    #[must_use]
     pub fn command(&self) -> &str {
         &self.command
     }
-    #[must_use]
     pub fn pattern(&self) -> Option<&str> {
         self.pattern.as_ref().map(|pattern| pattern.as_str())
     }
-    #[must_use]
     pub fn retained_output(&self) -> &str {
         &self.retained
     }
 
     /// Inspects the watched process's exit state while `wait` owns the watch.
-    #[must_use]
     pub fn exit_probe(&self) -> TerminalExitProbe {
         TerminalExitProbe(Arc::clone(&self.process))
     }

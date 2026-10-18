@@ -145,7 +145,7 @@ impl TurnRequestProcessor {
                 .await
                 .map_err(|error| internal_error(error.to_string()))?;
             let controller = ClaudeAccountController::new(&config);
-            let _ = controller
+            controller
                 .validate_selection(&params.account_id)
                 .map_err(|error| invalid_request(error.to_string()))?;
             if is_claude_thread {
@@ -260,7 +260,7 @@ impl TurnRequestProcessor {
                 }
             }
             AccountProvider::ClaudeSubscription => {
-                let _ = ClaudeAccountController::new(&config)
+                ClaudeAccountController::new(&config)
                     .validate_selection(&params.account_id)
                     .map_err(|error| invalid_request(error.to_string()))?;
             }

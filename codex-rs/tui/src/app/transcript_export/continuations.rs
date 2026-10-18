@@ -184,8 +184,7 @@ impl App {
                 Ok(())
             }
             PreparedExport::File { file, path } => {
-                let _ = file
-                    .persist_noclobber(&path)
+                file.persist_noclobber(&path)
                     .map_err(|error| format!("could not create {}: {error}", path.display()))?;
                 self.chat_widget
                     .add_info_message(format!("Saved conversation to {}", path.display()), None);

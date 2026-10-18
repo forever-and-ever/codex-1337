@@ -123,7 +123,7 @@ pub(crate) fn retain_accepted_agent_mail(
             });
         }
     } else {
-        let _ = found.insert(id, envelope);
+        found.insert(id, envelope);
     }
     Ok(())
 }

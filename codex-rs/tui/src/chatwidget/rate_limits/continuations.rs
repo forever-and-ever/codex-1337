@@ -22,7 +22,7 @@ impl ChatWidget {
     pub(crate) fn finish_automatic_model_switch(&mut self) {
         if std::mem::take(&mut self.input_queue_frontend.automatic_model_switch_pending) {
             self.submit_initial_user_message_if_pending();
-            let _ = self.maybe_send_next_queued_input();
+            self.maybe_send_next_queued_input();
         }
     }
 }

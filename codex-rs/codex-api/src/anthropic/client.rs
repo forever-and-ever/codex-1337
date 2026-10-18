@@ -37,7 +37,6 @@ impl<T: HttpTransport> AnthropicClient<T> {
         }
     }
 
-    #[must_use]
     pub fn with_telemetry(
         self,
         request: Option<Arc<dyn RequestTelemetry>>,
@@ -74,7 +73,7 @@ impl<T: HttpTransport> AnthropicClient<T> {
                 headers,
                 Some(body),
                 |req| {
-                    let _ = req.headers.insert(
+                    req.headers.insert(
                         http::header::ACCEPT,
                         HeaderValue::from_static("text/event-stream"),
                     );

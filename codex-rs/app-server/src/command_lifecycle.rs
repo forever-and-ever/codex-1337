@@ -42,7 +42,7 @@ impl CommandStarts {
     pub(crate) fn insert(&mut self, id: String) -> bool {
         match self.0.entry(id) {
             Entry::Vacant(slot) => {
-                let _ = slot.insert(Start::Native);
+                slot.insert(Start::Native);
                 true
             }
             Entry::Occupied(mut slot) => {
@@ -62,7 +62,7 @@ impl CommandStarts {
         let Entry::Vacant(slot) = self.0.entry(notification.item.id().to_owned()) else {
             return false;
         };
-        let _ = slot.insert(Start::Synthesized(Box::new(CommandSentinel {
+        slot.insert(Start::Synthesized(Box::new(CommandSentinel {
             notification: notification.clone(),
             outgoing: outgoing.clone(),
             review: Review::Pending,

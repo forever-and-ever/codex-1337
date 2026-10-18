@@ -197,7 +197,7 @@ fn argument_input(input: Option<&ToolInput>) -> Option<ActivityParts> {
     let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input.payload else {
         return None;
     };
-    let _ = super::output_provenance::format_json(source).ok()??;
+    super::output_provenance::format_json(source).ok()??;
     Some(ActivityParts {
         lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
         ..Default::default()

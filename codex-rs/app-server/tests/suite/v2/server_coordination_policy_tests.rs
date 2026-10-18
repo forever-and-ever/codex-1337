@@ -15,7 +15,7 @@ async fn user_owned_mcp(
     uri: http::Uri,
     Json(body): Json<Value>,
 ) -> Response {
-    let _ = gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
+    gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
     gate.changed.notify_one();
     let result = match body["method"].as_str() {
         Some("initialize") => json!({
@@ -221,7 +221,7 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
             gate.release.notify_one();
             None
         };
-        let _ = server
+        server
             .start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id: source.thread.id,
                 input: vec![UserInput::Text {

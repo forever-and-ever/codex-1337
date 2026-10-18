@@ -36,7 +36,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.regroup_cell_members(range.clone(), std::slice::from_ref(&cell));
                 }
-                let _ = self.transcript_cells.splice(range, [cell]);
+                self.transcript_cells.splice(range, [cell]);
             }
             TranscriptSplice::Members {
                 range,
@@ -64,7 +64,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.regroup_cell_members(range.clone(), &cells);
                 }
-                let _ = self.transcript_cells.splice(range, cells);
+                self.transcript_cells.splice(range, cells);
             }
             TranscriptSplice::AbsorbTail {
                 previous_revision,
@@ -78,7 +78,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.absorb_tail_into_live(previous_revision, hydrated_revision);
                 }
-                let _ = self.transcript_cells.pop();
+                self.transcript_cells.pop();
                 self.native_history.retain(&self.transcript_cells);
             }
         }

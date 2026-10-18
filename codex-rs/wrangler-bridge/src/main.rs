@@ -409,8 +409,8 @@ async fn main() -> Result<()> {
     live.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut history = tokio::time::interval(HISTORY_PERIOD);
     history.set_missed_tick_behavior(MissedTickBehavior::Skip);
-    let _ = live.tick().await;
-    let _ = history.tick().await;
+    live.tick().await;
+    history.tick().await;
     loop {
         tokio::select! {
             _ = live.tick() => {

@@ -315,13 +315,11 @@ impl App {
                 match result {
                     Ok(started) => {
                         if started.can_accept_text_input {
-                            let _ = self
-                                .agent_navigation
+                            self.agent_navigation
                                 .text_input_threads
                                 .insert(context.thread_id);
                         } else {
-                            let _ = self
-                                .agent_navigation
+                            self.agent_navigation
                                 .text_input_threads
                                 .remove(&context.thread_id);
                         }
@@ -572,7 +570,7 @@ impl App {
         if self.active_thread_id == Some(thread_id) {
             self.store_active_thread_receiver().await;
         }
-        let _ = self.agents_overview.activity.remove(&thread_id);
+        self.agents_overview.activity.remove(&thread_id);
         let epoch = self.reconnect.connection_epoch;
         let channel = self.ensure_thread_channel(thread_id);
         if live_attached {
@@ -735,7 +733,7 @@ impl App {
                 (true, true, Ok(None), None)
             }
         };
-        let _ = self.agent_navigation.explicit_attachments.insert(thread_id);
+        self.agent_navigation.explicit_attachments.insert(thread_id);
         let previous_thread_id = self.active_thread_id;
         // Notifications already routed to the active channel must reach the old
         // widget before its transcript state is transferred. Events routed after
@@ -782,7 +780,7 @@ impl App {
             attached_replay_only = true;
         }
         if pending_profile_on_unavailable_thread && !is_replay_only && session_verified {
-            let _ = self.pending_server_profiles.remove(&thread_id);
+            self.pending_server_profiles.remove(&thread_id);
         }
         // Refreshing can merge restored turns into the store, so recap progress must be read only
         // after the refresh while the activated thread channel is still retained.

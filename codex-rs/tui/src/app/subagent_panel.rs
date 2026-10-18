@@ -75,7 +75,7 @@ impl App {
                 if let Ok(id) = ThreadId::from_string(&event.thread_id)
                     && self.agent_navigation.get(&id).is_some()
                 {
-                    let _ = self.agent_navigation.models.insert(
+                    self.agent_navigation.models.insert(
                         id,
                         crate::subagent_roster::AgentModel {
                             model: event.thread_settings.model.clone(),
@@ -301,7 +301,7 @@ impl App {
         drop(roster);
         let request = server.request_handle();
         let events = self.app_event_tx.clone();
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let result = request
                 .request_typed::<codex_app_server_protocol::ThreadRetireResponse>(
                     ClientRequest::ThreadRetire {
@@ -322,7 +322,7 @@ impl App {
                 target,
                 result,
             });
-        }));
+        });
     }
 
     pub(super) async fn finish_agent_retirement(

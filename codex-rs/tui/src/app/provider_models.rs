@@ -58,7 +58,7 @@ impl App {
                     .show_provider_models_loading(request_id, &provider);
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
-                drop(tokio::spawn(async move {
+                tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(/*secs*/ 20), async {
                         let response = handle
                             .request_typed::<ModelListResponse>(ClientRequest::ModelList {
@@ -96,7 +96,7 @@ impl App {
                         provider,
                         result,
                     }));
-                }));
+                });
             }
             ProviderModelEvent::Loaded {
                 request_id,

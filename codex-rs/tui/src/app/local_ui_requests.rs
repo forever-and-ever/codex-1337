@@ -20,7 +20,7 @@ impl App {
     {
         let events = self.app_event_tx.clone();
         let epoch = self.server_operations.epoch();
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let value = future.await;
             events.send(AppEvent::LocalUiReply(UiReply::from_apply(
                 move |app, server| {
@@ -34,7 +34,7 @@ impl App {
                     apply(app, server, value)
                 },
             )));
-        }));
+        });
     }
 }
 
@@ -49,7 +49,7 @@ impl App {
             while !self.server_operations.is_empty() {
                 tokio::select! {
                     completion = self.server_operations.control_rx.recv() => {
-                        let _ = Box::pin(self.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
+                        Box::pin(self.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
                     }
                     completion = self.thread_delivery.completion_rx.recv() => {
                         Box::pin(self.handle_local_thread_completion(server, completion.expect("thread completion"))).await?;

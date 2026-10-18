@@ -66,7 +66,7 @@ impl ThreadLifecycleContributor<Config> for AlarmTools {
                 && !input.session_source.is_non_root_agent()
                 && !matches!(input.session_source, SessionSource::Exec)
                 && self.0.available();
-            let _ = input.thread_store.insert(if available {
+            input.thread_store.insert(if available {
                 Access::Available
             } else {
                 Access::Unavailable

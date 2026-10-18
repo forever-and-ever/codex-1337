@@ -161,16 +161,15 @@ async fn farm_spawns_and_replays_without_steering_parent(
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
     if !matches!(parent_state, ParentState::Pristine) {
-        let _ = app
-            .start_turn_and_wait_for_completion(TurnStartParams {
-                thread_id: parent.id.clone(),
-                input: vec![UserInput::Text {
-                    text: BACKGROUND.to_owned(),
-                    text_elements: Vec::new(),
-                }],
-                ..Default::default()
-            })
-            .await?;
+        app.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: parent.id.clone(),
+            input: vec![UserInput::Text {
+                text: BACKGROUND.to_owned(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
     }
     let active_turn = if matches!(parent_state, ParentState::Active) {
         // A gated parent inference must not become a spawn lock.
@@ -447,7 +446,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
 
         // A real allocation precedes this failed pointer write. NULL is not proof
         // of nonallocation, and removing the fault cannot authorize another child.
-        let _ = sqlx::query("CREATE TRIGGER farm_pointer_fault BEFORE UPDATE OF child_thread_id ON thread_farm_requests WHEN NEW.agent_path = '/root/farm_pointer_fault' BEGIN SELECT RAISE(ABORT, 'farm pointer fault'); END").execute(&pool).await?;
+        sqlx::query("CREATE TRIGGER farm_pointer_fault BEFORE UPDATE OF child_thread_id ON thread_farm_requests WHEN NEW.agent_path = '/root/farm_pointer_fault' BEGIN SELECT RAISE(ABORT, 'farm pointer fault'); END").execute(&pool).await?;
         next.request_id = uuid::Uuid::new_v4().to_string();
         next.task_name = Some("farm_pointer_fault".into());
         let fault = app
@@ -456,7 +455,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         let fault = app
             .read_stream_until_error_message(RequestId::Integer(fault))
             .await?;
-        let _ = sqlx::query("DROP TRIGGER farm_pointer_fault")
+        sqlx::query("DROP TRIGGER farm_pointer_fault")
             .execute(&pool)
             .await?;
         assert_eq!(
@@ -484,7 +483,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         pool.close().await;
     }
     // A farm must leave the loaded parent able to accept work and resume.
-    let _ = timeout(
+    timeout(
         Duration::from_secs(/*secs*/ 10),
         app.start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: parent.id.clone(),
@@ -518,7 +517,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
         })
         .await?;
     assert_eq!(retired.thread_ids, vec![receipt.child_thread_id.clone()]);
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     app = TestAppServer::builder()
         .with_codex_home(home.path())
         .with_env_overrides(&[("OPENAI_API_KEY", None)])
@@ -565,7 +564,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
             json!({"farmOutcome": "identityMismatch", "requestId": mismatch.request_id, "childThreadId": receipt.child_thread_id, "agentPath": receipt.agent_path})
         )
     );
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     server.shutdown().await;
     Ok(())
 }
@@ -604,16 +603,15 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
         .build_initialized()
         .await?;
     let parent = app.start_thread(ThreadStartParams::default()).await?.thread;
-    let _ = app
-        .start_turn_and_wait_for_completion(TurnStartParams {
-            thread_id: parent.id.clone(),
-            input: vec![UserInput::Text {
-                text: BACKGROUND.to_owned(),
-                text_elements: Vec::new(),
-            }],
-            ..Default::default()
-        })
-        .await?;
+    app.start_turn_and_wait_for_completion(TurnStartParams {
+        thread_id: parent.id.clone(),
+        input: vec![UserInput::Text {
+            text: BACKGROUND.to_owned(),
+            text_elements: Vec::new(),
+        }],
+        ..Default::default()
+    })
+    .await?;
     let mut params = ThreadFarmParams {
         thread_id: parent.id.clone(),
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -777,14 +775,13 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
             core_input
         ))?)
     );
-    let _ = db
-        .claim_farm_request(
-            ThreadId::from_string(&parent.id)?,
-            &params.request_id,
-            &payload_sha256,
-            "/root/interrupted_farm",
-        )
-        .await?;
+    db.claim_farm_request(
+        ThreadId::from_string(&parent.id)?,
+        &params.request_id,
+        &payload_sha256,
+        "/root/interrupted_farm",
+    )
+    .await?;
     db.close().await;
     // Replay must use the original requested mode before looking at today's
     // routing defaults; an uncertain claim is never permission to resend.
@@ -792,7 +789,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
     let mut changed: toml_edit::DocumentMut = std::fs::read_to_string(&config_path)?.parse()?;
     changed["wrangler"]["farm"]["model"] = toml_edit::value("unavailable-after-claim");
     std::fs::write(config_path, changed.to_string())?;
-    let _ = app.shutdown_gracefully().await?;
+    app.shutdown_gracefully().await?;
     let mut restarted = TestAppServer::builder()
         .with_codex_home(home.path())
         .build_initialized()
@@ -833,6 +830,6 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
             .count(),
         usize::from(mode == ThreadFarmMode::Automatic)
     );
-    let _ = restarted.shutdown_gracefully().await?;
+    restarted.shutdown_gracefully().await?;
     Ok(())
 }

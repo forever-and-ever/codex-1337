@@ -104,7 +104,7 @@ impl Admission {
     }
 
     pub(super) fn finish(&self, verdict: Verdict) {
-        let _ = self.completion.send_replace(Some(
+        self.completion.send_replace(Some(
             verdict.map_err(|reason| format!("{}: {reason}", self.call_id)),
         ));
     }
@@ -300,7 +300,7 @@ impl ToolExecutor<ToolInvocation> for FenceHandler {
             let super::context::ToolPayload::Function { arguments } = invocation.payload else {
                 return Err(FunctionCallError::RespondToModel("fence expects {}".into()));
             };
-            let _ = serde_json::from_str::<Empty>(&arguments)
+            serde_json::from_str::<Empty>(&arguments)
                 .map_err(|error| FunctionCallError::RespondToModel(error.to_string()))?;
             Ok(Box::new(FunctionToolOutput::from_text(
                 "Fence passed".into(),

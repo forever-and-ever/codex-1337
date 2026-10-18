@@ -49,7 +49,7 @@ pub(crate) fn reordered(cells: &[Arc<dyn HistoryCell>]) -> Vec<Arc<dyn HistoryCe
             continue;
         };
         let Some(&anchor) = source_users.get(placement.user_response_item_id.as_str()) else {
-            let _ = unresolved.insert(index);
+            unresolved.insert(index);
             continue;
         };
         let (left, right) = match placement.side {
@@ -69,7 +69,7 @@ pub(crate) fn reordered(cells: &[Arc<dyn HistoryCell>]) -> Vec<Arc<dyn HistoryCe
             .push((index, Arc::clone(cell)));
         let stationary =
             left.is_none_or(|left| index > left) && right.is_none_or(|right| index < right);
-        let _ = membership.insert(index, (right, stationary));
+        membership.insert(index, (right, stationary));
     }
     // Do not cross an unresolved source anchor: a partial page could otherwise
     // reverse peers before their common user interval becomes known. Block the

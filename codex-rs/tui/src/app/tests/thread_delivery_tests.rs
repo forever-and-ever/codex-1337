@@ -36,8 +36,7 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
     // could take it. Keep the receiver locally taken, and interleave widget/history effects.
     let (mut app, mut effects, _operations) = Box::pin(make_test_app_with_channels()).await;
     let thread_id = ThreadId::new();
-    let _ = app
-        .thread_event_channels
+    app.thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     app.activate_thread_channel(thread_id).await;
     app.chat_widget.handle_thread_session(test_thread_session(
@@ -96,7 +95,7 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
         .await?;
     let mut tui = tui::test_support::make_test_tui()?;
     while let Ok(effect) = effects.try_recv() {
-        let _ = Box::pin(app.handle_event(&mut tui, &mut server, effect)).await?;
+        Box::pin(app.handle_event(&mut tui, &mut server, effect)).await?;
     }
     assert!(app.transcript_cells.iter().any(|cell| {
         lines_to_single_string(&cell.display_lines(/*width*/ 80))
@@ -136,8 +135,7 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
 async fn pending_approval_detach_uses_existing_replay_without_a_dormant_send() -> Result<()> {
     let mut app = Box::pin(make_test_app()).await;
     let thread_id = ThreadId::new();
-    let _ = app
-        .thread_event_channels
+    app.thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     app.activate_thread_channel(thread_id).await;
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
@@ -166,8 +164,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
 {
     let (mut app, mut effects, _operations) = Box::pin(make_test_app_with_channels()).await;
     let thread_id = ThreadId::new();
-    let _ = app
-        .thread_event_channels
+    app.thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     set_test_initial_prompt(&mut app, "held startup draft".to_string());
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
@@ -205,7 +202,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
     );
 
     let mut receiver = app.active_thread_rx.take().expect("active receiver");
-    let _ = receiver.try_recv()?;
+    receiver.try_recv()?;
     app.retry_pending_thread_delivery().await;
     let ThreadBufferedEvent::Request(actual) = receiver.try_recv()? else {
         panic!("buffered approval")
@@ -268,7 +265,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
     assert!(app.thread_delivery.is_blocked());
     let replacement = ThreadEventChannel::new(/*capacity*/ 1);
     replacement.store.lock().await.active = true;
-    let _ = app.thread_event_channels.insert(thread_id, replacement);
+    app.thread_event_channels.insert(thread_id, replacement);
     app.retry_pending_thread_delivery().await;
     assert!(!app.thread_delivery.is_blocked());
     assert!(

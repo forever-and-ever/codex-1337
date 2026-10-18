@@ -177,7 +177,7 @@ impl Session {
         let tx_event = self.get_tx_event();
         // These are observations, not execution barriers. In particular cold vocabulary
         // initialization must not hold up sampling, tool dispatch, or interruption.
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let counts = tokio::task::spawn_blocking(move || {
                 outputs
                     .into_iter()
@@ -237,6 +237,6 @@ impl Session {
                     })
                     .await;
             }
-        }));
+        });
     }
 }

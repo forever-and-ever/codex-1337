@@ -235,7 +235,7 @@ impl ModelsManager for Catalog {
         _factory: HttpClientFactory,
     ) -> ModelsManagerFuture<'_, ()> {
         Box::pin(async move {
-            let _ = self.models().await;
+            self.models().await;
         })
     }
 }

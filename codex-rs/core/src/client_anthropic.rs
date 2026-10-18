@@ -38,7 +38,6 @@ use http::StatusCode;
 use std::sync::Arc;
 
 impl ModelClient {
-    #[must_use]
     pub fn with_anthropic_prompt_cache(mut self, policy: AnthropicPromptCache) -> Self {
         self.anthropic_prompt_cache = policy;
         self

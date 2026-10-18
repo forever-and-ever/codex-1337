@@ -174,7 +174,7 @@ impl Digest {
             body,
             SKILLS_INSTRUCTIONS_CLOSE_TAG,
         ] {
-            let _ = hasher.update(part.as_bytes());
+            hasher.update(part.as_bytes());
         }
         Self(hasher.finalize().to_hex().to_string())
     }

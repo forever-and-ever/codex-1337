@@ -186,7 +186,7 @@ pub(crate) fn shade_status(area: Rect, buf: &mut Buffer) {
         return;
     }
     for (x, bg) in (area.x..area.right()).zip(&live.backdrop) {
-        let _ = buf[(x, area.y)].set_bg(color(*bg));
+        buf[(x, area.y)].set_bg(color(*bg));
     }
 }
 
@@ -296,7 +296,7 @@ impl Feed {
             // A tool runs only within a turn, even one that started before the feed did.
             Event::ToolStarted { id, size } => match &mut self.phase {
                 Phase::Wait { tools } => {
-                    let _ = tools.insert(id, size);
+                    tools.insert(id, size);
                 }
                 Phase::Idle | Phase::Busy { .. } => {
                     self.phase = Phase::Wait {
@@ -511,7 +511,7 @@ mod tests {
         feed.observe(thread, Event::TurnStarted, at(/*secs*/ 0.0));
         // The first report has nothing earlier to settle against: it teaches the forecast's rate and
         // opens the books, and only the inflow after it is checked.
-        let _ = run(&mut feed, /*secs*/ 10.0);
+        run(&mut feed, /*secs*/ 10.0);
         let first = Usage {
             context: 10_000,
             output: 900,

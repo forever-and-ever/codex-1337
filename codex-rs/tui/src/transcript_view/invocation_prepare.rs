@@ -65,7 +65,7 @@ mod tests {
                     started.send(()).unwrap();
                     let _ = blocked.recv();
                 });
-            let _ = task.poll();
+            task.poll();
             blockers.push(task);
         }
         for _ in 0..2 {
@@ -118,15 +118,15 @@ mod tests {
             active: Some(Arc::new(LiveCell(text))),
             auxiliary: Vec::new(),
         };
-        let _ = live.sync_owned_live_tail(80, key(1), false, || snapshot("first revision"));
-        let _ = live.sync_owned_live_tail(80, key(2), false, || {
+        live.sync_owned_live_tail(80, key(1), false, || snapshot("first revision"));
+        live.sync_owned_live_tail(80, key(2), false, || {
             panic!("an in-flight revision must finish before it is replaced")
         });
         assert!(text(&render(&mut live, &[], 80, 12)).trim().is_empty());
         drop(releases);
         let deadline = std::time::Instant::now() + Duration::from_secs(30);
         loop {
-            let _ = render(&mut view, &cells, 40, 12);
+            render(&mut view, &cells, 40, 12);
             if let Some(layout) = view.current_layout(&cells, 0) {
                 assert_eq!(layout.text(), format!("Script (python)\n{source}"));
                 break;
@@ -139,9 +139,9 @@ mod tests {
         }
         assert!(!text(&render(&mut view, &cells, 40, 12)).contains("Preparing input"));
         let mut saw_first = false;
-        let _ = live.sync_live_activity(&[], vec!["second revision".into()]);
+        live.sync_live_activity(&[], vec!["second revision".into()]);
         loop {
-            let _ = live.sync_owned_live_tail(80, key(2), false, || snapshot("second revision"));
+            live.sync_owned_live_tail(80, key(2), false, || snapshot("second revision"));
             let frame = text(&render(&mut live, &[], 80, 12));
             if frame.contains("first revision") {
                 saw_first = true;

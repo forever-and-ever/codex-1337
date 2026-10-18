@@ -97,8 +97,7 @@ impl ChatWidget {
         }
         self.openrouter_ui.request = None;
         let visible = self.bottom_pane.active_view_id() == Some(crate::openrouter::BUSY_VIEW);
-        let _ = self
-            .bottom_pane
+        self.bottom_pane
             .dismiss_view_by_id(crate::openrouter::BUSY_VIEW);
         visible
     }
@@ -110,9 +109,8 @@ impl ChatWidget {
         selected: Option<&ModelSlug>,
         error: Option<String>,
     ) {
-        let _ = self.bottom_pane.dismiss_view_by_id(VIEW);
-        let _ = self
-            .bottom_pane
+        self.bottom_pane.dismiss_view_by_id(VIEW);
+        self.bottom_pane
             .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
         if matches!(menu, ModelMenu::Current) && error.is_none() {
             let catalog = Arc::make_mut(&mut self.model_catalog);
@@ -222,8 +220,7 @@ impl ChatWidget {
         slug: ModelSlug,
         response: OpenRouterModelEndpointsResponse,
     ) {
-        let _ = self
-            .bottom_pane
+        self.bottom_pane
             .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
         self.bottom_pane
             .show_view(Box::new(views::EndpointsView::new(
@@ -436,7 +433,7 @@ impl ChatWidget {
         self.openrouter_ui.status = None;
         self.openrouter_ui.status_request = None;
         self.openrouter_ui.last_refresh = None;
-        let _ = self.refresh_openrouter_status(StatusRefresh::Now);
+        self.refresh_openrouter_status(StatusRefresh::Now);
     }
 
     pub(crate) fn refresh_openrouter_status(&mut self, mode: StatusRefresh) -> bool {
@@ -537,7 +534,7 @@ impl ChatWidget {
         result: &Result<codex_app_server_protocol::ThreadAccountSelectResponse, String>,
     ) -> bool {
         let visible = self.bottom_pane.active_view_id() == Some(ACCOUNT_SELECTION_VIEW);
-        let _ = self.bottom_pane.dismiss_view_by_id(ACCOUNT_SELECTION_VIEW);
+        self.bottom_pane.dismiss_view_by_id(ACCOUNT_SELECTION_VIEW);
         if visible && let Err(error) = result {
             self.show_openrouter_error(format!("Cannot change OpenRouter key: {error}"));
             return true;

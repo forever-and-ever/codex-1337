@@ -26,7 +26,7 @@ impl Scope {
     pub(super) fn open(cwd: &Path, state: &Path, expected: Option<&str>) -> Result<Self, String> {
         let default_project = project_identity(cwd).map_err(|error| error.to_string())?;
         let cwd = cwd.canonicalize().map_err(|error| error.to_string())?;
-        let _ = cwd.to_str().ok_or("Browsing directory is not UTF-8")?;
+        cwd.to_str().ok_or("Browsing directory is not UTF-8")?;
         let mut hash = Sha256::new();
         // Old servers ignore project selectors. Reject their cached scope rather
         // than accidentally applying a descendant edit to the default project.
@@ -130,7 +130,7 @@ impl Scope {
                         .ok_or("Stored project namespace is not UTF-8")?,
                 );
                 for (name, location) in self.store(Some(&project))?.catalog()? {
-                    let _ = all.insert(format!("{}\0{name}", project.as_str()), location.key);
+                    all.insert(format!("{}\0{name}", project.as_str()), location.key);
                 }
             }
         }

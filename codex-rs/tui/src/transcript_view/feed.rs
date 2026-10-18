@@ -677,7 +677,7 @@ impl FeedIndex {
                         || cell.compact_hyperlink_lines(content_width),
                         |parts| parts.lines,
                     );
-                let _ = behead(&mut lines);
+                behead(&mut lines);
                 if !lines.is_empty() {
                     return true;
                 }
@@ -845,7 +845,7 @@ impl FeedIndex {
         let index = *self.folds.get(fold)?;
         let item = &self.items[index];
         if !expanded.remove(&item.fold_mark) {
-            let _ = expanded.insert(item.fold_mark.clone());
+            expanded.insert(item.fold_mark.clone());
         }
         Some(index)
     }
@@ -1338,7 +1338,7 @@ pub(super) fn behead(lines: &mut Vec<HyperlinkLine>) -> usize {
         .iter()
         .position(|line| line.width() > 0)
         .map_or(lines.len(), |rest| title + 1 + rest);
-    let _ = lines.drain(..rest);
+    lines.drain(..rest);
     rest
 }
 
@@ -1450,7 +1450,7 @@ impl TranscriptView {
         response_id: &str,
     ) -> Option<Range<usize>> {
         let bills = &self.step_bills;
-        let _ = bills.step(response_id)?;
+        bills.step(response_id)?;
         let mut thought = None;
         let mut first = None;
         for (index, cell) in cells.iter().enumerate().rev() {
@@ -1511,8 +1511,7 @@ impl TranscriptView {
             ..
         }) = &seat.header
         {
-            let _ = self
-                .disclosure
+            self.disclosure
                 .expanded
                 .remove(&self.feed.items[*item].fold_mark);
         }
@@ -1558,7 +1557,7 @@ impl TranscriptView {
                 // Both forms default open; late admission moves the same closed mark and focus.
                 let prior = Item::new(Kind::CodeMode, &block.identity());
                 if self.disclosure.expanded.remove(&prior.fold_mark) {
-                    let _ = self.disclosure.expanded.insert(item.fold_mark.clone());
+                    self.disclosure.expanded.insert(item.fold_mark.clone());
                 }
                 if let Some(focused) = &mut self.disclosure.focused
                     && let FoldTarget::Part(fold) = &mut focused.target

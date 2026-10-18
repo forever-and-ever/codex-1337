@@ -87,14 +87,14 @@ impl Session {
         if received.contains_key(id) {
             return false;
         }
-        let _ = received.insert(id.clone(), MailProjection::Submitting);
+        received.insert(id.clone(), MailProjection::Submitting);
         true
     }
 
     pub(crate) async fn release_agent_mail_submission(&self, id: &ResponseItemId) {
         let mut received = self.agent_mail.received.lock().await;
         if matches!(received.get(id), Some(MailProjection::Submitting)) {
-            let _ = received.remove(id);
+            received.remove(id);
         }
     }
 
@@ -142,7 +142,7 @@ impl Session {
         {
             return Ok(false);
         }
-        let _ = received.insert(id.clone(), MailProjection::Projecting);
+        received.insert(id.clone(), MailProjection::Projecting);
         Ok(true)
     }
 
@@ -160,7 +160,7 @@ impl Session {
     )]
     pub(crate) async fn recover_accepted_agent_mail(self: &Arc<Self>) -> CodexResult<()> {
         let acceptance = self.agent_mail.acceptance.lock().await;
-        let _ = self.recover_accepted_agent_mail_locked().await?;
+        self.recover_accepted_agent_mail_locked().await?;
         drop(acceptance);
         self.maybe_start_turn_for_pending_work().await;
         Ok(())
@@ -285,7 +285,7 @@ impl Session {
                         execution,
                     )
                     .await;
-                let _ = projection.insert(MailProjection::Published);
+                projection.insert(MailProjection::Published);
             }
         }
         Ok(!publication_blocked)
@@ -336,7 +336,7 @@ impl Session {
                 .admissions
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let _ = tasks.close();
+            tasks.close();
             tasks.clone()
         };
         tasks.wait().await;
@@ -431,7 +431,7 @@ impl Session {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .spawn(async move {
-                    let _ = session
+                    session
                         .agent_mail
                         .received
                         .lock()
@@ -448,7 +448,7 @@ impl Session {
                             "accepted agent-mail admission panicked; inbox retained".into(),
                         ))
                     });
-                    let _ = session.agent_mail.received.lock().await.remove(&id);
+                    session.agent_mail.received.lock().await.remove(&id);
                     drop(boundary);
                     drop(lifecycle);
                     result

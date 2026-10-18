@@ -14,10 +14,10 @@ pub(in crate::app) async fn settle_frontend_requests(
         {
             tokio::select! {
                 Some(event) = events.recv() => {
-                    let _ = Box::pin(app.handle_event(tui, server, event)).await?;
+                    Box::pin(app.handle_event(tui, server, event)).await?;
                 }
                 Some(completion) = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(tui, server, completion)).await?;
+                    Box::pin(app.handle_server_completion(tui, server, completion)).await?;
                 }
                 Some(completion) = app.thread_delivery.completion_rx.recv() => {
                     app.handle_local_thread_completion(server, completion).await?;

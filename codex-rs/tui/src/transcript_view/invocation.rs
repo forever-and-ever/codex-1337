@@ -187,7 +187,7 @@ impl PreparedInvocation {
         self.count_work(1);
         let available = call.has_formatted_output(width);
         if capabilities.len() == 3 {
-            let _ = capabilities.remove(0);
+            capabilities.remove(0);
         }
         capabilities.push((key, available));
         available
@@ -417,7 +417,7 @@ impl Invocations {
         if entry.source.is_some() {
             cache.entries.retain(|entry| !matches!(&entry.source, Some(SourceRevision::Retained(source)) if source.strong_count() == 0));
             if cache.entries.len() == 32 {
-                let _ = cache.entries.remove(0);
+                cache.entries.remove(0);
             }
             cache.entries.push(Rc::clone(&entry));
         }
@@ -896,8 +896,7 @@ impl TranscriptView {
         if self.invocations.input(&input.call_id) != Some(&input) {
             self.invocations.revision = self.invocations.revision.wrapping_add(1);
             let call_id = input.call_id.clone();
-            let _ = self
-                .invocations
+            self.invocations
                 .inputs
                 .insert(call_id.clone(), Arc::new(input));
             self.invocations

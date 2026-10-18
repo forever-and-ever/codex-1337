@@ -47,14 +47,12 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     // A deferred command leaves exactly its own draft for startup to replay.
     for draft in ["/account", "/rename Fix login"] {
         app.chat_widget.insert_str(draft);
-        let _ = app
-            .chat_widget
+        app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
         app.chat_widget.restore_session_draft();
         assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
-        let _ = app
-            .chat_widget
+        app.chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     }
     let original_model = app
@@ -166,7 +164,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         app.restore_parked_session_draft(&mut tui, &mut server)
             .await?
     );
-    let _ = Box::pin(app.settle_navigation(&mut tui, &mut server)).await?;
+    Box::pin(app.settle_navigation(&mut tui, &mut server)).await?;
     assert_eq!(
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
@@ -174,8 +172,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     assert!(recorded_params(&requests, "thread/start").is_empty());
 
     while events.try_recv().is_ok() {}
-    let _ = app
-        .chat_widget
+    app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
     assert_eq!(
@@ -193,8 +190,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
     );
-    let _ = app
-        .chat_widget
+    app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     app.start_draft_session(&server);
     app.start_draft_session(&server);

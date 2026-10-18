@@ -487,8 +487,7 @@ impl ScopedCodeMode {
         }
         self.refresh_children();
         for (id, revision) in &older.revisions {
-            let _ = self
-                .revisions
+            self.revisions
                 .entry(id.clone())
                 .or_insert_with(|| revision.clone());
         }
@@ -603,7 +602,7 @@ impl ScopedCodeMode {
                 }) {
                     return Ok(());
                 }
-                let _ = self.revisions.insert(
+                self.revisions.insert(
                     id.clone(),
                     if pending {
                         ChildRevision::Pending {

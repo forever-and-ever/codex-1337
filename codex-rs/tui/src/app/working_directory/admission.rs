@@ -18,7 +18,7 @@ impl App {
             };
             self.supersede_pending_navigation();
             let generation = self.navigation_generation();
-            let _ = self.request_server_prepared(
+            self.request_server_prepared(
                 app_server,
                 turn_submissions::ui_requests::UiRequestScope::Connection,
                 turn_submissions::ui_requests::UiRequestKind::ReadOnly,

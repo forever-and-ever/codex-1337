@@ -133,7 +133,7 @@ async fn stopped_runtime_is_restarted_headlessly() -> Result<()> {
     processor
         .connection_closed(TEST_CONNECTION_ID, session.as_ref())
         .await;
-    let _ = stopped.submit(Op::Shutdown).await?;
+    stopped.submit(Op::Shutdown).await?;
     timeout(Duration::from_secs(10), async {
         while stopped.agent_status().await != AgentStatus::Shutdown {
             tokio::time::sleep(Duration::from_millis(10)).await;

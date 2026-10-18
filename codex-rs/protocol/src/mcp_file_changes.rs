@@ -131,7 +131,6 @@ where
 
 impl FileChangeReceipt {
     /// Rejects an attachment as a whole; rejection never changes the actual tool result.
-    #[must_use]
     pub fn parse(value: &Value) -> Option<Self> {
         serde_json::to_writer(AttachmentBudget(0), value).ok()?;
         let receipt: Receipt = serde_json::from_value(value.clone()).ok()?;
@@ -175,19 +174,15 @@ impl FileChangeReceipt {
         Some(Self(receipt))
     }
 
-    #[must_use]
     pub fn outcome(&self) -> PublicationOutcome {
         self.0.outcome
     }
-    #[must_use]
     pub fn files(&self) -> &[FileChangeRecord] {
         &self.0.files
     }
-    #[must_use]
     pub fn into_files(self) -> Vec<FileChangeRecord> {
         self.0.files
     }
-    #[must_use]
     pub fn omitted_files(&self) -> u64 {
         self.0.omitted_files
     }
@@ -197,14 +192,12 @@ impl FileChangeReceipt {
         clippy::expect_used,
         reason = "Receipt fields have infallible JSON scalar/list serialization"
     )]
-    #[must_use]
     pub fn into_value(self) -> Value {
         serde_json::to_value(self.0).expect("validated receipt is serializable")
     }
 }
 
 impl FileChangeRecord {
-    #[must_use]
     pub fn identities(&self) -> (FilePublication, FileOperation, Option<&str>, Option<&str>) {
         match self {
             Self::Text {

@@ -43,7 +43,7 @@ pub(crate) fn capture(init: &mut ExtensionDataInit, source: &SessionSource) -> A
         None => inherited,
     };
     // MCP receives this startup snapshot, never the mutable extension store.
-    let _ = init.insert(policy.as_ref().clone());
+    init.insert(policy.as_ref().clone());
     policy
 }
 

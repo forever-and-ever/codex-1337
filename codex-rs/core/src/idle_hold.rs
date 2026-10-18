@@ -9,7 +9,6 @@ impl IdleHold {
         Self(Arc::new(held))
     }
 
-    #[must_use]
     pub fn is_held(&self) -> bool {
         (self.0)()
     }

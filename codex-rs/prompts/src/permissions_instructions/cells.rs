@@ -14,7 +14,6 @@ static ON_REQUEST_AUTO_REVIEW: LazyLock<String> =
 
 impl ApprovalPromptContext<'_> {
     /// Like catalog text, the cell text is complete: nothing is appended to it.
-    #[must_use]
     pub fn for_cells(mut self) -> Self {
         self.messages.on_request = ResolvedMessage::Catalog(ON_REQUEST);
         self.messages.on_request_auto_review =

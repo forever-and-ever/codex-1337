@@ -98,12 +98,12 @@ impl Lane {
             match error {
                 TrySendError::Full(job) => {
                     let requests = self.requests.clone();
-                    drop(tokio::spawn(async move {
+                    tokio::spawn(async move {
                         requests
                             .send(job)
                             .await
                             .unwrap_or_else(|_| panic!("transcript preparation pool stopped"));
-                    }));
+                    });
                 }
                 TrySendError::Closed(_) => panic!("transcript preparation pool stopped"),
             }

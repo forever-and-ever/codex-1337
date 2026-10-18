@@ -35,7 +35,7 @@ impl StateRuntime {
         let mut tx = self.pool.begin().await?;
         // Acquire SQLite's writer lock before reading candidates. A name assignment racing this
         // restore cannot slip between the availability check and the unarchive commit.
-        let _ = sqlx::query("UPDATE threads SET name = name WHERE id = ?")
+        sqlx::query("UPDATE threads SET name = name WHERE id = ?")
             .bind(thread_id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -89,14 +89,14 @@ WHERE archived = 0 AND id != ? AND name = ? COLLATE NOCASE
                     .ok_or_else(|| anyhow::anyhow!("unarchive name space exhausted"))?;
             }
             // Persist the name before releasing the archived state, in the same transaction.
-            let _ = sqlx::query("UPDATE threads SET name = ? WHERE id = ?")
+            sqlx::query("UPDATE threads SET name = ? WHERE id = ?")
                 .bind(candidate)
                 .bind(thread_id.to_string())
                 .execute(&mut *tx)
                 .await?;
         }
         let updated_at = file_modified_time_utc(rollout_path).await;
-        let _ = sqlx::query(
+        sqlx::query(
             "UPDATE threads SET archived = 0, archived_at = NULL, rollout_path = ?, updated_at = COALESCE(?, updated_at), updated_at_ms = COALESCE(?, updated_at_ms) WHERE id = ?",
         )
         .bind(rollout_path.display().to_string())
@@ -160,7 +160,7 @@ ORDER BY id",
                 .await?;
         if inserted.rows_affected() != 0 {
             for (id, name) in names {
-                let _ = sqlx::query(
+                sqlx::query(
                     "UPDATE threads SET name = ? WHERE id = ? AND history_mode = 'legacy' AND (name IS NULL OR (source = '{\"subagent\":{\"other\":\"guardian\"}}' AND name = 'Guardian review'))",
                 )
                 .bind(Some(name.trim()).filter(|name| !name.is_empty()))

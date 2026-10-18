@@ -54,12 +54,10 @@ impl AnthropicSignedCompaction {
     pub const MAX_OUTPUT_TOKENS: std::num::NonZeroU32 =
         std::num::NonZeroU32::new(/*n*/ 32_768).unwrap();
 
-    #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    #[must_use]
     pub fn signature(&self) -> &str {
         &self.signature
     }

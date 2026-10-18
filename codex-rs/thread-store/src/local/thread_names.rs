@@ -59,7 +59,7 @@ async fn read_legacy_names(
             tracing::warn!("skipping malformed legacy thread name-index entry");
             continue;
         };
-        let _ = names.insert(entry.id, entry.thread_name.trim().to_string());
+        names.insert(entry.id, entry.thread_name.trim().to_string());
     }
     for (&id, name) in &names {
         if name.is_empty() || db.get_thread(id).await.map_err(name_claim_error)?.is_some() {

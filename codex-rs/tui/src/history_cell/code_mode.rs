@@ -348,7 +348,7 @@ impl CodeModeCell {
     }
 
     fn header(&self) -> Option<Line<'static>> {
-        let _ = self.event_time()?;
+        self.event_time()?;
         let terminal = self.status();
         let (bullet, verb) = match terminal {
             Some((CodeModeStatus::Completed, _)) => ("•".green().bold(), "Called"),

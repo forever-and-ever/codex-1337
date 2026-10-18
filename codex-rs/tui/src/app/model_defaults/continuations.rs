@@ -24,7 +24,7 @@ impl App {
     {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
-        let _ = self.request_server(
+        self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,

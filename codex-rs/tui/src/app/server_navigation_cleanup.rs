@@ -86,7 +86,7 @@ impl App {
                     })?
                     .map_err(|error| error.to_string())?;
                 if archive {
-                    let _ = tokio::time::timeout(
+                    tokio::time::timeout(
                         ACK_TIMEOUT,
                         handle.request_typed::<codex_app_server_protocol::ThreadArchiveResponse>(
                             ClientRequest::ThreadArchive {

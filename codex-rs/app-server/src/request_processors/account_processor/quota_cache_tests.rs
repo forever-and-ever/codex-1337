@@ -38,7 +38,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
         async move {
             cache
                 .read(key, QuotaFreshness::Cached, move || async move {
-                    let _ = attempts.fetch_add(1, Ordering::SeqCst);
+                    attempts.fetch_add(1, Ordering::SeqCst);
                     started.notify_one();
                     finish.notified().await;
                     Ok(usage(/*used_percent*/ 25.0))

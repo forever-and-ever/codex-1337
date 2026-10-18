@@ -177,7 +177,7 @@ impl App {
                 DiscoveryReceipt::Liveness(observations),
             ) => {
                 for (id, result) in observations {
-                    let _ = self.apply_thread_liveness(result, id);
+                    self.apply_thread_liveness(result, id);
                 }
                 self.show_agent_picker(server);
             }
@@ -318,9 +318,9 @@ impl App {
             .collect();
         for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
             if let Some(model) = thread.model {
-                let _ = self.agent_navigation.models.insert(thread.thread_id, model);
+                self.agent_navigation.models.insert(thread.thread_id, model);
             } else {
-                let _ = self.agent_navigation.models.remove(&thread.thread_id);
+                self.agent_navigation.models.remove(&thread.thread_id);
             }
             let agent_path = thread.agent_path;
             let is_closed = matches!(
@@ -337,8 +337,7 @@ impl App {
                 is_closed,
             );
             if self.agent_navigation.get(&thread.thread_id).is_some() {
-                let _ = self
-                    .agent_navigation
+                self.agent_navigation
                     .descendant_roots
                     .insert(thread.thread_id, primary_thread_id);
             }

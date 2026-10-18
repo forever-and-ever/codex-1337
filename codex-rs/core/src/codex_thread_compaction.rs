@@ -13,8 +13,7 @@ impl CodexThread {
         trace: Option<W3cTraceContext>,
     ) -> CodexResult<()> {
         let (reply, response) = oneshot::channel();
-        let _ = self
-            .submit_with_trace(Op::StartCompaction { reply }, trace)
+        self.submit_with_trace(Op::StartCompaction { reply }, trace)
             .await?;
         response.await.unwrap_or(Err(CodexErr::InternalAgentDied))
     }

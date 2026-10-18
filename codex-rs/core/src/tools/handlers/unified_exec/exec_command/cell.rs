@@ -69,9 +69,9 @@ pub(super) fn spec(spec: ToolSpec) -> ToolSpec {
         .replacen(UPSTREAM_DESCRIPTION, DESCRIPTION, 1);
     let properties = spec.parameters.properties.get_or_insert_default();
     for dropped in DROPPED {
-        let _ = properties.remove(dropped);
+        properties.remove(dropped);
     }
-    let _ = properties.insert(
+    properties.insert(
         "background".to_string(),
         JsonSchema::boolean(Some(BACKGROUND_DESCRIPTION.to_string())),
     );

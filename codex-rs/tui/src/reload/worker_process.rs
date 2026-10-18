@@ -50,7 +50,7 @@ impl Reaper {
         let receiver = Arc::new(std::sync::Mutex::new(receiver));
         for _ in 0..WORKER_LIMIT {
             let receiver = Arc::clone(&receiver);
-            let _ = std::thread::Builder::new()
+            std::thread::Builder::new()
                 .name("ui-reaper".into())
                 .spawn(move || {
                     loop {
@@ -82,7 +82,7 @@ impl Slot {
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        let _ = self.0.fetch_sub(1, Ordering::Release);
+        self.0.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -101,7 +101,7 @@ impl Launch {
                 .spawn()?;
             let expected = format!("{}\n", super::retained::PROTOCOL);
             let mut bytes = vec![0; expected.len()];
-            let _ = child
+            child
                 .stdout
                 .take()
                 .ok_or_else(|| io::Error::other("Missing UI probe output pipe"))?
@@ -147,7 +147,7 @@ impl Launch {
         set_nonblocking(&master)?;
         let terminal = AsyncFd::new(master)?;
         let mut command = Command::new(&executable);
-        let _ = command
+        command
             .args(self.args)
             .env("CODEX_UI_HOST", self.directory)
             .env("CODEX_UI_GENERATION", self.generation.to_string())
@@ -157,7 +157,7 @@ impl Launch {
             .stderr(Stdio::from(slave));
         // SAFETY: only async-signal-safe syscalls execute between fork and exec.
         unsafe {
-            let _ = command.pre_exec(|| {
+            command.pre_exec(|| {
                 if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
                     return Err(io::Error::last_os_error());
                 }
