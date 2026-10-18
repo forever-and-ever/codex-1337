@@ -18,14 +18,12 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
                 started_at_ms: 1,
             })
         } else {
-            ServerNotification::ItemCompleted(
-                ItemCompletedNotification {
-                    thread_id: thread.to_string(),
-                    turn_id: turn.to_owned(),
-                    item,
-                    completed_at_ms: 2,
-                },
-            )
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: thread.to_string(),
+                turn_id: turn.to_owned(),
+                item,
+                completed_at_ms: 2,
+            })
         }
     }
     fn dynamic(id: &str, status: &str) -> ThreadItem {
@@ -208,10 +206,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
 
     assert_eq!(
         execution.summary.to_string(),
-        format!(
-            "Running ({})",
-            history_cell::code_mode_owner_label(&owner)
-        )
+        format!("Running ({})", history_cell::code_mode_owner_label(&owner))
     );
     store.push_notification(event(
         thread_id,

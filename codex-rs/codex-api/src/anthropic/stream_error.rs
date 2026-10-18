@@ -15,19 +15,28 @@ impl AnthropicStreamProgress {
     pub(super) fn after(self, event: &ResponseEvent) -> Self {
         match (self, event) {
             (Self::CompletedItem, _) | (_, ResponseEvent::OutputItemDone(_)) => Self::CompletedItem,
-            (_,
-ResponseEvent::OutputItemAdded(_) | ResponseEvent::OutputTextDelta { .. } |
-ResponseEvent::ToolCallInputDelta { .. } |
-ResponseEvent::ReasoningSummaryDelta { .. } |
-ResponseEvent::ReasoningSummaryDone { .. } |
-ResponseEvent::ReasoningContentDelta { .. } |
-ResponseEvent::ReasoningSummaryPartAdded { .. }) => Self::PartialOutput,
-            (_,
-ResponseEvent::Created { .. } | ResponseEvent::SafetyBuffering(_) |
-ResponseEvent::ServerModel(_) | ResponseEvent::ModelVerifications(_) |
-ResponseEvent::TurnModerationMetadata(_) |
-ResponseEvent::ServerReasoningIncluded(_) | ResponseEvent::Completed { .. } |
-ResponseEvent::RateLimits(_) | ResponseEvent::ModelsEtag(_)) => self,
+            (
+                _,
+                ResponseEvent::OutputItemAdded(_)
+                | ResponseEvent::OutputTextDelta { .. }
+                | ResponseEvent::ToolCallInputDelta { .. }
+                | ResponseEvent::ReasoningSummaryDelta { .. }
+                | ResponseEvent::ReasoningSummaryDone { .. }
+                | ResponseEvent::ReasoningContentDelta { .. }
+                | ResponseEvent::ReasoningSummaryPartAdded { .. },
+            ) => Self::PartialOutput,
+            (
+                _,
+                ResponseEvent::Created { .. }
+                | ResponseEvent::SafetyBuffering(_)
+                | ResponseEvent::ServerModel(_)
+                | ResponseEvent::ModelVerifications(_)
+                | ResponseEvent::TurnModerationMetadata(_)
+                | ResponseEvent::ServerReasoningIncluded(_)
+                | ResponseEvent::Completed { .. }
+                | ResponseEvent::RateLimits(_)
+                | ResponseEvent::ModelsEtag(_),
+            ) => self,
         }
     }
 }

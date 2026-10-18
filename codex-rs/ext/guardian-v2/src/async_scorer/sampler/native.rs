@@ -55,7 +55,10 @@ pub(super) async fn model(
         let mut catalog = sampler.native_catalog.lock().await;
         if let Some(catalog) = catalog
             .as_ref()
-            .filter(|catalog| catalog.account_id == account_id) { Arc::clone(catalog) } else {
+            .filter(|catalog| catalog.account_id == account_id)
+        {
+            Arc::clone(catalog)
+        } else {
             let scope = Arc::new(Catalog {
                 account_id: account_id.into(),
                 model: OnceCell::new(),

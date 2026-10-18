@@ -7,10 +7,7 @@ impl IssuingElicitationReviewer for GuardianMcpElicitationReviewer {
     fn approval_authority(
         self: Arc<Self>,
         request: ElicitationReviewRequest,
-    ) -> BoxFuture<
-        'static,
-        anyhow::Result<Option<codex_mcp::PreparedElicitationReview>>,
-    > {
+    ) -> BoxFuture<'static, anyhow::Result<Option<codex_mcp::PreparedElicitationReview>>> {
         let session = self.session.clone();
         Box::pin(async move {
             let session = session

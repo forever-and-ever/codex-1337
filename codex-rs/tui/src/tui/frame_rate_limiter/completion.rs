@@ -72,7 +72,10 @@ mod tests {
             frame_end + Duration::from_millis(30)
         );
         let next_end = frame_end + Duration::from_millis(35);
-        limiter.mark_completed(next_end.checked_sub(Duration::from_millis(1)).unwrap(), next_end);
+        limiter.mark_completed(
+            next_end.checked_sub(Duration::from_millis(1)).unwrap(),
+            next_end,
+        );
         assert_eq!(
             limiter.clamp_deadline(next_end),
             next_end + MIN_FRAME_INTERVAL

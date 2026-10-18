@@ -22,11 +22,7 @@ fn tool_text_matches_reference_tokenizer_without_interpreting_control_markers() 
             Some(expected)
         );
         assert_eq!(
-            count_o200k_arrival(
-                &ArrivalSource::ToolDeclarations {
-                    text: text.into(),
-                }
-            ),
+            count_o200k_arrival(&ArrivalSource::ToolDeclarations { text: text.into() }),
             Some(expected)
         );
     }
