@@ -40,8 +40,8 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
         .iter()
         .enumerate()
         .map(|(recipe, entry)| SelectionItem {
-            name: entry.name.to_owned(),
-            description: Some(entry.blurb.to_owned()),
+            name: entry.recipe.name.to_owned(),
+            description: Some(format!("{} — {}", entry.recipe.blurb, entry.credit)),
             is_current: current == Some(recipe),
             dismiss_on_select: true,
             actions: vec![Box::new(move |_: &AppEventSender| live::engage(recipe))],

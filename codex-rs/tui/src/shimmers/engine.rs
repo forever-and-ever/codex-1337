@@ -26,7 +26,7 @@ impl Engine {
     pub(super) fn new(recipe: usize, palette: Palette) -> Self {
         Self {
             recipe,
-            shimmer: (ROSTER[recipe].summon)(),
+            shimmer: (ROSTER[recipe].recipe.summon)(),
             stage: Stage::new(palette),
         }
     }
@@ -116,4 +116,40 @@ pub(super) fn color(rgb: Rgb) -> Color {
     )]
     let channel = |v: f64| v.clamp(0.0, 255.0) as u8;
     rgb_color((channel(rgb.0), channel(rgb.1), channel(rgb.2)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shimmers::ROSTER;
+    use crate::shimmers::script::Script;
+    use crate::shimmers::stage::TICK;
+
+    #[test]
+    fn every_stock_recipe_renders_a_full_script() {
+        let palette = Palette {
+            fg: Rgb(208.0, 208.0, 208.0),
+            bg: Rgb(21.0, 21.0, 21.0),
+        };
+        let script = Script::new();
+        for recipe in 0..ROSTER.len() {
+            let mut engine = Engine::new(recipe, palette);
+            for tick in 1..=540_u32 {
+                let t = f64::from(tick) * TICK;
+                let (spell, header, tokens) = script.at(t);
+                let (_, _, before) = script.at(t - TICK);
+                engine.step(u32::try_from(tokens - before).unwrap_or(u32::MAX), spell);
+                let (spans, backdrop) = engine.status(
+                    header,
+                    63 + u64::from(tick),
+                    palette,
+                    /*mark*/ true,
+                    /*letters*/ true,
+                );
+                assert!(!spans.is_empty(), "{recipe} rendered no status");
+                assert!(backdrop.len() <= 80, "{recipe} overflowed the row");
+                engine.tool(palette);
+            }
+        }
+    }
 }
