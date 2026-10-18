@@ -531,7 +531,9 @@ impl TranscriptView {
                         _ if !disclosure => {
                             let columns = if seat.content == Content::Beheaded {
                                 crate::transcript_geometry::NESTED_COLUMNS
-                            } else if cell.as_any().is::<crate::history_cell::RespondingCell>() {
+                            } else if cell.as_any().is::<crate::history_cell::RespondingCell>()
+                                || crate::history_cell::is_message(cell.as_ref())
+                            {
                                 crate::transcript_geometry::TITLE_COLUMN
                             } else if cell.as_any().is::<crate::history_cell::WorkStatusCell>() {
                                 crate::transcript_geometry::TITLE_COLUMN
@@ -540,7 +542,8 @@ impl TranscriptView {
                                 crate::transcript_geometry::GUTTER_COLUMNS
                             };
                             let content_width = if mode == HistoryRenderMode::Rich
-                                && cell.as_any().is::<crate::history_cell::WorkStatusCell>()
+                                && (cell.as_any().is::<crate::history_cell::WorkStatusCell>()
+                                    || crate::history_cell::is_message(cell.as_ref()))
                             {
                                 width.saturating_sub(columns).max(/*other*/ 1)
                             } else {

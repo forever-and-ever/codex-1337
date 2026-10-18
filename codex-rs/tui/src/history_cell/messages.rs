@@ -188,70 +188,7 @@ impl HistoryCell for UserHistoryCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let sanitized_message = sanitize_user_text((&self.message).into());
-        // Speech transcripts can begin with whitespace; the marker already supplies its separator.
-        let message = if self.spoken {
-            sanitized_message.trim_start()
-        } else {
-            sanitized_message.as_ref()
-        };
-        let text_elements = if message == self.message {
-            self.text_elements.as_slice()
-        } else {
-            &[]
-        };
-        let wrap_width = width
-            .saturating_sub(
-                LIVE_PREFIX_COLS + 1, /* keep a one-column right margin for wrapping */
-            )
-            .max(/*other*/ 1);
-
-        let style = history_prompt_style();
-        let element_style = style.fg(accent_color_on(style.bg));
-
-        let wrapped_images = plain_hyperlink_lines(adaptive_wrap_lines(
-            self.image_labels_not_in_message()
-                .map(|label| Line::from(label).style(element_style)),
-            RtOptions::new(usize::from(wrap_width))
-                .wrap_algorithm(textwrap::WrapAlgorithm::FirstFit),
-        ));
-
-        let wrapped_message = wrap_user_message(message, text_elements, style, wrap_width);
-
-        if wrapped_images.is_empty() && wrapped_message.is_none() {
-            return Vec::new();
-        }
-
-        let mut lines = Vec::new();
-
-        if !wrapped_images.is_empty() {
-            lines.extend(prefix_hyperlink_lines(
-                wrapped_images,
-                "  ".into(),
-                "  ".into(),
-            ));
-            if wrapped_message.is_some() {
-                lines.push(HyperlinkLine::new(Line::from("").style(style)));
-            }
-        }
-
-        if let Some(wrapped_message) = wrapped_message {
-            lines.extend(prefix_hyperlink_lines(
-                wrapped_message,
-                if self.spoken {
-                    "› ".red().bold()
-                } else {
-                    "› ".bold().dim()
-                },
-                "  ".into(),
-            ));
-        }
-
-        for source in lines.iter_mut().filter_map(|line| line.source.as_mut()) {
-            source.right_reserve = 1;
-            source.copy_as_prose = true;
-        }
-        message_band(lines, style)
+        presentation::user_lines(self, width)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -466,21 +403,7 @@ impl HistoryCell for AgentMessageCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut wrapped = Vec::new();
-        for (index, line) in self.lines.iter().enumerate() {
-            let initial_indent = agent_prefix(index == 0 && self.is_first_line).into();
-            let mut subsequent_indent = Line::from(agent_prefix(/*first*/ false));
-            subsequent_indent
-                .spans
-                .extend(crate::insert_history::leading_whitespace_prefix(&line.line).spans);
-            wrapped.extend(crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-                std::slice::from_ref(line),
-                RtOptions::new(width as usize)
-                    .initial_indent(initial_indent)
-                    .subsequent_indent(subsequent_indent),
-            ));
-        }
-        message_band(wrapped, history_response_style())
+        presentation::agent_lines(self, width)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -612,52 +535,7 @@ impl AgentMarkdownCell {
         width: u16,
         list_spacing: crate::markdown_render::ListSpacing,
     ) -> Vec<HyperlinkLine> {
-        let render = || {
-            let initial_prefix = agent_prefix(/*first*/ true);
-            let subsequent_prefix = agent_prefix(/*first*/ false);
-            let Some(wrap_width) =
-                crate::width::usable_content_width_u16(width, initial_prefix.width() as u16)
-            else {
-                return message_band(
-                    prefix_hyperlink_lines(
-                        vec![HyperlinkLine::new(Line::default())],
-                        initial_prefix,
-                        subsequent_prefix,
-                    ),
-                    history_response_style(),
-                );
-            };
-
-            // Reserve the marker; transcript geometry has already excluded the clock gutter.
-            let lines = crate::markdown::render_markdown_agent_with_list_spacing(
-                &self.markdown_source,
-                Some(wrap_width),
-                Some(self.cwd.as_path()),
-                self.inline_visualization_context.as_ref(),
-                list_spacing,
-            );
-            let lines = if self.spoken_artifacts {
-                let mut lines = lines;
-                super::spoken_artifacts::annotate_spoken_artifacts(&mut lines, &self.cwd);
-                lines
-            } else {
-                lines
-            };
-            message_band(
-                normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
-                    lines,
-                    initial_prefix,
-                    subsequent_prefix,
-                )),
-                history_response_style(),
-            )
-        };
-
-        if let Some(rendered_lines) = &self.rendered_lines {
-            rendered_lines.render(width, list_spacing, render)
-        } else {
-            render()
-        }
+        presentation::markdown_lines(self, width, list_spacing)
     }
 }
 
@@ -850,4 +728,7 @@ pub(crate) fn split_reasoning_summary_parts(reasoning_parts: &[String]) -> (Stri
     (leading_empty_part_header.unwrap_or_default(), content)
 }
 
+mod presentation;
+
+pub(crate) use presentation::is_message;
 mod snapshot;

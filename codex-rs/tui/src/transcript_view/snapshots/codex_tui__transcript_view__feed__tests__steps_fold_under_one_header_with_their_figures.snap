@@ -4,26 +4,26 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 unfolded
         [-] User
-              › Fix the failing test
+            Fix the failing test
 
   HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
-              • I'll run the tests first.
+            I'll run the tests first.
               Stored execution · exact input unavailable
               cargo test -p codex-tui --lib transcript_view::feed
   HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
-              • Fixed the parser.
+            Fixed the parser.
 
         [-] User                                                                3
-              › Thanks
+            Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
 
         [-] Response
-              • No step billed this reply.
+            No step billed this reply.
 
             Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
@@ -40,11 +40,11 @@ unfolded
 
 injection opened
         [-] User
-              › Fix the failing test
+            Fix the failing test
 
   HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
-              • I'll run the tests first.
+            I'll run the tests first.
               Stored execution · exact input unavailable
               cargo test -p codex-tui --lib transcript_view::feed
   HH:MM [-] Injection · environment_context                                   ≈84
@@ -53,15 +53,15 @@ injection opened
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
-              • Fixed the parser.
+            Fixed the parser.
 
         [-] User                                                                3
-              › Thanks
+            Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
 
         [-] Response
-              • No step billed this reply.
+            No step billed this reply.
 
             Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
@@ -76,28 +76,28 @@ injection opened
 
 script
         [-] User
-              › Fix the failing test
+            Fix the failing test
 
   HH:MM     Command · failed (1)        [in [raw] [fmt]] [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
-              • I'll run the tests first.
+            I'll run the tests first.
               Stored execution · exact input unavailable
               cargo test -p codex-tui --lib transcript_view::feed
   HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
-              • Fixed the parser.
+            Fixed the parser.
 
         [-] User                                                                3
-              › Thanks
+            Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
               const status = await tools.exec_command({ cmd: "git status" });
               text(status.output);
 
         [-] Response
-              • No step billed this reply.
+            No step billed this reply.
 
             Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached
@@ -112,24 +112,24 @@ script
 
 folded
         [-] User
-              › Fix the failing test
+            Fix the failing test
 
   HH:MM     Command · failed (1)        [in]             [out]               1342    120     34    ≈1188
         [+]   • Thought · Summary
-              • I'll run the tests first.
+            I'll run the tests first.
   HH:MM [+] Injection · environment_context                                   ≈84
 
   HH:MM [-] Response                                                          154    120     34
         [+]   • Thought · Summary
-              • Fixed the parser.
+            Fixed the parser.
 
         [-] User                                                                3
-              › Thanks
+            Thanks
 
   HH:MM [-] Code Mode (ζσξζ)            [in]             [out]                154    120     34        …
 
         [-] Response
-              • No step billed this reply.
+            No step billed this reply.
 
             Context compacted · 1m 23s
   HH:MM [-] Alarm check-layout · time reached

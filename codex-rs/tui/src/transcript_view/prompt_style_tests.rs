@@ -98,7 +98,7 @@ fn prompt_margin_and_blank_background_survive_resize_without_changing_copy() {
             layout.position_at(/*row*/ 0, /*column*/ 59),
             layout.position_at(/*row*/ 1, /*column*/ 2),
         ),
-        (56, 57, 57),
+        (58, 58, 59),
     );
 }
 
