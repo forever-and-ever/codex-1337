@@ -4,5 +4,5 @@ assertion_line: 299
 expression: "relevant.join(\"\\n\")"
 ---
 › Before farming
-• Farmed to /root/farm_1 · child-id
+Farmed to /root/farm_1 · child-id
 › After farming

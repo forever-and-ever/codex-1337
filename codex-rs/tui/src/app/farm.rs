@@ -16,7 +16,6 @@ use super::ThreadId;
 use super::TypedRequestError;
 use super::Uuid;
 use super::VecDeque;
-use super::history_cell;
 use super::transcript_splice::TranscriptSplice;
 use super::tui;
 use crate::chatwidget::FarmSubmission;
@@ -71,8 +70,11 @@ struct FarmReceipt {
 }
 
 impl HistoryCell for FarmReceipt {
-    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        history_cell::new_info_event(self.message.clone(), /*hint*/ None).display_lines(width)
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        vec![Line::styled(
+            self.message.clone(),
+            crate::render::header::style(),
+        )]
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
