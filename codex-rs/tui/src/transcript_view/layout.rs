@@ -290,10 +290,7 @@ impl TranscriptView {
                     .as_any()
                     .downcast_ref::<ReasoningSummaryCell>()
                     .is_some_and(ReasoningSummaryCell::is_transcript_only);
-            if cells[previous]
-                .as_any()
-                .is::<crate::history_cell::StreamAnchorCell>()
-                || self.elides_cell(cells, previous)
+            if self.elides_cell(cells, previous)
                 || transcript_only
                 || !self.feed_seat(cells, previous).is_visible()
             {

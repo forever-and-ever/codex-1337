@@ -4,7 +4,6 @@ use super::AgentMessageItem;
 use super::AppEvent;
 use super::Arc;
 use super::ChatWidget;
-use super::HistoryCell;
 use super::MessagePhase;
 use super::PathBuf;
 use super::PlanStreamController;
@@ -62,80 +61,6 @@ impl ChatWidget {
 
     #[expect(
         clippy::expect_used,
-        reason = "Background admission requires an origin thread and item identity."
-    )]
-    pub(super) fn enable_answer_preparation(
-        &self,
-        controller: StreamController,
-    ) -> StreamController {
-        let thread_id = self.thread_id.expect("background origin");
-        let item_id = controller.item_id.clone().expect("background item");
-        let timestamp = controller.timestamp;
-        let tx = self.app_event_tx.clone();
-        controller
-            .with_background(self.frame_requester.clone())
-            .with_rewraps(Arc::new(move |rows, width, mode| {
-                let mut body = history_cell::AgentMessageCell::new_hyperlink_lines(rows, true);
-                body.timestamp = timestamp;
-                body.item_id = Some(item_id.clone());
-                let cell = Arc::new(history_cell::StreamRowsCell {
-                    mode,
-                    width,
-                    reserved: history_cell::agent_prefix(true).width(),
-                    item_id: Some(item_id.clone()),
-                    content: history_cell::StreamRowContent::Prepared(Box::new(body)),
-                });
-                tx.send(AppEvent::PreparedStream(PreparedStream {
-                    kind: crate::streaming::completion::RevisionKind::Rewrap,
-                    thread_id,
-                    item_id: item_id.clone(),
-                    cell,
-                }));
-            }))
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "Background admission requires an origin and item; nonempty prepared rows always emit a plan cell."
-    )]
-    pub(super) fn enable_plan_preparation(
-        &self,
-        controller: PlanStreamController,
-    ) -> PlanStreamController {
-        let thread_id = self.thread_id.expect("background origin");
-        let item_id = controller.item_id.clone().expect("background item");
-        let tx = self.app_event_tx.clone();
-        let cwd = self.config.cwd.to_path_buf();
-        controller
-            .with_background(self.frame_requester.clone())
-            .with_rewraps(Arc::new(move |rows, width, mode| {
-                let body: Box<dyn HistoryCell> = if rows.is_empty() {
-                    Box::new(history_cell::StreamAnchorCell {
-                        item_id: item_id.clone(),
-                    })
-                } else {
-                    let mut renderer = PlanStreamController::new(width, &cwd, mode);
-                    renderer.item_id = Some(item_id.clone());
-                    renderer.emit_prepared(rows).expect("nonempty plan rows")
-                };
-                let cell = Arc::new(history_cell::StreamRowsCell {
-                    mode,
-                    width,
-                    reserved: 4,
-                    item_id: Some(item_id.clone()),
-                    content: history_cell::StreamRowContent::Prepared(body),
-                });
-                tx.send(AppEvent::PreparedStream(PreparedStream {
-                    kind: crate::streaming::completion::RevisionKind::Rewrap,
-                    thread_id,
-                    item_id: item_id.clone(),
-                    cell,
-                }));
-            }))
-    }
-
-    #[expect(
-        clippy::expect_used,
         reason = "An admitted background stream retains its origin thread and item identity until consumed."
     )]
     pub(super) fn prepare_answer_stream(
@@ -179,7 +104,7 @@ impl ChatWidget {
             cell.item_id = Some(item_id.clone());
             cell.timestamp = timestamp;
             tx.send(AppEvent::PreparedStream(PreparedStream {
-                kind: crate::streaming::completion::RevisionKind::Final(metadata),
+                assistant: metadata,
                 thread_id,
                 item_id,
                 cell: Arc::new(cell),
@@ -219,7 +144,7 @@ impl ChatWidget {
                 branch_cwd: None,
             });
             tx.send(AppEvent::PreparedStream(PreparedStream {
-                kind: crate::streaming::completion::RevisionKind::Final(metadata),
+                assistant: metadata,
                 thread_id,
                 item_id,
                 cell: Arc::new(history_cell::new_proposed_plan(source, &cwd)),
@@ -266,10 +191,10 @@ impl ChatWidget {
             .item_id
             .clone_from(&self.transcript.streaming_plan_item);
         if self.background_stream_enabled(controller.item_id.as_deref()) {
-            self.add_to_history(history_cell::StreamAnchorCell {
+            self.add_to_history(history_cell::RespondingCell {
                 item_id: controller.item_id.clone().expect("stream item"),
             });
-            controller = self.enable_plan_preparation(controller);
+            controller = controller.with_background(self.frame_requester.clone());
         }
         self.plan_stream_controller = Some(controller);
     }
@@ -283,10 +208,10 @@ impl ChatWidget {
         mut controller: StreamController,
     ) -> StreamController {
         if self.background_stream_enabled(controller.item_id.as_deref()) {
-            self.add_to_history(history_cell::StreamAnchorCell {
+            self.add_to_history(history_cell::RespondingCell {
                 item_id: controller.item_id.clone().expect("stream item"),
             });
-            controller = self.enable_answer_preparation(controller);
+            controller = controller.with_background(self.frame_requester.clone());
         }
         controller
     }

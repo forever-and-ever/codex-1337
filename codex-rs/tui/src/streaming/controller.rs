@@ -71,8 +71,6 @@ use super::table_holdback::table_holdback_state;
 
 #[path = "background.rs"]
 mod background;
-#[path = "immutable_rows.rs"]
-mod immutable_rows;
 
 /// Shared state and logic for the two-region streaming model.
 ///
@@ -690,7 +688,7 @@ impl StreamController {
         self.core.set_render_mode(render_mode);
     }
 
-    fn emit(&mut self, lines: impl Into<background::Rows>) -> Option<Box<dyn HistoryCell>> {
+    fn emit(&mut self, lines: Vec<HyperlinkLine>) -> Option<Box<dyn HistoryCell>> {
         self.emit_rows(lines)
     }
 }
@@ -819,7 +817,7 @@ impl PlanStreamController {
 
     fn emit(
         &mut self,
-        lines: impl Into<background::Rows>,
+        lines: Vec<HyperlinkLine>,
         include_bottom_padding: bool,
     ) -> Option<Box<dyn HistoryCell>> {
         self.emit_rows(lines, include_bottom_padding)
@@ -1797,7 +1795,7 @@ mod tests {
                 }
             }
 
-            trial.observe(delta, &emitted_lines).await;
+            trial.observe(delta);
             let mut visible = emitted_lines.clone();
             visible.extend(visible_lines(ctrl.current_tail_lines()));
             let visible_plain = lines_to_plain_strings(&visible);

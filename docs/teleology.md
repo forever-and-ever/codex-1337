@@ -440,12 +440,21 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50434 adds keyboard copy selection to the owned transcript; #50808 prunes TUI snapshots; #50109 bounds fullscreen prompts.
 - Evidence: 1cf770bb6b, b78ff3aff3, eaefb734ab, ae20fc5bef, cdc2ec4845.
 
+### stable-feed-publication
+
+- Telos: the feed is a factual record of state, not an engagement surface.
+- Holds: required policy: eschew progressive rendering and avoid updating published items in place. Atomic units, such as injections and synchronous tool calls, are formatted and highlighted once before publication, then drawn in their final state. Open/close units publish one opening state for ongoing work and one replacement at closure, without intermediate content churn; Code Mode cells and the assistant's Responding marker follow this pattern. Assistant messages appear only when complete: a green Responding title uses the same active-work styling as code-cell titles, has no token estimates or counters, and is replaced by the prepared message block. Shimmer may indicate ongoing work; content mutation is not an animation. Ordinary redraws, viewport reflow and explicit user disclosure do not create lifecycle revisions; reuse prepared source work rather than repeating it on each paint.
+- Owners: `codex-rs/tui/src/streaming/background.rs`, `codex-rs/tui/src/chatwidget/stream_preparation.rs`, `codex-rs/tui/src/history_cell/responding.rs`, `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`, `codex-rs/tui/src/app/transcript_splice.rs`, `codex-rs/tui/src/render/header.rs`, `codex-rs/tui/src/history_cell/code_mode.rs`.
+- Tripwire: `controller_live_view_matches_render_during_interleaved_table_streaming` includes a fullscreen trial that withholds partial rows and preserves the complete source across width/mode changes. `list_spacing_completion_preserves_the_scrolled_reader` exercises visible response markers, out-of-order completion, interleaved content and cancellation. Feed-wide compliance outside these paths has no single check; this doctrine does not authorize an incidental migration of every existing cell.
+- Pressure: upstream token-by-token streaming, provisional Markdown restyling, timer-driven source preparation and progress counters must not reintroduce content churn.
+- Evidence: owner decision, 2026-10-18.
+
 ### fast-ui-thread
 
 - Telos: typing, navigation and cancellation remain responsive while agent work, history updates and rendering preparation progress.
-- Holds: required invariant: the UI dispatcher performs bounded state transitions and cached presentation; it never awaits server responses or performs unbounded I/O or source preparation. Server, configuration and filesystem work runs as typed continuations: the dispatcher admits the request, and its completion returns the outcome to the UI task. Ordering, input ownership and uncertain outcomes are preserved, unrelated editing is never held, and a request that snapshots settings takes its snapshot behind the settings barrier. Each loop pass drains a finite input batch before frame work and polls terminal input with the UI task's own waker. An output writer thread owns the terminal: frames are latest-wins, controls and barriers keep their order, the next frame paints only after the previous one completes, and a geometry change or clear invalidates the writer's previous frame. Cell layout and streaming Markdown are prepared on background workers and published as immutable revisions; sequential parsing, semantic formatting, highlighting and token counting finish before publication. The screen holds the presented revision until its successor is ready and never re-renders the same content in place; a width change blanks the transcript region rather than showing clipped rows, and the composer always renders. Unchanged source preparation is reused across headers, bodies and cosmetic ticks; animation repaints without rebuilding content. Terminals that confirm bracketed paste skip the paste-burst hold.
+- Holds: required invariant: the UI dispatcher performs bounded state transitions and cached presentation; it never awaits server responses or performs unbounded I/O or source preparation. Server, configuration and filesystem work runs as typed continuations: the dispatcher admits the request, and its completion returns the outcome to the UI task. Ordering, input ownership and uncertain outcomes are preserved, unrelated editing is never held, and a request that snapshots settings takes its snapshot behind the settings barrier. Each loop pass drains a finite input batch before frame work and polls terminal input with the UI task's own waker. An output writer thread owns the terminal: frames are latest-wins, controls and barriers keep their order, the next frame paints only after the previous one completes, and a geometry change or clear invalidates the writer's previous frame. Cell layout and completed assistant messages are prepared on background workers and published as immutable revisions; parsing, semantic formatting, highlighting and token counting finish before publication. Pending live-output preparation alone never blocks navigation or publication of ready transcript content. Width-dependent layouts are replaced only when ready; a width change blanks the transcript region rather than showing clipped rows, and the composer always renders. Unchanged source preparation is reused across headers, bodies and cosmetic ticks; animation repaints without rebuilding content. Terminals that confirm bracketed paste skip the paste-burst hold.
 - Owners: `codex-rs/tui/src/app/startup.rs`, `codex-rs/tui/src/app/ui_schedule.rs`, `codex-rs/tui/src/app/server_ui_requests.rs`, `codex-rs/tui/src/app/local_ui_requests.rs`, `codex-rs/tui/src/app/navigation_config.rs`, `codex-rs/tui/src/custom_terminal/output.rs`, `codex-rs/tui/src/transcript_view/presented.rs`, `codex-rs/tui/src/streaming/background.rs`, `codex-rs/tui/src/app/owned_transcript.rs`, `codex-rs/tui/src/transcript_view/invocation.rs`, `codex-rs/tui/src/history_cell/invocation.rs`, `codex-rs/tui/src/history_cell/activity_lifecycle.rs`, `codex-rs/tui/src/transcript_view/layout.rs`, `codex-rs/tui/src/ui_latency.rs` and its endpoint, `codex-rs/cli/src/ui_latency.rs`.
-- Tripwire: `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` stalls the writer, then checks live input, latest-frame delivery, barrier order, and repaint after width changes and clears. `controller_live_view_matches_render_during_interleaved_table_streaming` checks worker-published stream rows against canonical rendering; a setext underline or a late table pipe restyles rows already shown, through a keyed splice. `invocation_ports_preserve_sources_across_completion_and_reflow` checks preparation reuse across cosmetic ticks and unrelated call arrivals. `script_panes_settle_off_dispatcher_and_reject_stale_completions` holds the preparation worker while exercising pane controls, then checks stale-width rejection and settled live reuse. Script panes publish highlighted, wrapped copy geometry together, never a half-prepared source. `mcp_file_receipts_share_native_hunks_and_independent_disclosures` checks native projections. No in-repo latency bound: only an external pty harness checks real terminal input wake-ups and paint.
+- Tripwire: `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` stalls the writer, then checks live input, latest-frame delivery, barrier order, and repaint after width changes and clears. `controller_live_view_matches_render_during_interleaved_table_streaming` checks off-thread completion and the buffering contract in [stable-feed-publication](#stable-feed-publication). `live_preparation_does_not_freeze_retained_navigation` checks scrolling and newly committed content while a live successor is blocked; `history_prefetch_waits_for_prepared_rows` rejects unknown layout height as evidence for loading older history. `invocation_ports_preserve_sources_across_completion_and_reflow` checks preparation reuse across cosmetic ticks and unrelated call arrivals. `script_panes_settle_off_dispatcher_and_reject_stale_completions` holds the preparation worker while exercising pane controls, then checks stale-width rejection and settled live reuse. Script panes publish highlighted, wrapped copy geometry together, never a half-prepared source. `mcp_file_receipts_share_native_hunks_and_independent_disclosures` checks native projections. No in-repo latency bound: only an external pty harness checks real terminal input wake-ups and paint.
 - Diagnostics: UI-task-local, fixed-stage wall-time recording publishes current work before execution. Its dedicated worker-local socket thread never depends on dispatcher/server/runtime progress; snapshots are bounded and reset is a lazy reporting epoch, not cancellation. No content, hot-path allocation, logging or disk export. Ordinary idle select is distinct from handler occupancy; timing remains inclusive, not CPU attribution. `ReactionLatency` spans input consumption to the flushed frame. Operator contract: [UI latency recorder](fork.md#ui-latency-recorder). `independent_dump_survives_blocked_and_suspended_dispatcher` and `publication_reset_race_is_bounded_and_never_accepts_torn_records` witness isolation and bounded publication/reset; they do not establish an end-to-end latency bound.
 - Pressure: upstream handlers that await the server, and rendering changes that prepare on the dispatcher, reintroduce stalls; convert them to continuations or worker preparation. Crossterm's event stream latches the waker of the poll that armed its reader, so a noop-waker poll strands the UI task. A synchronous terminal query (cursor position, colors) stalls the UI until the terminal answers or the probe times out, so after startup an owned screen issues none. Only the UI task publishes current recorder work; writer-thread phases enter histograms through drained completions.
 - Evidence: owner decision, 2026-10-15; responsive-ui acceptance, 2026-10-17.
@@ -656,7 +665,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/working_directory/admission.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/agents_overview_new/admission.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/backend_banner_fallback/continuations.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/agent_message_consolidation/continuations.rs`: fast-ui-thread, stable-feed-publication
 - `codex-rs/tui/src/app/history_pagination/failed_turns.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/app_server_thread_ownership/continuations.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/config_persistence/continuations.rs`: fast-ui-thread
@@ -689,7 +698,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/custom_terminal/output.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/presented.rs`: fast-ui-thread
 - `codex-rs/tui/src/live_work/presented.rs`: fast-ui-thread
-- `codex-rs/tui/src/streaming/background.rs`: fast-ui-thread
+- `codex-rs/tui/src/streaming/background.rs`: fast-ui-thread, stable-feed-publication
 - `AGENTS.md`: fullscreen-only, minimal-upstream-delta
 - `codex-rs/app-server-embedding/src/lib.rs`: pipelined-crate-graph
 - `codex-rs/app-server-protocol/src/delegation.rs`: server-hosted-agents
@@ -773,12 +782,12 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/idle_restart.rs`: reload-host
 - `codex-rs/tui/src/app/presentation.rs`: attention-gated-painting
 - `codex-rs/tui/src/app/queued_messages.rs`: durable-approvals-and-queues
-- `codex-rs/tui/src/app/transcript_splice.rs`: fullscreen-only
+- `codex-rs/tui/src/app/transcript_splice.rs`: fullscreen-only, stable-feed-publication
 - `codex-rs/tui/src/app/ui_reload.rs`: reload-host
 - `codex-rs/tui/src/app_server_session/account.rs`: pinned-accounts
 - `codex-rs/tui/src/chatwidget/goal_command.rs`: explicit-command-verbs
 - `codex-rs/tui/src/chatwidget/context_role.rs`: explicit-command-verbs
-- `codex-rs/tui/src/history_cell/code_mode.rs`: fullscreen-only
+- `codex-rs/tui/src/history_cell/code_mode.rs`: fullscreen-only, stable-feed-publication
 - `codex-rs/tui/src/history_cell/code_mode_projection.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/preamble.rs`: token-bills
 - `codex-rs/tui/src/reload/admission.rs`: reload-host
@@ -840,11 +849,12 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/server_fork_navigation.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/server_navigation_permissions.rs`: durable-approvals-and-queues
 - `codex-rs/core/src/agent/control/farm_reservation.rs`: server-hosted-agents
-- `codex-rs/tui/src/streaming/immutable_rows.rs`: fast-ui-thread
 - `codex-rs/tui/src/streaming/completion.rs`: fast-ui-thread
-- `codex-rs/tui/src/chatwidget/stream_preparation.rs`: fast-ui-thread
+- `codex-rs/tui/src/chatwidget/stream_preparation.rs`: fast-ui-thread, stable-feed-publication
 - `codex-rs/tui/src/transcript_view/layout_rewrap.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/live_preparation.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/preparation.rs`: fast-ui-thread
 - `codex-rs/tui/src/tui/background_preparation.rs`: fast-ui-thread
 - `codex-rs/tui/src/terminal_probe/bracketed_paste.rs`: fast-ui-thread
+- `codex-rs/tui/src/history_cell/responding.rs`: stable-feed-publication
+- `codex-rs/tui/src/render/header.rs`: stable-feed-publication

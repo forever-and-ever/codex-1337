@@ -1,4 +1,4 @@
-//! A prepared final revision is addressed to the stream that produced it, not the active view.
+//! A completed response is addressed to its item, not whichever thread is active.
 
 use crate::history_cell::HistoryCell;
 use codex_protocol::ThreadId;
@@ -12,14 +12,8 @@ pub(crate) struct PreparedAssistant {
 }
 
 #[derive(Debug)]
-pub(crate) enum RevisionKind {
-    Rewrap,
-    Final(Option<PreparedAssistant>),
-}
-
-#[derive(Debug)]
 pub(crate) struct PreparedStream {
-    pub(crate) kind: RevisionKind,
+    pub(crate) assistant: Option<PreparedAssistant>,
     pub(crate) thread_id: ThreadId,
     pub(crate) item_id: String,
     pub(crate) cell: Arc<dyn HistoryCell>,

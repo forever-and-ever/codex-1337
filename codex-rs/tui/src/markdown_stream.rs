@@ -17,9 +17,6 @@ use std::path::PathBuf;
 #[cfg(test)]
 use crate::markdown;
 
-#[path = "markdown_stream_source.rs"]
-mod source;
-
 /// Newline-gated accumulator that buffers raw markdown source and commits only completed lines.
 ///
 /// The buffer tracks how many source bytes have already been committed via

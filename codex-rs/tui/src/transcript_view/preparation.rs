@@ -115,7 +115,8 @@ pub(crate) struct Pending<T> {
     queued: Option<Job>,
     result: Receiver<T>,
     requests: Sender<Job>,
-    owner: Arc<()>,
+    // Dropping the ticket cancels queued work through Job's weak owner.
+    _owner: Arc<()>,
 }
 
 impl<T: Send + 'static> Pending<T> {
@@ -135,7 +136,7 @@ impl<T: Send + 'static> Pending<T> {
             }),
             requests: lane.requests.clone(),
             result: receiver,
-            owner,
+            _owner: owner,
         }
     }
 
@@ -167,28 +168,5 @@ impl<T: Send + 'static> Pending<T> {
                 Err(TrySendError::Closed(_)) => panic!("transcript preparation pool stopped"),
             }
         }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "The live task retains its cancellation owner until its worker returns a result."
-    )]
-    #[expect(
-        clippy::panic,
-        reason = "The process-lifetime preparation pool never closes; loss of its worker is an unrecoverable infrastructure invariant violation."
-    )]
-    pub(crate) async fn wait(mut self) -> T {
-        if let Some(job) = self.queued.take() {
-            self.requests
-                .send(job)
-                .await
-                .unwrap_or_else(|_| panic!("transcript preparation pool stopped"));
-        }
-        let result = self
-            .result
-            .await
-            .expect("transcript preparation worker stopped");
-        drop(self.owner);
-        result
     }
 }

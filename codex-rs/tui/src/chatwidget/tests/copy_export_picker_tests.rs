@@ -181,11 +181,7 @@ async fn completed_copy_source_survives_replay_and_stream_consolidation() {
                     assert_eq!(Some(prepared.thread_id), chat.thread_id);
                     assert_eq!(prepared.item_id, "source");
                     assert_eq!(prepared.cell.copy_source(), Some(source));
-                    let crate::streaming::completion::RevisionKind::Final(Some(markdown)) =
-                        prepared.kind
-                    else {
-                        panic!("authoritative final metadata");
-                    };
+                    let markdown = prepared.assistant.expect("authoritative final metadata");
                     chat.accept_prepared_markdown(prepared.thread_id, &prepared.item_id, markdown);
                     assert_eq!(chat.transcript.last_agent_source.as_deref(), Some(source));
                     break;
