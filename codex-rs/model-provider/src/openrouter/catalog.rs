@@ -100,7 +100,7 @@ impl Catalog {
             .acquire()
             .await
             .unwrap_or_else(|_| unreachable!("catalog refresh semaphore is never closed"));
-        let preferences = if let Ok(preferences) = read_openrouter_config(&self.home).await { preferences } else {
+        let Ok(preferences) = read_openrouter_config(&self.home).await else {
             tracing::warn!("Cannot read OpenRouter model preferences");
             return Vec::new();
         };
@@ -235,7 +235,7 @@ impl ModelsManager for Catalog {
         _factory: HttpClientFactory,
     ) -> ModelsManagerFuture<'_, ()> {
         Box::pin(async move {
-            self.models().await;
+            let _ = self.models().await;
         })
     }
 }

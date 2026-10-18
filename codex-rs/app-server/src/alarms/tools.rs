@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use std::sync::Arc;
 
 use chrono::DateTime;
@@ -64,7 +66,7 @@ impl ThreadLifecycleContributor<Config> for AlarmTools {
                 && !input.session_source.is_non_root_agent()
                 && !matches!(input.session_source, SessionSource::Exec)
                 && self.0.available();
-            input.thread_store.insert(if available {
+            let _ = input.thread_store.insert(if available {
                 Access::Available
             } else {
                 Access::Unavailable
@@ -161,8 +163,7 @@ impl<'call> ToolExecutor<ToolCall<'call>> for AlarmTool {
     {
         Box::pin(async move {
             let args = call.function_arguments()?;
-            let result = self
-                .execute(args)
+            let result = Box::pin(self.execute(args))
                 .await
                 .map_err(FunctionCallError::RespondToModel)?;
             Ok(Box::new(Porcelain(result)) as Box<dyn ToolOutput>)
@@ -180,8 +181,7 @@ impl AlarmTool {
             .get()
             .and_then(std::sync::Weak::upgrade)
             .ok_or_else(|| "alarm host is unavailable".to_string())?;
-        let (thread, lease) = service
-            .load(&self.caller.to_string())
+        let (thread, lease) = Box::pin(service.load(&self.caller.to_string()))
             .await
             .map_err(|err| err.message)?;
         let config = thread.config_snapshot().await;
@@ -255,9 +255,10 @@ impl AlarmTool {
                     wire::armed_list(&self.alarms.summaries(self.caller))
                 );
                 if let Some(line) = stale {
-                    text.push_str(&format!(
+                    let _ = write!(
+                        text,
                         "\nAlready in its output: `{line}`. Only new output sounds this alarm."
-                    ));
+                    );
                 }
                 Ok(text)
             }
@@ -298,7 +299,7 @@ impl Set {
             return Err("note must contain 1 to 2000 characters".into());
         }
         let at = match (self.after_seconds, self.at) {
-            (Some(seconds), None) if (1..=604800).contains(&seconds) => {
+            (Some(seconds), None) if (1..=604_800).contains(&seconds) => {
                 Some(now() + seconds * 1000)
             }
             (Some(_), None) => return Err("after_seconds must be between 1 and 604800".into()),
@@ -307,7 +308,7 @@ impl Set {
                     .map_err(|err| format!("at must be an RFC 3339 timestamp with offset: {err}"))?
                     .timestamp_millis();
                 let delay = at - now();
-                if !(1..=604800000).contains(&delay) {
+                if !(1..=604_800_000).contains(&delay) {
                     return Err("at must be in the future and within 7 days".into());
                 }
                 Some(at)
@@ -382,7 +383,7 @@ impl ToolOutput for Porcelain {
 
 fn definitions() -> Vec<DynamicToolFunctionSpec> {
     [
-        ("set", SET_DESCRIPTION, json!({"note":{"type":"string","minLength":1,"maxLength":2000,"description":"What to do when woken, written for yourself after a long gap."},"after_seconds":{"type":"integer","minimum":1,"maximum":604800},"at":{"type":"string","description":"RFC 3339 timestamp with offset, in the future and within 7 days."},"session_id":{"type":"integer","description":"A running background exec_command session of this conversation."},"pattern":{"type":"string","maxLength":512,"description":"Rust regex syntax, matched per new output line. Requires session_id."}}), vec!["note"]),
+        ("set", SET_DESCRIPTION, json!({"note":{"type":"string","minLength":1,"maxLength":2000,"description":"What to do when woken, written for yourself after a long gap."},"after_seconds":{"type":"integer","minimum":1,"maximum":604_800},"at":{"type":"string","description":"RFC 3339 timestamp with offset, in the future and within 7 days."},"session_id":{"type":"integer","description":"A running background exec_command session of this conversation."},"pattern":{"type":"string","maxLength":512,"description":"Rust regex syntax, matched per new output line. Requires session_id."}}), vec!["note"]),
         ("disarm", "Disarm an unsounded alarm by id.", json!({"id":{"type":"string"}}), vec!["id"]),
         ("list", "List this conversation's armed alarms.", json!({}), Vec::new()),
     ].into_iter().map(|(name, description, properties, required)| DynamicToolFunctionSpec { name: name.into(), description: description.into(), input_schema: json!({"type":"object","additionalProperties":false,"properties":properties,"required":required}), defer_loading: true }).collect()

@@ -1,4 +1,14 @@
-use super::*;
+use super::CodexErrorDetails;
+use super::JSONRPCErrorError;
+use super::Result;
+use super::ThreadBackgroundTerminal;
+use super::ThreadBackgroundTerminalsListParams;
+use super::ThreadBackgroundTerminalsListResponse;
+use super::ThreadId;
+use super::ThreadRequestProcessor;
+use super::internal_error;
+use super::invalid_request;
+use super::paginate_background_terminals;
 use codex_app_server_protocol::ThreadBackgroundTerminalsScope;
 
 impl ThreadRequestProcessor {
@@ -72,7 +82,7 @@ pub(super) fn paginate_subtree_background_terminals(
         }
         None => 0,
     };
-    let effective_limit = limit.unwrap_or(terminals.len() as u32).max(1) as usize;
+    let effective_limit = limit.map_or(terminals.len(), |limit| limit as usize).max(1);
     let end = start.saturating_add(effective_limit).min(terminals.len());
     let next_cursor = (end < terminals.len())
         .then(|| serde_json::to_string(&background_terminal_key(&terminals[end - 1])))

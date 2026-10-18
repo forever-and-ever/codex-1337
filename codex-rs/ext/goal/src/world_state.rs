@@ -36,7 +36,9 @@ impl<C: Send + Sync> ContextContributor for GoalExtension<C> {
                 return Vec::new();
             }
             let Some(config) = input.thread_store.get::<GoalExtensionConfig>() else {
-                panic!("goal runtime has no thread configuration");
+                unreachable!(
+                    "goal extension initializes thread configuration before rendering world state"
+                );
             };
             vec![continuation_rules_section(config.update_plan_enabled)]
         })

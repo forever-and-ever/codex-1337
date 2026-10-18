@@ -10,7 +10,7 @@ fn usage(used_percent: f64) -> QuotaUsage {
         five_hour: Some(RateLimitWindow {
             used_percent,
             window_minutes: Some(300),
-            resets_at: Some(2000000000),
+            resets_at: Some(2_000_000_000),
         }),
         seven_day: None,
     })
@@ -38,7 +38,7 @@ async fn cancelled_clients_cannot_erase_refreshes_or_failure_cooldowns() {
         async move {
             cache
                 .read(key, QuotaFreshness::Cached, move || async move {
-                    attempts.fetch_add(1, Ordering::SeqCst);
+                    let _ = attempts.fetch_add(1, Ordering::SeqCst);
                     started.notify_one();
                     finish.notified().await;
                     Ok(usage(/*used_percent*/ 25.0))

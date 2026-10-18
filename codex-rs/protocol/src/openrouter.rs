@@ -359,9 +359,15 @@ impl AddAssign for Usd {
 
 impl TryFrom<f64> for Usd {
     type Error = String;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The rounded finite value is checked against the inclusive -2^63 and exclusive 2^63 bounds before casting"
+    )]
     fn try_from(dollars: f64) -> Result<Self, Self::Error> {
         let nanos = (dollars * 1_000_000_000.0).round();
-        if !nanos.is_finite() || nanos < i64::MIN as f64 || nanos >= -(i64::MIN as f64) {
+        if !nanos.is_finite()
+            || !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&nanos)
+        {
             return Err("USD amount is invalid or exceeds nanodollar range".into());
         }
         Ok(Self(nanos as i64))
@@ -380,6 +386,10 @@ impl FromStr for Usd {
 }
 
 impl Serialize for Usd {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "The wire contract represents dollars as floating-point numbers; stored nanodollars and arithmetic remain exact"
+    )]
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_f64(self.0 as f64 / 1_000_000_000.0)
     }

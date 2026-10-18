@@ -40,7 +40,7 @@ impl AnthropicWarmingRequest {
         body["max_tokens"] = json!(0);
         body["stream"] = json!(false);
         let mut headers = request.api_headers(HeaderMap::new())?;
-        headers.insert(
+        let _ = headers.insert(
             http::header::ACCEPT,
             HeaderValue::from_static("application/json"),
         );
@@ -113,12 +113,12 @@ impl<T: HttpTransport> AnthropicClient<T> {
 
 impl AnthropicRequest {
     pub(super) fn api_headers(&self, mut headers: HeaderMap) -> Result<HeaderMap, ApiError> {
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+        let _ = headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         let betas = std::iter::once("oauth-2025-04-20")
             .chain(self.required_betas().iter().copied())
             .collect::<Vec<_>>()
             .join(",");
-        headers.insert(
+        let _ = headers.insert(
             "anthropic-beta",
             HeaderValue::from_str(&betas).map_err(|error| ApiError::InvalidRequest {
                 message: format!("invalid Anthropic beta header: {error}"),

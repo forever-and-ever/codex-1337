@@ -8,13 +8,14 @@ use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::UserInput;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 async fn user_owned_mcp(
     State(gate): State<Arc<ModelGate>>,
     uri: http::Uri,
     Json(body): Json<Value>,
 ) -> Response {
-    gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
+    let _ = gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
     gate.changed.notify_one();
     let result = match body["method"].as_str() {
         Some("initialize") => json!({
@@ -91,7 +92,12 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
         if case == "user_owned_identity" {
             // Even the old listener's URL/header shape is insufficient to claim
             // ownership of a durable user-configured server.
-            config.push_str(&format!("\n[mcp_servers.codex_tui]\nurl = {endpoint:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\nhttp_headers = {{Authorization = 'Bearer {}'}}\n[mcp_servers.mcp__codex_tui]\nurl = {:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\ndisabled_tools = ['unrelated_probe']\n", uuid::Uuid::new_v4(), format!("http://{address}/prefixed-mcp")));
+            let _ = write!(
+                config,
+                "\n[mcp_servers.codex_tui]\nurl = {endpoint:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\nhttp_headers = {{Authorization = 'Bearer {}'}}\n[mcp_servers.mcp__codex_tui]\nurl = {:?}\nrequired = true\ndefault_tools_approval_mode = 'approve'\ndisabled_tools = ['unrelated_probe']\n",
+                uuid::Uuid::new_v4(),
+                format!("http://{address}/prefixed-mcp")
+            );
         }
         std::fs::write(path, config)?;
         let requirements = match case {
@@ -100,10 +106,11 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
                 let mut requirements =
                     format!("[mcp_servers.codex_tui.identity]\nurl = {endpoint:?}\n");
                 if case == "user_owned_identity" {
-                    requirements.push_str(&format!(
+                    let _ = write!(
+                        requirements,
                         "[mcp_servers.mcp__codex_tui.identity]\nurl = {:?}\n",
                         format!("http://{address}/prefixed-mcp")
-                    ));
+                    );
                 }
                 requirements
             }
@@ -214,7 +221,7 @@ async fn native_approval_requires_managed_admission_before_retiring_a_legacy_ide
             gate.release.notify_one();
             None
         };
-        server
+        let _ = server
             .start_turn_and_wait_for_completion(TurnStartParams {
                 thread_id: source.thread.id,
                 input: vec![UserInput::Text {

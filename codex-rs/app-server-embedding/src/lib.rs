@@ -61,6 +61,10 @@ pub enum InProcessServerEvent {
     Lagged { skipped: usize },
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent startup policy and advertised protocol capabilities are orthogonal, not exclusive states"
+)]
 #[derive(Clone)]
 pub struct InProcessClientStartArgs {
     /// Resolved argv0 dispatch paths used by command execution internals.
@@ -169,7 +173,7 @@ static RUNTIME: OnceLock<EmbeddedStart> = OnceLock::new();
 
 /// Installs this process's app-server runtime; the first installation stands.
 pub fn install(start: EmbeddedStart) {
-    RUNTIME.get_or_init(|| start);
+    let _ = RUNTIME.get_or_init(|| start);
 }
 
 /// Starts the installed app-server runtime.

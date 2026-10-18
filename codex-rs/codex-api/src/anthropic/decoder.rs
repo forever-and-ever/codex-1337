@@ -309,7 +309,7 @@ impl<'a> Decoder<'a> {
                     }
                     _ => {}
                 }
-                self.blocks.insert(index, open);
+                let _ = self.blocks.insert(index, open);
                 self.next_index += 1;
             }
             Frame::ContentBlockDelta { index, delta } => {

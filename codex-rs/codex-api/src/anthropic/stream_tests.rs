@@ -16,12 +16,13 @@ use futures::stream;
 use http::HeaderMap;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::fmt::Write as _;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 fn request() -> AnthropicRequest {
     AnthropicRequest::from_body(
-        json!({"model":"synthetic","stream":true}),
+        &json!({"model":"synthetic","stream":true}),
         Arc::from([]),
         Arc::from([]),
     )
@@ -116,7 +117,7 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
     struct Dropped(Arc<AtomicUsize>);
     impl Drop for Dropped {
         fn drop(&mut self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
+            let _ = self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
     for expected_progress in [
@@ -136,10 +137,10 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
         if expected_progress == AnthropicStreamProgress::CompletedItem {
             frames.push(json!({"type":"content_block_stop","index":0}));
         }
-        let prefix = frames
-            .into_iter()
-            .map(|frame| format!("data: {frame}\n\n"))
-            .collect::<String>();
+        let prefix = frames.into_iter().fold(String::new(), |mut prefix, frame| {
+            let _ = write!(prefix, "data: {frame}\n\n");
+            prefix
+        });
         for consume in [true, false] {
             let count = Arc::new(AtomicUsize::new(0));
             let guard = Dropped(count.clone());
@@ -193,12 +194,16 @@ impl AuthProvider for NoAuth {
 }
 
 struct UncertainTransport(Arc<AtomicUsize>);
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "HttpTransport requires asynchronous methods; this scripted transport resolves immediately"
+)]
 impl HttpTransport for UncertainTransport {
     async fn execute(&self, _: Request) -> Result<Response, TransportError> {
         unreachable!("native inference must stream")
     }
     async fn stream(&self, _: Request) -> Result<StreamResponse, TransportError> {
-        self.0.fetch_add(1, Ordering::SeqCst);
+        let _ = self.0.fetch_add(1, Ordering::SeqCst);
         Err(TransportError::Network("synthetic uncertain POST".into()))
     }
 }
@@ -328,7 +333,7 @@ async fn errors_before_any_completed_item_stay_typed_for_retry() {
                     bytes: Box::pin(chunks),
                 };
                 let request = AnthropicRequest::from_body(
-                    json!({"model":"synthetic","stream":true}),
+                    &json!({"model":"synthetic","stream":true}),
                     Arc::from([AnthropicTool {
                         name: "fixture".into(),
                         description: String::new(),

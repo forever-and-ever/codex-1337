@@ -35,10 +35,14 @@ enum DescriptionDetail {
     Schema,
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "V8 requires this callback ABI, whose argument handle only exposes borrowed access"
+)]
 pub(super) fn describe_tool_callback(
     scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments,
-    mut retval: v8::ReturnValue<v8::Value>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut retval: v8::ReturnValue<'_, v8::Value>,
 ) {
     if !args.get(0).is_string() {
         throw_type_error(scope, "describe_tool name must be a string");
@@ -81,10 +85,14 @@ pub(super) fn describe_tool_callback(
     retval.set(description.into());
 }
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "V8 requires this callback ABI, whose argument handle only exposes borrowed access"
+)]
 pub(super) fn search_tools_callback(
     scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments,
-    mut retval: v8::ReturnValue<v8::Value>,
+    args: v8::FunctionCallbackArguments<'_>,
+    mut retval: v8::ReturnValue<'_, v8::Value>,
 ) {
     if !args.get(0).is_string() {
         throw_type_error(scope, "search_tools query must be a string");

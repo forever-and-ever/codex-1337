@@ -24,11 +24,11 @@ impl EmbeddedNetworkPolicy {
                 overrides,
             )
             .await?
-            .compose(Default::default())
+            .compose(codex_config::CloudRequirementsTomlBundle::default())
         }
         .await;
         if let Ok(application) = local {
-            policy.local.publish(
+            let _ = policy.local.publish(
                 policy.local.policy().revision(),
                 destination_policy(application.as_ref()),
             );
@@ -53,7 +53,7 @@ impl EmbeddedNetworkPolicy {
             .application
             .as_ref()
             .map(|requirements| &requirements.value);
-        self.effective.publish(
+        let _ = self.effective.publish(
             self.effective.policy().revision(),
             destination_policy(application),
         );

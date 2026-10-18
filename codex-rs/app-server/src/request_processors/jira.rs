@@ -18,7 +18,7 @@ impl ThreadRequestProcessor {
             .await
             .map_err(super::thread_read_view_error)?;
         let result = tokio::task::spawn_blocking(move || {
-            crate::jira_store::execute(&thread.cwd, params.expected_scope, params.action)
+            crate::jira_store::execute(&thread.cwd, params.expected_scope.as_deref(), params.action)
         })
         .await
         .map_err(|error| internal_error(error.to_string()))?

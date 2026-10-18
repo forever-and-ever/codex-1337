@@ -101,7 +101,7 @@ fn append_content(
                     .and_then(|input| input.get("input"))
                     .and_then(Value::as_str)
                 {
-                    custom_calls.insert(id.to_string());
+                    let _ = custom_calls.insert(id.to_string());
                     serde_json::json!({"type": "custom_tool_call", "call_id": id, "input": input})
                 } else {
                     // Only the adapter's exact one-key object envelope can be unwrapped.

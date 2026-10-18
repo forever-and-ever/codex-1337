@@ -58,7 +58,7 @@ pub fn encode_anthropic_request(
         prompt.tools,
         &options.model.input_modalities,
     )?;
-    history.system.splice(
+    let _ = history.system.splice(
         0..0,
         [SUBSCRIPTION_PREAMBLE, SUBSCRIPTION_HARNESS]
             .map(|text| json!({"type":"text", "text":text})),
@@ -150,5 +150,5 @@ pub fn encode_anthropic_request(
     if options.operation == AnthropicOperation::Compact {
         body["compaction"] = json!({"type":"summarize"});
     }
-    AnthropicRequest::from_body(body, Arc::clone(prompt.tools), Arc::from(betas))
+    AnthropicRequest::from_body(&body, Arc::clone(prompt.tools), Arc::from(betas))
 }

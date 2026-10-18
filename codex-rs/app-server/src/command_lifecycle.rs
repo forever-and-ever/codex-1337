@@ -42,7 +42,7 @@ impl CommandStarts {
     pub(crate) fn insert(&mut self, id: String) -> bool {
         match self.0.entry(id) {
             Entry::Vacant(slot) => {
-                slot.insert(Start::Native);
+                let _ = slot.insert(Start::Native);
                 true
             }
             Entry::Occupied(mut slot) => {
@@ -62,7 +62,7 @@ impl CommandStarts {
         let Entry::Vacant(slot) = self.0.entry(notification.item.id().to_owned()) else {
             return false;
         };
-        slot.insert(Start::Synthesized(Box::new(CommandSentinel {
+        let _ = slot.insert(Start::Synthesized(Box::new(CommandSentinel {
             notification: notification.clone(),
             outgoing: outgoing.clone(),
             review: Review::Pending,
@@ -107,7 +107,7 @@ impl CommandStarts {
                         turn_id: sentinel.notification.turn_id,
                         completed_at_ms: SystemTime::now()
                             .duration_since(UNIX_EPOCH)
-                            .map(|duration| duration.as_millis() as i64)
+                            .map(|duration| i64::try_from(duration.as_millis()).unwrap_or(i64::MAX))
                             .unwrap_or_default(),
                         item,
                     },
@@ -136,7 +136,7 @@ pub(crate) async fn note_review(
 pub(crate) async fn note_decision(
     thread_state: &Arc<Mutex<ThreadState>>,
     id: &str,
-    completion_status: &Option<CommandExecutionStatus>,
+    completion_status: Option<&CommandExecutionStatus>,
 ) {
     if completion_status.is_none() {
         thread_state

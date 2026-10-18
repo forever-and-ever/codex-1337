@@ -1,4 +1,11 @@
-use super::{AuthManager, CodexAuth, AuthStorageBackend, create_auth_storage, AuthManagerConfig, AuthCredentialsStoreMode, Arc, AuthConfig, agent_identity_authapi_base_url, validate_auth_restrictions};
+use super::Arc;
+use super::AuthConfig;
+use super::AuthCredentialsStoreMode;
+use super::AuthManager;
+use super::CodexAuth;
+use super::agent_identity_authapi_base_url;
+use super::create_auth_storage;
+use super::validate_auth_restrictions;
 use crate::auth::SavedAccount;
 use crate::auth::accounts::identity;
 
@@ -28,7 +35,7 @@ impl PreparedAccount<'_> {
     pub fn commit(self) {
         let mut scope = self.manager.write_account_scope();
         *scope = Some(self.id);
-        self.manager.set_cached_auth(Some(self.auth));
+        let _ = self.manager.set_cached_auth(Some(self.auth));
     }
 }
 
@@ -119,14 +126,14 @@ impl AuthManager {
             ));
         }
         // Login-method and workspace restrictions bind the active login as they bind a conversation.
-        self.load_saved_account(id).await?;
+        let _ = self.load_saved_account(id).await?;
         crate::auth::activate_account(
             &self.codex_home,
             id,
             self.auth_credentials_store_mode,
             self.keyring_backend_kind,
         )?;
-        self.reload().await;
+        let _ = self.reload().await;
         Ok(())
     }
 
@@ -157,7 +164,7 @@ impl AuthManager {
         {
             let mut scope = manager.write_account_scope();
             *scope = Some(id.to_owned());
-            manager.set_cached_auth(auth);
+            let _ = manager.set_cached_auth(auth);
         }
         Ok(Arc::new(manager))
     }

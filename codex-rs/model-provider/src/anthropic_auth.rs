@@ -119,6 +119,6 @@ struct AnthropicBearerAuth(HeaderValue);
 
 impl AuthProvider for AnthropicBearerAuth {
     fn add_auth_headers(&self, headers: &mut HeaderMap) {
-        headers.insert(http::header::AUTHORIZATION, self.0.clone());
+        let _ = headers.insert(http::header::AUTHORIZATION, self.0.clone());
     }
 }

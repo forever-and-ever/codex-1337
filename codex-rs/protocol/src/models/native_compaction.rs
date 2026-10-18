@@ -1,3 +1,8 @@
+#![expect(
+    unused_qualifications,
+    reason = "A derive-generated variant field reference has no qualified source segments and rustc suggests an empty removal span"
+)]
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;

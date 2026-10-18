@@ -9,6 +9,7 @@ use codex_protocol::openai_models::ModelServiceTier;
 use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::openai_models::ReasoningEffortPreset;
+use std::fmt::Write as _;
 use std::sync::OnceLock;
 
 pub(super) fn local(slug: &str) -> ModelInfo {
@@ -33,9 +34,10 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
                 .unwrap_or_default()
         });
         if let Some(shape) = bundled.iter().find(|info| info.slug == suffix) {
-            info.model_messages = shape.model_messages.clone();
+            info.model_messages.clone_from(&shape.model_messages);
             info.tool_mode = shape.tool_mode;
-            info.apply_patch_tool_type = shape.apply_patch_tool_type.clone();
+            info.apply_patch_tool_type
+                .clone_from(&shape.apply_patch_tool_type);
             info.shell_type = shape.shell_type;
             info.truncation_policy = shape.truncation_policy;
             info.include_skills_usage_instructions = shape.include_skills_usage_instructions;
@@ -84,10 +86,10 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
         context_label(context)
     );
     if matches!(slug, ModelSlug::Preset(_)) {
-        description.push_str(&format!(" · preset for {}", model.id));
+        let _ = write!(description, " · preset for {}", model.id);
     }
     if let Some(date) = &model.expiration_date {
-        description.push_str(&format!(" · retires {date}"));
+        let _ = write!(description, " · retires {date}");
     }
     if !model.supports_tools() {
         description.push_str(" · no tool calling");
@@ -157,6 +159,10 @@ pub fn normalize(resolved: &ResolvedModel, filter: &EndpointFilter, priority: i3
 
 /// "1M", "256K", "200K": the first of decimal or binary units that divides the size exactly,
 /// otherwise decimal units to two places.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "A two-decimal context label intentionally rounds token counts; model limits retain their exact integer values"
+)]
 fn context_label(tokens: i64) -> String {
     let exact = |base: i64| {
         let (unit, suffix) = if tokens >= base * base {

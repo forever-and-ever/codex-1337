@@ -43,8 +43,8 @@ impl TurnRequestProcessor {
             .await
             .map_err(unverified)?;
         let farm_request_id = params.request_id.clone();
-        let receipt = thread
-            .farm(FarmRequest {
+        let receipt = Box::pin(
+            thread.farm(FarmRequest {
                 request_id: params.request_id,
                 mode: match params.mode {
                     ThreadFarmMode::Automatic => FarmMode::Automatic,
@@ -57,9 +57,10 @@ impl TurnRequestProcessor {
                     .map(codex_app_server_protocol::UserInput::into_core)
                     .collect(),
                 task_name: params.task_name,
-            })
-            .await
-            .map_err(|error| farm_error(&farm_request_id, error))?;
+            }),
+        )
+        .await
+        .map_err(|error| farm_error(&farm_request_id, error))?;
         Ok(Some(
             ThreadFarmResponse {
                 child_thread_id: receipt.child_thread_id.to_string(),

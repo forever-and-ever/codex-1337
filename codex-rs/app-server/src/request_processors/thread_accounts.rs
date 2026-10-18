@@ -1,5 +1,11 @@
+use super::ClientResponsePayload;
+use super::ConnectionRequestId;
+use super::JSONRPCErrorError;
+use super::Result;
+use super::TurnRequestProcessor;
 use super::claude_account_controller::ClaudeAccountController;
-use super::*;
+use super::internal_error;
+use super::invalid_request;
 use codex_app_server_protocol::AccountNicknameSetParams;
 use codex_app_server_protocol::AccountNicknameSetResponse;
 use codex_app_server_protocol::AccountProvider;
@@ -132,21 +138,18 @@ impl TurnRequestProcessor {
         // Preserve the pre-Claude API default without guessing billing from an ID string.
         let provider = params.provider.unwrap_or(AccountProvider::Openai);
         if provider == AccountProvider::OpenRouter {
-            return self
-                .openrouter_key_select(&config, &thread, params.account_id)
-                .await;
+            return Box::pin(self.openrouter_key_select(&config, &thread, params.account_id)).await;
         }
         if provider == AccountProvider::ClaudeSubscription {
             let _lock = codex_config::lock_account_preferences(config.codex_home.as_path())
                 .await
                 .map_err(|error| internal_error(error.to_string()))?;
             let controller = ClaudeAccountController::new(&config);
-            controller
+            let _ = controller
                 .validate_selection(&params.account_id)
                 .map_err(|error| invalid_request(error.to_string()))?;
             if is_claude_thread {
-                thread
-                    .select_claude_account(&params.account_id)
+                Box::pin(thread.select_claude_account(&params.account_id))
                     .await
                     .map_err(|error| invalid_request(error.to_string()))?;
             }
@@ -186,8 +189,7 @@ impl TurnRequestProcessor {
             return Err(invalid_request("ChatGPT account is not saved"));
         }
         if is_chatgpt_thread {
-            thread
-                .select_account(&id)
+            Box::pin(thread.select_account(&id))
                 .await
                 .map_err(|error| invalid_request(error.to_string()))?;
         }
@@ -258,7 +260,7 @@ impl TurnRequestProcessor {
                 }
             }
             AccountProvider::ClaudeSubscription => {
-                ClaudeAccountController::new(&config)
+                let _ = ClaudeAccountController::new(&config)
                     .validate_selection(&params.account_id)
                     .map_err(|error| invalid_request(error.to_string()))?;
             }
