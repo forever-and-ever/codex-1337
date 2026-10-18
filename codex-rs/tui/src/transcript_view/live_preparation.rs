@@ -56,10 +56,6 @@ impl LivePreparation {
     pub(super) fn activity_ids(&self) -> Option<Arc<[String]>> {
         self.ready.as_ref().map(|(_, ids)| Arc::clone(ids))
     }
-
-    pub(super) fn is_pending(&self) -> bool {
-        self.pending.is_some()
-    }
 }
 
 impl OwnedLiveTail {

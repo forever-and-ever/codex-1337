@@ -263,7 +263,9 @@ impl TranscriptView {
         let preparing_cells = inflight.as_ref().map_or(cells, |(_, cells)| cells.as_ref());
         let mut prepared = Buffer::empty(area);
         self.render_prepared(area, &mut prepared, preparing_cells);
-        if !self.cache.waiting && !self.live_preparation.is_pending() {
+        // The live tail is already a complete immutable revision. Its successor
+        // must not hold scrolling or newly committed cells behind preparation.
+        if !self.cache.waiting {
             self.prefetch(preparing_cells);
             self.cache.waiting = false;
             if !self.presented_cells.as_ref().is_some_and(|old| {
@@ -298,7 +300,7 @@ impl TranscriptView {
                 suppressed_header: self.suppressed_prompt_header,
             });
         }
-        if self.cache.waiting || self.live_preparation.is_pending() {
+        if self.cache.waiting {
             self.inflight_cells = Some(inflight.unwrap_or_else(|| (area.width, Arc::from(cells))));
         }
         Clear.render(area, buf);
@@ -396,7 +398,7 @@ impl TranscriptView {
     }
 
     pub(super) fn selection_prepared(&self) -> bool {
-        !self.cache.waiting && !self.live_preparation.is_pending()
+        !self.cache.waiting
     }
 }
 
@@ -429,3 +431,7 @@ impl TranscriptView {
         ids
     }
 }
+
+#[cfg(test)]
+#[path = "preparation_progress_tests.rs"]
+mod tests;

@@ -20,6 +20,7 @@ mod layout;
 mod live_preparation;
 pub(crate) use live_preparation::OwnedLiveTail;
 mod mutations;
+mod pagination;
 pub(crate) mod preparation;
 mod presentation;
 mod presented;
@@ -598,25 +599,7 @@ impl TranscriptView {
     }
 
     pub(crate) fn near_start(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
-        if self.area.is_empty() && self.is_following() {
-            return false;
-        }
-        let (index, row) = self.start(cells);
-        let threshold = usize::from(self.area.height);
-        let mut distance = row;
-        if distance > threshold {
-            return false;
-        }
-        for previous in (0..index).rev() {
-            distance = distance.saturating_add(
-                self.layout(cells, previous)
-                    .map_or(/*default*/ 0, |layout| layout.row_count()),
-            );
-            if distance > threshold {
-                return false;
-            }
-        }
-        true
+        self.near_prepared_start(cells)
     }
 
     fn start(&mut self, cells: &[Arc<dyn HistoryCell>]) -> (usize, usize) {
