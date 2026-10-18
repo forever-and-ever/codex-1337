@@ -77,13 +77,13 @@ fn navigate_copy_resize_and_exit() {
             .any(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
     );
     insta::assert_snapshot!(text(&buffer), @"
-    › User text > user quote ``` user code ```
+    User text > user quote ``` user code…
 
-                    Latest plan
+        Latest plan
 
-                    > assistant quote
+        > assistant quote
 
-                    assistant code
+        assistant code
     ");
     insta::assert_snapshot!(
         view.footer_with_navigation(/*width*/ 50, crate::motion::MotionMode::Reduced, "")
