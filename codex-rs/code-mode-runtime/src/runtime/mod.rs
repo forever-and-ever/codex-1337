@@ -1,6 +1,7 @@
 mod audio;
 mod callbacks;
 mod discovery;
+mod encoding;
 mod globals;
 mod module_loader;
 mod native_result;

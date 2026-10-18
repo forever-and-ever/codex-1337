@@ -2237,6 +2237,7 @@ dependencies = [
  "codex-code-mode-protocol",
  "codex-protocol",
  "deno_core_icudata",
+ "encoding_rs",
  "futures",
  "opentelemetry",
  "pretty_assertions",

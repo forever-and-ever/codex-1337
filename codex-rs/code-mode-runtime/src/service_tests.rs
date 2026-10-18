@@ -1419,6 +1419,73 @@ async fn global_scope_contains_only_allowed_items() {
             ExecuteRequest {
                 enabled_tools,
                 source: r#"
+// These cases cross JS/native boundaries, including decoder state across calls.
+const equal = (actual, expected) => {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(JSON.stringify({actual, expected}));
+  }
+};
+const rejects = (run, name) => {
+  try { run(); } catch (error) { equal(error.name, name); return; }
+  throw new Error(`Expected ${name}`);
+};
+const encoder = new TextEncoder();
+equal(Array.from(encoder.encode("A😀\ud800é")), [65,240,159,152,128,239,191,189,195,169]);
+equal(encoder.encode(undefined).length, 0);
+const destination = new Uint8Array(7).fill(42);
+equal(encoder.encodeInto("😀éZ", destination.subarray(1,6)), {read:2,written:4});
+equal(Array.from(destination), [42,240,159,152,128,42,42]);
+equal(encoder.encodeInto("é", new Uint8Array(1)), {read:0,written:0});
+equal(encoder.encodeInto("\ud800", new Uint8Array(3)), {read:1,written:3});
+rejects(() => encoder.encodeInto("x", new Uint16Array(4)), "TypeError");
+rejects(() => encoder.encode(Symbol()), "TypeError");
+const decoder = new TextDecoder("  UtF-8 ");
+equal(decoder.encoding, "utf-8");
+equal([decoder.fatal,decoder.ignoreBOM], [false,false]);
+equal(decoder.decode(new Uint8Array([239]), {stream:true}), "");
+equal(decoder.decode(new Uint8Array([187,191,240,159]), {stream:true}), "");
+equal(decoder.decode(new Uint8Array([152,128])), "😀");
+equal(decoder.decode(new Uint8Array([239,187,191,65])), "A");
+equal(new TextDecoder("utf-8", {ignoreBOM:true}).decode(new Uint8Array([239,187,191,65])), "\ufeffA");
+equal(decoder.decode(new Uint8Array([226]), {stream:true}), "");
+equal(decoder.decode(), "�");
+equal(decoder.decode(new Uint8Array([192,175])), "��");
+const fatal = new TextDecoder("utf-8", {fatal:true});
+equal(fatal.decode(new Uint8Array([226]), {stream:true}), "");
+rejects(() => fatal.decode(), "TypeError");
+equal(fatal.decode(encoder.encode("recovered")), "recovered");
+rejects(() => fatal.decode(new Uint8Array([239,187,191,255]), {stream:true}), "TypeError");
+equal(fatal.decode(new Uint8Array([239,187,191,65])), "A");
+const latin = new TextDecoder("latin1");
+equal(latin.encoding, "windows-1252");
+equal(latin.decode(new Uint8Array([128,233])), "€é");
+const utf16 = new TextDecoder("utf-16le");
+equal(utf16.decode(new Uint8Array([255]), {stream:true}), "");
+equal(utf16.decode(new Uint8Array([254,61,216]), {stream:true}), "");
+equal(utf16.decode(new Uint8Array([0,222])), "😀");
+const jis = new TextDecoder("iso-2022-jp");
+equal(jis.decode(new Uint8Array([27,36]), {stream:true}), "");
+equal(jis.decode(new Uint8Array([66,36]), {stream:true}), "");
+equal(jis.decode(new Uint8Array([34,27,40,66])), "あ");
+const viewed = new Uint8Array([42,195,169,42]);
+equal(decoder.decode(new DataView(viewed.buffer,1,2)), "é");
+equal(decoder.decode(viewed.subarray(1,3)), "é");
+equal(decoder.decode(encoder.encode("buffer").buffer), "buffer");
+rejects(() => decoder.decode(null), "TypeError");
+rejects(() => new TextDecoder("replacement"), "RangeError");
+rejects(() => new TextDecoder("not-an-encoding"), "RangeError");
+equal(btoa("\x00\x80\xff"), "AID/");
+equal(atob(" \tAI\nD/\r"), "\x00\x80\xff");
+equal([atob("Zg"),atob("Zg=="),atob("Zh==")], ["f","f","f"]);
+equal(atob(""), "");
+for (const invalid of ["A", "Zg=", "Zg===", "Zg==x", "Zg-_", "\u00a0Zg=="]) {
+  rejects(() => atob(invalid), "InvalidCharacterError");
+}
+rejects(() => btoa("€"), "InvalidCharacterError");
+rejects(() => btoa("\ud800"), "InvalidCharacterError");
+rejects(() => atob(), "TypeError");
+equal(Object.prototype.toString.call(encoder), "[object TextEncoder]");
+equal(Object.prototype.toString.call(decoder), "[object TextDecoder]");
 text(Object.getOwnPropertyNames(globalThis).sort());
 const page = search_tools("ECHO", {namespace: "mcp__sample"});
 text(page);
@@ -1528,6 +1595,8 @@ text([
         "Symbol",
         "SyntaxError",
         "Temporal",
+        "TextDecoder",
+        "TextEncoder",
         "TypeError",
         "URIError",
         "Uint16Array",
@@ -1541,6 +1610,8 @@ text([
         "add_content",
         "as_settled",
         "audio",
+        "atob",
+        "btoa",
         "decodeURI",
         "decodeURIComponent",
         "describe_tool",
