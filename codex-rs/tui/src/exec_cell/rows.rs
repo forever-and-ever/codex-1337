@@ -84,6 +84,14 @@ impl ExecCall {
 }
 
 pub(crate) fn read_summary(label: &str) -> Line<'static> {
+    file_summary("Read", label)
+}
+
+pub(crate) fn write_summary(label: &str) -> Line<'static> {
+    file_summary("Write", label)
+}
+
+fn file_summary(verb: &str, label: &str) -> Line<'static> {
     let label = label.chars().fold(String::new(), |mut shown, ch| {
         if ch.is_control() {
             shown.extend(ch.escape_default());
@@ -92,7 +100,7 @@ pub(crate) fn read_summary(label: &str) -> Line<'static> {
         }
         shown
     });
-    vec!["Read ".cyan(), label.into()].into()
+    vec![format!("{verb} ").cyan(), label.into()].into()
 }
 
 pub(crate) fn formatted_input(script: &str) -> Option<Vec<HyperlinkLine>> {

@@ -526,7 +526,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let buffer = tests::render(&mut view, &code, 104, 26);
         let shown = tests::text(&buffer);
         // Filesystem helpers and shell reads share semantic paint through the same Fmt surface.
-        for label in ["Read src/main.rs", "Read Cargo.toml"] {
+        for label in ["Read src/main.rs", "Read Cargo.toml", "Write notes.txt"] {
             let (row, line) = shown
                 .lines()
                 .enumerate()
@@ -576,6 +576,24 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         assert!(!nested.text().contains("const answer"));
         assert!(!nested.text().contains("echo child"));
         assert!(nested.fold_position(&format).is_some());
+        // A completed filesystem write publishes the same native edit as apply_patch.
+        code[0] = reduce(codex_app_server_protocol::ThreadItem::FileChange {
+            id: "write-child".into(),
+            changes: vec![codex_app_server_protocol::FileUpdateChange {
+                path: "notes.txt".into(),
+                kind: codex_app_server_protocol::PatchChangeKind::Add,
+                diff: "+line one\n+line two\n".into(),
+            }],
+            status: codex_app_server_protocol::PatchApplyStatus::Completed,
+        });
+        let _ = tests::render(&mut view, &code, 104, 26);
+        let edited = view.current_layout(&code, 0).unwrap();
+        assert!(edited.text().contains("Edited"), "{}", edited.text());
+        assert!(
+            !edited.text().contains("Write notes.txt"),
+            "{}",
+            edited.text()
+        );
         code[0] = reduce(codex_app_server_protocol::ThreadItem::FunctionCallOutput {
             id: "code-output".into(),
             call_id: Some("code".into()),

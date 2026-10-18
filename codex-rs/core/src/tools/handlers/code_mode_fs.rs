@@ -19,6 +19,8 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::CoreToolRuntime;
 
+mod changes;
+
 const MAX_BYTES: usize = 1024 * 1024;
 
 #[derive(Deserialize)]
@@ -151,10 +153,20 @@ impl ToolExecutor<ToolInvocation> for FileSystemHandler {
                             "fs.writeFile exceeds 1 MiB; use a script for larger files",
                         ));
                     }
-                    access
+                    let change = changes::WriteChange::capture(&access, &path, &bytes).await;
+                    if let Err(error) = access
                         .write_file(&path, bytes, WriteFileOptions::default())
                         .await
-                        .map_err(fault)?;
+                    {
+                        // A failing write may have truncated or partially replaced the file.
+                        changes::WriteChange::Unavailable
+                            .publish(&invocation, &environment.selection.environment_id)
+                            .await;
+                        return Err(fault(error));
+                    }
+                    change
+                        .publish(&invocation, &environment.selection.environment_id)
+                        .await;
                     Value::Null
                 }
             };

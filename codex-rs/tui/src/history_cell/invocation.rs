@@ -157,12 +157,10 @@ fn write_input(input: &ToolInput) -> Option<ActivityParts> {
     if path.is_empty() {
         return None;
     }
+    let mut lines = vec![crate::exec_cell::rows::write_summary(path).into()];
+    mark_lines(&mut lines, OutputProvenance::Formatted);
     Some(ActivityParts {
-        lines: captured_lines(
-            &format!("Write {path}"),
-            ContextAuthor::Environment,
-            OutputMode::Fmt,
-        ),
+        lines,
         ..Default::default()
     })
 }
@@ -266,6 +264,20 @@ fn edit_projection(
             .into_iter()
             .map(|member| edit_projection(member, width, expanded, full)),
     )
+}
+
+fn has_patch(cell: &dyn HistoryCell) -> bool {
+    let any = cell.as_any();
+    if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
+        has_patch(wrapper.inner.as_ref())
+    } else if let Some(group) = any.downcast_ref::<ToolOutputGroup>() {
+        group
+            .members
+            .iter()
+            .any(|member| has_patch(member.as_ref()))
+    } else {
+        any.is::<super::PatchHistoryCell>()
+    }
 }
 
 fn input_projection(cell: &dyn HistoryCell, width: u16) -> Option<InvocationInput> {
@@ -576,6 +588,14 @@ impl Invocation<'_> {
             Source::Code(block) => {
                 let mut projections = block.members().iter().filter_map(|cell| {
                     if let Some(input) = cell.as_any().downcast_ref::<super::ToolInputCell>() {
+                        if write_input(&input.0).is_some()
+                            && block.members().iter().any(|member| {
+                                member.tool_call_ids().contains(&input.0.call_id.as_str())
+                                    && has_patch(member.as_ref())
+                            })
+                        {
+                            return Some(InvocationInput::default());
+                        }
                         return input_projection(cell.as_ref(), width).or_else(|| {
                             block.members().iter().find_map(|member| {
                                 (!member.as_any().is::<super::ToolInputCell>()

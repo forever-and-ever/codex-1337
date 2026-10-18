@@ -258,6 +258,116 @@ text('authority and bounds preserved');
                 .await?,
             b"private result"
         );
+        // A write receipt is private presentation, not the captured input and not model output.
+        // No-op writes and unreadable/oversized/binary predecessors must not invent text edits.
+        let writes = responses::mount_sse_sequence(
+            &server,
+            vec![
+                sse(vec![
+                    ev_custom_tool_call(
+                        "writes",
+                        "exec",
+                        r"
+await fs.writeFile('seed', 'updated\n');
+await fs.writeFile('seed', 'updated\n');
+await fs.writeFile('created.txt', 'created\n');
+await fs.writeFile('oversize', 'bounded replacement');
+await fs.writeFile('binary', new Uint8Array([0, 255]));
+text('writes finished');
+",
+                    ),
+                    ev_completed("writes"),
+                ]),
+                sse(vec![
+                    ev_assistant_message("done", "done"),
+                    ev_completed("done"),
+                ]),
+            ],
+        )
+        .await;
+        let _ = test
+            .codex
+            .start_or_steer_turn(
+                codex_core::TurnInputRequest::user_input(vec![
+                    codex_protocol::user_input::UserInput::Text {
+                        text: "Write files".into(),
+                        text_elements: Vec::new(),
+                    },
+                ])
+                .with_thread_settings(
+                    codex_protocol::protocol::ThreadSettingsOverrides {
+                        approval_policy: Some(codex_protocol::protocol::AskForApproval::Never),
+                        sandbox_policy: Some(
+                            codex_protocol::protocol::SandboxPolicy::DangerFullAccess,
+                        ),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .await?;
+        let mut edits = Vec::new();
+        let mut diffs = Vec::new();
+        let _ = core_test_support::wait_for_event(&test.codex, |event| {
+            match event {
+                codex_protocol::protocol::EventMsg::CodeModeOwned(owned) => {
+                    if let codex_protocol::protocol::EventMsg::ItemCompleted(completed) =
+                        owned.payload().as_ref()
+                        && let codex_protocol::items::TurnItem::FileChange(change) = &completed.item
+                    {
+                        assert_eq!(owned.owner.exec_call_id, "writes");
+                        assert_eq!(
+                            change.status,
+                            Some(codex_protocol::protocol::PatchApplyStatus::Completed)
+                        );
+                        edits.push(change.clone());
+                    }
+                }
+                codex_protocol::protocol::EventMsg::TurnDiff(diff) => {
+                    diffs.push(diff.unified_diff.clone());
+                }
+                _ => {}
+            }
+            matches!(event, codex_protocol::protocol::EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert_eq!(edits.len(), 2);
+        let changed = &edits[0].changes[&test.workspace_path_uri("seed")?.to_path_buf()];
+        let codex_protocol::protocol::FileChange::Update { unified_diff, .. } = changed else {
+            anyhow::bail!("replacing an existing file must be an update");
+        };
+        assert!(unified_diff.contains("-private result"));
+        assert!(unified_diff.contains("+updated"));
+        assert_eq!(
+            edits[1].changes[&test.workspace_path_uri("created.txt")?.to_path_buf()],
+            codex_protocol::protocol::FileChange::Add {
+                content: "created\n".into()
+            }
+        );
+        assert!(
+            diffs
+                .iter()
+                .any(|diff| diff.contains("+created") && diff.contains("+updated"))
+        );
+        assert_eq!(diffs.last().map(String::as_str), Some(""));
+        assert_eq!(
+            test.fs()
+                .read_file(
+                    &test.workspace_path_uri("oversize")?,
+                    ReadFileOptions::default(),
+                    /*sandbox*/ None,
+                )
+                .await?,
+            b"bounded replacement"
+        );
+        let request = writes.last_request().expect("write follow-up");
+        let output = custom_tool_output_items(&request, "writes");
+        assert_eq!(text_item(&output, 1), "writes finished");
+        assert!(
+            request
+                .input()
+                .iter()
+                .all(|item| item["type"] != "file_change")
+        );
         Ok(())
     }))
     .await
