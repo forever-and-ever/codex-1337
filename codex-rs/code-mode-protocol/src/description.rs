@@ -490,7 +490,14 @@ mod tests {
         };
 
         let description = augment_tool_definition(definition.clone()).description;
+        assert!(
+            description.starts_with("Call: await tools.hidden_dynamic_tool(args).\nParameters:")
+        );
         assert!(!description.contains("declare const tools"));
+        assert!(
+            description.find("city (required)").unwrap() < description.find("Returns:").unwrap()
+        );
+        assert!(description.ends_with("\n\nTest tool"));
         assert!(description.contains("city (required): string"));
         // A large return type must not consume the input contract's independent budget.
         let mut large_output = definition;
