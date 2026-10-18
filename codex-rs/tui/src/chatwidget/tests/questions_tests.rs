@@ -283,12 +283,14 @@ async fn async_question_answers_preserve_ambiguous_skill_selection_and_dismiss_r
 }
 
 #[tokio::test]
-async fn ordinary_follow_up_clears_unanswered_questions_after_accepted_input() {
+async fn ordinary_follow_up_preserves_questions_and_drafts_through_reconnect() {
     for queued in [false, true] {
         let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
         chat.thread_id = Some(ThreadId::new());
-        chat.show_welcome_banner = false;
         chat.add_async_questions("old", &questions());
+        chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+        chat.bottom_pane.handle_paste("unfinished answer".into());
+        chat.handle_key_event(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT));
         if queued {
             chat.on_task_started();
         }
@@ -300,7 +302,8 @@ async fn ordinary_follow_up_clears_unanswered_questions_after_accepted_input() {
             KeyCode::Enter
         }));
 
-        assert_eq!(question_count(&chat), 0);
+        // An accepted steering prompt is not evidence of answering the question.
+        assert_eq!(question_count(&chat), 2);
         if queued {
             assert_eq!(
                 chat.input_queue.queued_user_messages.front().unwrap().text,
@@ -309,18 +312,17 @@ async fn ordinary_follow_up_clears_unanswered_questions_after_accepted_input() {
             assert!(op_rx.try_recv().is_err());
         } else {
             assert_answer(op_rx.try_recv().unwrap(), "New prompt");
-            insta::assert_snapshot!(
-                "questions_cleared_by_follow_up",
-                render_bottom_popup(&chat, /*width*/ 80)
-                    .lines()
-                    .next()
-                    .unwrap()
-            );
         }
-        chat.add_async_questions("old", &questions());
-        assert_eq!(question_count(&chat), 0);
-        chat.add_async_questions("new", &[question("New question?", /*options*/ None)]);
-        assert_eq!(question_count(&chat), 1);
+        let saved = chat.capture_thread_input_state();
+        let (mut restored, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        restored.thread_id = chat.thread_id;
+        restored.add_async_questions("old", &questions());
+        restored.restore_reconnected_input(saved, &[]);
+        assert_eq!(question_count(&restored), 2);
+        restored.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+        assert!(render_bottom_popup(&restored, /*width*/ 80).contains("unfinished answer"));
+        restored.add_async_questions("new", &[question("New question?", /*options*/ None)]);
+        assert_eq!(question_count(&restored), 3);
     }
 }
 
@@ -341,7 +343,7 @@ async fn local_shell_command_preserves_unanswered_questions() {
 }
 
 #[tokio::test]
-async fn queued_prompt_clears_questions_arriving_after_enqueue_when_it_starts() {
+async fn queued_prompt_preserves_questions_arriving_before_and_after_enqueue() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
@@ -349,17 +351,17 @@ async fn queued_prompt_clears_questions_arriving_after_enqueue_when_it_starts() 
     chat.bottom_pane
         .set_composer_text("New prompt".into(), Vec::new(), Vec::new());
     chat.handle_key_event(KeyEvent::from(KeyCode::Tab));
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 2);
 
     chat.add_async_questions("late", &questions());
-    assert_eq!(question_count(&chat), 2);
+    assert_eq!(question_count(&chat), 4);
     chat.turn_lifecycle.finish();
     chat.update_task_running_state();
     assert!(chat.maybe_send_next_queued_input());
     assert_answer(op_rx.try_recv().unwrap(), "New prompt");
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 4);
     chat.add_async_questions("late", &questions());
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 4);
 }
 
 #[tokio::test]
@@ -413,7 +415,7 @@ async fn recovered_question_answers_preserve_other_questions() {
 }
 
 #[tokio::test]
-async fn slash_and_mode_prompts_clear_unanswered_questions_after_delivery() {
+async fn slash_and_mode_prompts_preserve_unanswered_questions_after_delivery() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.add_async_questions("old", &questions());
@@ -422,18 +424,18 @@ async fn slash_and_mode_prompts_clear_unanswered_questions_after_delivery() {
         /*had_modal_or_popup*/ false,
     );
     assert_answer(op_rx.try_recv().unwrap(), "New plan");
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 2);
 
     chat.input_queue.turn.started();
     chat.add_async_questions("next", &questions());
     let mode = collaboration_modes::default_mask(chat.model_catalog.as_ref()).unwrap();
     chat.submit_user_message_with_mode("Implement".to_string(), mode);
     assert_answer(op_rx.try_recv().unwrap(), "Implement");
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 4);
 }
 
 #[tokio::test]
-async fn accepted_review_clears_questions_but_rejected_review_preserves_them() {
+async fn accepted_and_rejected_reviews_preserve_questions() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.add_async_questions("old", &questions());
@@ -447,7 +449,7 @@ async fn accepted_review_clears_questions_but_rejected_review_preserves_them() {
             target: ReviewTarget::Custom { instructions }
         }) if instructions == "check this"
     );
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 2);
 
     chat.add_async_questions("new", &questions());
     chat.blocks_direct_input = true;
@@ -455,12 +457,12 @@ async fn accepted_review_clears_questions_but_rejected_review_preserves_them() {
         InputResult::CommandWithArgs(SlashCommand::Review, "try again".into(), Vec::new()),
         /*had_modal_or_popup*/ false,
     );
-    assert_eq!(question_count(&chat), 2);
+    assert_eq!(question_count(&chat), 4);
     assert!(op_rx.try_recv().is_err());
 }
 
 #[tokio::test]
-async fn queued_model_slash_prompt_clears_questions_but_local_slash_command_does_not() {
+async fn queued_model_and_local_slash_commands_preserve_questions() {
     let (mut chat, _rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.thread_id = Some(ThreadId::new());
     chat.on_task_started();
@@ -486,7 +488,7 @@ async fn queued_model_slash_prompt_clears_questions_but_local_slash_command_does
         },
         /*had_modal_or_popup*/ false,
     );
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 2);
     assert!(op_rx.try_recv().is_err());
 
     chat.add_async_questions("new", &questions());
@@ -499,7 +501,7 @@ async fn queued_model_slash_prompt_clears_questions_but_local_slash_command_does
         },
         /*had_modal_or_popup*/ false,
     );
-    assert_eq!(question_count(&chat), 0);
+    assert_eq!(question_count(&chat), 4);
 }
 
 #[tokio::test]
@@ -899,7 +901,7 @@ async fn question_key_repeats_do_not_consume_another_question() {
 }
 
 #[tokio::test]
-async fn question_queue_pop_becomes_an_ordinary_composer_draft_and_clears_questions_on_send() {
+async fn question_queue_pop_becomes_an_ordinary_composer_draft_and_preserves_questions() {
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     for text in ["older", "newer"] {
         chat.input_queue
@@ -925,8 +927,8 @@ async fn question_queue_pop_becomes_an_ordinary_composer_draft_and_clears_questi
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_answer(ops.try_recv().unwrap(), "older");
     chat.handle_key_event(forward);
-    assert_eq!(question_count(&chat), 0);
-    assert!(!chat.bottom_pane.questions.as_ref().unwrap().expanded);
+    assert_eq!(question_count(&chat), 2);
+    assert!(chat.bottom_pane.questions.as_ref().unwrap().expanded);
     assert!(
         !chat
             .bottom_pane

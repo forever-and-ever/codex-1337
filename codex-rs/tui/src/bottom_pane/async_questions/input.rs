@@ -160,7 +160,6 @@ impl BottomPaneView for AsyncQuestions {
         if key.kind == KeyEventKind::Release || self.is_complete() {
             return;
         }
-        self.snooze_auto_resolution();
         if self.handles_key_as_editing(key) {
             self.edit(key);
             return;
@@ -287,7 +286,6 @@ impl BottomPaneView for AsyncQuestions {
         if self.is_complete() || text.is_empty() {
             return false;
         }
-        self.snooze_auto_resolution();
         if !self.focus_is_notes() {
             self.focus_other();
         }
@@ -301,16 +299,6 @@ impl BottomPaneView for AsyncQuestions {
         self.composer.is_in_paste_burst()
     }
     fn next_frame_delay(&self) -> Option<Duration> {
-        self.timer_remaining(Instant::now())
-            .map(|remaining| {
-                if remaining > Duration::from_secs(20) {
-                    remaining - Duration::from_secs(20)
-                } else {
-                    remaining.min(Duration::from_secs(1))
-                }
-            })
-            .into_iter()
-            .chain(self.composer.footer_flash_delay())
-            .min()
+        self.composer.footer_flash_delay()
     }
 }

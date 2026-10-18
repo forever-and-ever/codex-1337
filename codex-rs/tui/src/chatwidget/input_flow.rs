@@ -7,9 +7,6 @@
 //! except for reversible settings pickers that preserve the reading position.
 
 use super::*;
-use crate::bottom_pane::prompt_args::parse_slash_name;
-use crate::bottom_pane::slash_commands::SlashCommandItem;
-use crate::bottom_pane::slash_commands::find_slash_command;
 
 pub(super) struct PreparedSubagentText {
     thread_id: ThreadId,
@@ -278,31 +275,6 @@ impl ChatWidget {
             self.empty_state_animation.borrow_mut().dismiss();
         }
         if !should_run_now || action != QueuedInputAction::Plain {
-            let queued_slash_prompt = action == QueuedInputAction::ParseSlash
-                && parse_slash_name(&user_message.text).is_none_or(|(name, args, _)| {
-                    if name.contains('/') {
-                        return true;
-                    }
-                    !args.trim().is_empty()
-                        && find_slash_command(
-                            name,
-                            self.builtin_command_flags(),
-                            &self.current_model_service_tier_commands(),
-                        )
-                        .is_some_and(|command| {
-                            !command.supports_inline_args()
-                                || matches!(
-                                    command,
-                                    SlashCommandItem::Builtin(
-                                        SlashCommand::Plan | SlashCommand::Review
-                                    )
-                                )
-                        })
-                });
-            let model_prompt = source == UserMessageSource::Prompt
-                && (action == QueuedInputAction::Literal
-                    || action == QueuedInputAction::Plain && !user_message.text.starts_with('!')
-                    || queued_slash_prompt);
             self.input_queue
                 .queued_user_messages
                 .push_back(QueuedUserMessage {
@@ -314,9 +286,6 @@ impl ChatWidget {
                     history_record: UserMessageHistoryRecord::UserMessageText,
                 });
             self.refresh_pending_input_preview();
-            if model_prompt && !should_run_now {
-                self.bottom_pane.clear_pending_questions();
-            }
             if should_run_now
                 && !(self.is_parent_owned_thread() && source == UserMessageSource::QuestionAnswer)
             {

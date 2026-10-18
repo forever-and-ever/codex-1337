@@ -1,14 +1,9 @@
-//! Pending async questions retain drafts until handled locally, answered by another client, or a live turn ends.
+//! Pending async questions retain drafts across turns until explicitly handled locally or by another client.
 //! Message IDs survive removal so replay cannot reopen an answered or skipped question.
 
 use super::*;
-use crate::history_cell::sanitize_user_text;
 use codex_context_fragments::AnsweredQuestion;
 use codex_context_fragments::ContextualUserFragment;
-use codex_utils_string::take_bytes_at_char_boundary;
-
-// Match the model-authored title budget used by AnsweredQuestion.
-const MAX_RECOVERED_QUESTION_TITLE_BYTES: usize = 512;
 
 impl AsyncQuestions {
     pub(crate) fn append(&mut self, message_id: &str, questions: &[AsyncUserInputQuestion]) {
@@ -16,7 +11,6 @@ impl AsyncQuestions {
             return;
         }
         let was_empty = self.state.pending.is_empty();
-        let expires_at = (!self.expanded).then(|| Instant::now() + Duration::from_secs(30));
         for (index, question) in questions.iter().enumerate() {
             // Match the desktop's JSON.stringify([tool name, item id, question index]).
             let question_id =
@@ -50,7 +44,6 @@ impl AsyncQuestions {
                 question,
                 options_state,
                 draft: ComposerDraft::default(),
-                expires_at,
             });
         }
         if was_empty {
@@ -62,9 +55,6 @@ impl AsyncQuestions {
     pub(crate) fn set_expanded(&mut self, expanded: bool) {
         self.save_current_draft();
         self.expanded = expanded && !self.state.pending.is_empty();
-        if self.expanded {
-            self.snooze_auto_resolution();
-        }
     }
 
     pub(crate) fn navigate(&mut self, forward: bool) -> bool {
@@ -81,27 +71,6 @@ impl AsyncQuestions {
         self.state.current_idx = next;
         self.restore_current_draft();
         true
-    }
-
-    pub(super) fn snooze_auto_resolution(&mut self) {
-        for question in &mut self.state.pending {
-            question.expires_at = None;
-        }
-    }
-
-    pub(super) fn timer_remaining(&self, now: Instant) -> Option<Duration> {
-        self.state
-            .pending
-            .iter()
-            .filter_map(|question| question.expires_at?.checked_duration_since(now))
-            .filter(|remaining| !remaining.is_zero())
-            .min()
-    }
-
-    pub(crate) fn countdown(&self, now: Instant) -> Option<String> {
-        self.timer_remaining(now)
-            .filter(|remaining| *remaining <= Duration::from_secs(20))
-            .map(|remaining| format!("{}s", remaining.as_secs_f64().ceil() as u64))
     }
 
     pub(super) fn go_next_or_submit(&mut self) {
@@ -214,19 +183,6 @@ impl AsyncQuestions {
         self.composer.reset_vim_mode();
     }
 
-    /// Recover unsent typed answers with their quoted questions before clearing pending questions.
-    pub(crate) fn take_pending_drafts(&mut self) -> Vec<String> {
-        self.save_current_draft();
-        let drafts = self
-            .state
-            .pending
-            .iter()
-            .filter_map(PendingQuestion::recovered_draft)
-            .collect();
-        self.clear_pending();
-        drafts
-    }
-
     pub(crate) fn capture(&mut self) -> QuestionState {
         self.composer.cancel_history_search();
         self.save_current_draft();
@@ -247,35 +203,7 @@ impl AsyncQuestions {
         );
         self.state.seen_ids.extend(incoming.seen_ids);
         self.expanded = self.state.expanded && !self.state.pending.is_empty();
-        if self.expanded {
-            self.snooze_auto_resolution();
-        }
         self.restore_current_draft();
         self.resolve_answers(&answered_ids.into_iter().collect::<Vec<_>>());
-    }
-}
-
-impl PendingQuestion {
-    fn recovered_draft(&self) -> Option<String> {
-        let answer = self.draft.text_with_pending();
-        let answer = answer.trim();
-        if answer.is_empty() {
-            return None;
-        }
-
-        let title = &self.question.title;
-        let prefix = take_bytes_at_char_boundary(title, MAX_RECOVERED_QUESTION_TITLE_BYTES);
-        let sanitized = sanitize_user_text(prefix.into());
-        let mut quoted = textwrap::indent(&sanitized, "> ");
-        if quoted.ends_with('\n') {
-            quoted.pop();
-        }
-        if quoted.is_empty() {
-            quoted.push_str("> ");
-        }
-        if prefix.len() < title.len() {
-            quoted.push('…');
-        }
-        Some(format!("{quoted}\n\n{answer}"))
     }
 }

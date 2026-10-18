@@ -180,7 +180,7 @@ async fn misalignment_policy_failure_stops_the_thread_and_renders_once() {
 }
 
 #[tokio::test]
-async fn misalignment_turn_end_discards_history_search_and_question_drafts() {
+async fn misalignment_turn_end_discards_main_draft_but_preserves_questions() {
     let (mut chat, _rx, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
@@ -220,7 +220,7 @@ async fn misalignment_turn_end_discards_history_search_and_question_drafts() {
     );
 
     assert_eq!(chat.capture_thread_input_state().unwrap().composer, None);
-    assert_eq!(chat.bottom_pane.question_editor().unanswered_count(), 0);
+    assert_eq!(chat.bottom_pane.question_editor().unanswered_count(), 1);
     chat.clear_misalignment_for_new_turn(
         "acknowledged-turn",
         MisalignmentTurnSource::AcknowledgedContinuation,

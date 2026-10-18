@@ -1,6 +1,6 @@
 //! Inline editing for asynchronous questions. Legacy request_user_input keeps its own overlay.
 //! Local submissions and committed desktop replies remove questions; arrival never steals focus.
-//! Live turn completion recovers unsent typed drafts before removing pending questions.
+//! Ordinary prompts and turn completion preserve pending questions and their drafts.
 
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::CancellationEvent;
@@ -27,7 +27,6 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use std::collections::HashSet;
 use std::time::Duration;
-use std::time::Instant;
 use unicode_width::UnicodeWidthStr;
 
 mod input;
@@ -46,9 +45,6 @@ struct PendingQuestion {
     question: AsyncUserInputQuestion,
     options_state: ScrollState,
     draft: ComposerDraft,
-    // A replacement must not auto-answer while the user cannot see the question.
-    #[serde(skip)]
-    expires_at: Option<Instant>,
 }
 
 /// Locally retained async questions; replayed message IDs cannot resurrect handled answers.

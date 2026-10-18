@@ -145,9 +145,6 @@ impl ChatWidget {
         #[cfg(target_os = "linux")]
         let hold_submission = hold_submission || crate::reload::worker::is_activating();
         if hold_submission {
-            let model_prompt = source == UserMessageSource::Prompt
-                && (shell_escape_policy == ShellEscapePolicy::Disallow
-                    || !user_message.text.starts_with('!'));
             // A prepared submission was accepted before any messages queued behind it.
             let queue_index = if prepared_images.is_some() {
                 0
@@ -169,16 +166,10 @@ impl ChatWidget {
                 },
             );
             self.refresh_pending_input_preview();
-            if model_prompt {
-                self.bottom_pane.clear_pending_questions();
-            }
             self.request_draft_session();
             return (true, None);
         }
         if !self.is_session_configured() {
-            let model_prompt = source == UserMessageSource::Prompt
-                && (shell_escape_policy == ShellEscapePolicy::Disallow
-                    || !user_message.text.starts_with('!'));
             tracing::warn!("cannot submit user message before session is configured; queueing");
             self.input_queue
                 .queued_user_messages
@@ -188,9 +179,6 @@ impl ChatWidget {
                     ..QueuedUserMessage::from(user_message)
                 });
             self.refresh_pending_input_preview();
-            if model_prompt {
-                self.bottom_pane.clear_pending_questions();
-            }
             self.request_draft_session();
             return (true, None);
         }
@@ -518,9 +506,6 @@ impl ChatWidget {
 
         if !self.submit_op(op.clone()) {
             return (false, None);
-        }
-        if source == UserMessageSource::Prompt {
-            self.bottom_pane.clear_pending_questions();
         }
         self.dismiss_backend_banner_for_new_turn();
         self.note_realtime_typed_input(&submitted_message.text);

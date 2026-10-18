@@ -34,19 +34,13 @@ fn questions_flush_buffered_typing_and_record_activity() {
         .unwrap()
         .set_expanded(/*expanded*/ false);
     pane.push_async_questions("next", &questions);
-    let now = Instant::now() + Duration::from_secs(15);
     insta::assert_snapshot!(
-        "question_collapsed_countdown",
-        pane.question_summary(now)
+        "question_collapsed_summary",
+        pane.question_summary()
             .unwrap()
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("\n")
     );
-    let editor = pane.questions.as_mut().unwrap();
-    assert!(editor.countdown(now + Duration::from_secs(30)).is_none());
-    editor.set_expanded(/*expanded*/ true);
-    editor.append("while-open", &questions);
-    assert!(editor.countdown(now).is_none());
 }

@@ -41,38 +41,12 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    /// Capture answers and settle the main draft before turn finalization can restore input.
-    pub(crate) fn take_question_drafts(&mut self) -> Option<Vec<String>> {
-        let questions = self.questions.as_mut()?;
-        // The question editor closes at turn end; recover its typed answer, not a history preview.
-        questions.composer.cancel_history_search();
-        let drafts = questions.take_pending_drafts();
-        if !drafts.is_empty() && !self.composer.history_search_active() {
-            self.composer.flush_pending_input();
-        }
-        Some(drafts)
-    }
-
-    /// Append recovered answers after turn finalization, retaining existing composer elements.
-    pub(crate) fn append_question_drafts(&mut self, drafts: &[String]) {
-        if drafts.is_empty() {
-            return;
-        }
-        self.composer
-            .edit_stored_draft(|composer| composer.append_recovered_drafts(&drafts.join("\n\n")));
-        self.request_redraw();
-    }
-
-    pub(super) fn question_summary(&self, now: Instant) -> Option<Vec<Line<'static>>> {
+    pub(super) fn question_summary(&self) -> Option<Vec<Line<'static>>> {
         let questions = self
             .questions
             .as_ref()
             .filter(|q| !q.expanded && q.unanswered_count() > 0)?;
         let count = questions.unanswered_count();
-        let countdown = questions
-            .countdown(now)
-            .map(|text| format!(" · {text}"))
-            .unwrap_or_default();
         let mut lines = vec![Line::from(vec![
             "  ? ".dim(),
             Span::styled(
@@ -80,7 +54,6 @@ impl BottomPane {
                 crate::style::accent_style(),
             )
             .bold(),
-            countdown.dim(),
         ])];
         if let Some(binding) = self.pending_input_preview.edit_binding {
             let mut hint = Line::from("    ");

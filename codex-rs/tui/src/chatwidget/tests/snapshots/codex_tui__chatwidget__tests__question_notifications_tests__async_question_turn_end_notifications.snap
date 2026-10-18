@@ -7,15 +7,19 @@ expression: outcomes
     (
         Completed,
         Some(
-            "Agent turn complete",
+            "Question: Which way?",
         ),
     ),
     (
         Interrupted,
-        None,
+        Some(
+            "Question: Which way?",
+        ),
     ),
     (
         Failed,
-        None,
+        Some(
+            "Question: Which way?",
+        ),
     ),
 ]

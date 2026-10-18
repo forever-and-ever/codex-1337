@@ -480,10 +480,10 @@ During a merge, look up each conflicted path in the index at the end and resolve
 ### async-questions-never-auto-answered
 
 - Telos: an agent's question is answered only by the human.
-- Holds: the TUI delivers an answer only as text the user wrote, through ordinary user-turn delivery; opening, leaving, skipping or dismissing the question picker neither interrupts work nor synthesizes an answer.
-- Owners: `codex-rs/tui/src/chatwidget/questions.rs`, `codex-rs/tui/src/async_question_reply.rs`, `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`.
+- Holds: the TUI delivers an answer only through an explicit question reply, as text the user wrote through ordinary user-turn delivery; unrelated prompts and turn endings preserve pending questions and their drafts. Opening, leaving, skipping or dismissing the question picker neither interrupts work nor synthesizes an answer.
+- Owners: `codex-rs/tui/src/chatwidget/questions.rs`, `codex-rs/tui/src/async_question_reply.rs`, `codex-rs/tui/src/bottom_pane/async_questions/`, `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`.
 - Tripwire: partial: `codex-rs/tui/src/chatwidget/tests/questions_tests.rs` asserts the ops that answers and follow-ups send; no test asserts that leaving or dismissing sends nothing.
-- Pressure: upstream's async-question integration replaced the fork's implementation at the 0.154.0 merge (06ae488041), so every owner is upstream code; 0.162 #51449 and #49804 edit `request_user_input/mod.rs`.
+- Pressure: upstream's async-question integration replaced the fork's implementation at the 0.154.0 merge (06ae488041); the retained async editor is now fork-owned, while 0.162 #51449 and #49804 edit the upstream `request_user_input/mod.rs`.
 - Evidence: 193bbc9b49.
 
 ## Merge hygiene

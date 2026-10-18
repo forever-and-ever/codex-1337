@@ -2478,7 +2478,7 @@ impl BottomPane {
             {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            let question_summary = self.question_summary(Instant::now());
+            let question_summary = self.question_summary();
             // History overlays must not clear the status and previews above this composer.
             if options.command_popup_placement == CommandPopupPlacement::Overlay
                 && (has_status_or_footer

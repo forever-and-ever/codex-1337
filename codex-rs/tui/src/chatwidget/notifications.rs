@@ -18,6 +18,15 @@ impl ChatWidget {
 
     pub(crate) fn maybe_post_pending_notification(&mut self, tui: &mut crate::tui::Tui) {
         if let Some(notif) = self.pending_notification.take() {
+            if matches!(notif, Notification::AsyncQuestion { .. })
+                && self
+                    .bottom_pane
+                    .questions
+                    .as_ref()
+                    .is_none_or(|questions| questions.unanswered_count() == 0)
+            {
+                return;
+            }
             tui.notify(notif.display());
         }
     }

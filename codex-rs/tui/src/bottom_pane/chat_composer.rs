@@ -86,7 +86,7 @@
 //! Ctrl+R searches history in the footer and previews matches in the composer.
 //! Typing and pasting edit the active search query, including large pastes and image paths.
 //! Background recovery updates the saved prompt without changing the query or visible preview.
-//! Esc or Ctrl+C restores that prompt, including recovered answers and interrupted input.
+//! Esc or Ctrl+C restores that prompt, including interrupted input.
 //! Enter accepts a matching preview and discards the saved prompt; without a match, search stays open.
 //! Vim undo/redo snapshots complete drafts and groups direct edits with active Vim transactions.
 //! An active edit keeps one separately capped snapshot; canceling does not evict committed history.

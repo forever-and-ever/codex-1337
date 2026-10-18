@@ -505,11 +505,6 @@ impl ChatWidget {
         {
             return;
         }
-        let question_drafts = if self.thread_usage.replaying_turn_completion {
-            None
-        } else {
-            self.take_question_drafts()
-        };
         if codex_error_info == Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation) {
             self.on_misalignment_policy_violation();
         } else if codex_error_info
@@ -544,13 +539,6 @@ impl ChatWidget {
             }
         } else {
             self.on_error(message);
-        }
-        if let Some(drafts) = question_drafts
-            && !self.has_misalignment_policy_violation()
-        {
-            self.bottom_pane.append_question_drafts(&drafts);
-            self.refresh_pending_input_preview();
-            self.request_redraw();
         }
     }
 

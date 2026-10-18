@@ -1,21 +1,11 @@
 //! Connect the retained question editor to ordinary input delivery and queue navigation.
-//! Only an accepted local send or queue operation consumes an asynchronous answer.
+//! Only explicit question replies or skips consume pending questions; ordinary prompts preserve them.
 
 use super::*;
 use crate::bottom_pane::QuestionSubmission;
 use codex_protocol::items::AsyncUserInputQuestion;
 
 impl ChatWidget {
-    pub(super) fn take_question_drafts(&mut self) -> Option<Vec<String>> {
-        if matches!(
-            self.pending_notification,
-            Some(Notification::AsyncQuestion { .. })
-        ) {
-            self.pending_notification = None;
-        }
-        self.bottom_pane.take_question_drafts()
-    }
-
     pub(super) fn add_async_questions(
         &mut self,
         message_id: &str,
