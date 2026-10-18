@@ -66,7 +66,7 @@ pub(crate) fn create_exec_command_tool_with_environment_id(
         properties.insert(
             "shell".to_string(),
             JsonSchema::string(Some(
-                "Shell binary to launch. Defaults to the user's default shell.".to_string(),
+                "Shell binary to launch. Defaults to Bash on Linux, independent of the user's login shell; remote execution uses the environment's reported shell.".to_string(),
             )),
         );
     }

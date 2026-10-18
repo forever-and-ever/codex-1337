@@ -105,6 +105,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: changes to shell invocation, snapshot preparation, executor selection or turn permission grants must preserve script-versus-shell authority; Code Mode description overrides must not hide the filesystem helpers.
 - Evidence: 0dc126edd9, 0a51b60ef1.
 
+### agent-bash
+
+- Telos: agent command syntax does not depend on the human's choice of interactive shell.
+- Holds: supported Linux agent execution selects Bash for both session defaults and executor-reported shell context, independently of the human's login shell. Missing Bash fails execution rather than silently interpreting the source with another shell. Raw `bash` is Bash; `exec_command` and Code Mode's `sh` helper use the agent default unless an explicit override or an external executor's reported shell applies. Inherited environment, PATH, permission policy and cancellation retain their existing owners. Human-only TUI `!!` commands remain on the separate local-shell path.
+- Owners: `codex-rs/shell-command/src/agent_shell.rs`, with seams in `codex-rs/core/src/session/session.rs` and `codex-rs/exec-server-protocol/src/protocol.rs`; model-facing shell contract in `codex-rs/core/src/tools/handlers/shell_spec.rs`.
+- Tripwire: `exec_command_uses_installed_environment_shell_policy_with_explicit_overrides` (`codex-rs/core/tests/suite/unified_exec.rs`) couples executed Bash syntax, reported shell and selected-environment policy. Human-local authority remains covered by [client-only-shell](#client-only-shell).
+- Pressure: upstream default-shell detection follows the human's login shell; reusing it for agents silently changes syntax, startup behavior and glob expansion.
+- Evidence: owner doctrine decision, 2026-10-18.
+
 ### response-order-fences
 
 - Telos: dependent execution stages fit in one model response without racing or running after a failed prerequisite.
@@ -570,7 +579,11 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/code_mode/wait_handler.rs`: turn-economy
 - `codex-rs/core/src/tools/context.rs`: terse-exec-envelope
 - `codex-rs/core/src/tools/handlers/mcp.rs`: compact-contracts
-- `codex-rs/core/src/tools/handlers/shell_spec.rs`: standing-context-trims
+- `codex-rs/core/src/tools/handlers/shell_spec.rs`: standing-context-trims, agent-bash
+- `codex-rs/shell-command/src/agent_shell.rs`: agent-bash
+- `codex-rs/code-mode-protocol/src/sh.rs`: agent-bash
+- `codex-rs/core/src/session/session.rs`: agent-bash
+- `codex-rs/exec-server-protocol/src/protocol.rs`: agent-bash
 - `codex-rs/core/src/tools/handlers/unified_exec/exec_command.rs`: standing-context-trims, local-coprocessor
 - `codex-rs/core/src/tools/parallel.rs`: response-order-fences
 - `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor

@@ -561,7 +561,10 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
 
     let call_id = "exec-command-environment-shell-policy";
     let command = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
+        core_test_support::TestTargetOs::Linux => {
+            r#"[[ -n "$BASH_VERSION" ]] || exit 71; printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#
+        }
+        core_test_support::TestTargetOs::MacOs => {
             r#"printf '%s:%s:%s:%s' "$KEEP" "${DROP:-missing}" "${OWNER_ONLY:-missing}" "$CODEX_VERSION""#
         }
         core_test_support::TestTargetOs::Windows => {
@@ -573,7 +576,7 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         "login": false,
         "yield_time_ms": 5_000,
     });
-    mount_sse_sequence(
+    let log = mount_sse_sequence(
         harness.server(),
         vec![
             sse(vec![
@@ -600,6 +603,9 @@ async fn exec_command_uses_installed_environment_shell_policy_with_explicit_over
         output.output.trim(),
         concat!("preserved:missing:missing:", env!("CARGO_PKG_VERSION")),
     );
+    if matches!(core_test_support::test_target_os(), core_test_support::TestTargetOs::Linux) {
+        assert!(log.requests()[0].body_json().to_string().contains("<shell>bash</shell>"));
+    }
     Ok(())
     })
     .await
