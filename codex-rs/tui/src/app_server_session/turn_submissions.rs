@@ -1,9 +1,19 @@
 //! Canonical request construction shared by background submission and focused facade tests.
 
-use super::*;
+use super::AbsolutePathBuf;
+use super::AskForApproval;
+use super::PathBuf;
+use super::Result;
+use super::ThreadId;
+use super::TurnPermissionsOverride;
+use super::UserInput;
+use super::turn_permissions_overrides;
 use codex_app_server_protocol::TurnStartParams;
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::option_option,
+    reason = "Wire patch distinguishes keeping, clearing, and setting the service tier"
+)]
 pub(crate) fn turn_start_params(
     thread_id: ThreadId,
     client_user_message_id: String,

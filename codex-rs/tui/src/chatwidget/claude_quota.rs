@@ -26,7 +26,7 @@ impl ChatWidget {
     pub(crate) fn finish_status_claude_quota_refresh(
         &mut self,
         request_id: u64,
-        result: Result<Option<AccountQuota>, String>,
+        result: &Result<Option<AccountQuota>, String>,
     ) {
         let data = claude_quota_data(
             result.as_ref().ok().and_then(Option::as_ref),

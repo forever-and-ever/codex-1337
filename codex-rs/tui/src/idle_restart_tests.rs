@@ -133,11 +133,11 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
     let root = tempfile::tempdir()?;
     for mode in ["replace", "foreign"] {
         let mut command = Command::new(std::env::current_exe()?);
-        command.args(["--exact", "idle_restart::tests::reexec_keeps_pid_and_resumes_once_without_replaying_launch_input", "--nocapture"])
+        let _ = command.args(["--exact", "idle_restart::tests::reexec_keeps_pid_and_resumes_once_without_replaying_launch_input", "--nocapture"])
             .current_dir(root.path()).env(CHILD, mode).env_remove(HANDOFF_ENV)
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         if mode == "foreign" {
-            command.env(
+            let _ = command.env(
                 HANDOFF_ENV,
                 serde_json::to_string(&Handoff {
                     pid: std::process::id(),

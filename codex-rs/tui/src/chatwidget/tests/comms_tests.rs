@@ -3,7 +3,8 @@ use codex_app_server_protocol::CommsGate;
 
 #[tokio::test]
 async fn comms_command_output() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, mut rx, _op_rx) =
+        Box::pin(make_chatwidget_manual(/*model_override*/ None)).await;
     for comms in [CommsGate::Open, CommsGate::Closed, CommsGate::Blocked] {
         chat.show_comms(comms);
     }

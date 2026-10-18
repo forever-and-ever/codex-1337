@@ -1,6 +1,7 @@
 //! Per-file presentation shared by native changes and producer-reported MCP changes.
 
 use std::borrow::Cow;
+use std::fmt::Write;
 use std::path::Path;
 
 use ratatui::prelude::*;
@@ -43,7 +44,7 @@ impl FileChangeView<'_> {
             } else if matches!(character, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
             {
                 // Escape text-reordering controls without changing ordinary RTL filenames.
-                label.push_str(&format!("\\u{{{:04x}}}", character as u32));
+                let _ = write!(label, "\\u{{{:04x}}}", u32::from(character));
             } else {
                 label.push(character);
             }

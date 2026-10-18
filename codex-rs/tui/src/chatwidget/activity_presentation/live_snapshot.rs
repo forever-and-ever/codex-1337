@@ -1,6 +1,16 @@
 //! Owned snapshots cross the UI preparation boundary.
 
-use super::*;
+use super::Arc;
+use super::ChatWidget;
+use super::ExecCell;
+use super::HistoryCell;
+use super::HyperlinkLine;
+use super::Line;
+use super::McpToolCallCell;
+use super::PlainHistoryCell;
+use super::WebSearchCell;
+use super::history_cell;
+use super::realtime_split_flap;
 
 // Release compatibility until a new upstream active-cell type gains a clone seam.
 struct RenderedLiveSnapshot {
@@ -85,7 +95,6 @@ impl LiveSnapshot for dyn HistoryCell {
             "live transcript cell has no owned snapshot: {:?}",
             self.type_id()
         );
-        static WARN: std::sync::Once = std::sync::Once::new();
         WARN.call_once(|| {
             tracing::warn!(
                 "unknown live transcript cell: rendering an inline compatibility snapshot"
@@ -128,3 +137,5 @@ impl ChatWidget {
         }
     }
 }
+
+static WARN: std::sync::Once = std::sync::Once::new();

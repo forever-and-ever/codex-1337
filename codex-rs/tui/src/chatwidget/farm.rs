@@ -2,7 +2,19 @@
 //! explicit discard clears only the unchanged draft, and a restore fills only a composer
 //! that newer input does not occupy; later edits are never overwritten.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::PathBuf;
+use super::SelectionItem;
+use super::SelectionViewParams;
+use super::ShellEscapePolicy;
+use super::SlashCommand;
+use super::ThreadComposerState;
+use super::ThreadInputState;
+use super::UserInput;
+use super::UserMessageHistoryRecord;
+use super::UserMessageSource;
+use super::app_server_text_elements;
 use codex_app_server_protocol::ThreadFarmMode;
 
 #[derive(Debug, Clone, PartialEq)]

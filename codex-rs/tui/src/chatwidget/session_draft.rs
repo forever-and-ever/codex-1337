@@ -1,6 +1,14 @@
 //! A fresh launch is a composer, not a server conversation, until it receives work.
 
-use super::*;
+use super::AppEvent;
+use super::Arc;
+use super::ChatWidget;
+use super::Insets;
+use super::Line;
+use super::RenderableExt;
+use super::RenderableItem;
+use super::SlashCommand;
+use super::Stylize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SessionDraft {
@@ -63,7 +71,9 @@ impl ChatWidget {
                     choice.provider.name
                 )
             })?;
-        self.config.model_provider_id = choice.provider.id.clone();
+        self.config
+            .model_provider_id
+            .clone_from(&choice.provider.id);
         self.config.model_provider = provider;
         self.config.model = Some(choice.model.model.clone());
         self.config.model_reasoning_effort = Some(choice.effort.clone());

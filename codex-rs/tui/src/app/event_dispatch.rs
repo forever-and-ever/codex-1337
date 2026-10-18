@@ -1334,7 +1334,7 @@ impl App {
                 self.refresh_claude_quota(app_server, request_id, account);
             }
             AppEvent::ClaudeQuotaLoaded { request_id, result } => {
-                self.chat_widget.finish_status_claude_quota_refresh(request_id, result);
+                self.chat_widget.finish_status_claude_quota_refresh(request_id, &result);
             }
             AppEvent::OpenAccountPicker { thread_id } => self.open_account_picker(app_server, thread_id),
             AppEvent::SelectAccount { thread_id, account_id, provider } => self.select_account(app_server, thread_id, account_id, provider),
@@ -1836,7 +1836,7 @@ impl App {
             }
             AppEvent::ProviderModel(event) => self.handle_provider_model_event(tui, app_server, event).await,
             AppEvent::OpenRouter(event) => self.handle_openrouter_event(app_server, event),
-            AppEvent::OpenProviderReasoning { provider, model } => self.chat_widget.show_provider_reasoning(provider, model),
+            AppEvent::OpenProviderReasoning { provider, model } => self.chat_widget.show_provider_reasoning(&provider, &model),
             AppEvent::OpenReasoningPopup { model } => {
                 self.chat_widget.open_reasoning_popup(model);
             }

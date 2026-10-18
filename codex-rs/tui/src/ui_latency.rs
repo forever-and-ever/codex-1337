@@ -134,7 +134,7 @@ impl Shared {
         }
     }
     fn now(&self) -> u64 {
-        self.origin.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
+        u64::try_from(self.origin.elapsed().as_nanos()).unwrap_or(u64::MAX)
     }
 }
 #[derive(Clone, Copy)]
@@ -291,7 +291,12 @@ impl Writer {
             SLOW_NS
         };
         if elapsed >= slow_ns && !matches!(stage, Stage::IdleSelect) {
-            self.shared.slow[self.slow_count as usize % SLOW].store([
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "Modulo SLOW yields an index strictly below the fixed ring length"
+            )]
+            let slow_slot = (self.slow_count % SLOW as u64) as usize;
+            self.shared.slow[slow_slot].store([
                 epoch,
                 self.slow_count.saturating_add(1),
                 stage as u64 + 1,
@@ -427,9 +432,7 @@ pub(crate) fn frame_completed(
         }
         let origin = writer.shared.origin;
         let nanos = |at: Instant| {
-            at.saturating_duration_since(origin)
-                .as_nanos()
-                .min(u128::from(u64::MAX)) as u64
+            u64::try_from(at.saturating_duration_since(origin).as_nanos()).unwrap_or(u64::MAX)
         };
         for (stage, (started, ended)) in [
             Stage::TerminalDiff,
@@ -505,10 +508,10 @@ const _: () = assert!(size_of::<Shared>() + size_of::<Writer>() <= 64 * 1024);
 pub async fn benchmark<R>(active: bool, measure: impl FnOnce(&dyn Fn(bool), usize) -> R) -> R {
     let boundary = |nested: bool| {
         let _outer = enter(Stage::Maintenance);
-        std::hint::black_box(1_u64);
+        let _ = std::hint::black_box(1_u64);
         if nested {
             let _child = enter(Stage::FramePreparation);
-            std::hint::black_box(2_u64);
+            let _ = std::hint::black_box(2_u64);
         }
     };
     if active {

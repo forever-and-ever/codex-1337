@@ -19,6 +19,10 @@ pub(crate) async fn thread_goal_get(
         .await?)
 }
 
+#[expect(
+    clippy::option_option,
+    reason = "Wire patch distinguishes keeping, clearing, and setting the token budget"
+)]
 pub(crate) async fn thread_goal_set(
     server: &AppServerSession,
     thread_id: ThreadId,
@@ -88,8 +92,8 @@ impl AppServerSession {
         selected_profile: Option<&PermissionProfileSelection>,
         name: Option<ForkName>,
     ) -> Result<AppServerStartedThread> {
-        let prepared = self
-            .prepare_fork_thread(
+        let prepared = Box::pin(
+            self.prepare_fork_thread(
                 RequestPolicy::Unbounded,
                 local_settings,
                 config,
@@ -100,8 +104,9 @@ impl AppServerSession {
                 selected_profile,
                 name,
             )
-            .run()
-            .await;
+            .run(),
+        )
+        .await;
         self.apply_session_observations(prepared.observations);
         prepared.result
     }
@@ -113,8 +118,8 @@ impl AppServerSession {
         thread_id: ThreadId,
         selected_profile: Option<&PermissionProfileSelection>,
     ) -> Result<AppServerStartedThread> {
-        let prepared = self
-            .prepare_side_thread(
+        let prepared = Box::pin(
+            self.prepare_side_thread(
                 RequestPolicy::Unbounded,
                 local_settings,
                 config,
@@ -122,8 +127,9 @@ impl AppServerSession {
                 selected_profile,
                 Vec::new(),
             )
-            .run()
-            .await;
+            .run(),
+        )
+        .await;
         self.apply_session_observations(prepared.observations);
         prepared.result
     }

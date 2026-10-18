@@ -205,8 +205,14 @@ impl NoticePresentation {
     }
 
     pub(super) fn heading(&self) -> &'static str {
-        use CollabAgentToolCallStatus::*;
-        use NoticeOperation::*;
+        use CollabAgentToolCallStatus::Completed;
+        use CollabAgentToolCallStatus::Failed;
+        use CollabAgentToolCallStatus::InProgress;
+        use CollabAgentToolCallStatus::Interrupted;
+        use NoticeOperation::Close;
+        use NoticeOperation::Resume;
+        use NoticeOperation::SendInput;
+        use NoticeOperation::Spawn;
         match (self.operation, &self.status) {
             (Spawn, InProgress) => "Spawning",
             (Spawn, Completed) => "Spawned",

@@ -1,9 +1,20 @@
-use super::*;
+use super::Arc;
+use super::BUCKET_UPPER_NS;
+use super::BUCKETS;
+use super::Instant;
+use super::Ordering;
+use super::Record;
+use super::SLOW;
+use super::SLOW_NS;
+use super::STAGE_NAMES;
+use super::STAGES;
+use super::STAT_WORDS;
+use super::Shared;
+use super::Writer;
 use std::fs;
 use std::io::Read;
 use std::io::Write;
 use std::io::{self};
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
@@ -22,7 +33,7 @@ const DEADLINE: Duration = Duration::from_millis(200);
 const METADATA: usize = 512;
 const WORDS: usize = 11 + 8 + 6 + 8 + STAGES * (STAT_WORDS + 1) + SLOW * 6;
 const WIRE: usize = METADATA + WORDS * 8;
-const MAGIC: u64 = 0x55494c4154454e01;
+const MAGIC: u64 = 0x5549_4c41_5445_4e01;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Identity {
@@ -117,28 +128,9 @@ fn start_ticks(pid: u32) -> io::Result<u64> {
         .and_then(|ticks| ticks.parse().ok())
         .ok_or_else(|| io::Error::other("invalid process start identity"))
 }
-fn peer(fd: i32) -> io::Result<libc::ucred> {
-    let mut cred = libc::ucred {
-        pid: 0,
-        uid: 0,
-        gid: 0,
-    };
-    let mut size = size_of::<libc::ucred>() as libc::socklen_t;
-    // SAFETY: getsockopt writes at most the supplied size into a live ucred.
-    let result = unsafe {
-        libc::getsockopt(
-            fd,
-            libc::SOL_SOCKET,
-            libc::SO_PEERCRED,
-            (&raw mut cred).cast(),
-            &raw mut size,
-        )
-    };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: geteuid has no pointer or lifetime preconditions.
-    if size as usize != size_of::<libc::ucred>() || cred.uid != unsafe { libc::geteuid() } {
+fn peer(fd: impl std::os::fd::AsFd) -> io::Result<rustix::net::UCred> {
+    let cred = rustix::net::sockopt::socket_peercred(fd)?;
+    if cred.uid != rustix::process::geteuid() {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "UI diagnostic peer is not this user",
@@ -179,10 +171,7 @@ impl Endpoint {
         };
         fs::set_permissions(&owner.path, fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        // SAFETY: listener is a live listening socket; backlog is deliberately small.
-        if unsafe { libc::listen(listener.as_raw_fd(), 4) } != 0 {
-            return Err(io::Error::last_os_error());
-        }
+        rustix::net::listen(&listener, 4)?;
         let info = codex_build_info::BuildInfo::get();
         let identity = Identity {
             pid,
@@ -211,7 +200,7 @@ impl Endpoint {
             thread::Builder::new()
                 .name("ui-latency".into())
                 .stack_size(128 * 1024)
-                .spawn(move || listen(listener, receiver, shared, metadata))?,
+                .spawn(move || listen(&listener, &receiver, &shared, &metadata))?,
         );
         Ok(owner)
     }
@@ -229,37 +218,24 @@ impl Drop for Endpoint {
     }
 }
 
-fn listen(listener: UnixListener, wake: UnixStream, shared: Arc<Shared>, metadata: [u8; METADATA]) {
+fn listen(listener: &UnixListener, wake: &UnixStream, shared: &Shared, metadata: &[u8; METADATA]) {
     let mut fds = [
-        libc::pollfd {
-            fd: listener.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        },
-        libc::pollfd {
-            fd: wake.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        },
+        rustix::event::PollFd::new(listener, rustix::event::PollFlags::IN),
+        rustix::event::PollFd::new(wake, rustix::event::PollFlags::IN),
     ];
     loop {
-        // SAFETY: fds is a live fixed pollfd array. No timer or periodic export.
-        let result = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
-        if result < 0 {
-            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                continue;
-            }
-            return;
+        match rustix::event::poll(&mut fds, None) {
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => continue,
+            Err(_) => return,
         }
-        if fds[1].revents != 0 {
-            return;
-        }
-        if fds[0].revents & libc::POLLIN == 0 {
+        if !fds[1].revents().is_empty() || !fds[0].revents().contains(rustix::event::PollFlags::IN)
+        {
             return;
         }
         if let Ok((mut client, _)) = listener.accept() {
-            // Exactly one client, one request, one fixed response; no client threads.
-            let _ = serve(&mut client, &shared, &metadata);
+            // One client and fixed-size response per request; no client threads.
+            let _ = serve(&mut client, shared, metadata);
         }
     }
 }
@@ -281,7 +257,7 @@ fn read_request(client: &mut UnixStream, deadline: Instant) -> io::Result<[u8; 8
     Ok(request)
 }
 fn serve(client: &mut UnixStream, shared: &Shared, metadata: &[u8; METADATA]) -> io::Result<()> {
-    peer(client.as_raw_fd())?;
+    let _ = peer(&*client)?;
     let deadline = Instant::now() + DEADLINE;
     match &read_request(client, deadline)? {
         b"UIR1DUMP" => {}
@@ -320,6 +296,14 @@ fn serve(client: &mut UnixStream, shared: &Shared, metadata: &[u8; METADATA]) ->
     Ok(())
 }
 fn snapshot(shared: &Shared) -> [u64; WORDS] {
+    fn append<'a, const N: usize>(rest: &'a mut [u64], record: &Record<N>) -> &'a mut [u64] {
+        let (slot, tail) = rest.split_at_mut(N + 1);
+        if let Some(values) = record.read() {
+            slot[0] = 1;
+            slot[1..].copy_from_slice(&values);
+        }
+        tail
+    }
     let mut words = [0; WORDS];
     words[..11].copy_from_slice(&[
         MAGIC,
@@ -335,22 +319,15 @@ fn snapshot(shared: &Shared) -> [u64; WORDS] {
         shared.suppressed_scopes.load(Ordering::Relaxed),
     ]);
     let mut rest = &mut words[11..];
-    fn append<const N: usize>(rest: &mut &mut [u64], record: &Record<N>) {
-        let (slot, tail) = std::mem::take(rest).split_at_mut(N + 1);
-        if let Some(values) = record.read() {
-            slot[0] = 1;
-            slot[1..].copy_from_slice(&values);
-        }
-        *rest = tail;
-    }
-    append(&mut rest, &shared.current);
-    append(&mut rest, &shared.committed);
-    append(&mut rest, &shared.admission);
+
+    rest = append(rest, &shared.current);
+    rest = append(rest, &shared.committed);
+    rest = append(rest, &shared.admission);
     for record in &shared.stats {
-        append(&mut rest, record);
+        rest = append(rest, record);
     }
     for record in &shared.slow {
-        append(&mut rest, record);
+        rest = append(rest, record);
     }
     words[1] = shared.now();
     words
@@ -418,23 +395,22 @@ async fn query_path(path: &Path, pid: u32, start: u64, reset: bool) -> io::Resul
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
     let metadata = fs::symlink_metadata(path)?;
-    // SAFETY: geteuid has no preconditions.
     if !metadata.file_type().is_socket()
-        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.uid() != rustix::process::geteuid().as_raw()
         || metadata.mode() & 0o777 != 0o600
     {
         return Err(io::ErrorKind::PermissionDenied.into());
     }
     let response = tokio::time::timeout(Duration::from_millis(500), async {
         let mut client = tokio::net::UnixStream::connect(path).await?;
-        if peer(client.as_raw_fd())?.pid != pid as i32 {
+        if peer(&client)?.pid.as_raw_nonzero().get().unsigned_abs() != pid {
             return Err(io::ErrorKind::InvalidData.into());
         }
         client
             .write_all(if reset { b"UIR1RSET" } else { b"UIR1DUMP" })
             .await?;
         let mut response = [0; WIRE];
-        client.read_exact(&mut response).await?;
+        let _ = client.read_exact(&mut response).await?;
         Ok::<_, io::Error>(response)
     })
     .await
@@ -460,20 +436,11 @@ async fn query_path(path: &Path, pid: u32, start: u64, reset: bool) -> io::Resul
 fn stage(value: u64) -> Option<&'static str> {
     value
         .checked_sub(1)
-        .and_then(|i| STAGE_NAMES.get(i as usize))
+        .and_then(|i| usize::try_from(i).ok())
+        .and_then(|i| STAGE_NAMES.get(i))
         .copied()
 }
 fn decode(identity: Identity, words: &[u64; WORDS]) -> io::Result<Report> {
-    if words[0] != MAGIC
-        || words[5] != BUCKETS as u64
-        || words[6] != STAGES as u64
-        || words[7] != SLOW as u64
-    {
-        return Err(io::Error::other("unsupported UI diagnostic schema"));
-    }
-    let epoch = words[2];
-    let mut incomplete = 0;
-    let mut rest = &words[11..];
     fn take<'a>(rest: &mut &'a [u64], n: usize, incomplete: &mut usize) -> Option<&'a [u64]> {
         let (slot, tail) = rest.split_at(n + 1);
         *rest = tail;
@@ -484,6 +451,17 @@ fn decode(identity: Identity, words: &[u64; WORDS]) -> io::Result<Report> {
             Some(&slot[1..])
         }
     }
+    if words[0] != MAGIC
+        || words[5] != BUCKETS as u64
+        || words[6] != STAGES as u64
+        || words[7] != SLOW as u64
+    {
+        return Err(io::Error::other("unsupported UI diagnostic schema"));
+    }
+    let epoch = words[2];
+    let mut incomplete = 0;
+    let mut rest = &words[11..];
+
     let current = take(&mut rest, 7, &mut incomplete).map(|w| Current {
         epoch: w[0],
         published_ns: w[1],

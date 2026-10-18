@@ -1,6 +1,14 @@
 //! Account requests preview the fresh-root selection only until a conversation owns their scope.
 
-use super::*;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Config;
+use super::GetAccountParams;
+use super::GetAccountResponse;
+use super::Result;
+use super::ThreadId;
+use super::bootstrap_request_error;
+use super::thread_start_params_from_config;
 use codex_app_server_protocol::NewThreadAccountParams;
 use codex_utils_path_uri::LegacyAppPathString;
 

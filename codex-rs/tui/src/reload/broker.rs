@@ -52,7 +52,7 @@ pub(super) async fn listen(
         let (stream, _) = listener.accept().await?;
         connection += 1;
         let commands = commands.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
                 return;
             };
@@ -98,7 +98,7 @@ pub(super) async fn listen(
                 () = forwarding => {},
             }
             let _ = commands.send(Command::Detach(connection)).await;
-        });
+        }));
     }
 }
 
@@ -139,10 +139,10 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     }
                 }
                 Some(Command::Attach(connection, writer)) => {
-                    ui.insert(connection, writer);
+                    let _ = ui.insert(connection, writer);
                 }
                 Some(Command::Detach(connection)) => {
-                    ui.remove(&connection);
+                    let _ = ui.remove(&connection);
                 }
                 Some(Command::Input(connection, message)) => {
                     if !ui.contains_key(&connection) {
@@ -151,7 +151,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                     let Some(client) = upstream.as_ref() else { continue };
                     match message {
                         JSONRPCMessage::Request(request) if request.method == "initialize" => {
-                            send(&mut ui, Audience::Connection(connection), &JSONRPCMessage::Response(JSONRPCResponse {
+                            send(&mut ui, &Audience::Connection(connection), &JSONRPCMessage::Response(JSONRPCResponse {
                                 id: request.id,
                                 result: serde_json::json!({
                                     "userAgent": "codex-ui-host",
@@ -168,7 +168,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                             request.id = RequestId::String(format!("ui-host-{request_sequence}"));
                             let handle = client.request_handle();
                             let results = results.clone();
-                            tokio::spawn(async move {
+                            drop(tokio::spawn(async move {
                                 let result = handle.request_json_rpc(request).await;
                                 let message = match result {
                                     Ok(Ok(result)) => JSONRPCMessage::Response(JSONRPCResponse { id, result }),
@@ -183,11 +183,11 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                                     }),
                                 };
                                 let _ = results.send((connection, message)).await;
-                            });
+                            }));
                         }
                         JSONRPCMessage::Notification(notification) => {
                             if notification.method == "initialized" {
-                                for request in pending.values() { send(&mut ui, Audience::Connection(connection), request); }
+                                for request in pending.values() { send(&mut ui, &Audience::Connection(connection), request); }
                             } else if let Ok(notification) = serde_json::to_value(notification)
                                 .and_then(serde_json::from_value::<ClientNotification>) {
                                 let _ = client.notify(notification).await;
@@ -197,14 +197,14 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                             if pending.contains_key(&response.id)
                                 && client.resolve_server_request(response.id.clone(), response.result).await.is_ok()
                             {
-                                pending.remove(&response.id);
+                                let _ = pending.remove(&response.id);
                             }
                         }
                         JSONRPCMessage::Error(error) => {
                             if pending.contains_key(&error.id)
                                 && client.reject_server_request(error.id.clone(), error.error).await.is_ok()
                             {
-                                pending.remove(&error.id);
+                                let _ = pending.remove(&error.id);
                             }
                         }
                     }
@@ -219,15 +219,15 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
             } => match event {
                 Some(AppServerEvent::ServerNotification(notification)) => {
                     if let codex_app_server_protocol::ServerNotification::ServerRequestResolved(value) = notification.as_ref() {
-                        pending.remove(&value.request_id);
+                        let _ = pending.remove(&value.request_id);
                     }
-                    send(&mut ui, Audience::All, &notification);
+                    send(&mut ui, &Audience::All, &notification);
                 }
                 Some(AppServerEvent::ServerRequest(request)) => {
                     if let Ok(value) = serde_json::to_value(&request)
                         && let Some(id) = value.get("id").and_then(|id| serde_json::from_value(id.clone()).ok()) {
-                            pending.insert(id, value.clone());
-                            send(&mut ui, Audience::All, &value);
+                            let _ = pending.insert(id, value.clone());
+                            send(&mut ui, &Audience::All, &value);
                         }
                 }
                 Some(AppServerEvent::Lagged { .. } | AppServerEvent::Disconnected { .. }) | None => {
@@ -237,7 +237,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                 }
             },
             Some((connection, message)) = replies.recv() => {
-                send(&mut ui, Audience::Connection(connection), &message);
+                send(&mut ui, &Audience::Connection(connection), &message);
             }
 
         }
@@ -249,7 +249,7 @@ enum Audience {
     All,
 }
 
-fn send(ui: &mut HashMap<u64, Connection>, audience: Audience, value: &impl serde::Serialize) {
+fn send(ui: &mut HashMap<u64, Connection>, audience: &Audience, value: &impl serde::Serialize) {
     let text = match serde_json::to_string(value) {
         Ok(text) => text,
         Err(error) => {
@@ -259,7 +259,7 @@ fn send(ui: &mut HashMap<u64, Connection>, audience: Audience, value: &impl serd
     };
     let message = Message::Text(text.into());
     ui.retain(|connection, peer| {
-        if matches!(audience, Audience::Connection(target) if *connection != target) {
+        if matches!(audience, Audience::Connection(target) if connection != target) {
             return true;
         }
         peer.writer.try_send(message.clone()).is_ok()

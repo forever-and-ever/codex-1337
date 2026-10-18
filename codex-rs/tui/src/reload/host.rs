@@ -16,7 +16,6 @@ use super::worker_process::Launch;
 use super::worker_process::Worker;
 use std::collections::VecDeque;
 use std::io;
-use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
@@ -64,7 +63,7 @@ pub(super) async fn run() -> io::Result<i32> {
         broker_task.abort_handle(),
     ]);
     let (finished, result) = oneshot::channel();
-    std::thread::Builder::new()
+    let _ = std::thread::Builder::new()
         .name("ui-supervisor".into())
         .spawn(move || {
             let result = match tokio::runtime::Builder::new_current_thread()
@@ -119,7 +118,7 @@ async fn supervise(
             Reload::Checking(admission) => {
                 let now = Instant::now();
                 if now >= admission.expires {
-                    host.reject_admission(io::Error::new(
+                    host.reject_admission(&io::Error::new(
                         io::ErrorKind::TimedOut,
                         "UI checkpoint probe timed out",
                     ));
@@ -184,8 +183,8 @@ async fn supervise(
                         // consume queued input that is also present in the checkpoint.
                         drop(reply);
                     }
-                    Ok(_) => host.reject_admission(io::Error::other("UI exited during reload admission")),
-                    Err(error) => host.reject_admission(error),
+                    Ok(_) => host.reject_admission(&io::Error::other("UI exited during reload admission")),
+                    Err(error) => host.reject_admission(&error),
                 }
             }
             Some((generation, result)) = launches.recv() => {
@@ -227,7 +226,7 @@ async fn supervise(
                     control::Request::Hello { .. } => control::Response::Error("Incompatible UI reload protocol".into()),
                     control::Request::Connect(endpoint) => {
                         let commands = broker_tx.clone();
-                        tokio::spawn(async move {
+                        drop(tokio::spawn(async move {
                             let (tx, rx) = oneshot::channel();
                             let _ = commands.send(broker::Command::Connect(endpoint.into(), tx)).await;
                             let response = match rx.await {
@@ -235,7 +234,7 @@ async fn supervise(
                                 _ => control::Response::Error("Unable to connect to app server".into()),
                             };
                             let _ = reply.send(response);
-                        });
+                        }));
                         continue;
                     }
                     control::Request::Reload(checkpoint) if host.reload.idle() => {
@@ -273,7 +272,7 @@ async fn supervise(
             ready = terminal.input.readable(), if host.reload.replacing() || host.reload.failed() || host.input.len() <= 65536 - 4096 => {
                 let mut ready = ready?;
                 let mut bytes = [0; 4096];
-                if let Ok(result) = ready.try_io(|fd| worker_process::read(fd.get_ref().as_raw_fd(), &mut bytes)) {
+                if let Ok(result) = ready.try_io(|fd| worker_process::read(fd.get_ref(), &mut bytes)) {
                     if result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::Interrupted) { continue; }
                     let count = result?;
                     if count == 0 { break 0 }
@@ -310,9 +309,9 @@ async fn supervise(
             ready = terminal.output.writable(), if !host.output.is_empty() => {
                 let mut ready = ready?;
                 let bytes = host.output.as_slices().0;
-                if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref().as_raw_fd(), bytes)) {
+                if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref(), bytes)) {
                     if result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::Interrupted) { continue; }
-                    host.output.drain(..result?);
+                    let _ = host.output.drain(..result?);
                 }
             }
             ready = async {
@@ -326,7 +325,7 @@ async fn supervise(
                 ) => {
                 let mut ready = ready?;
                 let mut bytes = [0; 4096];
-                match ready.try_io(|fd| worker_process::read(fd.get_ref().as_raw_fd(), &mut bytes)) {
+                match ready.try_io(|fd| worker_process::read(fd.get_ref(), &mut bytes)) {
                     Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => {},
                     Ok(Ok(0) | Err(_)) => host.output_open = false,
                     Ok(Ok(count)) => {
@@ -343,9 +342,9 @@ async fn supervise(
                 }
             }, if !host.input.is_empty() => {
                 let mut ready = ready?;
-                if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref().as_raw_fd(), host.input.as_slices().0)) {
+                if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref(), host.input.as_slices().0)) {
                     match result {
-                        Ok(count) => { host.input.drain(..count); }
+                        Ok(count) => { let _ = host.input.drain(..count); }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
                         Err(error) => return Err(error),
                     }
@@ -416,7 +415,7 @@ impl Host {
         let launched = launched.clone();
         // Even the protocol probe's spawn can block in the kernel. Keep the
         // entire launch off the watchdog reactor, with its slot held throughout.
-        tokio::task::spawn_blocking(move || {
+        drop(tokio::task::spawn_blocking(move || {
             let result = tokio::runtime::Handle::current().block_on(async {
                 if negotiate {
                     launch.negotiate().await?;
@@ -424,7 +423,7 @@ impl Host {
                 launch.spawn()
             });
             let _ = launched.blocking_send((generation, result));
-        });
+        }));
     }
 
     fn reject(&mut self, launched: &Launched) {
@@ -449,7 +448,7 @@ impl Host {
         self.launch(self.previous.clone(), launched);
     }
 
-    fn reject_admission(&mut self, error: io::Error) {
+    fn reject_admission(&mut self, error: &io::Error) {
         if let Reload::Checking(admission) = std::mem::replace(&mut self.reload, Reload::Idle) {
             match admission.origin {
                 Origin::Worker {

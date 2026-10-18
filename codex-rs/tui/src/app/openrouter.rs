@@ -239,7 +239,7 @@ impl App {
                 match (request, result) {
                     (Request::Models { menu, selected }, Ok(Reply::Models(listing))) => self
                         .chat_widget
-                        .show_openrouter_models(menu, listing, selected, None),
+                        .show_openrouter_models(menu, listing, selected.as_ref(), None),
                     (Request::Endpoints { menu, slug }, Ok(Reply::Endpoints(response))) => self
                         .chat_widget
                         .show_openrouter_endpoints(menu, slug, response),
@@ -365,7 +365,7 @@ impl App {
             } => {
                 if self.current_displayed_thread_id() == Some(thread_id) {
                     self.chat_widget
-                        .finish_openrouter_status(thread_id, id, mode, result);
+                        .finish_openrouter_status(thread_id, id, mode, &result);
                 }
             }
         }

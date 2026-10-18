@@ -9,7 +9,8 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
         (SlashCommand::Farm, ThreadFarmMode::FullHistory),
         (SlashCommand::FarmFresh, ThreadFarmMode::Fresh),
     ] {
-        let (mut chat, mut events, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        let (mut chat, mut events, mut ops) =
+            Box::pin(make_chatwidget_manual(/*model_override*/ None)).await;
         chat.thread_id = Some(ThreadId::new());
         chat.on_task_started();
         let text = format!("/{} inspect $audit", command.command());
@@ -26,7 +27,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
         chat.set_remote_image_urls(vec!["data:image/png;base64,inline".into()]);
         let before = chat.bottom_pane.composer_draft_snapshot();
         // The queue binding must delegate immediately rather than append a parent follow-up.
-        chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         let submission = loop {
             if let AppEvent::Farm {
                 mode: actual,
@@ -77,7 +78,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
                 "farm_receipt_recovery",
                 render_bottom_popup(&chat, /*width*/ 80)
             );
-            chat.handle_key_event(KeyCode::Enter.into());
+            let _ = chat.handle_key_event(KeyCode::Enter.into());
             let mut reconciled = false;
             while let Ok(event) = events.try_recv() {
                 if let AppEvent::ReconcileFarm { request_id } = event {
@@ -87,8 +88,8 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
             }
             assert!(reconciled);
             chat.open_farm_recovery("retained-request".into());
-            chat.handle_key_event(KeyCode::Down.into());
-            chat.handle_key_event(KeyCode::Enter.into());
+            let _ = chat.handle_key_event(KeyCode::Down.into());
+            let _ = chat.handle_key_event(KeyCode::Enter.into());
             let mut discarded = false;
             while let Ok(event) = events.try_recv() {
                 if let AppEvent::DiscardFarm { request_id } = event {
@@ -107,7 +108,7 @@ async fn immediate_farm_preserves_rich_draft_and_rejects_unrepresentable_remote_
         );
         chat.snapshot_local_images = true;
         let before = chat.bottom_pane.composer_draft_snapshot();
-        chat.handle_key_event(KeyCode::Enter.into());
+        let _ = chat.handle_key_event(KeyCode::Enter.into());
         let mut after = chat.bottom_pane.composer_draft_snapshot();
         after.startup_local_history = before.startup_local_history.clone();
         after.last_composer_activity_at = before.last_composer_activity_at;
