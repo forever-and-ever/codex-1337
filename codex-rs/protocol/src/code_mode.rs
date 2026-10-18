@@ -82,7 +82,6 @@ impl CodeModePayload for crate::protocol::EventMsg {
 
 impl crate::protocol::EventMsg {
     /// Completed children release attribution; a yielded PTY still owns later updates.
-    #[must_use]
     pub fn code_mode_completed_child(&self) -> Option<std::borrow::Cow<'_, str>> {
         use crate::items::CommandExecutionStatus;
         use crate::items::TurnItem;
@@ -104,7 +103,6 @@ impl crate::protocol::EventMsg {
     }
 
     /// Observers outside human-transcript projection retain native event semantics.
-    #[must_use]
     pub fn native_event(&self) -> &Self {
         match self {
             Self::CodeModeOwned(owned) => owned.payload(),

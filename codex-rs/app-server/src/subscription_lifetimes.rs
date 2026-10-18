@@ -17,16 +17,14 @@ impl SubscriptionLifetimes {
     }
 
     pub(crate) fn insert(&self, connection_id: ConnectionId, thread_id: ThreadId) {
-        let _ = self
-            .0
+        self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert((connection_id, thread_id));
     }
 
     pub(crate) fn remove(&self, connection_id: ConnectionId, thread_id: ThreadId) {
-        let _ = self
-            .0
+        self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&(connection_id, thread_id));

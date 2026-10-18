@@ -1088,8 +1088,7 @@ impl App {
                 if self.current_displayed_thread_id() == Some(thread_id) {
                     match result {
                         Ok(observations) => {
-                            let _ =
-                                self.apply_loaded_subagent_observations(thread_id, observations);
+                            self.apply_loaded_subagent_observations(thread_id, observations);
                         }
                         Err(error) => {
                             tracing::warn!(%error, "failed to list loaded threads for subagent backfill");
@@ -1353,7 +1352,7 @@ impl App {
             );
         }
         if !read_only {
-            let _ = self.chat_widget.maybe_send_next_queued_input();
+            self.chat_widget.maybe_send_next_queued_input();
         }
         if let ResumePresentation::ReadOnly(notice) = &ready.presentation {
             self.ensure_thread_channel(thread_id).mark_external_writer();

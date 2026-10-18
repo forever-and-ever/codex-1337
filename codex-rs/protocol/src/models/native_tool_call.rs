@@ -18,14 +18,12 @@ pub enum NativeToolCall {
 }
 
 impl NativeToolCall {
-    #[must_use]
     pub fn call_id(&self) -> &str {
         match self {
             Self::Anthropic { call_id, .. } => call_id,
         }
     }
 
-    #[must_use]
     pub fn name(&self) -> &str {
         match self {
             Self::Anthropic { name, .. } => name,

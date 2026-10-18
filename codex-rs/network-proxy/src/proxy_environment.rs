@@ -75,7 +75,6 @@ pub const PROXY_ENV_KEYS: &[&str] = &[
     "ftp_proxy",
 ];
 
-#[must_use]
 pub fn is_managed_proxy_env_var(key: &str, value: &str) -> bool {
     if PROXY_ENV_KEYS.contains(&key) {
         return true;
@@ -130,7 +129,6 @@ pub fn proxy_url_env_value<'a, S: std::hash::BuildHasher>(
     env.get(lower_key.as_str()).map(String::as_str)
 }
 
-#[must_use]
 pub fn has_proxy_url_env_vars<S: std::hash::BuildHasher>(env: &HashMap<String, String, S>) -> bool {
     PROXY_URL_ENV_KEYS
         .iter()

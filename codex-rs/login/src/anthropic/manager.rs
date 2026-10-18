@@ -92,7 +92,6 @@ impl AuthManager {
         })
     }
 
-    #[must_use]
     pub fn pin(&self, id: AccountId) -> Account {
         Account {
             manager: self.clone(),
@@ -102,7 +101,6 @@ impl AuthManager {
 }
 
 impl Account {
-    #[must_use]
     pub fn id(&self) -> &AccountId {
         &self.id
     }
@@ -214,7 +212,7 @@ impl Account {
         replacement: &Record,
     ) -> Result<(), AuthError> {
         let state = &self.manager.state;
-        let _ = state.pending.lock().await.insert(
+        state.pending.lock().await.insert(
             self.id.clone(),
             Pending {
                 previous: previous.clone(),
@@ -231,7 +229,7 @@ impl Account {
         })
         .await
         .map_err(|_| io::Error::other("Anthropic credential write task failed"))??;
-        let _ = state.pending.lock().await.remove(&self.id);
+        state.pending.lock().await.remove(&self.id);
         Ok(())
     }
 }

@@ -48,7 +48,7 @@ pub(super) fn is_execution_header(text: &str) -> bool {
             .split_once("\nOutput:\n")
             .is_some_and(|(header, body)| {
                 let mut lines = header.lines();
-                let _ = lines.next();
+                lines.next();
                 body.is_empty()
                     && match lines.next() {
                         None => true,

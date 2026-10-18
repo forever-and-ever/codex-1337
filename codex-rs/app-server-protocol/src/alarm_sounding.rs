@@ -43,7 +43,6 @@ pub enum AlarmCause {
 impl AlarmSounding {
     /// Callers also require an absent call ID: an ordinary tool response is not
     /// an unsolicited alarm sounding.
-    #[must_use]
     pub fn from_tool_output(
         name: &str,
         namespace: Option<&str>,
@@ -55,7 +54,6 @@ impl AlarmSounding {
         Self::parse(output.to_text().as_deref()?)
     }
 
-    #[must_use]
     pub fn render(&self) -> String {
         let (cause, detail) = match &self.cause {
             AlarmCause::Clock { late_by_seconds } => {

@@ -109,7 +109,7 @@ async fn openrouter_status_snapshot() {
     chat.token_info = Some(make_token_info(1000, 128_000));
     chat.token_info.as_mut().unwrap().total_token_usage.cost =
         Some(Usd::from_nanodollars(420_000_000));
-    let _ = chat.refresh_openrouter_status(StatusRefresh::Show);
+    chat.refresh_openrouter_status(StatusRefresh::Show);
     let mut request = None;
     while let Ok(event) = rx.try_recv() {
         if let AppEvent::OpenRouter(Event::RefreshStatus { id, .. }) = event {

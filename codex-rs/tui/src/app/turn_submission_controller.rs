@@ -385,7 +385,7 @@ impl App {
                 lane.waiting.push_back(entry);
             }
         } else {
-            let _ = self.server_operations.lanes.insert(
+            self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active: entry,
@@ -540,7 +540,7 @@ impl App {
             SubmissionRequest::Operation(operation) => operation.lane(scope),
             _ => OperationLane::Thread(active.origin.thread().0),
         };
-        let _ = self.server_operations.lanes.insert(
+        self.server_operations.lanes.insert(
             key,
             SubmissionLane {
                 active,
@@ -565,7 +565,7 @@ impl App {
             };
             if !matches!(lane.state, LaneState::Queued) && requests::holds_start_lease(&lane.active)
             {
-                let _ = protected_starts.insert(thread_id);
+                protected_starts.insert(thread_id);
             }
             let mut retained = VecDeque::new();
             for entry in lane.waiting.drain(..) {
@@ -579,7 +579,7 @@ impl App {
             if matches!(lane.state, LaneState::Queued) && matches_origin(&lane.active) {
                 removed.push(lane.active);
                 if let Some(active) = lane.waiting.pop_front() {
-                    let _ = self.server_operations.lanes.insert(
+                    self.server_operations.lanes.insert(
                         key,
                         SubmissionLane {
                             active,
@@ -589,7 +589,7 @@ impl App {
                     );
                 }
             } else {
-                let _ = self.server_operations.lanes.insert(key, lane);
+                self.server_operations.lanes.insert(key, lane);
             }
         }
         removed.sort_by_key(|entry| entry.order);
@@ -894,7 +894,7 @@ impl App {
             )
             .await;
             if uncertain {
-                let _ = self.server_operations.lanes.insert(
+                self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active,
@@ -916,7 +916,7 @@ impl App {
                 .is_some_and(|channel| Arc::ptr_eq(&channel.store, store))
             && self.continue_realtime_preparation(*thread_id, &mut active, result.clone())
         {
-            let _ = self.server_operations.lanes.insert(
+            self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active,
@@ -933,7 +933,7 @@ impl App {
         ))) = &outcome
             && Self::continue_voice_preference(&mut active, write)
         {
-            let _ = self.server_operations.lanes.insert(
+            self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active,
@@ -1034,7 +1034,7 @@ impl App {
                                 .await;
                             }
                         }
-                        let _ = self.server_operations.lanes.insert(
+                        self.server_operations.lanes.insert(
                             key,
                             SubmissionLane {
                                 active,
@@ -1049,7 +1049,7 @@ impl App {
                 }
             }
             if let Some(next) = waiting.pop_front() {
-                let _ = self.server_operations.lanes.insert(
+                self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -1171,7 +1171,7 @@ impl App {
                 )),
             }
             if transport_failed {
-                let _ = self.begin_reconnect();
+                self.begin_reconnect();
             }
         } else {
             if current
@@ -1183,7 +1183,7 @@ impl App {
                 );
             }
             if let Some(next) = waiting.pop_front() {
-                let _ = self.server_operations.lanes.insert(
+                self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -1220,8 +1220,7 @@ impl App {
             // The retained original store outlives channel-map removal. Child question
             // submissions seed it from their exact emitter only when no state survived.
             input.recover_submission_drafts(drafts, action);
-            let _ = self
-                .agents_overview
+            self.agents_overview
                 .input_states
                 .insert(thread_id, input.clone());
         } else {
@@ -1286,7 +1285,7 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("control receipt channel closed"))?;
-                        let _ = Box::pin(self.handle_server_completion(&mut tui, server, completion)).await?;
+                        Box::pin(self.handle_server_completion(&mut tui, server, completion)).await?;
                     }
                 }
             }
@@ -1360,7 +1359,7 @@ impl App {
     ) {
         self.start_fresh_session(tui, server, source, message, name)
             .await;
-        let _ = Box::pin(self.settle_navigation(tui, server))
+        Box::pin(self.settle_navigation(tui, server))
             .await
             .expect("fresh navigation settled");
     }

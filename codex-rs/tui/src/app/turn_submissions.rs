@@ -685,7 +685,7 @@ impl ServerOperations {
             .expect("selected operation lane disappeared");
         if active.id == id {
             if let Some(next) = waiting.pop_front() {
-                let _ = self.lanes.insert(
+                self.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -701,7 +701,7 @@ impl ServerOperations {
                 .position(editable)
                 .expect("selected queued operation disappeared");
             let removed = waiting.remove(index);
-            let _ = self.lanes.insert(
+            self.lanes.insert(
                 key,
                 SubmissionLane {
                     active,

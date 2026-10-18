@@ -15,7 +15,7 @@ pub(super) async fn finish_close_verification(
                     app.handle_local_thread_completion(server, completion.expect("thread completion")).await?;
                 }
                 completion = app.server_operations.control_rx.recv() => {
-                    let _ = Box::pin(app.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
+                    Box::pin(app.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
                 }
             }
         }

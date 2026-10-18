@@ -171,7 +171,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         native_config.model_provider_id = "claude".into();
         native_config.model_provider = provider("claude");
         native_config.model_catalog = None;
-        let _ = session.agent_models_manager(&native_config).await.unwrap();
+        session.agent_models_manager(&native_config).await.unwrap();
         let manager = create_model_provider_with_anthropic_account(
             native_config.model_provider,
             Some(Arc::clone(&session.services.auth_manager)),
@@ -431,7 +431,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         (Some(bob.clone()), Some(alice.clone()))
     );
     let first = session.agent_models_manager(&config).await.unwrap();
-    let _ = first
+    first
         .list_models(
             RefreshStrategy::OnlineIfUncached,
             config.http_client_factory(),
@@ -441,7 +441,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
     assert!(Arc::ptr_eq(&first, &retained));
     activate(&alice);
     let rebound = session.agent_models_manager(&config).await.unwrap();
-    let _ = rebound
+    rebound
         .list_models(
             RefreshStrategy::OnlineIfUncached,
             config.http_client_factory(),

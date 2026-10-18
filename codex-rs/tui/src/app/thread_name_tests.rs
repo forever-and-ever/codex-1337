@@ -40,7 +40,7 @@ async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
         "thread_name_conflict",
         render_bottom_popup(&app.chat_widget, /*width*/ 78)
     );
-    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
     assert!(!app.chat_widget.has_active_view());
     assert!(
         !std::iter::from_fn(|| rx.try_recv().ok())
@@ -48,9 +48,9 @@ async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
     );
 
     assert!(app.confirm_thread_name_conflict(&error, request.clone()));
-    let _ = app.chat_widget.handle_key_event(KeyCode::Char('2').into());
+    app.chat_widget.handle_key_event(KeyCode::Char('2').into());
     assert!(app.chat_widget.has_active_view());
-    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let confirmations = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::ConfirmedThreadName {

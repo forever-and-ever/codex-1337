@@ -228,7 +228,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
     if split.len() != cells.len() || split.iter().zip(cells).any(|(a, b)| !Arc::ptr_eq(a, b)) {
         let mut normalized = split;
         if let Some((range, replacements)) = reunite_code_mode(&normalized) {
-            let _ = normalized.splice(range, replacements);
+            normalized.splice(range, replacements);
         }
         return Some((0..cells.len(), normalized));
     }
@@ -247,7 +247,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
                     *retained = Arc::clone(cell);
                 }
             } else {
-                let _ = references.insert(key, (index, Arc::clone(cell)));
+                references.insert(key, (index, Arc::clone(cell)));
             }
         }
         let Some(CodeModeCell::Legacy(block)) = cell.as_any().downcast_ref::<CodeModeCell>() else {
@@ -262,7 +262,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
         } else {
             let mut retained = block.clone();
             retained.members.clear();
-            let _ = blocks.insert(block.exec_call_id.clone(), (index, retained));
+            blocks.insert(block.exec_call_id.clone(), (index, retained));
         }
     }
     if blocks.is_empty() {
@@ -285,7 +285,7 @@ pub(crate) fn reunite_code_mode(cells: &[Arc<dyn HistoryCell>]) -> Option<Projec
             .find(|(_, block)| block.owns(cell.as_ref()))
         {
             block.insert_member(cell);
-            let _ = absorbed.insert(index);
+            absorbed.insert(index);
         }
     }
     if !changed && absorbed.is_empty() {

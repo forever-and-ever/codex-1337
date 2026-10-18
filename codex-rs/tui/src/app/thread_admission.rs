@@ -49,7 +49,7 @@ impl App {
             return;
         }
         if belongs_to_family && let Some(root) = self.primary_thread_id {
-            let _ = self.agent_navigation.descendant_roots.insert(id, root);
+            self.agent_navigation.descendant_roots.insert(id, root);
         }
         self.agent_navigation.set_agent_path(
             id,

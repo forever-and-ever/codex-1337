@@ -158,7 +158,7 @@ impl LocalAgentControl {
         }
         drop(admission);
         for id in &ids {
-            let _ = state.remove_thread(id).await;
+            state.remove_thread(id).await;
         }
         drop(lifecycle);
         for thread in threads {

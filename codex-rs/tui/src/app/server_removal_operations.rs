@@ -578,8 +578,7 @@ impl App {
                             && self.removal_view_matches(&target)
                         {
                             if let Err(error) = self.reset_for_thread_switch(tui) {
-                                let _ = self
-                                    .server_operations
+                                self.server_operations
                                     .lanes
                                     .insert(OperationLane::Connection, lane);
                                 return Err(error);
@@ -633,8 +632,7 @@ impl App {
                 outcome
             }
         };
-        let _ = self
-            .server_operations
+        self.server_operations
             .lanes
             .insert(OperationLane::Connection, lane);
         self.finish_submission(
@@ -676,8 +674,7 @@ impl App {
 
     fn hold_uncertain_removal(&mut self, mut lane: SubmissionLane) {
         lane.state = LaneState::Uncertain;
-        let _ = self
-            .server_operations
+        self.server_operations
             .lanes
             .insert(OperationLane::Connection, lane);
         self.chat_widget.add_error_message("Task detachment was not fully confirmed. No removal or detach was retried. Close and reopen this TUI to resynchronize.".into());
@@ -720,7 +717,7 @@ impl App {
                 if thread.session_id == target.request.thread_id.to_string()
                     || parent.is_some_and(|id| removed.contains(&id))
                 {
-                    let _ = removed.insert(*id);
+                    removed.insert(*id);
                 }
             }
             if removed.len() == count {
@@ -742,11 +739,11 @@ impl App {
                 self.chat_widget.pause_unavailable_thread();
             }
             self.remove_agents_overview_thread(id);
-            let _ = self.agents_overview.activity.remove(&id);
-            let _ = self.agents_overview.last_messages.remove(&id);
-            let _ = self.agents_overview.usage.remove(&id);
-            let _ = self.agents_overview.refresh_thread_ids.remove(&id);
-            let _ = self.agents_overview.dispatched_requests.remove(&id);
+            self.agents_overview.activity.remove(&id);
+            self.agents_overview.last_messages.remove(&id);
+            self.agents_overview.usage.remove(&id);
+            self.agents_overview.refresh_thread_ids.remove(&id);
+            self.agents_overview.dispatched_requests.remove(&id);
         }
     }
 }

@@ -116,7 +116,7 @@ impl UiSchedule {
                 if matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Moved)
                     && matches!(self.input.back(), Some((_, TuiEvent::Mouse(mouse))) if mouse.kind == MouseEventKind::Moved)
                 {
-                    let _ = self.input.pop_back();
+                    self.input.pop_back();
                 }
                 self.input.push_back((stamp, event));
             }
@@ -180,7 +180,7 @@ impl UiSchedule {
                     .any(|(_, event)| matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_)))
             {
                 // Ctrl+C first clears typeahead; it must not leapfrog it into an interrupt.
-                let _ = self.input.drain(..=index);
+                self.input.drain(..=index);
                 return None;
             }
             self.input.remove(index)
@@ -559,7 +559,7 @@ pub(super) async fn drive(
                 crate::reload::worker::ready().await?;
                 app.chat_widget
                     .set_queue_autosend_suppressed(/*suppressed*/ false);
-                let _ = app.chat_widget.maybe_send_next_queued_input();
+                app.chat_widget.maybe_send_next_queued_input();
                 ui_host_ready = true;
             }
         }
@@ -724,7 +724,7 @@ pub(super) async fn drive(
                 let _handler_stage = enter(Stage::ServerEvent);
                 if let Some(event) = app_server_event { app.handle_app_server_event(app_server, event).await } else {
                     listen_for_app_server_events = false;
-                    let _ = app.begin_reconnect();
+                    app.begin_reconnect();
                     tracing::warn!("app-server event stream closed");
                 }
                 AppRunControl::Continue
@@ -781,7 +781,7 @@ pub(super) async fn drive(
             () = async {
                 match app.commit_animation.as_mut() {
                     Some(interval) => {
-                        let _ = interval.tick().await;
+                        interval.tick().await;
                     }
                     None => std::future::pending().await,
                 }

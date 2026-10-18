@@ -60,7 +60,7 @@ async fn query(candidate: &Path, options: &[&str]) -> io::Result<(ExitStatus, Ve
         .kill_on_drop(true)
         .spawn()?;
     let mut bytes = Vec::new();
-    let _ = child
+    child
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("Missing UI probe output pipe"))?

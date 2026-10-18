@@ -25,7 +25,6 @@ pub struct FarmExecutorConfig {
 }
 
 impl FarmConfig {
-    #[must_use]
     pub fn executor(&self, provider_id: &str) -> FarmExecutorConfig {
         let provider = self.providers.get(provider_id);
         FarmExecutorConfig {

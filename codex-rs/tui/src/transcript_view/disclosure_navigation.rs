@@ -112,7 +112,7 @@ impl TranscriptView {
             };
             if let Some(next) = next {
                 target = next.clone();
-                let _ = self.focus_fold(cells, index, target.clone());
+                self.focus_fold(cells, index, target.clone());
                 continue;
             }
             let mut candidate = index;
@@ -137,7 +137,7 @@ impl TranscriptView {
                 } {
                     index = candidate;
                     target = next.clone();
-                    let _ = self.focus_fold(cells, index, target.clone());
+                    self.focus_fold(cells, index, target.clone());
                     break;
                 }
             }

@@ -58,7 +58,7 @@ pub fn encode_anthropic_request(
         prompt.tools,
         &options.model.input_modalities,
     )?;
-    let _ = history.system.splice(
+    history.system.splice(
         0..0,
         [SUBSCRIPTION_PREAMBLE, SUBSCRIPTION_HARNESS]
             .map(|text| json!({"type":"text", "text":text})),

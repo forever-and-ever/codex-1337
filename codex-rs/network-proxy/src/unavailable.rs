@@ -101,15 +101,12 @@ pub enum NetworkProxy {}
     reason = "Compatibility signatures for an uninhabited runtime"
 )]
 impl NetworkProxy {
-    #[must_use]
     pub fn builder() -> NetworkProxyBuilder {
         NetworkProxyBuilder
     }
-    #[must_use]
     pub fn http_addr(&self) -> SocketAddr {
         match *self {}
     }
-    #[must_use]
     pub fn socks_addr(&self) -> SocketAddr {
         match *self {}
     }
@@ -126,26 +123,21 @@ impl NetworkProxy {
     ) -> Result<crate::RemoteNetworkProxyLaunchConfig> {
         match *self {}
     }
-    #[must_use]
     pub fn remote_policy_decider(
         &self,
         allow_local_binding: bool,
     ) -> Option<Arc<dyn NetworkPolicyDecider>> {
         match *self {}
     }
-    #[must_use]
     pub fn allow_local_binding(&self) -> bool {
         match *self {}
     }
-    #[must_use]
     pub fn allow_unix_sockets(&self) -> Arc<[String]> {
         match *self {}
     }
-    #[must_use]
     pub fn dangerously_allow_all_unix_sockets(&self) -> bool {
         match *self {}
     }
-    #[must_use]
     pub fn managed_mitm_ca_trust_bundle_path(&self) -> Option<AbsolutePathBuf> {
         match *self {}
     }
@@ -166,7 +158,6 @@ impl NetworkProxy {
     ) {
         match *self {}
     }
-    #[must_use]
     pub fn credential_broker_environment(
         &self,
         env: &HashMap<String, String>,

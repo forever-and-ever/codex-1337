@@ -139,7 +139,7 @@ fn receipts_admit_contract_examples_and_reject_inconsistent_captured_effects() {
         .push(valid["files"][0].clone());
     assert!(FileChangeReceipt::parse(&receipt).is_none());
     let mut receipt = valid;
-    let _ = receipt["files"][0]
+    receipt["files"][0]
         .as_object_mut()
         .unwrap()
         .remove("before");

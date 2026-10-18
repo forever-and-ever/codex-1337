@@ -148,7 +148,7 @@ impl Operations {
             self.closed_turns.push_back(turn.to_owned());
         }
         while self.closed_turns.len() > self.capacity {
-            let _ = self.closed_turns.pop_front();
+            self.closed_turns.pop_front();
         }
     }
 
@@ -190,7 +190,7 @@ impl Operations {
         retired.sort_unstable();
         let excess = retired.len().saturating_sub(self.capacity);
         for (_, id) in retired.into_iter().take(excess) {
-            let _ = self.executions.remove(&id);
+            self.executions.remove(&id);
         }
     }
 
@@ -336,8 +336,7 @@ impl Operations {
             }
             ServerNotification::StreamItemsDiscarded(n) => {
                 for id in &n.item_ids {
-                    let _ = self
-                        .items
+                    self.items
                         .insert(id.clone(), Revision::Terminal(Instant::now()));
                 }
             }
@@ -390,7 +389,7 @@ impl Operations {
     fn call(&mut self, custody: Custody, id: String, name: String, source: Source) {
         match self.items.entry(id) {
             Entry::Vacant(slot) => {
-                let _ = slot.insert(Revision::Pending {
+                slot.insert(Revision::Pending {
                     custody,
                     source,
                     work: Pending::Call(name),
@@ -494,8 +493,7 @@ impl Operations {
             match &fact.event {
                 CodeModeEvent::ToolCall { call_id } => {
                     if finished {
-                        let _ = self
-                            .items
+                        self.items
                             .insert(call_id.clone(), Revision::Terminal(Instant::now()));
                     } else {
                         self.call(custody, call_id.clone(), "Tool call".to_owned(), source);
@@ -512,8 +510,7 @@ impl Operations {
             // The typed execution supersedes the provider call, without deleting its capture.
             finish_call(&mut self.items, &owner.exec_call_id);
         } else if execution.finished() && pending(item, started) == Some(true) {
-            let _ = self
-                .items
+            self.items
                 .insert(item.id().to_owned(), Revision::Terminal(Instant::now()));
         } else {
             self.item(
@@ -664,7 +661,7 @@ fn admit(
     match items.entry(key) {
         Entry::Occupied(mut slot) => Revision::admit(slot.get_mut(), work, source, custody),
         Entry::Vacant(slot) => {
-            let _ = slot.insert(work.map_or_else(
+            slot.insert(work.map_or_else(
                 || Revision::Terminal(Instant::now()),
                 |work| Revision::Pending {
                     custody,
@@ -687,14 +684,14 @@ fn trim_revisions<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, capacity: u
     retired.sort_unstable();
     let excess = retired.len().saturating_sub(capacity);
     for (_, key) in retired.into_iter().take(excess) {
-        let _ = items.remove(&key);
+        items.remove(&key);
     }
 }
 
 fn finish_call<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, key: &K) {
     match items.entry(key.clone()) {
         Entry::Vacant(slot) => {
-            let _ = slot.insert(Revision::Terminal(Instant::now()));
+            slot.insert(Revision::Terminal(Instant::now()));
         }
         Entry::Occupied(mut slot) => {
             if matches!(
@@ -704,7 +701,7 @@ fn finish_call<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, key: &K) {
                     ..
                 }
             ) {
-                let _ = slot.insert(Revision::Terminal(Instant::now()));
+                slot.insert(Revision::Terminal(Instant::now()));
             }
         }
     }

@@ -43,7 +43,6 @@ pub enum WarmingLore {
 }
 
 impl WarmingLore {
-    #[must_use]
     pub fn lifetime(self) -> Duration {
         match self {
             Self::OpenAi => Duration::from_mins(/*secs*/ 30),
@@ -100,7 +99,6 @@ pub trait PromptCacheObserver: Send + Sync + Debug {
 
 /// Installs one app-server-owned observer before the manager starts any threads.
 pub trait PromptCacheManager {
-    #[must_use]
     fn with_prompt_cache_observer(self, observer: Arc<dyn PromptCacheObserver>) -> Self;
 }
 
@@ -276,7 +274,7 @@ impl ModelClient {
         let consumer_dropped = CancellationToken::new();
         let dropped = consumer_dropped.clone();
         let (sender, rx_event) = tokio::sync::mpsc::channel(/*buffer*/ 16);
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut dispatch = Some(dispatch);
             loop {
                 let event = tokio::select! {
@@ -316,7 +314,7 @@ impl ModelClient {
                     break;
                 }
             }
-        }));
+        });
         ResponseStream {
             rx_event,
             interrupt,
@@ -344,7 +342,6 @@ pub struct RequestStart {
 }
 
 impl RequestStart {
-    #[must_use]
     pub fn now() -> Self {
         Self {
             wall: SystemTime::now(),
@@ -352,12 +349,10 @@ impl RequestStart {
         }
     }
 
-    #[must_use]
     pub fn wall(self) -> SystemTime {
         self.wall
     }
 
-    #[must_use]
     pub fn age(self) -> Duration {
         self.monotonic
             .elapsed()

@@ -22,7 +22,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     app.chat_widget
         .handle_thread_session_quiet(test_thread_session(root, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("/farm original task");
-    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let submission = loop {
         if let AppEvent::Farm { submission, .. } = events.try_recv().expect("farm event") {
             break submission;
@@ -45,7 +45,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     let mut tui = tui::test_support::make_test_tui().expect("test tui");
     app.open_farm_recovery(root);
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
-    let _ = app.chat_widget.handle_key_event(KeyCode::Esc.into());
+    app.chat_widget.handle_key_event(KeyCode::Esc.into());
     app.finish_farm(
         &mut tui,
         id.clone(),
@@ -126,7 +126,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     app.chat_widget
         .handle_thread_session_quiet(test_thread_session(root, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("/farm investigate the race");
-    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let submission = loop {
         if let AppEvent::Farm {
             thread_id,
@@ -369,7 +369,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         // Toggling to the parent leaves the ephemeral side open, even without a draft or status.
         // Neither replacement path may mistake that quiet state for disposable UI state.
         let side = ThreadId::new();
-        let _ = app.side_threads.insert(side, SideThreadState::new(root));
+        app.side_threads.insert(side, SideThreadState::new(root));
         let mut errors = Vec::new();
         for displayed in [root, side] {
             app.active_thread_id = Some(displayed);

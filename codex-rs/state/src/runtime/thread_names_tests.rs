@@ -53,7 +53,7 @@ async fn root_name_claim_race_and_archive_lifecycle() -> anyhow::Result<()> {
     first
         .mark_archived(owner, &owner_metadata.rollout_path, Utc::now())
         .await?;
-    let _ = first.update_thread_name(contender, Some("siege")).await?;
+    first.update_thread_name(contender, Some("siege")).await?;
     first
         .mark_unarchived(owner, &owner_metadata.rollout_path)
         .await?;
@@ -77,7 +77,7 @@ async fn root_name_claim_race_and_archive_lifecycle() -> anyhow::Result<()> {
         restored.name
     );
     // A compatibility projection cannot resurrect an explicitly cleared claim, even on retry.
-    let _ = first.update_thread_name(owner, /*name*/ None).await?;
+    first.update_thread_name(owner, /*name*/ None).await?;
     first
         .import_legacy_thread_names(&[(owner, "stale legacy name".to_string())])
         .await?;

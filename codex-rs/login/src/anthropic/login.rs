@@ -43,7 +43,7 @@ pub struct LoginCancelHandle(watch::Sender<bool>);
 
 impl LoginCancelHandle {
     pub fn cancel(&self) {
-        let _ = self.0.send_replace(/*value*/ true);
+        self.0.send_replace(/*value*/ true);
     }
 }
 
@@ -134,12 +134,10 @@ impl LoginAttempt {
         })
     }
 
-    #[must_use]
     pub fn authorization_url(&self) -> &str {
         &self.authorization_url
     }
 
-    #[must_use]
     pub fn cancel_handle(&self) -> LoginCancelHandle {
         self.cancel.clone()
     }
@@ -175,7 +173,7 @@ impl LoginAttempt {
             .ok_or_else(|| io::Error::other("Anthropic callback already consumed"))?
             .await
             .map_err(|_| io::Error::other("Anthropic callback task failed"));
-        let _ = self.callback.take();
+        self.callback.take();
         let code = code??;
         let tokens: Tokens = OAuthClient::new(
             &self.http,

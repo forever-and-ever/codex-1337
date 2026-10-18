@@ -15,7 +15,7 @@ impl App {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         use codex_app_server_protocol as api;
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,

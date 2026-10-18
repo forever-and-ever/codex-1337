@@ -92,8 +92,7 @@ impl ModelProvider for NativeBoundary {
             // capture_anthropic_auth has already run. Rotate A and commit B before
             // the first POST; its explicit 401 must recover the captured A only.
             if self.switch_once.swap(false, Ordering::SeqCst) {
-                let _ = self
-                    .store
+                self.store
                     .upsert(
                         self.account_a.clone(),
                         SubscriptionGrant::bearer_only("rotated-a".into())?,
@@ -336,7 +335,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         )
         .await?;
     while let Some(event) = stream.next().await {
-        let _ = event?;
+        event?;
     }
     let requests = server.received_requests().await.unwrap();
     let observed = requests.iter().map(|request| {
@@ -350,7 +349,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             .collect::<Vec<_>>();
         for message in body["messages"].as_array_mut().unwrap() {
             for block in message["content"].as_array_mut().unwrap() {
-                let _ = block.as_object_mut().unwrap().remove("cache_control");
+                block.as_object_mut().unwrap().remove("cache_control");
             }
         }
         json!({"bearer":request.headers["authorization"].to_str().unwrap(), "messages":body["messages"], "effort":body["output_config"]["effort"], "markers":markers})

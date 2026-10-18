@@ -33,7 +33,7 @@ impl ServerResume {
             if matches!(self, Self::Coordination)
                 && matches!(thread.agent_status().await, AgentStatus::Shutdown)
             {
-                let _ = processor
+                processor
                     .thread_manager
                     .remove_thread_if_matches(&id, &thread)
                     .await;

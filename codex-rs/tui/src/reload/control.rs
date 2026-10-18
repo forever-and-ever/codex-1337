@@ -123,7 +123,7 @@ pub(super) async fn listen(
     loop {
         let (mut stream, _) = listener.accept().await?;
         let events = events.clone();
-        drop(tokio::spawn(async move {
+        tokio::spawn(async move {
             let Ok(Ok(envelope)) = tokio::time::timeout(
                 std::time::Duration::from_secs(/*secs*/ 10),
                 read::<Envelope>(&mut stream),
@@ -151,7 +151,7 @@ pub(super) async fn listen(
                     tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), operation)
                         .await;
             }
-        }));
+        });
     }
 }
 
@@ -205,7 +205,7 @@ async fn read<T: serde::de::DeserializeOwned>(stream: &mut UnixStream) -> io::Re
         ));
     }
     let mut bytes = vec![0; len];
-    let _ = stream.read_exact(&mut bytes).await?;
+    stream.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(io::Error::other)
 }
 
@@ -357,7 +357,7 @@ mod tests {
         let version = super::super::retained::checkpoint_version;
         assert_eq!(version(&legacy_checkpoint).unwrap(), 2);
         let mut v1 = legacy_checkpoint.clone();
-        let _ = v1.as_object_mut().unwrap().remove("unstarted");
+        v1.as_object_mut().unwrap().remove("unstarted");
         assert_eq!(version(&v1).unwrap(), 1);
         let old: super::super::RetainedInput = serde_json::from_value(v1)?;
         assert_eq!(serde_json::to_value(old)?["draft"]["composer"], composer);

@@ -63,7 +63,7 @@ pub(super) async fn run() -> io::Result<i32> {
         broker_task.abort_handle(),
     ]);
     let (finished, result) = oneshot::channel();
-    let _ = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("ui-supervisor".into())
         .spawn(move || {
             let result = match tokio::runtime::Builder::new_current_thread()
@@ -226,7 +226,7 @@ async fn supervise(
                     control::Request::Hello { .. } => control::Response::Error("Incompatible UI reload protocol".into()),
                     control::Request::Connect(endpoint) => {
                         let commands = broker_tx.clone();
-                        drop(tokio::spawn(async move {
+                        tokio::spawn(async move {
                             let (tx, rx) = oneshot::channel();
                             let _ = commands.send(broker::Command::Connect(endpoint.into(), tx)).await;
                             let response = match rx.await {
@@ -234,7 +234,7 @@ async fn supervise(
                                 _ => control::Response::Error("Unable to connect to app server".into()),
                             };
                             let _ = reply.send(response);
-                        }));
+                        });
                         continue;
                     }
                     control::Request::Reload(checkpoint) if host.reload.idle() => {
@@ -311,7 +311,7 @@ async fn supervise(
                 let bytes = host.output.as_slices().0;
                 if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref(), bytes)) {
                     if result.as_ref().is_err_and(|error| error.kind() == io::ErrorKind::Interrupted) { continue; }
-                    let _ = host.output.drain(..result?);
+                    host.output.drain(..result?);
                 }
             }
             ready = async {
@@ -344,7 +344,7 @@ async fn supervise(
                 let mut ready = ready?;
                 if let Ok(result) = ready.try_io(|fd| worker_process::write(fd.get_ref(), host.input.as_slices().0)) {
                     match result {
-                        Ok(count) => { let _ = host.input.drain(..count); }
+                        Ok(count) => { host.input.drain(..count); }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => {},
                         Err(error) => return Err(error),
                     }
@@ -415,7 +415,7 @@ impl Host {
         let launched = launched.clone();
         // Even the protocol probe's spawn can block in the kernel. Keep the
         // entire launch off the watchdog reactor, with its slot held throughout.
-        drop(tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let result = tokio::runtime::Handle::current().block_on(async {
                 if negotiate {
                     launch.negotiate().await?;
@@ -423,7 +423,7 @@ impl Host {
                 launch.spawn()
             });
             let _ = launched.blocking_send((generation, result));
-        }));
+        });
     }
 
     fn reject(&mut self, launched: &Launched) {

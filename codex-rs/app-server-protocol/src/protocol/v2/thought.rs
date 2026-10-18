@@ -15,7 +15,6 @@ pub struct ResponseProjection {
 
 impl ThreadItem {
     /// The response's reasoning, when it carried any.
-    #[must_use]
     pub fn from_response_completed(
         event: &RawResponseCompletedEvent,
     ) -> Option<ResponseProjection> {

@@ -18,7 +18,7 @@ impl App {
             ContextRoleCommand::Set(_) => UiRequestKind::Mutation,
         };
         let clear = matches!(command, ContextRoleCommand::Set(None));
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             kind,

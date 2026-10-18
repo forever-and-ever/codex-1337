@@ -117,7 +117,7 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
     struct Dropped(Arc<AtomicUsize>);
     impl Drop for Dropped {
         fn drop(&mut self) {
-            let _ = self.0.fetch_add(1, Ordering::SeqCst);
+            self.0.fetch_add(1, Ordering::SeqCst);
         }
     }
     for expected_progress in [
@@ -203,7 +203,7 @@ impl HttpTransport for UncertainTransport {
         unreachable!("native inference must stream")
     }
     async fn stream(&self, _: Request) -> Result<StreamResponse, TransportError> {
-        let _ = self.0.fetch_add(1, Ordering::SeqCst);
+        self.0.fetch_add(1, Ordering::SeqCst);
         Err(TransportError::Network("synthetic uncertain POST".into()))
     }
 }

@@ -11,7 +11,6 @@ pub enum SearchRoute {
 }
 
 impl SearchRoute {
-    #[must_use]
     pub fn classify(
         provider: &ModelProviderInfo,
         providers: &HashMap<String, ModelProviderInfo>,

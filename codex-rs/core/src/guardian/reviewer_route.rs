@@ -62,8 +62,7 @@ impl ReviewerRouteQuarantine {
             QuarantineCause::Ineligible => Duration::from_secs(/*secs*/ 3600),
             QuarantineCause::Unavailable => Duration::from_secs(/*secs*/ 600),
         };
-        let _ = self
-            .accounts
+        self.accounts
             .lock()
             .await
             .insert(account_id.to_owned(), Instant::now() + duration);

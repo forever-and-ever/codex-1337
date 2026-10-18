@@ -86,7 +86,7 @@ impl LocalThreadStore {
                 if end == 0 {
                     return Err(mail_history_error("empty canonical lineage segment"));
                 }
-                let _ = reader
+                reader
                     .seek(SeekFrom::Start(end - 1))
                     .map_err(mail_history_error)?;
                 let mut last_byte = [0];
@@ -203,16 +203,16 @@ fn retried_record_prefix(partial: &[u8], complete: &[u8]) -> bool {
     fn without_timestamp(record: &[u8]) -> Option<&[u8]> {
         let value = record.strip_prefix(b"{\"timestamp\":")?;
         let mut timestamp = serde_json::Deserializer::from_slice(value).into_iter::<String>();
-        let _ = timestamp.next()?.ok()?;
+        timestamp.next()?.ok()?;
         let rest = &value[timestamp.byte_offset()..];
         // Require a complete numeric ordinal and item discriminator, not a shared JSON header.
         let value = rest.strip_prefix(b",\"ordinal\":")?;
         let mut ordinal = serde_json::Deserializer::from_slice(value).into_iter::<u64>();
-        let _ = ordinal.next()?.ok()?;
+        ordinal.next()?.ok()?;
         let value = value[ordinal.byte_offset()..].strip_prefix(b",\"type\":")?;
         let mut kind = serde_json::Deserializer::from_slice(value).into_iter::<String>();
-        let _ = kind.next()?.ok()?;
-        let _ = value[kind.byte_offset()..].strip_prefix(b",\"payload\":")?;
+        kind.next()?.ok()?;
+        value[kind.byte_offset()..].strip_prefix(b",\"payload\":")?;
         Some(rest)
     }
     let Some(partial) = without_timestamp(partial) else {

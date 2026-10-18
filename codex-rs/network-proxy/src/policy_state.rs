@@ -55,7 +55,6 @@ pub struct BlockedRequestArgs {
 }
 
 impl BlockedRequest {
-    #[must_use]
     pub fn new(args: BlockedRequestArgs) -> Self {
         let BlockedRequestArgs {
             host,

@@ -260,7 +260,7 @@ impl TranscriptView {
             self.scroll(cells, 0);
         }
         if let Some(key) = self.deferred_focus.take() {
-            let _ = self.handle_key(key, cells);
+            self.handle_key(key, cells);
         }
         self.resume_fold_navigation();
         let inflight = self
@@ -349,10 +349,10 @@ impl TranscriptView {
         };
         let last = self.visible.last().expect("visible has a first row").index;
         for index in first.saturating_sub(2)..first {
-            let _ = self.current_layout(cells, index);
+            self.current_layout(cells, index);
         }
         for index in last + 1..=(last + 2).min(cells.len().saturating_sub(1)) {
-            let _ = self.current_layout(cells, index);
+            self.current_layout(cells, index);
         }
     }
 }
@@ -376,7 +376,7 @@ impl TranscriptView {
             if let Some(layout) = self.cache.rewrap(&layout, width, false)
                 && let Some(snapshot) = self.snapshot_mut()
             {
-                let _ = snapshot.pinned.insert(key, layout);
+                snapshot.pinned.insert(key, layout);
             }
         }
         if let Some(live) = live

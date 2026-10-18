@@ -197,7 +197,7 @@ impl Session {
             return delta.take();
         }
         if full_context {
-            let _ = delta.take();
+            delta.take();
         }
         if !full_context && !lease.instruction_pending {
             return delta.take();

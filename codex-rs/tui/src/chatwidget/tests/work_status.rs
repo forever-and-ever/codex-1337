@@ -96,7 +96,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         for width in [80, 30] {
             let height = chat.desired_height(width);
             let mut terminal = ratatui::Terminal::new(TestBackend::new(width, height)).unwrap();
-            let _ = terminal
+            terminal
                 .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
                 .unwrap();
             panels.push(normalized_backend_snapshot(terminal.backend()));
@@ -181,13 +181,13 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     if let ServerNotification::ThreadWorkStatusUpdated(update) = &mut cleared {
         update.status.activity.clear();
     }
-    let _ = chat.set_status_header("Reconnecting…".into());
+    chat.set_status_header("Reconnecting…".into());
     chat.handle_server_notification(cleared, /*replay_kind*/ None);
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
         "Reconnecting…",
     );
-    let _ = chat.set_status_header("Working".into());
+    chat.set_status_header("Working".into());
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
         "Working"
@@ -199,18 +199,18 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
     let elapsed = chat.bottom_pane.status_elapsed().unwrap();
     let mut legacy = status;
     legacy.activity = format!("{}👩‍🔬 extra", "x".repeat(48));
-    let _ = chat.set_status_header("Reconnecting…".into());
+    chat.set_status_header("Reconnecting…".into());
     chat.on_work_status_updated(legacy);
     assert_eq!(
         chat.bottom_pane.status_widget().unwrap().header(),
         "Reconnecting…"
     );
-    let _ = chat.set_status_header("Working".into());
+    chat.set_status_header("Working".into());
     let expected = format!("{}…", "x".repeat(48));
     assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
     chat.bottom_pane.hide_status_indicator();
     chat.bottom_pane.ensure_status_indicator();
-    let _ = chat.set_status_header("Working".into());
+    chat.set_status_header("Working".into());
     assert_eq!(chat.bottom_pane.status_widget().unwrap().header(), expected);
     assert!(chat.bottom_pane.status_elapsed().unwrap() >= elapsed);
     chat.clear_work_status();
@@ -218,7 +218,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         chat.bottom_pane.status_widget().unwrap().header(),
         "Working"
     );
-    let _ = drain_insert_history(&mut rx);
+    drain_insert_history(&mut rx);
     for final_status in [
         TurnStatus::Completed,
         TurnStatus::Interrupted,
@@ -239,7 +239,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         );
         assert_eq!(chat.current_work_status, None);
         chat.bottom_pane.ensure_status_indicator();
-        let _ = chat.restore_reasoning_status_header();
+        chat.restore_reasoning_status_header();
         assert_eq!(
             chat.bottom_pane.status_widget().unwrap().header(),
             "Working"
@@ -249,7 +249,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         chat.handle_server_notification(notification.clone(), /*replay_kind*/ None);
         assert_eq!(chat.current_work_status, None);
         chat.bottom_pane.ensure_status_indicator();
-        let _ = chat.restore_reasoning_status_header();
+        chat.restore_reasoning_status_header();
         assert_eq!(
             chat.bottom_pane.status_widget().unwrap().header(),
             "Working"
@@ -306,8 +306,8 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
                 Vec::new(),
             );
             chat.set_parent_owned_thread();
-            let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-            let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+            chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
             assert_eq!(chat.composer_text_with_pending(), "Retained root draft");
             let mut roster = chat.subagent_roster.lock().unwrap();
             roster.watched = Some(ids[8]);
@@ -317,7 +317,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         for (width, max_height) in [(80, 16), (30, 16), (30, 8)] {
             let height = chat.desired_height(width).min(max_height);
             let mut terminal = ratatui::Terminal::new(TestBackend::new(width, height)).unwrap();
-            let _ = terminal
+            terminal
                 .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
                 .unwrap();
             assert_eq!(

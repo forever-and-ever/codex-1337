@@ -24,8 +24,7 @@ impl App {
         notification: ServerNotification,
     ) {
         let epoch = self.server_operations.epoch();
-        let _ =
-            self.request_server(
+        self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::ReadOnly,
@@ -62,7 +61,7 @@ impl App {
     ) {
         let epoch = self.server_operations.epoch();
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
-        let _ = self.request_server(
+        self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,

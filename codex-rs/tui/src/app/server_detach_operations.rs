@@ -240,7 +240,7 @@ impl App {
             }
             match (&target.kind, result.result) {
                 (DetachKind::Side { .. }, Ok(())) => {
-                    let _ = self.abandoned_side_threads.insert(target.thread_id);
+                    self.abandoned_side_threads.insert(target.thread_id);
                     let drafts = self
                         .take_unsent_thread_operations(target.thread_id, &target.store)
                         .await;
@@ -270,7 +270,7 @@ impl App {
                         .expect("matching detach target checked")
                         .mark_replay_only();
                     self.abort_thread_event_listener(thread_id);
-                    let _ = self.pending_server_profiles.remove(&thread_id);
+                    self.pending_server_profiles.remove(&thread_id);
                     self.pause_detached_thread_input(target).await;
                     self.restore_submission_drafts(
                         thread_id,

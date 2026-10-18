@@ -50,8 +50,8 @@ async fn context_role_command_output() {
     ] {
         chat.bottom_pane
             .set_composer_text(input.to_string(), Vec::new(), Vec::new());
-        let _ = chat.handle_key_event(KeyCode::Esc.into());
-        let _ = chat.handle_key_event(KeyCode::Enter.into());
+        chat.handle_key_event(KeyCode::Esc.into());
+        chat.handle_key_event(KeyCode::Enter.into());
         let mut errors = 0;
         while let Ok(event) = rx.try_recv() {
             match event {

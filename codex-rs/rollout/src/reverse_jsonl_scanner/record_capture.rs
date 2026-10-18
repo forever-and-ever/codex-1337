@@ -14,7 +14,7 @@ impl<R: Read + Seek> ReverseJsonlScanner<R> {
     pub fn scan_next_rollout_line_with_record(
         &mut self,
     ) -> io::Result<Option<(ScanOutcome<RolloutLine>, &[u8])>> {
-        let _ = self.record_capture.get_or_insert_default();
+        self.record_capture.get_or_insert_default();
         let outcome = self.scan_next_rollout_line()?;
         let Some(record) = self.record_capture.as_deref() else {
             unreachable!("record capture enabled before scanning");

@@ -128,7 +128,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
     );
     let mut painted = Vec::new();
     for mode in [OutputMode::Fmt, OutputMode::Raw, OutputMode::Fmt] {
-        let _ = tests::render(&mut view, &cells, 80, 14);
+        tests::render(&mut view, &cells, 80, 14);
         let layout = view.current_layout(&cells, 0).unwrap();
         let target = FoldTarget::Invocation {
             call_id: "mode".into(),
@@ -161,7 +161,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         let selection = view.selection.as_mut().unwrap();
         selection.start.offset = 0;
         selection.end.offset = layout.text().len();
-        let _ = tests::render(&mut view, &cells, 34, 18);
+        tests::render(&mut view, &cells, 34, 18);
         assert_eq!(view.selected_text(&cells), Some(text));
         view.end_selection(&cells);
         painted.push(format!("{mode:?}\n{buffer:?}"));
@@ -252,14 +252,14 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             "unsafe",
             Action::Toggle(Port::Output, Panel::Visible(OutputMode::Fmt)),
         );
-        let _ = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
         let layout = view.current_layout(&cells, /*index*/ 0).unwrap();
         let start = layout.text().find(&safe).unwrap();
         view.begin_selection(&cells, /*column*/ 4, /*row*/ 1, /*clicks*/ 1);
         let selection = view.selection.as_mut().unwrap();
         selection.start.offset = start;
         selection.end.offset = start + safe.len();
-        let _ = tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
+        tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
         assert_eq!(view.selected_text(&cells).as_deref(), Some(safe.as_str()));
         view.end_selection(&cells);
         let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
@@ -328,7 +328,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         })
         .unwrap();
         if source == ArrivalSource::Legacy {
-            let _ = encoded.as_object_mut().unwrap().remove("source");
+            encoded.as_object_mut().unwrap().remove("source");
         }
         let replay =
             crate::history_cell::ArrivalCell::new(serde_json::from_value(encoded).unwrap());
@@ -581,7 +581,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(!tests::text(&closed).contains("Raw Context"));
             let parent = view.current_layout(&cells, 0).unwrap().fold_targets()[0].clone();
             assert!(view.focus_fold(&cells, 0, parent));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 64, 6);
             assert!(tests::text(&folded).contains("Raw Context"));
             assert!(
@@ -597,8 +597,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 0,
                 FoldTarget::Part("arrival-raw:provenance-definitions".into())
             ));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
-            let _ = tests::render(&mut view, &cells, 64, 12);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            tests::render(&mut view, &cells, 64, 12);
             let layout = view.current_layout(&cells, 0).unwrap();
             let start = layout.text().find(json).unwrap();
             assert!(layout.text().contains("Tool Declarations"));
@@ -606,12 +606,12 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             let selection = view.selection.as_mut().unwrap();
             selection.start.offset = start;
             selection.end.offset = start + json.len();
-            let _ = tests::render(&mut view, &cells, 32, 16);
+            tests::render(&mut view, &cells, 32, 16);
             assert_eq!(view.selected_text(&cells), Some(json.into()));
             view.end_selection(&cells);
             assert!(view.focus_fold(&cells, 0, FoldTarget::OutputMode(OutputMode::Fmt)));
-            let _ = view.handle_key(crossterm::event::KeyCode::Right.into(), &cells);
-            let _ = tests::render(&mut view, &cells, 64, 16);
+            view.handle_key(crossterm::event::KeyCode::Right.into(), &cells);
+            tests::render(&mut view, &cells, 64, 16);
             let formatted = view.current_layout(&cells, 0).unwrap();
             assert!(formatted.text().contains("9007199254740993123456789"));
             assert!(formatted.text().contains("1.2300e+04"));
@@ -621,7 +621,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 0,
                 FoldTarget::Part("arrival-raw:provenance-definitions".into())
             ));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 32, 8);
             assert!(
                 !view
@@ -730,7 +730,7 @@ fn mixed_feed_keeps_its_grid_through_resize_and_details() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    let _ = shell.complete_call(
+    shell.complete_call(
         "shell",
         CommandOutput::new(/*exit_code*/ 0, "source".into()),
         Duration::ZERO,
@@ -744,7 +744,7 @@ fn mixed_feed_keeps_its_grid_through_resize_and_details() {
         /*interaction_input*/ None,
         /*animations_enabled*/ false,
     );
-    let _ = poll.complete_call(
+    poll.complete_call(
         "poll",
         CommandOutput::new(/*exit_code*/ 0, String::new()),
         Duration::ZERO,
@@ -853,13 +853,13 @@ fn mixed_feed_keeps_its_grid_through_resize_and_details() {
         snapshots.push(format!("width={width}\n{}", text.trim_end()));
         if width == 64 {
             assert!(view.focus_fold(&cells, 2, target));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let expanded = tests::render(&mut view, &cells, width, /*height*/ 50);
             let text = tests::text(&expanded);
             assert!(text.contains("poll foo"));
             assert!(!text.contains("tokens"));
             snapshots.push(format!("expanded width={width}\n{}", text.trim_end()));
-            let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
         }
         view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
         view.jump_to_latest();
@@ -868,7 +868,7 @@ fn mixed_feed_keeps_its_grid_through_resize_and_details() {
             "detailed width={width}\n{}",
             tests::text(&detailed).trim_end()
         ));
-        let _ = cells.pop();
+        cells.pop();
     }
     let clock = timestamp.unwrap().span().content.trim().to_owned();
     insta::assert_snapshot!(snapshots.join("\n\n").replace(&clock, "14:17"));
@@ -1026,7 +1026,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     insta::assert_snapshot!(rendered);
 
     // A following live tool must be as tightly spaced as its committed counterpart.
-    let _ = cells.pop();
+    cells.pop();
     let tail = ToolOutputCell::from_output(
         "tail",
         Some("tail"),
@@ -1036,11 +1036,11 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     )
     .unwrap();
     let ids = tail.activity_ids();
-    let _ = view.sync_live_activity(&cells, ids);
-    let _ = view.sync_live_invocation_tail(100, None, &tail, Vec::new());
+    view.sync_live_activity(&cells, ids);
+    view.sync_live_invocation_tail(100, None, &tail, Vec::new());
     let mut live = Buffer::empty(area);
     view.render(area, &mut live, &cells);
-    let _ = view.sync_live_tail(/*width*/ 100, /*key*/ None, |_| None);
+    view.sync_live_tail(/*width*/ 100, /*key*/ None, |_| None);
     cells.push(Arc::new(tail));
     let mut committed = Buffer::empty(area);
     view.render(area, &mut committed, &cells);
@@ -1278,7 +1278,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             ),
         }
     ));
-    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &replay);
     let result = tests::render(&mut view, &replay, 100, 12);
     assert!(tests::text(&result).contains(capture));
     // Missing legacy ownership is not proximity: its output item still has a named fold.

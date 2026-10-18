@@ -203,13 +203,12 @@ impl StateRuntime {
         thread_id: ThreadId,
         id: i64,
     ) -> anyhow::Result<()> {
-        let _ =
-            sqlx::query("DELETE FROM thread_alarms WHERE owner = ? AND thread_id = ? AND id = ?")
-                .bind(owner_label(owner))
-                .bind(thread_id.to_string())
-                .bind(id)
-                .execute(self.pool.as_ref())
-                .await?;
+        sqlx::query("DELETE FROM thread_alarms WHERE owner = ? AND thread_id = ? AND id = ?")
+            .bind(owner_label(owner))
+            .bind(thread_id.to_string())
+            .bind(id)
+            .execute(self.pool.as_ref())
+            .await?;
         Ok(())
     }
 
@@ -218,7 +217,7 @@ impl StateRuntime {
         owner: Channel,
         thread_id: ThreadId,
     ) -> anyhow::Result<()> {
-        let _ = sqlx::query("DELETE FROM thread_alarms WHERE owner = ? AND thread_id = ?")
+        sqlx::query("DELETE FROM thread_alarms WHERE owner = ? AND thread_id = ?")
             .bind(owner_label(owner))
             .bind(thread_id.to_string())
             .execute(self.pool.as_ref())

@@ -29,7 +29,7 @@ impl Bearer {
 
 impl AuthProvider for Bearer {
     fn add_auth_headers(&self, headers: &mut HeaderMap) {
-        let _ = headers.insert(http::header::AUTHORIZATION, self.expose());
+        headers.insert(http::header::AUTHORIZATION, self.expose());
     }
 }
 
@@ -56,8 +56,7 @@ pub async fn read_key_file(path: &Path) -> io::Result<Bearer> {
         .await
         .map_err(|_| io::Error::other("Cannot inspect the OpenRouter key file"))?;
     let mut secret = String::new();
-    let _ = file
-        .take(16_385)
+    file.take(16_385)
         .read_to_string(&mut secret)
         .await
         .map_err(|_| io::Error::other("Cannot read the OpenRouter key file"))?;

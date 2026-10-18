@@ -14,7 +14,7 @@ impl App {
     ) -> std::ops::ControlFlow<(), Option<AbsolutePathBuf>> {
         if !self.server_operations.is_empty() {
             let source = self.current_displayed_thread_id();
-            let _ = self.request_server_prepared(
+            self.request_server_prepared(
                 app_server,
                 turn_submissions::ui_requests::UiRequestScope::Connection,
                 turn_submissions::ui_requests::UiRequestKind::ReadOnly,

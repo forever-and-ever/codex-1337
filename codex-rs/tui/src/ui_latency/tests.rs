@@ -88,12 +88,12 @@ async fn independent_dump_survives_blocked_and_suspended_dispatcher() {
         ));
     let mut slow = std::os::unix::net::UnixStream::connect(&path).expect("slow client");
     slow.write_all(b"U").expect("partial command");
-    let _ = query(pid, false)
+    query(pid, false)
         .await
         .expect("deadline releases slow client");
     let mut malformed = std::os::unix::net::UnixStream::connect(&path).expect("malformed client");
     malformed.write_all(b"NOTVALID").expect("bad command");
-    let _ = query(pid, false)
+    query(pid, false)
         .await
         .expect("malformed client does not kill listener");
     drop(endpoint);
@@ -159,7 +159,7 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
             .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
                 let input = crate::tui::TuiEvent::Paste(String::new());
                 let old = input_consumed(&input).expect("consumed input");
-                let _ = shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
                 input_handled(old);
                 drop(enter(Stage::FramePaint));
                 drop(enter(Stage::TerminalFlush));
@@ -232,7 +232,7 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
                 assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
                 drop(enter(Stage::FramePaint));
                 let stale = frame_submitted();
-                let _ = shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
                 frame_completed(stale, phases, flush_end);
                 assert_eq!(
                     WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),

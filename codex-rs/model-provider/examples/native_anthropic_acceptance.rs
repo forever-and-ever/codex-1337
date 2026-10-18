@@ -308,11 +308,11 @@ impl Driver {
 
 fn private_file(path: &Path) -> Result<File> {
     let mut options = OpenOptions::new();
-    let _ = options.create_new(true).write(true);
+    options.create_new(true).write(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        let _ = options.mode(0o600);
+        options.mode(0o600);
     }
     Ok(options.open(path)?)
 }
@@ -400,7 +400,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))?;
     }
     let mut token = String::new();
-    let _ = std::io::stdin()
+    std::io::stdin()
         .take(/*limit*/ 65537)
         .read_to_string(&mut token)
         .map_err(|_| anyhow::anyhow!("invalid bearer input"))?;
@@ -577,7 +577,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
         let result = echo_result(&call.items, &driver.tools[0])?;
         parent.extend(call.items);
         parent.push(result);
-        let _ = driver
+        driver
             .send(haiku_stage("parent.tool_result", &haiku, one_hour), &parent)
             .await?;
         let parent = driver.persist("parent-history.json", &parent)?;
@@ -679,7 +679,7 @@ async fn run(args: &[String], arm: Arm) -> Result<()> {
     resumed.extend(resumed_receipt.items);
     resumed.push(result);
     let resumed = driver.persist("signed-tool-history.json", &resumed)?;
-    let _ = driver
+    driver
         .send(
             signed_stage("signed.tool_result", AnthropicOperation::Inference),
             &resumed,

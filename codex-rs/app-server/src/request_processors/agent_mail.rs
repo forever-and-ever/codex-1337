@@ -53,7 +53,7 @@ fn defer_recipient(
 ) {
     match retries.entry((root, recipient)) {
         Entry::Vacant(entry) => {
-            let _ = entry.insert(RecoveryBackoff::new(&error));
+            entry.insert(RecoveryBackoff::new(&error));
             tracing::error!(%root, %recipient, %error, "accepted-mail recovery is blocked; inbox retained; unload/reload or resume recipient after repairing storage; retrying with capped backoff");
         }
         Entry::Occupied(mut entry) => {
@@ -78,7 +78,7 @@ impl ThreadRequestProcessor {
             let mut recipients = HashMap::new();
             let mut inbox_retry: Option<RecoveryBackoff> = None;
             loop {
-                let _ = tick.tick().await;
+                tick.tick().await;
                 if inbox_retry.as_ref().is_some_and(RecoveryBackoff::waiting) {
                     continue;
                 }
@@ -151,7 +151,7 @@ impl ThreadRequestProcessor {
             {
                 defer_recipient(retries, root, recipient, error);
             } else {
-                let _ = retries.remove(&(root, recipient));
+                retries.remove(&(root, recipient));
             }
         }
         Ok(())

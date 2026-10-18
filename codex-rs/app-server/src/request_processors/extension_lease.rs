@@ -55,18 +55,18 @@ impl Drop for PendingConnectionAttach {
         let lease_id = self.lease_id.clone();
         let cancellation = Arc::clone(&self.cancellation);
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            drop(runtime.spawn(async move {
+            runtime.spawn(async move {
                 {
                     let mut leases = leases.lock().await;
                     if leases
                         .get(&thread_id)
                         .is_some_and(|lease| lease.lease_id == lease_id)
                     {
-                        let _ = leases.remove(&thread_id);
+                        leases.remove(&thread_id);
                     }
                 }
                 thread.detach_mcp_extension(&cancellation).await;
-            }));
+            });
         }
     }
 }
@@ -130,7 +130,7 @@ impl ThreadRequestProcessor {
                     .get(&thread_id)
                     .is_some_and(|lease| lease.cancellation.is_cancelled())
                 {
-                    let _ = leases.remove(&thread_id);
+                    leases.remove(&thread_id);
                 }
                 if let Some(existing) = leases.get(&thread_id) {
                     if existing.owner == owner
@@ -150,7 +150,7 @@ impl ThreadRequestProcessor {
                 }
                 let lease_id = Uuid::now_v7().to_string();
                 let cancellation = Arc::new(CancellationToken::new());
-                let _ = leases.insert(
+                leases.insert(
                     thread_id,
                     ExtensionLease {
                         owner,

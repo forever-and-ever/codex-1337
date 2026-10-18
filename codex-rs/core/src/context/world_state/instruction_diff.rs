@@ -144,7 +144,7 @@ impl Entry {
                     .push(Text::from_fragment(fragment.as_ref()).fingerprint());
             }
         }
-        let _ = snapshot
+        snapshot
             .sections
             .insert(format!("{STATE_PREFIX}{id}"), revision.into_value());
         (state, updates)
@@ -158,7 +158,7 @@ impl WorldState {
             !self.sections.contains_key(id),
             "duplicate world-state section ID: {id}"
         );
-        let _ = self.sections.insert(
+        self.sections.insert(
             id,
             Entry::Instruction(Box::new(section), Amendment::Unified),
         );
@@ -301,7 +301,7 @@ pub(super) fn retire_missing(
             prior.lineage.push(removal.fingerprint());
             updates.push(WorldStateUpdate::fragment(removal));
         }
-        let _ = snapshot.sections.insert(key.clone(), prior.into_value());
+        snapshot.sections.insert(key.clone(), prior.into_value());
     }
     updates
 }

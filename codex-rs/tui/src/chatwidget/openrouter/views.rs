@@ -209,7 +209,7 @@ impl EndpointsView {
             _ => BTreeSet::new(),
         };
         if !slugs.remove(&row.slug) {
-            let _ = slugs.insert(row.slug.clone());
+            slugs.insert(row.slug.clone());
         }
         self.filter = match (EndpointSet::new(slugs), mark) {
             (Some(set), EndpointMark::Allow) => EndpointFilter::Only(set),

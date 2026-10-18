@@ -24,9 +24,9 @@ impl ChatWidget {
             self.status_state.reasoning_resume_turn_id = None;
             self.status_state.reasoning_recovered_after_refresh = false;
         }
-        let _ = self.clear_active_stream_tail();
+        self.clear_active_stream_tail();
         self.adaptive_chunking.reset();
-        let _ = self.sync_active_stream_tail();
+        self.sync_active_stream_tail();
         self.app_event_tx
             .send(AppEvent::DiscardStreamItems(item_ids));
         if self.stream_controllers_idle() {
