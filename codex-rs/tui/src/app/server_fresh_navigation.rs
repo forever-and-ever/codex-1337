@@ -1,6 +1,38 @@
 //! Fresh acquisition retains the unsent initial draft independently of subscription custody.
 
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AbortOnDropHandle;
+use super::App;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::AppServerTarget;
+use super::Arc;
+use super::CODEX_CLI_VERSION;
+use super::CleanupContinuation;
+use super::Config;
+use super::ConnectionMutation;
+use super::DetachScope;
+use super::FutureExt;
+use super::LaneState;
+use super::LocalDraftRecovery;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::OperationOrigin;
+use super::Path;
+use super::PathBuf;
+use super::PendingNavigation;
+use super::ProviderModelChoice;
+use super::Result;
+use super::ServerCompletion;
+use super::ServerOperation;
+use super::ThreadId;
+use super::ThreadStartSource;
+use super::UserMessage;
+use super::apply_managed_new_thread_defaults;
+use super::detach;
+use super::navigation_config;
+use super::tui;
 use crate::app::session_lifecycle::ThreadAttachPresentation;
 use crate::app_server_session::session_preparation::PreparedSession;
 use crate::app_server_session::session_preparation::StartPreparation;
@@ -212,69 +244,76 @@ impl App {
             operation.generation,
         );
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let outcome = std::panic::AssertUnwindSafe(async {
-                match effect {
-                    FreshEffect::Defaults { cwd, config } => {
-                        let defaults = tokio::time::timeout(
-                            ACK_TIMEOUT,
-                            crate::config_update::read_effective_config_if_supported(
-                                handle.clone(),
-                                &cwd,
-                            ),
-                        )
-                        .await
-                        .map_err(|_| "New-session defaults read timed out".to_string())
-                        .and_then(|result| result.map_err(|error| error.to_string()));
-                        let result = match defaults {
-                            Ok(defaults) => config
-                                .run()
-                                .await
-                                .map(|projected| {
-                                    let (config, settings) = *projected;
-                                    Box::new((defaults, config, settings))
-                                })
-                                .map_err(|error| error.to_string()),
-                            Err(error) => Err(error),
-                        };
-                        FreshOutcome::Defaults(result)
-                    }
-                    FreshEffect::Start(plan) => FreshOutcome::Started(Box::new(plan.run().await)),
-                    FreshEffect::Name { thread_id, name } => {
-                        let result = tokio::time::timeout(
-                            ACK_TIMEOUT,
-                            handle.thread_allocate_name(
-                                api::RequestId::String(format!("tui-operation-{id}-name")),
-                                api::ThreadSetNameParams {
-                                    thread_id: thread_id.to_string(),
-                                    name: name.clone(),
-                                    naming_mode: Some(api::ThreadNameMode::Explicit),
-                                    conflict_thread_ids: None,
-                                },
-                            ),
-                        )
-                        .await
-                        .map_err(|_| {
-                            "Name acknowledgement timed out; the name write may still complete"
-                                .to_string()
-                        })
-                        .and_then(|result| {
-                            result
-                                .map(|response| response.thread_name.unwrap_or(name))
-                                .map_err(|error| error.to_string())
-                        });
-                        FreshOutcome::Named(result)
-                    }
-                    FreshEffect::Detach(plan) => FreshOutcome::Detached(
-                        match tokio::time::timeout(ACK_TIMEOUT, detach::send(&handle, id, &plan))
+            let outcome = Box::pin(
+                std::panic::AssertUnwindSafe(async {
+                    match effect {
+                        FreshEffect::Defaults { cwd, config } => {
+                            let defaults = tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                crate::config_update::read_effective_config_if_supported(
+                                    handle.clone(),
+                                    &cwd,
+                                ),
+                            )
                             .await
-                        {
-                            Ok(results) => detach::DetachReceipt::Complete(results),
-                            Err(_) => detach::DetachReceipt::BudgetExpired,
-                        },
-                    ),
-                }
-            })
-            .catch_unwind()
+                            .map_err(|_| "New-session defaults read timed out".to_string())
+                            .and_then(|result| result.map_err(|error| error.to_string()));
+                            let result = match defaults {
+                                Ok(defaults) => config
+                                    .run()
+                                    .await
+                                    .map(|projected| {
+                                        let (config, settings) = *projected;
+                                        Box::new((defaults, config, settings))
+                                    })
+                                    .map_err(|error| error.to_string()),
+                                Err(error) => Err(error),
+                            };
+                            FreshOutcome::Defaults(result)
+                        }
+                        FreshEffect::Start(plan) => {
+                            FreshOutcome::Started(Box::new(Box::pin(plan.run()).await))
+                        }
+                        FreshEffect::Name { thread_id, name } => {
+                            let result = tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                handle.thread_allocate_name(
+                                    api::RequestId::String(format!("tui-operation-{id}-name")),
+                                    api::ThreadSetNameParams {
+                                        thread_id: thread_id.to_string(),
+                                        name: name.clone(),
+                                        naming_mode: Some(api::ThreadNameMode::Explicit),
+                                        conflict_thread_ids: None,
+                                    },
+                                ),
+                            )
+                            .await
+                            .map_err(|_| {
+                                "Name acknowledgement timed out; the name write may still complete"
+                                    .to_string()
+                            })
+                            .and_then(|result| {
+                                result
+                                    .map(|response| response.thread_name.unwrap_or(name))
+                                    .map_err(|error| error.to_string())
+                            });
+                            FreshOutcome::Named(result)
+                        }
+                        FreshEffect::Detach(plan) => FreshOutcome::Detached(
+                            match tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                detach::send(&handle, id, &plan),
+                            )
+                            .await
+                            {
+                                Ok(results) => detach::DetachReceipt::Complete(results),
+                                Err(_) => detach::DetachReceipt::BudgetExpired,
+                            },
+                        ),
+                    }
+                })
+                .catch_unwind(),
+            )
             .await
             .unwrap_or(FreshOutcome::Terminated);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
@@ -396,7 +435,7 @@ impl App {
                     &self.harness_overrides,
                 );
                 let choice = if let Some(choice) = &input.provider {
-                    config.model_provider_id = choice.provider.id.clone();
+                    config.model_provider_id.clone_from(&choice.provider.id);
                     if let Some(info) = config.model_providers.get(&choice.provider.id) {
                         config.model_provider = info.clone();
                     }
@@ -532,8 +571,7 @@ impl App {
                         false,
                     );
                 } else {
-                    self.commit_fresh_navigation(tui, server, operation, *ready)
-                        .await?;
+                    Box::pin(self.commit_fresh_navigation(tui, server, operation, *ready)).await?;
                 }
             }
             (mut stage, FreshOutcome::Terminated) => {
@@ -595,7 +633,7 @@ impl App {
                 blank.session = session.clone();
             }
             if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                self.agents_overview.input_states.insert(thread_id, input);
+                let _ = self.agents_overview.input_states.insert(thread_id, input);
             }
         }
         if let Some(choice) = &ready.context.input.provider {
@@ -609,7 +647,8 @@ impl App {
         self.remember_launch_permissions();
         let thread_id = ready.started.session.thread_id;
         if !self.config.ephemeral && !matches!(self.app_server_target, AppServerTarget::Embedded) {
-            self.agents_overview
+            let _ = self
+                .agents_overview
                 .blank_sessions
                 .insert(thread_id, ready.started.clone());
         }
@@ -623,7 +662,7 @@ impl App {
             )
             .await
         {
-            self.agents_overview.blank_sessions.remove(&thread_id);
+            let _ = self.agents_overview.blank_sessions.remove(&thread_id);
             self.recover_fresh_input(&mut ready.context.input);
             self.chat_widget.add_error_message(format!(
                 "Failed to attach to fresh app-server thread: {error}"

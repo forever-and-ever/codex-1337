@@ -1,6 +1,8 @@
 //! Generated-title allocation after a background name check.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::ThreadId;
 use crate::app_server_session::typed_requests::SessionRpc;
 
 impl App {
@@ -13,7 +15,7 @@ impl App {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         use codex_app_server_protocol as api;
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,

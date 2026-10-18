@@ -1,6 +1,11 @@
 //! Preserve failed-turn cells while replacing a paginated history window.
 
-use super::*;
+use super::App;
+use super::Arc;
+use super::HistoryCell;
+use super::TranscriptSplice;
+use super::history_cell;
+use super::tui;
 
 impl App {
     /// Move metadata witnesses with their source turn, never with a later page's tools.

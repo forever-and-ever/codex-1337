@@ -17,8 +17,9 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn session_draft_switches_provider_without_creating_threads_or_losing_input() -> Result<()> {
-    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
+    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
+    let (mut server, requests, proxy) =
+        Box::pin(start_recording_remote_app_server(&app.config)).await?;
     let mut tui = tui::test_support::make_test_tui()?;
     app.chat_widget.session_draft = Some(SessionDraft::Editing);
     // Routing discovery can publish the global login after draft bootstrap has
@@ -46,12 +47,14 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     // A deferred command leaves exactly its own draft for startup to replay.
     for draft in ["/account", "/rename Fix login"] {
         app.chat_widget.insert_str(draft);
-        app.chat_widget
+        let _ = app
+            .chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
         app.chat_widget.restore_session_draft();
         assert_eq!(app.chat_widget.composer_text_with_pending(), draft);
-        app.chat_widget
+        let _ = app
+            .chat_widget
             .handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     }
     let original_model = app
@@ -163,7 +166,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         app.restore_parked_session_draft(&mut tui, &mut server)
             .await?
     );
-    app.settle_navigation(&mut tui, &mut server).await?;
+    let _ = Box::pin(app.settle_navigation(&mut tui, &mut server)).await?;
     assert_eq!(
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
@@ -171,7 +174,8 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
     assert!(recorded_params(&requests, "thread/start").is_empty());
 
     while events.try_recv().is_ok() {}
-    app.chat_widget
+    let _ = app
+        .chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Starting));
     assert_eq!(
@@ -189,7 +193,8 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         serde_json::to_value(app.chat_widget.capture_thread_input_state())?["composer"],
         original_input
     );
-    app.chat_widget
+    let _ = app
+        .chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     app.start_draft_session(&server);
     app.start_draft_session(&server);
@@ -215,16 +220,15 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
 
 #[tokio::test]
 async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> Result<()> {
-    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let (mut server, _, proxy) = start_recording_remote_app_server(&app.config).await?;
+    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
+    let (mut server, _, proxy) = Box::pin(start_recording_remote_app_server(&app.config)).await?;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
     let backend = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
-        disconnect::serve_reconnect_requests(
-            tokio_tungstenite::accept_async(stream).await?,
-            |_| std::future::ready(None),
-        )
+        disconnect::serve_reconnect_requests(tokio_tungstenite::accept_async(stream).await?, |_| {
+            std::future::ready(None)
+        })
         .await
     });
     app.chat_widget.session_draft = Some(SessionDraft::Editing);
@@ -233,14 +237,14 @@ async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> R
     assert!(app.begin_reconnect());
     assert!(app.reconnect.presentation == reconnect::ReconnectPresentation::Draft);
     let mut tui = tui::test_support::make_test_tui()?;
-    let connected = reconnect::reconnect(
+    let connected = Box::pin(reconnect::reconnect(
         app.app_server_target.clone(),
         app.config.clone(),
         app.local_settings.clone(),
         /*thread_id*/ None,
         /*remote_cwd*/ None,
         reconnect::ReconnectPresentation::Draft,
-    )
+    ))
     .await?;
     app.finish_reconnect(
         &mut tui,

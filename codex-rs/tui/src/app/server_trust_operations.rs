@@ -1,4 +1,28 @@
-use super::*;
+use super::App;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::Arc;
+use super::ConnectionMutation;
+use super::ControlCompletion;
+use super::LaneState;
+use super::NavigationIntent;
+use super::OperationLane;
+use super::OperationOrigin;
+use super::OperationReceipt;
+use super::OperationScope;
+use super::PendingNavigation;
+use super::PendingSubmission;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionLane;
+use super::SubmissionOutcome;
+use super::SubmissionRequest;
+use super::Uuid;
+use super::VecDeque;
+use super::agents_overview;
+use super::directory;
+use super::resume;
+use super::tui;
 use crate::hooks_rpc::HookTrustUpdate;
 use crate::hooks_rpc::write_hook_trusts_typed;
 use crate::onboarding::onboarding_screen::DirectoryTrustConsent;
@@ -70,7 +94,7 @@ impl TrustOperation {
                     consent.clone().send(handle, id).await?;
                 }
                 ResumeTrustConsent::Hooks { updates, .. } => {
-                    write_hook_trusts_typed(handle, updates.clone()).await?;
+                    let _ = write_hook_trusts_typed(handle, updates.clone()).await?;
                 }
             },
             TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
@@ -156,7 +180,7 @@ impl App {
             waiting = lane.waiting;
             waiting.push_front(lane.active);
         }
-        self.server_operations.lanes.insert(
+        let _ = self.server_operations.lanes.insert(
             OperationLane::Connection,
             SubmissionLane {
                 active,
@@ -166,6 +190,7 @@ impl App {
         );
         self.drive_server_operations(server);
         self.refresh_submission_preview();
+        drop(operation);
     }
 
     pub(super) fn transfer_navigation_trust(
@@ -240,8 +265,7 @@ impl App {
                     intent: NavigationIntent::Transitioning,
                     state: LaneState::Queued,
                 };
-                self.continue_directory_trust_saved(server, pending, consent)
-                    .await;
+                Box::pin(self.continue_directory_trust_saved(server, pending, consent)).await;
                 Ok(AppRunControl::Continue)
             }
             TrustConsent::Resume(consent) => {
@@ -253,8 +277,7 @@ impl App {
                     intent: NavigationIntent::Transitioning,
                     state: LaneState::Queued,
                 };
-                self.continue_resume_trust_saved(server, pending, consent)
-                    .await?;
+                self.continue_resume_trust_saved(server, pending, consent);
                 Ok(AppRunControl::Continue)
             }
             TrustConsent::Dashboard(consent) => {

@@ -1,20 +1,28 @@
 use super::*;
+use crate::AppServerTarget;
+use crate::app::SideParentStatus;
+use crate::app::SideThreadState;
 use crate::app::tests::make_test_app_with_channels;
 use crate::app::tests::test_thread_session;
+use crate::app_command::AppCommand;
 use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnStatus;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
-    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    let (mut app, mut events, _ops) = Box::pin(make_test_app_with_channels()).await;
     let root = ThreadId::new();
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(root);
     app.chat_widget
         .handle_thread_session_quiet(test_thread_session(root, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("/farm original task");
-    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let submission = loop {
         if let AppEvent::Farm { submission, .. } = events.try_recv().expect("farm event") {
             break submission;
@@ -37,7 +45,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     let mut tui = tui::test_support::make_test_tui().expect("test tui");
     app.open_farm_recovery(root);
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
-    app.chat_widget.handle_key_event(KeyCode::Esc.into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Esc.into());
     app.finish_farm(
         &mut tui,
         id.clone(),
@@ -111,14 +119,14 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
 
 #[tokio::test]
 async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigation() {
-    let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
+    let (mut app, mut events, mut ops) = Box::pin(make_test_app_with_channels()).await;
     let root = ThreadId::new();
     app.primary_thread_id = Some(root);
     app.active_thread_id = Some(root);
     app.chat_widget
         .handle_thread_session_quiet(test_thread_session(root, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("/farm investigate the race");
-    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let submission = loop {
         if let AppEvent::Farm {
             thread_id,
@@ -231,7 +239,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     app.transcript_cells.clear();
     let child = ThreadId::new();
     app.active_thread_id = Some(child);
-    app.native_history = Default::default();
+    app.native_history = super::super::native_history::NativeHistory::default();
     app.insert_history_cell(
         &mut tui,
         Box::new(history_cell::new_info_event(
@@ -264,7 +272,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
     // Rebuild from actual buffered events, not saved rendered cells. Repeated switches
     // must update the original receipt position instead of appending it after newer text.
     app.active_thread_id = Some(root);
-    app.native_history = Default::default();
+    app.native_history = super::super::native_history::NativeHistory::default();
     let snapshot = app.thread_event_channels[&root]
         .store
         .lock()
@@ -361,7 +369,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         // Toggling to the parent leaves the ephemeral side open, even without a draft or status.
         // Neither replacement path may mistake that quiet state for disposable UI state.
         let side = ThreadId::new();
-        app.side_threads.insert(side, SideThreadState::new(root));
+        let _ = app.side_threads.insert(side, SideThreadState::new(root));
         let mut errors = Vec::new();
         for displayed in [root, side] {
             app.active_thread_id = Some(displayed);

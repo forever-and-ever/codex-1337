@@ -1,6 +1,32 @@
 //! Selection prepares metadata and subscriptions without transferring the visible receiver.
 
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AbortOnDropHandle;
+use super::App;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::Arc;
+use super::CleanupContinuation;
+use super::Config;
+use super::FutureExt;
+use super::Instant;
+use super::LaneState;
+use super::Mutex;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::PendingNavigation;
+use super::Result;
+use super::ServerCompletion;
+use super::ThreadEventAttachment;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadSessionState;
+use super::Turn;
+use super::Uuid;
+use super::detach;
+use super::recap;
+use super::tui;
 use crate::app_server_session::session_preparation::PreparedHistory;
 use crate::app_server_session::session_preparation::PreparedSession;
 use crate::app_server_session::session_preparation::ResumePreparation;
@@ -148,7 +174,7 @@ impl App {
             operation.generation,
         );
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let receipt = std::panic::AssertUnwindSafe(async {
+            let receipt = Box::pin(std::panic::AssertUnwindSafe(async {
                 match effect {
                     SelectionEffect::DiscardSide { handle, plan } => {
                         let receipt = match tokio::time::timeout(
@@ -171,7 +197,7 @@ impl App {
                         .await,
                     ),
                     SelectionEffect::Resume { plan, handle } => SelectionReceipt::Resumed {
-                        prepared: plan.run().await,
+                        prepared: Box::pin(plan.run()).await,
                         handle,
                     },
                     SelectionEffect::Fallback {
@@ -180,18 +206,18 @@ impl App {
                         config,
                         local_settings,
                     } => SelectionReceipt::Fallback(
-                        crate::app_server_session::session_preparation::prepare_thread_history(
+                        Box::pin(crate::app_server_session::session_preparation::prepare_thread_history(
                             RequestPolicy::Interactive,
                             handle,
                             thread_id,
                             *config,
                             *local_settings,
-                        )
+                        ))
                         .await,
                     ),
                 }
             })
-            .catch_unwind()
+            .catch_unwind())
             .await
             .unwrap_or(SelectionReceipt::Terminated);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
@@ -219,10 +245,10 @@ impl App {
         receipt: SelectionReceipt,
     ) -> Result<()> {
         let same_epoch = operation.epoch == self.server_operations.epoch;
-        let stage = match std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
-        {
-            NavigationIntent::Select(stage) => stage,
-            _ => unreachable!("selection receipt without selection intent"),
+        let NavigationIntent::Select(stage) =
+            std::mem::replace(&mut operation.intent, NavigationIntent::Transitioning)
+        else {
+            unreachable!("selection receipt without selection intent")
         };
         match (stage, receipt) {
             (SelectStage::Liveness { thread_id, after }, SelectionReceipt::Liveness(result))
@@ -289,11 +315,13 @@ impl App {
                 match result {
                     Ok(started) => {
                         if started.can_accept_text_input {
-                            self.agent_navigation
+                            let _ = self
+                                .agent_navigation
                                 .text_input_threads
                                 .insert(context.thread_id);
                         } else {
-                            self.agent_navigation
+                            let _ = self
+                                .agent_navigation
                                 .text_input_threads
                                 .remove(&context.thread_id);
                         }
@@ -544,7 +572,7 @@ impl App {
         if self.active_thread_id == Some(thread_id) {
             self.store_active_thread_receiver().await;
         }
-        self.agents_overview.activity.remove(&thread_id);
+        let _ = self.agents_overview.activity.remove(&thread_id);
         let epoch = self.reconnect.connection_epoch;
         let channel = self.ensure_thread_channel(thread_id);
         if live_attached {
@@ -591,8 +619,7 @@ impl App {
             SelectionAfter::Fork => {
                 // The continuation lease ends here; admission installs the fork's lease.
                 self.chat_widget.fork_in_progress = false;
-                self.fork_current_thread(tui, server, None, Vec::new(), true)
-                    .await?;
+                self.fork_current_thread(tui, server, None, Vec::new(), true);
             }
             SelectionAfter::DiscardSide(thread_id) => {
                 self.discard_side_thread_in_background(server, thread_id)
@@ -708,7 +735,7 @@ impl App {
                 (true, true, Ok(None), None)
             }
         };
-        self.agent_navigation.explicit_attachments.insert(thread_id);
+        let _ = self.agent_navigation.explicit_attachments.insert(thread_id);
         let previous_thread_id = self.active_thread_id;
         // Notifications already routed to the active channel must reach the old
         // widget before its transcript state is transferred. Events routed after
@@ -755,7 +782,7 @@ impl App {
             attached_replay_only = true;
         }
         if pending_profile_on_unavailable_thread && !is_replay_only && session_verified {
-            self.pending_server_profiles.remove(&thread_id);
+            let _ = self.pending_server_profiles.remove(&thread_id);
         }
         // Refreshing can merge restored turns into the store, so recap progress must be read only
         // after the refresh while the activated thread channel is still retained.

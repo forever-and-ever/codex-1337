@@ -8,19 +8,19 @@ pub(super) async fn finish_close_verification(
     server: &mut AppServerSession,
     events: &mut mpsc::UnboundedReceiver<AppEvent>,
 ) -> Result<()> {
-    time::timeout(Duration::from_secs(10), async {
+    Box::pin(time::timeout(Duration::from_secs(10), async {
         while !app.server_operations.is_empty() {
             tokio::select! {
                 completion = app.thread_delivery.completion_rx.recv() => {
                     app.handle_local_thread_completion(server, completion.expect("thread completion")).await?;
                 }
                 completion = app.server_operations.control_rx.recv() => {
-                    app.handle_server_completion(tui, server, completion.expect("server completion")).await?;
+                    let _ = Box::pin(app.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
                 }
             }
         }
         Ok::<_, color_eyre::Report>(())
-    }).await??;
+    })).await??;
     let mut remaining = Vec::new();
     while let Ok(event) = events.try_recv() {
         match event {

@@ -1,6 +1,17 @@
 //! Background export preparation and UI progress receipts.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::Path;
+use super::PathBuf;
+use super::RawReasoningVisibility;
+use super::ThreadId;
+use super::TranscriptExportDestination;
+use super::TypedRequestError;
+use super::Write;
+use super::is_history_pagination_unsupported;
+use super::load_export_transcript;
+use super::render_markdown_transcript;
 
 pub(super) fn prepare_transcript(
     cwd: &Path,
@@ -173,7 +184,8 @@ impl App {
                 Ok(())
             }
             PreparedExport::File { file, path } => {
-                file.persist_noclobber(&path)
+                let _ = file
+                    .persist_noclobber(&path)
                     .map_err(|error| format!("could not create {}: {error}", path.display()))?;
                 self.chat_widget
                     .add_info_message(format!("Saved conversation to {}", path.display()), None);

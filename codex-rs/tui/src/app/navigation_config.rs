@@ -1,6 +1,12 @@
 //! Move-only configuration work carried by navigation receipts.
 
-use super::*;
+use super::App;
+use super::Config;
+use super::ConfigBuilder;
+use super::Path;
+use super::PathBuf;
+use super::Result;
+use super::config_persistence;
 use crate::local_settings::LocalSettings;
 
 pub(super) struct ConfigRebuild {

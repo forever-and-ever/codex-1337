@@ -1,4 +1,30 @@
-use super::*;
+use super::App;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AskForApproval;
+use super::CODEX_CLI_VERSION;
+use super::CleanupContinuation;
+use super::NavigationIntent;
+use super::PendingNavigation;
+use super::PermissionProfileSnapshot;
+use super::Result;
+use super::ResumeEffect;
+use super::ResumePresentation;
+use super::ResumePurpose;
+use super::ResumeReady;
+use super::ResumeSource;
+use super::ResumeStage;
+use super::RuntimeApprovalPolicyOverride;
+use super::RuntimePermissionProfileOverride;
+use super::RuntimePermissionProfileTurnOverride;
+use super::RuntimePolicyOverrideScope;
+use super::SelectionAfter;
+use super::SessionTarget;
+use super::ThreadAttachPresentation;
+use super::ThreadId;
+use super::ThreadInputStateRestoreMode;
+use super::api;
+use super::tui;
 
 impl App {
     pub(in crate::app) async fn select_agents_overview_thread_after(
@@ -76,7 +102,7 @@ impl App {
             .select_agents_overview_thread(tui, server, thread_id)
             .await?;
         if matches!(control, AppRunControl::Continue) {
-            return self.settle_navigation(tui, server).await;
+            return Box::pin(self.settle_navigation(tui, server)).await;
         }
         Ok(control)
     }
@@ -155,7 +181,7 @@ impl App {
                 blank.session = session.clone();
             }
             if let Some(input) = self.chat_widget.capture_thread_input_state() {
-                self.agents_overview.input_states.insert(thread_id, input);
+                let _ = self.agents_overview.input_states.insert(thread_id, input);
             }
         }
         let mut ids = self
@@ -180,7 +206,7 @@ impl App {
                 if Some(*thread_id) != self.current_displayed_thread_id()
                     && let Some(input) = store.input_state.clone()
                 {
-                    self.agents_overview.input_states.insert(*thread_id, input);
+                    let _ = self.agents_overview.input_states.insert(*thread_id, input);
                 }
                 let requests = store.pending_replay_requests();
                 if !requests.is_empty() {
@@ -200,7 +226,8 @@ impl App {
         if running {
             for thread_id in ids {
                 if !self.side_threads.contains_key(&thread_id) {
-                    self.agents_overview
+                    let _ = self
+                        .agents_overview
                         .dispatched_requests
                         .entry(thread_id)
                         .or_default();
@@ -367,7 +394,7 @@ impl App {
                 self.chat_widget.on_thread_settings_updated(settings);
             }
             if !preserve_in_flight_turn && !matches!(after, SelectionAfter::Fork) {
-                self.chat_widget.maybe_send_next_queued_input();
+                let _ = self.chat_widget.maybe_send_next_queued_input();
             }
         }
         self.queue_farm_receipt_replay();

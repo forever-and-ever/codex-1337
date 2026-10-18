@@ -1,6 +1,91 @@
 //! Threadless navigation shares operation admission, lifecycle and retirement, not a sentinel thread.
 
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AGENTS_OVERVIEW_VIEW_ID;
+use super::AbortOnDropHandle;
+use super::AbsolutePathBuf;
+use super::AgentNavigationDirection;
+use super::App;
+use super::AppCommand;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::AppServerTarget;
+use super::ApprovalsReviewer;
+use super::Arc;
+use super::AskForApproval;
+use super::BUILT_IN_PERMISSION_PROFILE_WORKSPACE;
+use super::CODEX_CLI_VERSION;
+use super::ChatWidget;
+use super::ClientRequest;
+use super::Config;
+use super::ConnectionMutation;
+use super::ControlCompletion;
+use super::DetachScope;
+use super::DraftDisposition;
+use super::DraftOrigin;
+use super::Duration;
+use super::EnvironmentManager;
+use super::ExitReason;
+use super::Feature;
+use super::HooksListEntry;
+use super::Instant;
+use super::LaneState;
+use super::LoaderOverrides;
+use super::LocalDraftRecovery;
+use super::Mutex;
+use super::NavigationPreview;
+use super::OperationLane;
+use super::OperationOrigin;
+use super::OperationReceipt;
+use super::OperationScope;
+use super::Path;
+use super::PathBuf;
+use super::PendingSubmission;
+use super::PermissionProfileSelection;
+use super::PermissionProfileSnapshot;
+use super::ProviderModelChoice;
+use super::Result;
+use super::RuntimeApprovalPolicyOverride;
+use super::RuntimeKeymap;
+use super::RuntimePermissionProfileOverride;
+use super::RuntimePermissionProfileTurnOverride;
+use super::RuntimePolicyOverrideScope;
+use super::ServerCompletion;
+use super::ServerOperation;
+use super::SessionTarget;
+use super::SideThreadState;
+use super::StateDbHandle;
+use super::SubmissionDraft;
+use super::SubmissionLane;
+use super::SubmissionOutcome;
+use super::SubmissionRequest;
+use super::ThreadEventAttachment;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadInputState;
+use super::ThreadItem;
+use super::ThreadSessionState;
+use super::ThreadStartSource;
+use super::TomlValue;
+use super::Turn;
+use super::TurnStatus;
+use super::UserMessage;
+use super::UserTurnReplay;
+use super::Uuid;
+use super::VecDeque;
+use super::agent_status_feed;
+use super::agents_overview;
+use super::apply_managed_new_thread_defaults;
+use super::detach;
+use super::find_loaded_subagent_threads_for_primary;
+use super::navigation_config;
+use super::new_session;
+use super::recap;
+use super::session_lifecycle;
+use super::side;
+use super::tui;
+use super::ui_requests;
 
 use futures::FutureExt;
 
@@ -267,7 +352,7 @@ impl App {
             .is_some_and(|operation| operation.id == id)
         {
             self.recover_pending_navigation_draft();
-            self.server_operations.navigation.cancel(id);
+            let _ = self.server_operations.navigation.cancel(id);
         }
     }
 
@@ -571,17 +656,20 @@ impl App {
         };
         match completion.receipt {
             NavigationReceipt::Fork(receipt) => {
-                self.finish_fork_navigation(tui, server, operation, matching, receipt)
+                Box::pin(self.finish_fork_navigation(tui, server, operation, matching, receipt))
                     .await?;
             }
             NavigationReceipt::Directory(receipt) => {
-                self.finish_directory_navigation(tui, server, operation, matching, receipt)
-                    .await?;
+                Box::pin(
+                    self.finish_directory_navigation(tui, server, operation, matching, receipt),
+                )
+                .await?;
             }
             NavigationReceipt::Resumed(receipt) => {
-                let control = self
-                    .finish_resume_navigation(tui, server, operation, matching, receipt)
-                    .await?;
+                let control = Box::pin(
+                    self.finish_resume_navigation(tui, server, operation, matching, receipt),
+                )
+                .await?;
                 self.drive_server_operations(server);
                 self.refresh_submission_preview();
                 return Ok(control);
@@ -590,14 +678,14 @@ impl App {
                 self.finish_navigation_cleanup(server, operation, matching, result);
             }
             NavigationReceipt::Fresh(receipt) => {
-                self.finish_fresh_navigation(tui, server, operation, matching, receipt)
+                Box::pin(self.finish_fresh_navigation(tui, server, operation, matching, receipt))
                     .await?;
             }
             NavigationReceipt::Discovered(receipt) if matching => {
                 self.finish_discovery(tui, server, operation, receipt)
                     .await?;
             }
-            NavigationReceipt::Discovered(_) => {}
+
             NavigationReceipt::Selected(receipt) => {
                 self.finish_selection_operation(tui, server, operation, matching, receipt)
                     .await?;
@@ -609,7 +697,7 @@ impl App {
                     unreachable!("only the defaults stage emits a defaults receipt");
                 };
                 if let Some(defaults) = defaults {
-                    crate::projectless::apply_defaults(
+                    let _ = crate::projectless::apply_defaults(
                         &mut preparation.config,
                         &self.harness_overrides,
                         server,
@@ -630,9 +718,9 @@ impl App {
                 self.add_agents_overview_error(format!(
                     "Failed to read session picker defaults: {error}"
                 ));
-                self.chat_widget.maybe_send_next_queued_input();
+                let _ = self.chat_widget.maybe_send_next_queued_input();
             }
-            NavigationReceipt::PickerDefaults(_) => {}
+
             NavigationReceipt::Picker(Ok(mut picker)) if matching => {
                 picker.model_provider_override = self.harness_overrides.model_provider.clone();
                 self.drive_server_operations(server);
@@ -674,9 +762,12 @@ impl App {
                 self.add_agents_overview_error(format!(
                     "Failed to start TUI session picker: {error}"
                 ));
-                self.chat_widget.maybe_send_next_queued_input();
+                let _ = self.chat_widget.maybe_send_next_queued_input();
             }
-            NavigationReceipt::Picker(Err(_)) | NavigationReceipt::PickerClosed => {}
+            NavigationReceipt::Discovered(_)
+            | NavigationReceipt::PickerDefaults(_)
+            | NavigationReceipt::Picker(Err(_))
+            | NavigationReceipt::PickerClosed => {}
         }
         self.drive_server_operations(server);
         self.refresh_submission_preview();
@@ -717,15 +808,17 @@ impl App {
         );
         operation.intent = NavigationIntent::PickerStarting;
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let result = std::panic::AssertUnwindSafe(crate::start_app_server_for_picker(
-                &preparation.config,
-                &preparation.target,
-                preparation.cli_kv_overrides,
-                preparation.loader_overrides,
-                preparation.state_db,
-                preparation.environment_manager,
-            ))
-            .catch_unwind()
+            let result = Box::pin(
+                std::panic::AssertUnwindSafe(crate::start_app_server_for_picker(
+                    &preparation.config,
+                    &preparation.target,
+                    preparation.cli_kv_overrides,
+                    preparation.loader_overrides,
+                    preparation.state_db,
+                    preparation.environment_manager,
+                ))
+                .catch_unwind(),
+            )
             .await
             .map_err(|_| "Picker preparation task terminated unexpectedly".to_string())
             .and_then(|result| result.map_err(|error| error.to_string()));

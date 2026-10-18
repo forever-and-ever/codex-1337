@@ -147,7 +147,7 @@ impl JiraForm {
         match key.code {
             KeyCode::Esc if self.dirty() => self.discard = true,
             KeyCode::Esc => return true,
-            KeyCode::Tab => self.field = (self.field + 1) % 3,
+
             KeyCode::BackTab => self.field = (self.field + 2) % 3,
             KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if self.field == 0 => {
                 self.category = match self.category {
@@ -156,7 +156,7 @@ impl JiraForm {
                 };
             }
             KeyCode::Enter if self.field == 2 => self.body.insert_str("\n"),
-            KeyCode::Enter => self.field = (self.field + 1) % 3,
+            KeyCode::Tab | KeyCode::Enter => self.field = (self.field + 1) % 3,
             _ if self.field == 1 => self.slug.input(key),
             _ if self.field == 2 => self.body.input(key),
             _ => {}
@@ -419,7 +419,9 @@ impl JiraBrowser {
             .into_iter()
             .map(|line| Line::from(line.into_owned()).dim())
             .collect();
-        let hint_height = (hint_lines.len() as u16).min(inner.height.saturating_sub(/*rhs*/ 3));
+        let hint_height = u16::try_from(hint_lines.len())
+            .unwrap_or(u16::MAX)
+            .min(inner.height.saturating_sub(/*rhs*/ 3));
         let footer_height = hint_height + 2;
         let footer_y = inner.y + inner.height.saturating_sub(footer_height);
         let status_lines = textwrap::wrap(&status, inner.width as usize)
@@ -510,12 +512,7 @@ impl JiraBrowser {
         self.scroll = self
             .scroll
             .min(keys.len().saturating_sub(list.height as usize));
-        for (row, key) in keys
-            .iter()
-            .skip(self.scroll)
-            .take(list.height as usize)
-            .enumerate()
-        {
+        for (row, key) in (0..list.height).zip(keys.iter().skip(self.scroll)) {
             let selected = self.selected.as_ref() == Some(key);
             let line = format!(
                 "{} {}",
@@ -527,7 +524,7 @@ impl JiraBrowser {
             } else {
                 line.into()
             };
-            let row = Rect::new(list.x, list.y + row as u16, list.width, /*height*/ 1);
+            let row = Rect::new(list.x, list.y + row, list.width, /*height*/ 1);
             Paragraph::new(line).render(row, buf);
             self.targets.rows.push((row, key.clone()));
         }

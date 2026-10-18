@@ -1,6 +1,13 @@
 //! Apply prepared stream replacements without rebuilding their layout on the UI task.
 
-use super::*;
+use super::App;
+use super::Arc;
+use super::ConsolidationScrollbackReflow;
+use super::HistoryCell;
+use super::Result;
+use super::TranscriptSplice;
+use super::history_cell;
+use super::tui;
 
 impl App {
     #[expect(

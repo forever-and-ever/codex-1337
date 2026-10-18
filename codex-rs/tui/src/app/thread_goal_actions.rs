@@ -29,7 +29,6 @@ impl App {
         thread_id: ThreadId,
     ) {
         self.open_thread_goal_menu_continuation(app_server, thread_id)
-            .await
     }
 
     pub(super) async fn maybe_prompt_resume_paused_goal_after_resume(
@@ -38,7 +37,6 @@ impl App {
         thread_id: ThreadId,
     ) {
         self.maybe_prompt_resume_paused_goal_after_resume_continuation(app_server, thread_id)
-            .await
     }
 
     pub(super) async fn open_thread_goal_editor(
@@ -47,7 +45,6 @@ impl App {
         thread_id: Option<ThreadId>,
     ) {
         self.open_thread_goal_editor_continuation(app_server, thread_id)
-            .await
     }
 
     pub(super) async fn set_thread_goal_draft(
@@ -58,7 +55,6 @@ impl App {
         mode: ThreadGoalSetMode,
     ) {
         self.set_thread_goal_draft_continuation(app_server, thread_id, draft, mode)
-            .await
     }
 
     pub(super) async fn set_thread_goal_status(
@@ -68,7 +64,6 @@ impl App {
         status: ThreadGoalStatus,
     ) {
         self.set_thread_goal_status_continuation(app_server, thread_id, status)
-            .await
     }
 
     pub(super) async fn clear_thread_goal(
@@ -77,7 +72,6 @@ impl App {
         thread_id: ThreadId,
     ) {
         self.clear_thread_goal_continuation(app_server, thread_id)
-            .await
     }
 
     pub(super) fn show_replace_thread_goal_confirmation(

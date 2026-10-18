@@ -1,9 +1,31 @@
 //! Prompt-edit custody across history reads, mutation acknowledgment, and normal-pump replay.
 
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Arc;
+use super::ClientRequest;
+use super::Duration;
+use super::HistoryCell;
+use super::Instant;
+use super::Mutex;
+use super::ReplayKind;
+use super::Result;
+use super::ServerNotification;
+use super::ThreadBufferedEvent;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::Turn;
+use super::TypedRequestError;
+use super::Uuid;
+use super::tui;
+use super::turn_submissions;
+use super::turn_submissions::DraftDisposition;
+use super::turn_submissions::DraftOrigin;
+use super::turn_submissions::SubmissionDraft;
 use super::turn_submissions::ui_requests::UiRequestHandle;
 use super::turn_submissions::ui_requests::UiRequestKind;
 use super::turn_submissions::ui_requests::UiRequestScope;
-use super::*;
 use crate::chatwidget::UserMessage;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ThreadRevertParams;
@@ -137,7 +159,7 @@ impl App {
                     if let Some((turn_id, item_id)) = &start_item {
                         for turn in &mut thread.turns {
                             if &turn.id == turn_id {
-                                if let Some(index) = turn.items.iter().position(|item| item.id() == item_id) { turn.items.drain(..index); }
+                                if let Some(index) = turn.items.iter().position(|item| item.id() == item_id) { let _ = turn.items.drain(..index); }
                                 break;
                             }
                             turn.items.clear();
@@ -226,7 +248,7 @@ impl App {
             retained_turns,
         };
         self.pending_revert = Some(pending);
-        self.request_server(server, UiRequestScope::Thread(thread_id), UiRequestKind::Mutation, "revert prompt",
+        let _ = self.request_server(server, UiRequestScope::Thread(thread_id), UiRequestKind::Mutation, "revert prompt",
             move |handle| async move {
                 let response: ThreadRevertResponse = handle.request_typed(ClientRequest::ThreadRevert {
                     request_id: RequestId::String(format!("tui-prompt-revert-{id}")),
@@ -275,9 +297,7 @@ impl App {
             self.chat_widget.restore_user_message_to_composer(prompt);
             return;
         }
-        use super::turn_submissions::DraftDisposition;
-        use super::turn_submissions::DraftOrigin;
-        use super::turn_submissions::SubmissionDraft;
+
         let drafts = vec![SubmissionDraft {
             client_id: Uuid::new_v4().to_string(),
             message: prompt,
@@ -298,7 +318,8 @@ impl App {
                 .as_mut()
                 .expect("prompt edit retained its source input");
             input.recover_submission_drafts(drafts, DraftDisposition::Edit);
-            self.agents_overview
+            let _ = self
+                .agents_overview
                 .input_states
                 .insert(pending.thread_id, input.clone());
         }
@@ -321,7 +342,7 @@ impl App {
             }
             RevertPhase::Mutating { .. } => !same_epoch,
             RevertPhase::Uncertain(_) => !same_store,
-            _ => false,
+            RevertPhase::Reading(_) => false,
         };
         if stale {
             self.app_event_tx
@@ -501,7 +522,7 @@ impl App {
         if self.primary_thread_id == Some(thread_id) {
             self.primary_session_configured = Some(session.clone());
         }
-        self.thread_event_channels.remove(&thread_id);
+        let _ = self.thread_event_channels.remove(&thread_id);
         self.active_thread_id = None;
         self.recap.reset_for_new_thread(Instant::now());
         self.recap.seed_from_turns(&retained_turns, Instant::now());

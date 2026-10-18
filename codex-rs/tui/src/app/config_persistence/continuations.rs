@@ -1,6 +1,40 @@
 //! Configuration request tails, background refreshes, and accepted-state projection.
 
-use super::*;
+use super::ActivePermissionProfile;
+use super::App;
+use super::AppCommand;
+use super::AppEvent;
+use super::AppServerSandboxMode;
+use super::AppServerSession;
+use super::ApprovalsReviewer;
+use super::AskForApproval;
+use super::CODEX_CLI_VERSION;
+use super::Config;
+use super::ConfigBuilder;
+use super::ConfigReadResponse;
+use super::Feature;
+use super::PathBuf;
+use super::PermissionProfile;
+use super::PermissionProfileSelection;
+use super::PermissionProfileSnapshot;
+use super::Result;
+use super::RuntimePermissionProfileOverride;
+use super::RuntimePolicyOverrideScope;
+use super::ThreadId;
+use super::ThreadMemoryMode;
+use super::ThreadSettingsUpdateParams;
+use super::Uuid;
+use super::WrapErr;
+use super::WriteStatus;
+use super::approval_policy_from_effective_config;
+use super::approvals_reviewer_from_effective_config;
+use super::auto_review_mode;
+use super::build_config_on_runtime_worker;
+use super::feature_enabled_from_effective_config;
+use super::memories_from_effective_config;
+use super::overridden_write_message;
+use super::sandbox_mode_from_effective_config;
+use super::turn_submissions;
 use crate::app_server_session::typed_requests::SessionRpc;
 
 pub(super) async fn build_config_on_runtime_worker_continuation(
@@ -46,7 +80,7 @@ impl App {
         .await
     }
 
-    pub(super) async fn select_permission_profile_continuation(
+    pub(super) fn select_permission_profile_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         mut selection: PermissionProfileSelection,
@@ -55,7 +89,7 @@ impl App {
         fallback_policy: AskForApproval,
         fallback_reviewer: ApprovalsReviewer,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
             turn_submissions::ui_requests::UiRequestKind::Mutation,
@@ -63,9 +97,7 @@ impl App {
             move |handle| async move {
                 handle
                     .thread_settings_update(
-                        codex_app_server_protocol::RequestId::String(
-                            Uuid::new_v4().to_string(),
-                        ),
+                        codex_app_server_protocol::RequestId::String(Uuid::new_v4().to_string()),
                         params,
                     )
                     .await
@@ -97,10 +129,12 @@ impl App {
                             .approvals_reviewer
                             .or_else(|| previous.and_then(|profile| profile.approvals_reviewer))
                             .or(Some(reviewer));
-                        app.agents_overview
+                        let _ = app
+                            .agents_overview
                             .selected_permission_profiles
                             .insert(thread_id, selection.profile_id.clone());
-                        app.agents_overview
+                        let _ = app
+                            .agents_overview
                             .requested_permission_profiles
                             .insert(thread_id, selection.clone());
                         if displayed {
@@ -203,7 +237,7 @@ impl App {
     {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
-        self.request_server(
+        let _ = self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::ReadOnly,
@@ -221,7 +255,7 @@ impl App {
             );
     }
 
-    pub(super) async fn update_feature_flags_continuation(
+    pub(super) fn update_feature_flags_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         next_config: Config,
@@ -237,7 +271,7 @@ impl App {
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         let origin = self.current_displayed_thread_id();
         let cwd = self.chat_widget.config_ref().cwd.display().to_string();
-        self.request_server(
+        let _ = self.request_server(
                 app_server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,
@@ -300,7 +334,7 @@ impl App {
                         },
                     );
                     for (feature, effective_enabled) in feature_updates_to_apply {
-                        app.chat_widget
+                        let _ = app.chat_widget
                             .set_feature_enabled(feature, effective_enabled);
                     }
                     if show_memory_enable_notice {
@@ -389,7 +423,7 @@ impl App {
         let cwd = self.chat_widget.config_ref().cwd.display().to_string();
         let edits =
             crate::config_update::build_memory_settings_edits(use_memories, generate_memories);
-        self.request_server(
+        let _ = self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,
@@ -414,7 +448,7 @@ impl App {
                                 };
                                 let effective_generate = memories.generate_memories.unwrap_or(previous_generate);
                                 if app.current_displayed_thread_id() == origin {
-                                    app.sync_memory_state_from_effective_config(&effective_config);
+                                    let _ = app.sync_memory_state_from_effective_config(&effective_config);
                                 }
                                 app.queue_thread_memory_mode(server, origin, previous_generate, effective_generate);
                                 Ok(())
@@ -452,7 +486,7 @@ impl App {
         } else {
             ThreadMemoryMode::Disabled
         };
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,
@@ -483,14 +517,14 @@ impl App {
         );
     }
 
-    pub(super) async fn reset_memories_with_app_server_continuation(
+    pub(super) fn reset_memories_with_app_server_continuation(
         &mut self,
         app_server: &mut AppServerSession,
     ) {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
         self.app_event_tx.send(AppEvent::FollowTranscript);
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::Connection,
             UiRequestKind::Mutation,
@@ -526,7 +560,7 @@ impl App {
         op: AppCommand,
     ) {
         let Some(thread_id) = self.active_thread_id else {
-            self.chat_widget.submit_op(op);
+            let _ = self.chat_widget.submit_op(op);
             return;
         };
         let AppCommand::OverrideTurnContext {

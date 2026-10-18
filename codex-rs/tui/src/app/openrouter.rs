@@ -1,4 +1,10 @@
-use super::*;
+use super::AbsolutePathBuf;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Duration;
+use super::Uuid;
 use crate::openrouter::Event;
 use crate::openrouter::Reply;
 use crate::openrouter::Request;
@@ -96,7 +102,7 @@ impl App {
                 let handle = server.request_handle();
                 let request_id = server.next_request_id();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(30), async {
                         match &request {
                             Request::Models { .. } => {
@@ -142,7 +148,7 @@ impl App {
                                 ))
                             }
                             Request::Forget { slug, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterModelForgetResponse>(
                                         ClientRequest::OpenRouterModelForget {
                                             request_id,
@@ -168,7 +174,7 @@ impl App {
                                 Ok(Reply::Endpoints(response))
                             }
                             Request::Route { slug, filter, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterModelRouteResponse>(
                                         ClientRequest::OpenRouterModelRoute {
                                             request_id,
@@ -182,7 +188,7 @@ impl App {
                                 Ok(Reply::Done)
                             }
                             Request::AddKey { name, path, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterKeyAddResponse>(
                                         ClientRequest::OpenRouterKeyAdd {
                                             request_id,
@@ -196,7 +202,7 @@ impl App {
                                 Ok(Reply::Done)
                             }
                             Request::RemoveKey { name, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterKeyRemoveResponse>(
                                         ClientRequest::OpenRouterKeyRemove {
                                             request_id,
@@ -224,7 +230,7 @@ impl App {
                         request,
                         result,
                     }));
-                });
+                }));
             }
             Event::Finished {
                 id,
@@ -275,7 +281,8 @@ impl App {
                         Ok(Reply::Done),
                     ) => {
                         self.open_account_picker(server, thread_id);
-                        self.chat_widget
+                        let _ = self
+                            .chat_widget
                             .refresh_openrouter_status(StatusRefresh::Now);
                     }
                     (request, Err(error)) => {
@@ -295,7 +302,7 @@ impl App {
                 let request_id = server.next_request_id();
                 let status_request_id = server.next_request_id();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(30), async {
                         let accounts = handle
                             .request_typed::<ThreadAccountListResponse>(
@@ -355,7 +362,7 @@ impl App {
                         mode,
                         result,
                     }));
-                });
+                }));
             }
             Event::StatusLoaded {
                 thread_id,

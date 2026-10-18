@@ -1,6 +1,14 @@
 //! Request continuations for model fallback and Reserve reasoning changes.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::AutomaticModelSwitchReason;
+use super::LUNA_RESERVE_MODEL;
+use super::ModeKind;
+use super::ReasoningEffort;
+use super::ThreadId;
+use super::ThreadSettingsUpdateParams;
+use super::model_display_name;
 
 impl App {
     pub(super) fn request_reserve_reasoning(
@@ -8,12 +16,12 @@ impl App {
         app_server: &AppServerSession,
         thread_id: ThreadId,
         effort: Option<ReasoningEffort>,
-        mode: codex_protocol::config_types::CollaborationMode,
+        mode: ModeKind,
         params: ThreadSettingsUpdateParams,
     ) {
         self.model_selection_generation.advance();
         let generation = self.model_selection_generation;
-        self.request_thread_settings_update(app_server, params, move |app, updated| {
+        let _ = self.request_thread_settings_update(app_server, params, move |app, updated| {
             if updated
                 && app.model_selection_generation == generation
                 && app.active_thread_id == Some(thread_id)
@@ -21,7 +29,7 @@ impl App {
                 && app.chat_widget.current_model() == LUNA_RESERVE_MODEL
             {
                 app.chat_widget.set_reasoning_effort(effort.clone());
-                if mode.mode == ModeKind::Plan {
+                if mode == ModeKind::Plan {
                     app.chat_widget.set_plan_mode_reasoning_effort(effort);
                 }
             }

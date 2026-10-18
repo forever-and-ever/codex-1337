@@ -8,14 +8,14 @@ use codex_protocol::ThreadId;
 use crate::pager_overlay::Overlay;
 use crate::tui::Tui;
 impl App {
-    pub(super) async fn context_inventory(
+    pub(super) fn context_inventory(
         &mut self,
         tui: &mut Tui,
         server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
         let frame = tui.frame_requester();
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,

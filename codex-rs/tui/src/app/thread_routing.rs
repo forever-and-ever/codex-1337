@@ -799,8 +799,7 @@ impl App {
                 Ok(true)
             }
             AppCommand::SetThreadName { name } => {
-                self.rename_thread(app_server, thread_id, name.clone(), Vec::new())
-                    .await;
+                self.rename_thread(app_server, thread_id, name.clone(), Vec::new());
                 Ok(true)
             }
             AppCommand::Review { target } => {
@@ -2073,7 +2072,7 @@ impl App {
             && self.chat_widget.has_active_modal()
             && self.startup_protected_input_boundary
         {
-            self.request_modal_frame(tui.frame_requester());
+            self.request_modal_frame(&tui.frame_requester());
         }
         if self.backtrack_render_pending {
             tui.frame_requester().schedule_frame();

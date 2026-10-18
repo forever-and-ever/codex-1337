@@ -1,6 +1,7 @@
 //! Conversation attachment is not proof of ancestry in the primary's spawn tree.
 
-use super::*;
+use super::App;
+use super::ThreadId;
 use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadStatus;
@@ -48,7 +49,7 @@ impl App {
             return;
         }
         if belongs_to_family && let Some(root) = self.primary_thread_id {
-            self.agent_navigation.descendant_roots.insert(id, root);
+            let _ = self.agent_navigation.descendant_roots.insert(id, root);
         }
         self.agent_navigation.set_agent_path(
             id,

@@ -1,6 +1,17 @@
 //! Delay bare-launch thread creation until the composer has a submitted input.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::Arc;
+use super::ChatWidget;
+use super::Config;
+use super::FileSearchManager;
+use super::ModelCatalog;
+use super::ProviderModelChoice;
+use super::Result;
+use super::ThreadInputState;
+use super::startup;
+use super::tui;
 use crate::chatwidget::SessionDraft;
 
 pub(super) struct ParkedSessionDraft {
@@ -67,7 +78,7 @@ impl App {
         self.config.model_reasoning_effort = self.chat_widget.current_reasoning_effort();
         self.pending_startup_thread_start = true;
         let mut launch_choices = crate::app_server_session::StartupLaunchChoices::default();
-        launch_choices.model = self.config.model.clone();
+        launch_choices.model.clone_from(&self.config.model);
         launch_choices.effort = self
             .config
             .model_reasoning_effort
@@ -83,7 +94,7 @@ impl App {
         );
     }
 
-    pub(super) async fn select_draft_provider(
+    pub(super) fn select_draft_provider(
         &mut self,
         server: &mut AppServerSession,
         choice: ProviderModelChoice,

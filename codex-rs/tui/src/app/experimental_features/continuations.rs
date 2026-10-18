@@ -1,9 +1,16 @@
 //! Deferred feature persistence for future threads.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::HistoryCell;
+use super::WriteStatus;
+use super::history_cell;
+use super::overridden_write_message;
+use super::tui;
 
 impl App {
-    pub(super) async fn enable_feature_for_new_threads_continuation(
+    pub(super) fn enable_feature_for_new_threads_continuation(
         &mut self,
         _tui: &mut tui::Tui,
         app_server: &AppServerSession,
@@ -12,7 +19,7 @@ impl App {
     ) {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
-        self.request_server(
+        let _ = self.request_server(
                 app_server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,

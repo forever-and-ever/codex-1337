@@ -5,7 +5,15 @@
 //! and avoiding protocol-upgrade rollback loops in already-running supervisors.
 //! Side threads survive the host handoff, but thread/resume requires stored history they lack.
 
-use super::*;
+use super::AGENTS_OVERVIEW_VIEW_ID;
+use super::App;
+use super::AppServerTarget;
+use super::Duration;
+use super::HashMap;
+use super::PathBuf;
+use super::Result;
+use super::ThreadId;
+use super::farm;
 
 impl App {
     pub(super) async fn reload_ui(
@@ -101,14 +109,14 @@ impl App {
         for (id, channel) in &self.thread_event_channels {
             let store = channel.store.lock().await;
             if let Some(input) = &store.input_state {
-                threads.insert(*id, input.clone());
+                let _ = threads.insert(*id, input.clone());
             }
         }
         let mut draft = self.chat_widget.capture_thread_input_state();
         if let Some(selected) = selected
             && let Some(input) = draft.take()
         {
-            threads.insert(selected, input);
+            let _ = threads.insert(selected, input);
         }
         let unstarted = if self.chat_widget.session_draft.is_some() {
             draft

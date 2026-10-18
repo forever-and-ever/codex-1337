@@ -1,12 +1,42 @@
 //! Destructive task actions retain the connection barrier through reconciliation and presentation.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AppServerTarget;
+use super::Arc;
+use super::ChatWidget;
+use super::ClientRequest;
+use super::ConnectionMutation;
+use super::ControlCompletion;
+use super::DetachScope;
+use super::DraftDisposition;
+use super::ExitReason;
+use super::HashSet;
+use super::LaneState;
+use super::OperationLane;
+use super::OperationReceipt;
+use super::OperationScope;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionLane;
+use super::SubmissionOutcome;
+use super::SubmissionRequest;
+use super::ThreadEventAttachment;
+use super::ThreadId;
+use super::TypedRequestError;
+use super::Uuid;
+use super::detach;
+use super::tui;
 use crate::app_event::AgentsOverviewAction;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use codex_app_server_protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
+#[cfg(test)]
+use std::time::Duration;
 
 #[derive(Clone, Copy)]
 enum RemovalSource {
@@ -167,14 +197,12 @@ pub(super) async fn send(
             let request_id = api::RequestId::String(format!("tui-removal-{id}-mutate"));
             let result = match target.request.action {
                 AgentsOverviewAction::Archive => handle
-                    .request_typed::<api::ThreadArchiveResponse>(
-                        ClientRequest::ThreadArchive {
-                            request_id,
-                            params: api::ThreadArchiveParams {
-                                thread_id: target.request.thread_id.to_string(),
-                            },
+                    .request_typed::<api::ThreadArchiveResponse>(ClientRequest::ThreadArchive {
+                        request_id,
+                        params: api::ThreadArchiveParams {
+                            thread_id: target.request.thread_id.to_string(),
                         },
-                    )
+                    })
                     .await
                     .map(|_| ()),
                 AgentsOverviewAction::Delete => handle
@@ -339,7 +367,7 @@ impl App {
         }
     }
 
-    async fn pause_removed_primary(&mut self, target: &RemovalTarget) {
+    fn pause_removed_primary(&mut self, target: &RemovalTarget) {
         if let Some(primary) = target.primary {
             if let Some(channel) = self.thread_event_channels.get_mut(&primary) {
                 channel.mark_replay_only();
@@ -414,9 +442,7 @@ impl App {
                         }
                         let target = RemovalTarget { request, primary };
                         let mut plan = self
-                            .prepare_detach_plan(DetachScope::Navigation {
-                                destination: None,
-                            })
+                            .prepare_detach_plan(DetachScope::Navigation { destination: None })
                             .await;
                         plan.targets.retain(|entry| {
                             (matches!(target.request.source, RemovalSource::Current)
@@ -513,7 +539,7 @@ impl App {
                         RemovalReceipt::PrimaryLoaded(loaded),
                     ) => {
                         if !loaded {
-                            self.pause_removed_primary(&target).await;
+                            self.pause_removed_primary(&target);
                         }
                         if !loaded && self.removal_view_matches(&target) {
                             let plan = self.prepare_removal_detach().await;
@@ -552,7 +578,8 @@ impl App {
                             && self.removal_view_matches(&target)
                         {
                             if let Err(error) = self.reset_for_thread_switch(tui) {
-                                self.server_operations
+                                let _ = self
+                                    .server_operations
                                     .lanes
                                     .insert(OperationLane::Connection, lane);
                                 return Err(error);
@@ -600,13 +627,14 @@ impl App {
             }
             outcome => {
                 if let RemovalOperation::Reconcile { target, failure } = operation {
-                    self.pause_removed_primary(&target).await;
+                    self.pause_removed_primary(&target);
                     self.present_removal_failure(&target, &failure);
                 }
                 outcome
             }
         };
-        self.server_operations
+        let _ = self
+            .server_operations
             .lanes
             .insert(OperationLane::Connection, lane);
         self.finish_submission(
@@ -626,7 +654,7 @@ impl App {
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
     ) -> Result<AppRunControl> {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        Box::pin(tokio::time::timeout(Duration::from_secs(5), async {
             while self.server_operations.lanes.get(&OperationLane::Connection).is_some_and(|lane| {
                 !matches!(lane.state, LaneState::Uncertain)
                     && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
@@ -637,18 +665,19 @@ impl App {
                         self.handle_local_thread_completion(server, completion.expect("local receipt channel open")).await?;
                     }
                     completion = self.server_operations.control_rx.recv() => {
-                        let control = self.handle_server_completion(tui, server, completion.expect("server receipt channel open")).await?;
+                        let control = Box::pin(self.handle_server_completion(tui, server, completion.expect("server receipt channel open"))).await?;
                         if !matches!(control, AppRunControl::Continue) { return Ok(control); }
                     }
                 }
             }
             Ok(AppRunControl::Continue)
-        }).await?
+        })).await?
     }
 
     fn hold_uncertain_removal(&mut self, mut lane: SubmissionLane) {
         lane.state = LaneState::Uncertain;
-        self.server_operations
+        let _ = self
+            .server_operations
             .lanes
             .insert(OperationLane::Connection, lane);
         self.chat_widget.add_error_message("Task detachment was not fully confirmed. No removal or detach was retried. Close and reopen this TUI to resynchronize.".into());
@@ -691,7 +720,7 @@ impl App {
                 if thread.session_id == target.request.thread_id.to_string()
                     || parent.is_some_and(|id| removed.contains(&id))
                 {
-                    removed.insert(*id);
+                    let _ = removed.insert(*id);
                 }
             }
             if removed.len() == count {
@@ -700,7 +729,7 @@ impl App {
         }
         removed.extend(target.primary);
         self.prepare_agents_overview_removal(&removed);
-        self.pause_removed_primary(target).await;
+        self.pause_removed_primary(target);
         for id in removed {
             if let Some(channel) = self.thread_event_channels.get_mut(&id) {
                 channel.mark_replay_only();
@@ -713,11 +742,11 @@ impl App {
                 self.chat_widget.pause_unavailable_thread();
             }
             self.remove_agents_overview_thread(id);
-            self.agents_overview.activity.remove(&id);
-            self.agents_overview.last_messages.remove(&id);
-            self.agents_overview.usage.remove(&id);
-            self.agents_overview.refresh_thread_ids.remove(&id);
-            self.agents_overview.dispatched_requests.remove(&id);
+            let _ = self.agents_overview.activity.remove(&id);
+            let _ = self.agents_overview.last_messages.remove(&id);
+            let _ = self.agents_overview.usage.remove(&id);
+            let _ = self.agents_overview.refresh_thread_ids.remove(&id);
+            let _ = self.agents_overview.dispatched_requests.remove(&id);
         }
     }
 }

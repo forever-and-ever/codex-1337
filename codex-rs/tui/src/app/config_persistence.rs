@@ -299,7 +299,6 @@ impl App {
             config.permissions.approval_policy.value().into(),
             config.approvals_reviewer,
         )
-        .await
     }
 
     pub(super) fn reject_pending_permission_change(&mut self) -> bool {
@@ -680,7 +679,6 @@ impl App {
             permissions_history_label,
             config_edits,
         )
-        .await
     }
 
     pub(super) async fn update_memory_settings_with_app_server(
@@ -697,7 +695,6 @@ impl App {
         app_server: &mut AppServerSession,
     ) {
         self.reset_memories_with_app_server_continuation(app_server)
-            .await
     }
 
     pub(super) fn reasoning_label(reasoning_effort: Option<&ReasoningEffortConfig>) -> String {

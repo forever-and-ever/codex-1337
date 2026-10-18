@@ -1,5 +1,9 @@
+use super::App;
+use super::Arc;
+use super::HistoryCell;
+use super::history_cell;
 use super::transcript_splice::TranscriptSplice;
-use super::*;
+use super::tui;
 
 fn source_item_id(cell: &dyn HistoryCell) -> Option<&str> {
     history_cell::streaming_item_id(cell).or_else(|| {

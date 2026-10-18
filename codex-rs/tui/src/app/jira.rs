@@ -1,8 +1,21 @@
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Duration;
+use super::KeyCode;
+use super::KeyEventKind;
+use super::KeyModifiers;
+use super::Result;
+use super::TuiEvent;
+use super::TypedRequestError;
+use super::Uuid;
+use super::jira_view;
 use super::jira_view::JiraBrowser;
 use super::jira_view::JiraForm;
 use super::jira_view::JiraIntent;
 use super::jira_view::ReadPurpose;
-use super::*;
+use super::tui;
 use codex_app_server_protocol::JiraAction;
 use codex_app_server_protocol::JiraIssue;
 use codex_app_server_protocol::JiraResult;
@@ -11,7 +24,7 @@ use codex_app_server_protocol::ThreadJiraParams;
 use codex_app_server_protocol::ThreadJiraResponse;
 
 impl App {
-    pub(super) async fn open_jira(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
+    pub(super) fn open_jira(&mut self, tui: &mut tui::Tui, server: &mut AppServerSession) {
         let Some(id) = self
             .primary_thread_id
             .filter(|id| Some(*id) == self.current_displayed_thread_id())
@@ -72,7 +85,7 @@ impl App {
             }
             JiraAction::List { .. } | JiraAction::Read { .. } => None,
         };
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = match tokio::time::timeout(
                 Duration::from_secs(/*secs*/ 30),
                 handle.request_typed::<ThreadJiraResponse>(ClientRequest::ThreadJira {
@@ -90,7 +103,7 @@ impl App {
                     .into()),
             };
             tx.send(AppEvent::JiraFinished { token, result });
-        });
+        }));
     }
 
     fn request_jira_preview(&mut self, server: &mut AppServerSession) {
@@ -111,7 +124,7 @@ impl App {
         }
     }
 
-    pub(super) async fn handle_jira_input(
+    pub(super) fn handle_jira_input(
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
@@ -306,7 +319,7 @@ impl App {
             tui.frame_requester().schedule_frame();
             return;
         }
-        browser.project = response.project.as_str().to_owned();
+        response.project.as_str().clone_into(&mut browser.project);
         browser.scope = Some(response.scope);
         match (intent, response.result) {
             (JiraIntent::List, JiraResult::List { data, next_cursor }) => {
@@ -452,7 +465,8 @@ impl App {
                 browser.select(selected);
             }
             _ => {
-                browser.error = Some("Unexpected Jira response; nothing further dispatched.".into());
+                browser.error =
+                    Some("Unexpected Jira response; nothing further dispatched.".into());
             }
         }
         self.request_jira_preview(server);
