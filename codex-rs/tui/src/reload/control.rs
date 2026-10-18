@@ -123,7 +123,7 @@ pub(super) async fn listen(
     loop {
         let (mut stream, _) = listener.accept().await?;
         let events = events.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let Ok(Ok(envelope)) = tokio::time::timeout(
                 std::time::Duration::from_secs(/*secs*/ 10),
                 read::<Envelope>(&mut stream),
@@ -151,7 +151,7 @@ pub(super) async fn listen(
                     tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 10), operation)
                         .await;
             }
-        });
+        }));
     }
 }
 
@@ -178,7 +178,8 @@ pub(super) fn suspend(directory: &Path, generation: u64) -> io::Result<()> {
         generation,
         request: Request::Suspend,
     })?;
-    stream.write_all(&(bytes.len() as u32).to_be_bytes())?;
+    let length = u32::try_from(bytes.len()).map_err(io::Error::other)?;
+    stream.write_all(&length.to_be_bytes())?;
     stream.write_all(&bytes)?;
     let mut length = [0; 4];
     stream.read_exact(&mut length)?;
@@ -191,7 +192,7 @@ pub(super) fn suspend(directory: &Path, generation: u64) -> io::Result<()> {
     match serde_json::from_slice(&bytes)? {
         Response::Ok => Ok(()),
         Response::Error(message) => Err(io::Error::other(message)),
-        _ => Err(io::Error::other("Unexpected suspend response")),
+        Response::State(_) => Err(io::Error::other("Unexpected suspend response")),
     }
 }
 
@@ -204,7 +205,7 @@ async fn read<T: serde::de::DeserializeOwned>(stream: &mut UnixStream) -> io::Re
         ));
     }
     let mut bytes = vec![0; len];
-    stream.read_exact(&mut bytes).await?;
+    let _ = stream.read_exact(&mut bytes).await?;
     serde_json::from_slice(&bytes).map_err(io::Error::other)
 }
 
@@ -216,7 +217,8 @@ async fn write(stream: &mut UnixStream, value: &impl Serialize) -> io::Result<()
             "UI host message too large",
         ));
     }
-    stream.write_u32(bytes.len() as u32).await?;
+    let length = u32::try_from(bytes.len()).map_err(io::Error::other)?;
+    stream.write_u32(length).await?;
     stream.write_all(&bytes).await
 }
 
@@ -355,7 +357,7 @@ mod tests {
         let version = super::super::retained::checkpoint_version;
         assert_eq!(version(&legacy_checkpoint).unwrap(), 2);
         let mut v1 = legacy_checkpoint.clone();
-        v1.as_object_mut().unwrap().remove("unstarted");
+        let _ = v1.as_object_mut().unwrap().remove("unstarted");
         assert_eq!(version(&v1).unwrap(), 1);
         let old: super::super::RetainedInput = serde_json::from_value(v1)?;
         assert_eq!(serde_json::to_value(old)?["draft"]["composer"], composer);

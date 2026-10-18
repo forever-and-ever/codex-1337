@@ -1,6 +1,10 @@
 //! Background file and transcript preparation.
 
-use super::*;
+use super::AppServerFileSystem;
+use super::GoalDraft;
+use super::GoalFilePath;
+use super::Result;
+use super::materialize_goal_objective;
 
 pub(super) async fn materialize_goal_draft_continuation(
     app_server: &AppServerFileSystem,

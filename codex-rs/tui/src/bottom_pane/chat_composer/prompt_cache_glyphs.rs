@@ -62,7 +62,6 @@ impl PromptCacheGlyphs {
 impl ChatComposer {
     /// Right-aligned in the bottom padding row; skipped when the row would clip it.
     pub(super) fn render_bottom_row_indicators(
-        &self,
         composer: Rect,
         options: ComposerRenderOptions<'_>,
         buf: &mut Buffer,
@@ -94,7 +93,7 @@ impl ChatComposer {
         if composer.height < 3 || left <= composer.x.saturating_add(LIVE_PREFIX_COLS) {
             return;
         }
-        buf.set_line(left, composer.bottom() - 1, &line, width);
+        let _ = buf.set_line(left, composer.bottom() - 1, &line, width);
     }
 }
 

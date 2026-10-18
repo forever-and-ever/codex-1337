@@ -1,6 +1,16 @@
 //! Account discovery stays in a dismissible picker while the server inventories logins.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::CustomPromptView;
+use super::KeyCode;
+use super::SelectionItem;
+use super::SelectionViewParams;
+use super::StatusAccountDisplay;
+use super::ThreadId;
+use super::key_hint;
+use super::standard_popup_hint_line;
+use codex_app_server_protocol::AccountProvider;
 
 const ACCOUNT_PICKER_LOADING_VIEW: &str = "account-picker-loading";
 const CLAUDE_LOGIN_PENDING_VIEW: &str = "claude-login";
@@ -16,8 +26,7 @@ impl ChatWidget {
         response: codex_app_server_protocol::ThreadAccountListResponse,
     ) {
         let mut openrouter_items = Vec::new();
-        self.append_openrouter_accounts(thread_id, &response, &mut openrouter_items);
-        use codex_app_server_protocol::AccountProvider;
+        Self::append_openrouter_accounts(thread_id, &response, &mut openrouter_items);
         let mut items: Vec<SelectionItem> = response
             .accounts
             .into_iter()
@@ -158,19 +167,17 @@ impl ChatWidget {
     pub(crate) fn show_account_nickname_prompt(
         &mut self,
         thread_id: ThreadId,
-        provider: codex_app_server_protocol::AccountProvider,
+        provider: AccountProvider,
         account_id: String,
         nickname: Option<String>,
     ) {
         let title = match provider {
-            codex_app_server_protocol::AccountProvider::OpenRouter => {
+            AccountProvider::OpenRouter => {
                 self.add_error_message("OpenRouter keys are named by their key name".to_owned());
                 return;
             }
-            codex_app_server_protocol::AccountProvider::Openai => "Rename ChatGPT account",
-            codex_app_server_protocol::AccountProvider::ClaudeSubscription => {
-                "Rename Claude account"
-            }
+            AccountProvider::Openai => "Rename ChatGPT account",
+            AccountProvider::ClaudeSubscription => "Rename Claude account",
         };
         let tx = self.app_event_tx.clone();
         self.bottom_pane.show_text_prompt(
@@ -193,32 +200,32 @@ impl ChatWidget {
     }
 
     pub(crate) fn finish_claude_login_pending(&mut self) {
-        self.bottom_pane
+        let _ = self
+            .bottom_pane
             .dismiss_view_by_id(CLAUDE_LOGIN_PENDING_VIEW);
     }
 
     pub(crate) fn show_claude_login_pending(&mut self, login_id: String) {
-        self.bottom_pane
-            .show_selection_view(SelectionViewParams {
-                view_id: Some(CLAUDE_LOGIN_PENDING_VIEW),
-                title: Some("Sign in to Claude".to_owned()),
-                subtitle: Some(
-                    "Complete sign-in in your browser. Existing conversations keep their accounts."
-                        .to_owned(),
-                ),
-                items: vec![SelectionItem {
-                    name: "Cancel sign-in".to_owned(),
-                    actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::CancelClaudeLogin {
-                            login_id: login_id.clone(),
-                        });
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                }],
-                footer_hint: Some(standard_popup_hint_line()),
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            view_id: Some(CLAUDE_LOGIN_PENDING_VIEW),
+            title: Some("Sign in to Claude".to_owned()),
+            subtitle: Some(
+                "Complete sign-in in your browser. Existing conversations keep their accounts."
+                    .to_owned(),
+            ),
+            items: vec![SelectionItem {
+                name: "Cancel sign-in".to_owned(),
+                actions: vec![Box::new(move |tx| {
+                    tx.send(AppEvent::CancelClaudeLogin {
+                        login_id: login_id.clone(),
+                    });
+                })],
+                dismiss_on_select: true,
                 ..Default::default()
-            });
+            }],
+            footer_hint: Some(standard_popup_hint_line()),
+            ..Default::default()
+        });
     }
 
     pub(crate) fn show_account_picker_loading(&mut self) {

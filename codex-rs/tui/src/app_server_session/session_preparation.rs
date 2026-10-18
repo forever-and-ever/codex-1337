@@ -1,7 +1,40 @@
 //! Handle-only session preparation; observations return to the sole session owner.
 
+use super::AppServerRequestHandle;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::AskForApproval;
+use super::ClientRequest;
+use super::Config;
+use super::HistoryHydrationScope;
+use super::LocalSettings;
+use super::PermissionProfile;
+use super::PermissionProfileSelection;
+use super::RequestId;
+use super::Result;
+use super::ResumeModelSettings;
+use super::Thread;
+use super::ThreadHistoryMode;
+use super::ThreadHistorySupport;
+use super::ThreadId;
+use super::ThreadParamsMode;
+use super::ThreadResumeParams;
+use super::ThreadResumeResponse;
+use super::ThreadStartParams;
+use super::ThreadStartSource;
+use super::TypedRequestError;
+use super::Uuid;
+use super::bootstrap_request_error;
+use super::history;
 use super::history::preparation::HistoryPaginationUpdate;
-use super::*;
+use super::is_history_pagination_unsupported;
+use super::remove_permission_config_overrides;
+use super::request_thread_start_with_history_fallback;
+use super::started_thread_from_resume_response;
+use super::started_thread_from_start_response;
+use super::thread_resume_params_from_config;
+use super::thread_session_state_from_thread_response;
+use super::thread_start_params_from_config;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
@@ -24,10 +57,7 @@ pub(crate) async fn loaded_observations(
         policy,
         handle,
         ClientRequest::ThreadLoadedList {
-            request_id: RequestId::String(format!(
-                "tui-discover-{}",
-                Uuid::new_v4()
-            )),
+            request_id: RequestId::String(format!("tui-discover-{}", Uuid::new_v4())),
             params: codex_app_server_protocol::ThreadLoadedListParams {
                 cursor: None,
                 limit: None,

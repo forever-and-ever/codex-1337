@@ -1,4 +1,10 @@
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::SelectionItem;
+use super::SelectionViewParams;
+use super::ThreadId;
+use super::history_cell;
+use super::standard_popup_hint_line;
 use codex_app_server_protocol::AlarmSummary;
 use codex_app_server_protocol::ThreadAlarmsUpdatedNotification;
 
@@ -11,7 +17,8 @@ pub(super) struct Alarms {
 impl ChatWidget {
     pub(super) fn on_alarms_updated(&mut self, update: ThreadAlarmsUpdatedNotification) {
         if self
-            .thread_id.is_none_or(|id| id.to_string() != update.thread_id)
+            .thread_id
+            .is_none_or(|id| id.to_string() != update.thread_id)
         {
             return;
         }

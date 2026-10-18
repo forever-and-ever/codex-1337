@@ -2,7 +2,19 @@
 
 use super::super::ThreadComposerState;
 use super::super::ThreadInputState;
-use super::*;
+use super::InputQueueState;
+use super::MessageDelivery;
+use super::PendingSteer;
+use super::PendingTurnStart;
+use super::QueuedUserMessage;
+use super::SteerInput;
+use super::SteerInterrupt;
+use super::SubmittedUserInput;
+use super::UserMessage;
+use super::UserMessageHistoryRecord;
+use super::UserMessageSource;
+use super::UserTurnInput;
+use super::VecDeque;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::CollaborationModeMask;
 use codex_protocol::openai_models::ReasoningEffort;
@@ -22,6 +34,10 @@ struct LegacyQueuedMessage {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Decode-only historical wire layout must retain its independent legacy flags"
+)]
 struct LegacyInput {
     questions: Option<crate::bottom_pane::QuestionState>,
     pending_thread_settings: Option<codex_app_server_protocol::ThreadSettingsUpdatedNotification>,

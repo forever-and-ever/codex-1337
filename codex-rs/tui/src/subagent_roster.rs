@@ -176,7 +176,7 @@ impl Renderable for RosterView {
         if roster.rows.is_empty() {
             0
         } else {
-            roster.rows.len().min(6) as u16 + 1
+            u16::try_from(roster.rows.len()).unwrap_or(u16::MAX).min(6) + 1
         }
     }
 
@@ -238,12 +238,8 @@ impl Renderable for RosterView {
             .map(|row| self.model_cell(row).width())
             .max()
             .unwrap_or(0);
-        for (offset, row) in roster
-            .rows
-            .iter()
-            .skip(roster.first)
-            .take(height)
-            .enumerate()
+        for (offset, row) in
+            (0..area.height).zip(roster.rows.iter().skip(roster.first).take(height))
         {
             let tokens = row
                 .tokens
@@ -252,7 +248,8 @@ impl Renderable for RosterView {
             let tokens_width = tokens.width().min(usize::from(area.width));
             let edge = if offset == 0 && roster.first > 0 {
                 '↑'
-            } else if offset + 1 == height && roster.first + height < roster.rows.len() {
+            } else if usize::from(offset) + 1 == height && roster.first + height < roster.rows.len()
+            {
                 '↓'
             } else {
                 ' '
@@ -299,7 +296,7 @@ impl Renderable for RosterView {
             }
             Paragraph::new(line).render(
                 Rect {
-                    y: area.y + offset as u16,
+                    y: area.y + offset,
                     height: 1,
                     ..area
                 },

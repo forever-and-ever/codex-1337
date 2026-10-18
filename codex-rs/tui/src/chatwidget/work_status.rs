@@ -61,7 +61,7 @@ impl ChatWidget {
         let status = &self.status_state.current_status;
         if status.header == "Working" {
             let header = self.work_status_header(&status.header);
-            self.bottom_pane.update_status(
+            let _ = self.bottom_pane.update_status(
                 header,
                 status.details.clone(),
                 StatusDetailsCapitalization::Preserve,
@@ -149,6 +149,6 @@ impl Renderable for WorkStatusView<'_> {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        self.lines(width).len() as u16
+        u16::try_from(self.lines(width).len()).unwrap_or(u16::MAX)
     }
 }

@@ -4193,6 +4193,7 @@ dependencies = [
  "ratatui-macros",
  "regex-lite",
  "rmcp",
+ "rustix 1.1.4",
  "semver",
  "serde",
  "serde_json",

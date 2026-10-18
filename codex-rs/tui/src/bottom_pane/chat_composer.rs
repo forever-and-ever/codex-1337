@@ -4795,7 +4795,7 @@ impl ChatComposer {
             self.cursor_pos_with_options(area, options),
             buf,
         );
-        self.render_bottom_row_indicators(composer_rect, options, buf);
+        Self::render_bottom_row_indicators(composer_rect, options, buf);
         if options.footer.is_some_and(|footer| footer.is_interactive) {
             buf.set_style(composer_rect, Style::default().dim());
         }

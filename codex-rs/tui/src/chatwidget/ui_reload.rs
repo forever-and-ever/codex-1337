@@ -1,6 +1,9 @@
 //! Reload safety concerns unfinished user actions, not whether the agent is working.
 
-use super::*;
+use super::ChatWidget;
+use super::ExternalEditorState;
+use super::SessionDraft;
+use super::input_queue;
 
 impl ChatWidget {
     #[cfg(target_os = "linux")]

@@ -1,6 +1,6 @@
 //! Freeze a realtime split-flap cell for prepared stream replacement.
 
-use super::*;
+use super::SplitFlapTranscriptCell;
 
 impl SplitFlapTranscriptCell {
     pub(in crate::chatwidget) fn snapshot(&self, width: u16) -> Self {

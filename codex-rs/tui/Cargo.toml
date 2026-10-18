@@ -94,6 +94,7 @@ ratatui = { workspace = true, features = [
 ] }
 ratatui-macros = { workspace = true }
 regex-lite = { workspace = true }
+rustix = { workspace = true, features = ["event", "fs", "process", "termios"] }
 rmcp = { workspace = true, features = ["server", "transport-streamable-http-server"] }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

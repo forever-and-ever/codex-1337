@@ -1,6 +1,12 @@
 //! Incoming follow-ups share pending-input presentation and edit/cancel keys.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::KeyBindingListExt;
+use super::KeyEvent;
+use super::KeyEventKind;
+use super::UserInput;
+use super::history_cell;
 use crate::app::QueueEvent;
 use crate::app_command::PendingSteerCancelAction;
 use codex_app_server_protocol::QueuedSubmission;

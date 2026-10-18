@@ -1,4 +1,6 @@
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::StatusIndicatorState;
 
 impl ChatWidget {
     pub(super) fn discard_stream_items(&mut self, item_ids: Vec<String>) {
@@ -17,15 +19,14 @@ impl ChatWidget {
             self.reasoning_buffer.clear();
             self.reasoning_summary_parts.clear();
             self.reasoning_header = None;
-            self.status_state.retry_status_header =
-                Some(StatusIndicatorState::working().header);
+            self.status_state.retry_status_header = Some(StatusIndicatorState::working().header);
             self.status_state.reasoning_item_id = None;
             self.status_state.reasoning_resume_turn_id = None;
             self.status_state.reasoning_recovered_after_refresh = false;
         }
-        self.clear_active_stream_tail();
+        let _ = self.clear_active_stream_tail();
         self.adaptive_chunking.reset();
-        self.sync_active_stream_tail();
+        let _ = self.sync_active_stream_tail();
         self.app_event_tx
             .send(AppEvent::DiscardStreamItems(item_ids));
         if self.stream_controllers_idle() {

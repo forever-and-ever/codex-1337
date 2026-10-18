@@ -1,6 +1,9 @@
 //! The client can disappear only when no local input or foreground operation is lost.
 
-use super::*;
+use super::ChatWidget;
+use super::ExternalEditorState;
+use super::ThreadInputState;
+use super::input_queue;
 
 impl ChatWidget {
     pub(crate) fn ready_for_idle_restart(&self) -> bool {

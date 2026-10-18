@@ -3,7 +3,8 @@ use codex_app_server_protocol::ContextRole;
 
 #[tokio::test]
 async fn context_role_command_output() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let (mut chat, mut rx, _op_rx) =
+        Box::pin(make_chatwidget_manual(/*model_override*/ None)).await;
     chat.thread_id = Some(ThreadId::new());
     let mut role = None;
     let mut output = Vec::new();
@@ -49,8 +50,8 @@ async fn context_role_command_output() {
     ] {
         chat.bottom_pane
             .set_composer_text(input.to_string(), Vec::new(), Vec::new());
-        chat.handle_key_event(KeyCode::Esc.into());
-        chat.handle_key_event(KeyCode::Enter.into());
+        let _ = chat.handle_key_event(KeyCode::Esc.into());
+        let _ = chat.handle_key_event(KeyCode::Enter.into());
         let mut errors = 0;
         while let Ok(event) = rx.try_recv() {
             match event {

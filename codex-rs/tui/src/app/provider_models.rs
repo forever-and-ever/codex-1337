@@ -104,7 +104,7 @@ impl App {
                 result,
             } => {
                 self.chat_widget
-                    .show_provider_models(request_id, provider, result);
+                    .show_provider_models(request_id, &provider, result);
             }
             ProviderModelEvent::Start(choice) => {
                 if self.chat_widget.session_draft.is_some() {

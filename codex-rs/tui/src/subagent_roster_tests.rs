@@ -47,7 +47,7 @@ fn roster_model_columns() -> anyhow::Result<()> {
     let mut snapshots = Vec::new();
     for height in [4, 2] {
         let mut terminal = Terminal::new(TestBackend::new(/*width*/ 80, height))?;
-        terminal.draw(|frame| view.render(frame.area(), frame.buffer_mut()))?;
+        let _ = terminal.draw(|frame| view.render(frame.area(), frame.buffer_mut()))?;
         snapshots.push(terminal.backend().to_string());
     }
     insta::assert_snapshot!(snapshots.join("\n\n"));

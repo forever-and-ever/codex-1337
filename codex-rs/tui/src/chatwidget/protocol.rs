@@ -91,10 +91,10 @@ impl ChatWidget {
                 self.on_alarms_updated(notification)
             }
             ServerNotification::ThreadPromptCacheUpdated(notification) => {
-                self.on_prompt_cache_updated(notification);
+                self.on_prompt_cache_updated(&notification);
             }
             ServerNotification::ThreadPromptCacheMissed(notification) => {
-                self.on_prompt_cache_missed(notification);
+                self.on_prompt_cache_missed(&notification);
             }
             ServerNotification::ThreadWarmingStopped(notification) => {
                 self.add_warning_message(format!("Warming stopped. {}", notification.reason));

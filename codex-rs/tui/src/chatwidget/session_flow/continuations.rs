@@ -1,6 +1,6 @@
 //! Prompt-revert notices projected after deferred history preparation.
 
-use super::*;
+use super::ChatWidget;
 
 impl ChatWidget {
     pub(crate) fn project_prompt_revert_notice(&mut self, notice: &str) {

@@ -1,4 +1,8 @@
 use super::*;
+use crate::chatwidget::KeyCode;
+use crate::chatwidget::KeyModifiers;
+use crate::chatwidget::ThreadId;
+use crate::chatwidget::UserMessage;
 use crate::chatwidget::tests::helpers::render_bottom_popup;
 use crate::chatwidget::tests::make_chatwidget_manual_with_sender;
 use codex_app_server_protocol::TurnToolOutput;
@@ -6,7 +10,7 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn incoming_messages_share_queue_controls_without_local_autosend() {
-    let (mut chat, _, mut events, mut ops) = make_chatwidget_manual_with_sender().await;
+    let (mut chat, _, mut events, mut ops) = Box::pin(make_chatwidget_manual_with_sender()).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     chat.apply_external_edit("unfinished prompt".into());
@@ -18,7 +22,7 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         })),
     };
     chat.update_server_queue(vec![item.clone()], /*busy*/ false);
-    chat.maybe_send_next_queued_input();
+    let _ = chat.maybe_send_next_queued_input();
     assert!(
         ops.try_recv().is_err(),
         "the durable queue, not this TUI, owns dispatch"
@@ -27,11 +31,11 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
         "incoming_queued_message",
         render_bottom_popup(&chat, /*width*/ 80)
     );
-    chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
+    let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
     // Removal must be acknowledged before the incoming message becomes a draft.
     assert_eq!(chat.composer_text_with_pending(), "unfinished prompt");
     // The widget emits intents; App's mutation owner admits only one operation.
-    chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
+    let _ = chat.handle_key_event(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT));
     let actions = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::Queue(QueueEvent::Remove {

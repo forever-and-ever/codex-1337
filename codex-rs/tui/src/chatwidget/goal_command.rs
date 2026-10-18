@@ -72,8 +72,8 @@ impl ChatWidget {
 
     pub(super) fn dispatch_goal_command(
         &mut self,
-        args: String,
-        text_elements: Vec<TextElement>,
+        args: &str,
+        text_elements: &[TextElement],
         pending_pastes: Vec<(String, String)>,
         local_images: Vec<LocalImageAttachment>,
         remote_image_urls: Vec<String>,
@@ -87,7 +87,7 @@ impl ChatWidget {
         }
 
         // TELOS(explicit-command-verbs): queued inputs must pass the same boundary as live input.
-        let command = match GoalCommand::parse_args(&args) {
+        let command = match GoalCommand::parse_args(args) {
             Ok(parsed) => parsed,
             Err(error) => {
                 self.add_error_message(error);
@@ -136,7 +136,7 @@ impl ChatWidget {
 
         let payload_offset = args.trim_end().len() - payload.len();
         let text_elements =
-            Self::slash_command_args_elements(payload, payload_offset, &text_elements);
+            Self::slash_command_args_elements(payload, payload_offset, text_elements);
         let draft = GoalDraft {
             objective: payload.to_string(),
             text_elements,
@@ -157,7 +157,7 @@ impl ChatWidget {
                         })
                     })
                     .collect();
-                self.queue_user_message_with_options(
+                let _ = self.queue_user_message_with_options(
                     UserMessage {
                         text: format!("{GOAL_PREFIX}{}", draft.objective),
                         local_images: draft.local_images,
