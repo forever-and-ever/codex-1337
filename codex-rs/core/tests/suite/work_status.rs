@@ -26,11 +26,12 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
     });
     let test = builder.build_with_auto_env(&server).await?;
     let updates = [
-        json!({"activity": "Read renderer"}),
+        json!({"activity": "  Read\n renderer "}),
         json!({"activity": "Write tests"}),
         json!({"activity": " "}),
         json!({"activity": "🦀".repeat(50)}),
         json!({"activity": "🦀".repeat(51)}),
+        json!({"activity": 42}),
     ];
     let mut requests = Vec::new();
     for (index, update) in updates.iter().enumerate() {
@@ -42,7 +43,9 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
                     responses::ev_custom_tool_call(
                         &id,
                         "exec",
-                        &format!("text(await tools.update_work_status({update}));"),
+                        &format!(
+                            "text([await tools.update_work_status({update}), \"continued\"]);"
+                        ),
                     ),
                     responses::ev_completed(&id),
                 ]),
@@ -107,6 +110,11 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
                 emitted_at: None,
             },
             WorkStatus {
+                turn_id: turn_id.clone(),
+                activity: "🦀".repeat(50),
+                emitted_at: None,
+            },
+            WorkStatus {
                 turn_id,
                 activity: "🦀".repeat(50),
                 emitted_at: None,
@@ -118,7 +126,8 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         "Work status updated.",
         "Summaries must contain visible text without control characters.",
         "Work status updated.",
-        "Keep each summary within 50 characters.",
+        "Warning: work status truncated to 50 characters.",
+        "Warning: work status ignored; failed to parse function arguments",
     ]
     .iter()
     .enumerate()
@@ -129,6 +138,7 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         )
         .expect("tool reply");
         assert!(output.contains(expected), "{output}");
+        assert!(output.contains("continued"), "{output}");
     }
     // Exercise the real rollout policy: presentation updates are not durable history.
     test.codex.flush_rollout().await?;

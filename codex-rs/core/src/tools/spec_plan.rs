@@ -1369,12 +1369,7 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
     }
-    // Ephemeral side conversations still have a resident status display.
-    if !turn_context.session_source.is_internal()
-        && !crate::guardian::is_basic_session_source(&turn_context.session_source)
-    {
-        registry.add(WorkStatusHandler);
-    }
+    registry.add(WorkStatusHandler);
 
     if features.enabled(Feature::DeferredExecutor) {
         registry.add(
