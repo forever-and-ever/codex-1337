@@ -110,8 +110,13 @@ fn live_preparation_does_not_freeze_retained_navigation() {
         },
     );
 
+    // Input bursts must compose against the requested position, not the last painted row.
     // A new live revision must not freeze navigation through already prepared content.
-    view.scroll(&cells, -2);
+    let (index, row) = view.start(&cells);
+    for rows in [-2, -2, 1] {
+        view.scroll(&cells, rows);
+    }
+    assert_eq!(view.start(&cells), (index, row - 3));
     assert_ne!(render(&mut view, &cells, 32, 4), before);
     view.jump_to_latest();
     render(&mut view, &extended, 32, 4);
@@ -138,6 +143,11 @@ async fn return_to_latest_cancels_unfinished_history_scroll()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         view.cache.frames = Some(crate::tui::FrameRequester::new(draw_tx));
+        view.scroll(&cells, -100);
+        assert!(view.deferred_scroll.is_some());
+        view.scroll(&cells, 1);
+        assert!(view.deferred_scroll.is_none());
+        assert!(view.is_following());
         view.scroll(&cells, -100);
         assert!(view.deferred_scroll.is_some());
         view.jump_to_latest();

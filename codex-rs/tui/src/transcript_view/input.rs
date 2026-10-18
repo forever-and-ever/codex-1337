@@ -4,7 +4,7 @@
 //! Optional automatic copying happens only when a nonempty mouse selection is released.
 //! Automatic copies optionally clear the selection; explicit copies always clear it after
 //! confirmed delivery.
-//! Wheel input accumulates fractional rows and discards the remainder when direction reverses.
+//! Wheel input preserves fractional rows and caps admitted distance in real time.
 
 use crate::key_hint::KeyBindingListExt;
 use crossterm::event::KeyCode;
@@ -312,17 +312,7 @@ impl TranscriptView {
                 } else {
                     1.0
                 };
-                if self.pending_mouse_scroll.signum() != direction {
-                    self.pending_mouse_scroll = 0.0;
-                }
-                self.pending_mouse_scroll += direction * self.mouse_scroll_speed;
-                // Decimal speeds can land just short of a whole row after repeated addition.
-                let rounded = self.pending_mouse_scroll.round();
-                if rounded != 0.0 && (self.pending_mouse_scroll - rounded).abs() < 1e-9 {
-                    self.pending_mouse_scroll = rounded;
-                }
-                let rows = self.pending_mouse_scroll as isize;
-                self.pending_mouse_scroll = self.pending_mouse_scroll.fract();
+                let rows = self.wheel.rows(direction * self.mouse_scroll_speed);
                 if rows != 0 {
                     self.scroll(cells, rows);
                 }

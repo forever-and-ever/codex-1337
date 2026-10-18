@@ -34,6 +34,7 @@ mod surface;
 mod text;
 mod tool_output_tokens;
 mod turn_tip;
+mod wheel;
 
 use std::sync::Arc;
 
@@ -120,7 +121,7 @@ struct VisibleRow {
 /// Shared scrolling and interaction state for compact and detailed transcript presentations.
 pub(crate) struct TranscriptView {
     pub(crate) mouse_scroll_speed: f64,
-    pending_mouse_scroll: f64,
+    wheel: wheel::WheelScroll,
     pub(crate) copy_on_select: bool,
     pub(crate) copy_on_select_clear_selection: bool,
     pub(crate) primary_selection: bool,
@@ -173,7 +174,7 @@ impl Default for TranscriptView {
     fn default() -> Self {
         Self {
             mouse_scroll_speed: 1.0,
-            pending_mouse_scroll: 0.0,
+            wheel: wheel::WheelScroll::default(),
             copy_on_select: false,
             copy_on_select_clear_selection: false,
             primary_selection: false,

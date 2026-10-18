@@ -1,6 +1,5 @@
 //! Layout readiness admits paint; terminal completion admits its routing geometry.
 
-use super::Anchor;
 use super::Arc;
 use super::Buffer;
 use super::Clear;
@@ -200,10 +199,6 @@ impl TranscriptView {
         self.inflight_cells = None;
     }
 
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."
-    )]
     pub(crate) fn scroll(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
         if self.cache.frames.is_none() {
             self.scroll_prepared(cells, rows);
@@ -213,21 +208,18 @@ impl TranscriptView {
             return;
         }
         let previous = self.position;
-        let scroll = if let Some(mut scroll) = self.deferred_scroll.take() {
+        // Reversal supersedes movement blocked on preparation; it must not first pay off old input.
+        let pending = self
+            .deferred_scroll
+            .take()
+            .filter(|scroll| rows == 0 || scroll.rows.signum() == rows.signum());
+        let scroll = if let Some(mut scroll) = pending {
             scroll.rows = scroll.rows.saturating_add(rows);
             scroll
         } else {
-            let Some(first) = self.visible.first() else {
-                return;
-            };
-            let offset = first.layout.position_at(first.row, 0);
             Scroll {
-                origin: Position::Reading(Anchor {
-                    key: first.key,
-                    index: first.index,
-                    offset,
-                    row_bias: first.layout.row_for_offset(offset) as isize - first.row as isize,
-                }),
+                // Relative input composes against intent, not stale pointer-routing geometry.
+                origin: previous,
                 rows,
                 cells: self
                     .snapshot_cells()

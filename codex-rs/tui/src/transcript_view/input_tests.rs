@@ -61,8 +61,8 @@ fn mouse_scroll_speed_scales_rows_and_accumulates_fractional_movement() {
     insta::assert_snapshot!(frames.join("\n\n"));
 }
 
-#[test]
-fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
+#[tokio::test(start_paused = true)]
+async fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
     use crate::history_cell::PlainHistoryCell;
 
     let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(PlainHistoryCell::new(
@@ -82,6 +82,7 @@ fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
             ..TranscriptView::default()
         };
         view.render(area, &mut Buffer::empty(area), &cells);
+        view.cache.frames = Some(crate::tui::FrameRequester::test_dummy());
         view.scroll(&cells, /*rows*/ -40);
         let (index, row) = view.start(&cells);
         for (kind, direction) in [
@@ -89,7 +90,9 @@ fn decimal_mouse_scroll_speeds_preserve_whole_rows() {
             (MouseEventKind::ScrollDown, 1),
         ] {
             let (_, start_row) = view.start(&cells);
+            // Deliberately withhold painting throughout the burst; admitted ticks must accumulate.
             for event in 1..=100 {
+                tokio::time::advance(std::time::Duration::from_millis(10)).await;
                 view.handle_mouse(mouse(kind, /*column*/ 1, /*row*/ 1), &cells);
                 let rows = (f64::from(event) * speed).floor() as isize * direction;
                 assert_eq!(
