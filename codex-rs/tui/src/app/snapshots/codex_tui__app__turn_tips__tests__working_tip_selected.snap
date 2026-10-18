@@ -1,0 +1,28 @@
+---
+source: tui/src/app/turn_tips_tests.rs
+expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(buffer_text(crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal),))"
+---
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+              Response row 0
+              Response row 1
+              Response row 2
+              Response row 3
+              Response row 4
+              Response row 5
+              Response row 6
+              Response row 7
+              Response row 8
+              Response row 9
+
+────────────────────────────────────────────────────────────────────────────────
+                                                    Selecting text · esc cancel
+  • Working (0s • ⌃c to interrupt)
+    └ Tip: Try /help.
+
+────────────────────────────────────────────────────────────────────────────────
+
+› Ask Codex to do anything
+                                                                              󰜗
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project

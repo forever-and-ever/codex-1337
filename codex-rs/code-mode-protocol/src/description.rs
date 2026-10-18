@@ -504,7 +504,7 @@ mod tests {
                 .contains(&"Output detail. ".repeat(100))
         );
         assert!(
-            enabled_tool_metadata(&large_output)
+            enabled_tool_metadata(large_output)
                 .describe_output()
                 .contains("ok (required): boolean")
         );
@@ -601,7 +601,7 @@ mod tests {
                 .contains("await tools.mcp__sample__search(args)")
         );
         assert!(definition.description.contains("Returns: MCP result"));
-        let output = enabled_tool_metadata(&definition).describe_output();
+        let output = enabled_tool_metadata(definition).describe_output();
         assert!(output.contains("id (required): string"));
         assert!(output.contains("score (required): number"));
         assert!(!output.contains("External schema"));

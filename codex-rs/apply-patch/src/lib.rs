@@ -406,7 +406,8 @@ async fn apply_hunks_with_options(
             Ok(delta)
         }
         Err(error) => {
-            let msg = error.to_string();
+            // Preserve the filesystem cause: executor sandbox denial classification uses it.
+            let msg = format!("{error:#}");
             writeln!(stderr, "{msg}").map_err(|error| {
                 ApplyPatchFailure::new(ApplyPatchError::from(error), delta.clone())
             })?;

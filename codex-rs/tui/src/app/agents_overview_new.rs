@@ -163,7 +163,31 @@ impl App {
         let started = match result {
             Ok(started) => started,
             Err(error) => {
-                self.add_agents_overview_error(format!("Failed to start session: {error}"));
+                // Older servers omit the reason. Only use their specific message when
+                // data is absent, so other invalid requests aren't misclassified.
+                let (title, message) = if matches!(
+                    error.downcast_ref::<TypedRequestError>(),
+                    Some(TypedRequestError::Server { source, .. })
+                        if source.code == -32600
+                            && match &source.data {
+                                Some(data) => data.get("reason").and_then(serde_json::Value::as_str)
+                                    == Some("serverShuttingDown"),
+                                None => source.message == "Server is draining; retry after reconnecting",
+                            }
+                ) {
+                    let mut message = String::from(
+                        "New sessions are paused while active turns finish or are canceled. The default shutdown wait is up to one minute.",
+                    );
+                    if !matches!(self.app_server_target, AppServerTarget::Embedded) {
+                        message.push_str(
+                            " If the server restarts, Codex will reconnect automatically.",
+                        );
+                    }
+                    (Some("Codex's background server is shutting down"), message)
+                } else {
+                    (None, format!("Failed to start session: {error}"))
+                };
+                self.show_agents_overview_error(title, message);
                 return Ok(AppRunControl::Continue);
             }
         };

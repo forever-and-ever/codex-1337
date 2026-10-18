@@ -1,7 +1,6 @@
 //! Typed requests and receipts for the non-turn branches of the ordered operation ledger.
 
 use super::App;
-use super::AppCommand;
 use super::AppEvent;
 use super::AppServerSession;
 use super::Arc;
@@ -22,7 +21,6 @@ use super::SkillsListParams;
 use super::SkillsListResponse;
 use super::SubmissionFailure;
 use super::SubmissionRequest;
-use super::ThreadEventStore;
 use super::ThreadId;
 use super::ThreadSettingsUpdateParams;
 use super::TypedRequestError;
@@ -30,7 +28,6 @@ use super::UiReply;
 use super::Uuid;
 use super::WrapErr;
 use super::WriteStatus;
-use super::app_server_requests;
 use super::control;
 use super::detach;
 use super::navigation;
@@ -91,27 +88,20 @@ pub(in crate::app) enum ConnectionMutation {
 #[derive(Clone)]
 pub(in crate::app) enum ServerRequestDelivery {
     Resolved {
-        resolution: app_server_requests::AppServerRequestResolution,
-        command: Box<AppCommand>,
+        reply: codex_app_server_client::AppServerReplyHandle,
+        result: serde_json::Value,
     },
-    DynamicTool(app_server_requests::AppServerRequestResolution),
     Rejected {
-        request_id: codex_app_server_protocol::RequestId,
+        reply: codex_app_server_client::AppServerReplyHandle,
         error: codex_app_server_protocol::JSONRPCErrorError,
     },
 }
 
 impl ServerRequestDelivery {
-    async fn send(self, handle: &AppServerRequestHandle) -> std::io::Result<()> {
+    async fn send(self) -> std::io::Result<()> {
         match self {
-            Self::Resolved { resolution, .. } | Self::DynamicTool(resolution) => {
-                handle
-                    .resolve_server_request(resolution.request_id, resolution.result)
-                    .await
-            }
-            Self::Rejected { request_id, error } => {
-                handle.reject_server_request(request_id, error).await
-            }
+            Self::Resolved { reply, result } => reply.resolve(result).await,
+            Self::Rejected { reply, error } => reply.reject(error).await,
         }
     }
 }
@@ -247,7 +237,7 @@ pub(super) async fn send(
     match operation {
         ServerOperation::Response(delivery) => {
             delivery
-                .send(&handle)
+                .send()
                 .await
                 .map_err(|source| TypedRequestError::Transport {
                     method: "server-request response delivery".into(),
@@ -453,16 +443,6 @@ impl App {
                 unreachable!("typed UI reply reduced before the operation lane")
             }
 
-            OperationReceipt::ServerRequestDelivered => {
-                if let ServerOperation::Response(delivery) = operation
-                    && let ServerRequestDelivery::Resolved { command, .. } = &**delivery
-                    && ThreadEventStore::op_can_change_pending_replay_state(command.as_ref())
-                {
-                    self.note_thread_outbound_op(thread_id, command).await;
-                    self.refresh_pending_thread_approvals().await;
-                    self.refresh_side_parent_status_from_store(thread_id).await;
-                }
-            }
             OperationReceipt::RealtimeSpeechAccepted => {
                 if let ServerOperation::Realtime(
                     operation @ RealtimeOperation::Speech { delivery_id, .. },
@@ -543,7 +523,8 @@ impl App {
             OperationReceipt::VoicePreference(_) => {
                 unreachable!("voice preferences have connection origin")
             }
-            OperationReceipt::UiRequestApplied
+            OperationReceipt::ServerRequestDelivered
+            | OperationReceipt::UiRequestApplied
             | OperationReceipt::Removal(_)
             | OperationReceipt::RealtimePrepared(_)
             | OperationReceipt::RealtimeStarted

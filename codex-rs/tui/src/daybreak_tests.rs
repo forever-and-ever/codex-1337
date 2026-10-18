@@ -33,6 +33,16 @@ fn turn_program_uses_catalog_and_preserves_legacy_models() {
     for (name, eligible_account) in [("unlisted-model", true), (model.model.as_str(), false)] {
         assert!(program_for_turn(&models, name, eligible_account, /*enabled*/ true).is_err());
     }
+    for programs in [None, Some(vec![]), Some(vec![CyberAccessProgram::Standard])] {
+        model.available_access_programs = programs.map(|cyber| ModelAccessPrograms { cyber });
+        let result = program_for_turn(
+            std::slice::from_ref(&model),
+            &model.model,
+            /*eligible_account*/ true,
+            /*enabled*/ true,
+        );
+        assert!(result.is_err());
+    }
 }
 
 #[test]

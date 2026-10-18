@@ -547,15 +547,17 @@ async fn prepare_queued_input(mut input: TurnInput) -> Result<TurnInput, QueueSe
 }
 
 fn supported_queue_input(input: &TurnInput) -> bool {
-    match input {
-        TurnInput::UserInput { .. } => true,
-        TurnInput::ResponseItem(ResponseItem::FunctionCallOutput {
-            call_id: None,
-            name: Some(name),
-            ..
-        }) => !name.trim().is_empty(),
-        TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => false,
-    }
+    let item = match input {
+        TurnInput::UserInput { .. } => return true,
+        TurnInput::ResponseItem(item) => item,
+        TurnInput::AnnotatedResponseItem(annotated) => &annotated.item,
+        TurnInput::InterAgentCommunication(_) => return false,
+    };
+    matches!(item, ResponseItem::FunctionCallOutput {
+        call_id: None,
+        name: Some(name),
+        ..
+    } if !name.trim().is_empty())
 }
 
 impl<C> ThreadLifecycleContributor<C> for QueuedItemService

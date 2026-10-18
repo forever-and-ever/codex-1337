@@ -273,7 +273,7 @@ impl Driver {
                     _ => &[],
                 })
                 .filter_map(|content| match content {
-                    ContentItem::OutputText { text } => Some(text.as_str()),
+                    ContentItem::OutputText { text, .. } => Some(text.as_str()),
                     _ => None,
                 })
                 .collect();

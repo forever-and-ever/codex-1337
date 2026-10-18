@@ -44,7 +44,7 @@ impl NetworkProxySpec {
     }
 
     pub(crate) fn credential_broker_enabled(&self) -> bool {
-        self.config.credential_broker && self.constraints.enabled != Some(false)
+        self.enabled() && self.config.credential_broker && self.constraints.enabled != Some(false)
     }
 
     pub fn proxy_host_and_port(&self) -> String {

@@ -178,26 +178,6 @@ FIXTURE_BINARIES = (
             "codex-rmcp-client",
         ),
     ),
-    (
-        "codex-shell-escalation",
-        "codex-execve-wrapper",
-        (
-            "app_test_support",
-            "codex-agent-extension",
-            "codex-app-server",
-            "codex-cli",
-            "codex-core",
-            "codex-exec",
-            "codex-guardian-v2",
-            "codex-history-notes-extension",
-            "codex-login",
-            "codex-mcp-extension",
-            "codex-memories-write",
-            "codex-queue-extension",
-            "codex-tui",
-            "core_test_support",
-        ),
-    ),
     ("codex-stdio-to-uds", "codex-stdio-to-uds", ("codex-stdio-to-uds",)),
 )
 

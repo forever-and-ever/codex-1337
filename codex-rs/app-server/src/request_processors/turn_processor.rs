@@ -24,6 +24,8 @@ use codex_protocol::protocol::AdditionalContextKind as CoreAdditionalContextKind
 use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::protocol::TurnSettingsUpdate;
 use codex_protocol::protocol::TurnSettingsUpdateOutcome;
+use codex_protocol::turn_input::AnnotatedResponseItem;
+use codex_protocol::turn_input::ResponseItemAnnotations;
 use codex_skills::system_cache_root_dir;
 
 use crate::image_url::REMOTE_IMAGE_URL_ERROR;
@@ -117,7 +119,7 @@ pub(crate) struct TurnRequestProcessor {
     analytics_events_client: AnalyticsEventsClient,
     config: Arc<Config>,
     config_manager: ConfigManager,
-    pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
+    pending_thread_unloads: PendingThreadUnloads,
     thread_state_manager: ThreadStateManager,
     thread_watch_manager: ThreadWatchManager,
     skills_watcher: Arc<SkillsWatcher>,
@@ -180,7 +182,7 @@ impl TurnRequestProcessor {
         analytics_events_client: AnalyticsEventsClient,
         config: Arc<Config>,
         config_manager: ConfigManager,
-        pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
+        pending_thread_unloads: PendingThreadUnloads,
         thread_state_manager: ThreadStateManager,
         thread_watch_manager: ThreadWatchManager,
         skills_watcher: Arc<SkillsWatcher>,
@@ -678,9 +680,17 @@ impl TurnRequestProcessor {
         let additional_context = map_additional_context(params.additional_context);
         let turn_has_input = !params.input.is_empty();
         let input = if let Some(tool_output) = params.tool_output {
+            let retain = tool_output.retain;
             let item = tool_output.into_core();
             validate_response_item_image_urls(std::slice::from_ref(&item))?;
-            TurnInput::ResponseItem(item)
+            if retain {
+                TurnInput::AnnotatedResponseItem(AnnotatedResponseItem {
+                    item,
+                    annotations: ResponseItemAnnotations { retain: true },
+                })
+            } else {
+                TurnInput::ResponseItem(item)
+            }
         } else {
             TurnInput::UserInput {
                 content: params

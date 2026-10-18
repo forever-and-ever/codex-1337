@@ -83,7 +83,6 @@ use super::navigation_config;
 use super::new_session;
 use super::recap;
 use super::session_lifecycle;
-use super::side;
 use super::tui;
 use super::ui_requests;
 

@@ -12,6 +12,7 @@ use super::CopyStatus;
 use super::SelectionTarget;
 use crate::tui::FrameRequester;
 use std::cell::Cell;
+use std::cell::LazyCell;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
@@ -83,6 +84,7 @@ impl CopySetup {
 pub(crate) type CopyResult = Result<CopyStatus, String>;
 
 enum Request {
+    WarmTextReader,
     Copy {
         text: Arc<str>,
         format: CopyFormat,
@@ -207,6 +209,15 @@ impl ClipboardWorker {
         Ok(CopyStatus::Pending(id))
     }
 
+    pub(crate) fn warm_text_reader(&mut self, frames: FrameRequester) -> Result<(), String> {
+        self.ensure_started(frames)?;
+        self.requests
+            .as_ref()
+            .ok_or("clipboard worker stopped")?
+            .send(Request::WarmTextReader)
+            .map_err(|_| "clipboard worker stopped".to_string())
+    }
+
     fn ensure_started(&mut self, frames: FrameRequester) -> Result<(), String> {
         if self.requests.is_none() {
             self.start(
@@ -244,7 +255,7 @@ impl ClipboardWorker {
                     };
                     (result, terminal_text.into_inner())
                 },
-                crate::clipboard_paste::text::read,
+                crate::clipboard_paste::text::reader,
             )?;
         }
         Ok(())
@@ -344,7 +355,7 @@ impl ClipboardWorker {
         }
     }
 
-    fn start(
+    fn start<R>(
         &mut self,
         frames: FrameRequester,
         mut copy: impl FnMut(
@@ -357,19 +368,27 @@ impl ClipboardWorker {
             Option<(SelectionTarget, String)>,
         ) + Send
         + 'static,
-        mut read: impl FnMut(SelectionTarget, Instant) -> Result<String, String> + Send + 'static,
-    ) -> Result<(), String> {
+        make_reader: impl FnOnce() -> R + Send + 'static,
+    ) -> Result<(), String>
+    where
+        R: FnMut(SelectionTarget, Instant) -> Result<String, String>,
+    {
         let (requests, incoming) = mpsc::channel::<Request>();
         let (outgoing, responses) = mpsc::channel();
         // Native calls can wait indefinitely; shutdown waits only for a bounded handoff.
         std::thread::Builder::new()
             .name("clipboard-copy".into())
             .spawn(move || {
+                let mut read = LazyCell::new(make_reader);
                 let mut lease: Option<ClipboardLease> = None;
                 // An ordinary copy must not relinquish PRIMARY, or vice versa.
                 let mut primary_lease: Option<ClipboardLease> = None;
                 while let Ok(request) = incoming.recv() {
                     let (destination, outcome, terminal_text) = match request {
+                        Request::WarmTextReader => {
+                            LazyCell::force(&read);
+                            continue;
+                        }
                         Request::Copy {
                             text,
                             format,

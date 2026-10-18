@@ -5387,6 +5387,8 @@ source_response_item_id: None,
             })),
             RolloutItem::ResponseItem(
                 codex_protocol::models::ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
                     id: Some(codex_protocol::ResponseItemId::with_suffix("msg", "1")),
                     role: "user".into(),
                     content: vec![codex_protocol::models::ContentItem::InputText {

@@ -202,7 +202,7 @@ pub(super) async fn run(mut commands: mpsc::Receiver<Command>) {
                         }
                         JSONRPCMessage::Error(error) => {
                             if pending.contains_key(&error.id)
-                                && client.reject_server_request(error.id.clone(), error.error).await.is_ok()
+                                && client.request_handle().reject_server_request(error.id.clone(), error.error).await.is_ok()
                             {
                                 let _ = pending.remove(&error.id);
                             }

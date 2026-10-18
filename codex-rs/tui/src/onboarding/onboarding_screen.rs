@@ -1,7 +1,7 @@
 //! Onboarding screen orchestration and top-level keyboard routing.
 //!
 //! The onboarding flow is a small state machine over visible steps
-//! (welcome/auth/trust). This module decides which step receives key/paste
+//! (welcome/auth/trust/GovCloud). This module decides which step receives key/paste
 //! events and enforces flow-level safety rules that cut across individual step
 //! widgets. Folder-entry consent reuses this same event loop for startup and in-app navigation.
 //!
@@ -51,6 +51,7 @@ use crate::onboarding::keys;
 use crate::onboarding::trust_directory::TrustDirectorySelection;
 use crate::onboarding::trust_directory::TrustDirectoryWidget;
 use crate::onboarding::welcome::WelcomeWidget;
+use crate::startup_draft::StartupCancelled;
 use crate::tui::FrameRequester;
 use crate::tui::OverlayInput;
 use crate::tui::Tui;
@@ -733,12 +734,14 @@ async fn run_onboarding_screen_inner(
                                 let _ = tui.terminal.clear();
                                 did_full_clear_after_success = true;
                             }
-                            let _ = tui.draw(u16::MAX, |frame| {
+                            tui.draw(u16::MAX, |frame| {
                                 frame.render_widget_ref(&onboarding_screen, frame.area());
-                            });
+                            })?;
                         }
                         TuiEvent::Mouse(_) => {}
                     }
+                } else {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, StartupCancelled).into());
                 }
             }
             event = async {

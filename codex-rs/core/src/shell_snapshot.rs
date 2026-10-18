@@ -20,6 +20,8 @@ use codex_network_proxy::NetworkProxy;
 use codex_otel::SessionTelemetry;
 use codex_protocol::ThreadId;
 use codex_protocol::config_types::ShellEnvironmentPolicy;
+use codex_protocol::shell_environment::CODEX_TOOL_CALL_ID_ENV_VAR;
+use codex_protocol::shell_environment::set_tool_call_id_env_var;
 use codex_shell_command::shell_snapshot::CapturedSnapshot;
 use codex_shell_command::shell_snapshot::SnapshotCaptureOptions;
 use codex_shell_command::shell_snapshot::SnapshotStartup;
@@ -415,11 +417,13 @@ async fn run_script_with_timeout(
             SnapshotShellMode::Validation(path) => Some(path),
             SnapshotShellMode::Login => None,
         };
+        let mut env = std::env::vars().collect();
+        set_tool_call_id_env_var(&mut env, None);
         return sandbox
             .run(
                 args,
                 cwd,
-                std::env::vars().collect(),
+                env,
                 snapshot_timeout,
                 shell_name,
                 snapshot_read_path,
@@ -439,6 +443,7 @@ async fn run_script_with_timeout(
         handler.env_clear();
         handler.envs(std::env::vars_os());
     }
+    handler.env_remove(CODEX_TOOL_CALL_ID_ENV_VAR);
     codex_protocol::shell_environment::scrub_non_inheritable_env_vars(handler.as_std_mut());
     #[cfg(unix)]
     let output = {

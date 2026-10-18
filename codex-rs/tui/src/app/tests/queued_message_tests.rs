@@ -25,6 +25,7 @@ async fn queued_edit_acknowledgement_preserves_the_original_threads_draft() -> R
         client_user_message_id: "incoming".into(),
         input: Vec::new(),
         tool_output: Some(Box::new(TurnToolOutput {
+            retain: false,
             name: "message".into(),
             namespace: None,
             output: FunctionCallOutputBody::Text("follow-up".into()),
@@ -836,7 +837,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     };
     assert!(
         app.pending_app_server_requests
-            .note_server_request(&approval)
+            .note_buffered_request(&app_server_requests::BufferedServerRequest::new(
+                approval.clone(),
+                &server.request_handle()
+            ))
             .is_none()
     );
     let decision = AppCommand::PatchApproval {

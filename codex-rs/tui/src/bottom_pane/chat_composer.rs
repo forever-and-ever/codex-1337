@@ -181,6 +181,7 @@
 //! Local-shell completion and cancellation remain client-owned while disconnected.
 //! When connected but the thread is unavailable, configured
 //! submit keys may dispatch explicitly allowed recovery and local commands; other drafts stay put.
+//! Empty-prompt agents navigation remains available with its usual editor and draft guards.
 //! Collapsed pastes expand into editable text so the full draft can be copied before quitting.
 //!
 //! # Reasoning Effort Animations
@@ -268,7 +269,8 @@
 //! detection; enabling the bypass flushes and clears in-flight state. False or absent uses terminal
 //! auto detection. Keystroke-injected pastes on confirming terminals have no forced-hold override.
 //! Mouse edits flush pending typing; selection and copy behavior lives in [`mouse`]. Confirmed
-//! copies clear the selection while preserving the draft and cursor.
+//! copies clear the selection while preserving the draft and cursor. Footer text uses a separate
+//! read-only selection owner over its final rendered cells.
 //!
 //! See `codex-rs/tui/src/bottom_pane/paste_burst.rs` for the detailed state machine.
 //!
@@ -284,8 +286,13 @@
 //!   Expired bursts are flushed first so manual Tab keeps its normal shortcut behavior.
 //! - [`ChatComposer::flush_paste_burst_if_due`]/[`ChatComposer::handle_paste_burst_flush`]: called
 //!   from UI ticks to integrate a pending burst via [`ChatComposer::apply_paste`] or insert a
-//!   held single character. Explicit terminal paste events use [`ChatComposer::handle_paste`] to
-//!   classify input first; buffered keys have already been classified.
+//!   held single character. Explicit paste events (terminal or clipboard) use
+//!   [`ChatComposer::handle_paste`], which first commits buffered typing before classifying the
+//!   pasted text. This preserves the order when a paste arrives before the next burst-flush tick;
+//!   buffered keys have already been classified and go directly through `apply_paste`.
+//! - Startup recovery previews held keys with the live Vim Replace policy without consuming them.
+//!   Buffered pastes remain literal in recovery so large-paste and image classification stays with
+//!   the live paste path.
 //!
 //! # Input Disabled Mode
 //!
@@ -402,6 +409,7 @@ mod hints;
 mod history_search;
 mod inline_input;
 mod mouse;
+pub(crate) use mouse::ClipboardPasteTarget;
 mod paste_input;
 mod popup_state;
 pub(crate) use alarm_indicator::alarm_label;
@@ -532,6 +540,7 @@ fn parent_owned_command_is_allowed(command: SlashCommand, args: &str) -> bool {
                 | SlashCommand::MultiAgents
                 | SlashCommand::Vim
                 | SlashCommand::Keymap
+                | SlashCommand::Config
                 | SlashCommand::ElevateSandbox
                 | SlashCommand::Experimental
                 | SlashCommand::Memories
@@ -794,6 +803,7 @@ impl ChatComposer {
                 external_editor_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_external_editor"),
                 warning_notice_area: std::cell::Cell::default(),
+                selection_revision: std::cell::Cell::default(),
                 show_warnings_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_warnings"),
                 show_transcript_key: default_keymap
@@ -3863,9 +3873,7 @@ impl ChatComposer {
             return false;
         }
 
-        if key_hint::plain(KeyCode::Left).is_press(*key_event) && self.agents_navigation_available()
-        {
-            self.app_event_tx.send(AppEvent::OpenAgentsOverview);
+        if self.handle_agents_navigation(*key_event) {
             return true;
         }
 
@@ -4645,6 +4653,13 @@ impl ChatComposer {
                 .render(composer_rect, buf);
             return;
         }
+        self.register_rendered_selection(
+            [
+                status.intersection(buf.area),
+                footer_rect.intersection(buf.area),
+            ],
+            options,
+        );
         let style = user_message_style();
         Block::default().style(style).render(composer_rect, buf);
         if !remote_images_rect.is_empty() {
@@ -6675,7 +6690,7 @@ mod tests {
         }
     }
 
-    fn test_plugin_summary(name: &str, description: &str) -> PluginCapabilitySummary {
+    pub(super) fn test_plugin_summary(name: &str, description: &str) -> PluginCapabilitySummary {
         PluginCapabilitySummary {
             config_name: format!("{name}@test"),
             display_name: name.to_string(),

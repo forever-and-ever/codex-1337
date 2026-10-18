@@ -12,15 +12,15 @@ use crate::normalize_code_mode_identifier;
 
 const MAX_SUMMARY_CHARACTERS: usize = 160;
 
-pub fn enabled_tool_metadata(definition: &ToolDefinition) -> EnabledToolMetadata {
+pub fn enabled_tool_metadata(definition: ToolDefinition) -> EnabledToolMetadata {
     EnabledToolMetadata {
-        tool_name: definition.tool_name.clone(),
+        tool_name: definition.tool_name,
         global_name: normalize_code_mode_identifier(&definition.name),
-        description: definition.description.clone(),
+        description: definition.description,
         summary: compact_tool_summary(&definition.summary),
         kind: definition.kind,
-        input_schema: definition.input_schema.clone().map(Arc::new),
-        output_schema: definition.output_schema.clone().map(Arc::new),
+        input_schema: definition.input_schema.map(Arc::new),
+        output_schema: definition.output_schema.map(Arc::new),
     }
 }
 

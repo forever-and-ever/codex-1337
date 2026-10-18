@@ -1,5 +1,4 @@
 use crate::shell::ShellInvocation;
-use codex_tools::UnifiedExecShellMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ScriptLanguage {
@@ -41,10 +40,7 @@ impl ScriptLanguage {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ExecutionMode {
-    Shell {
-        invocation: ShellInvocation,
-        shell_mode: UnifiedExecShellMode,
-    },
+    Shell { invocation: ShellInvocation },
     Script,
 }
 
@@ -57,14 +53,9 @@ impl ExecutionMode {
         platform: codex_shell_command::is_dangerous_command::DangerousCommandPlatform,
     ) -> crate::tools::sandboxing::ExecApprovalRequirement {
         match self {
-            Self::Shell { shell_mode, .. } => {
+            Self::Shell { .. } => {
                 policy
-                    .create_exec_approval_requirement_for_shell(
-                        request,
-                        configured_shell,
-                        shell_mode,
-                        platform,
-                    )
+                    .create_exec_approval_requirement_for_shell(request, configured_shell, platform)
                     .await
             }
             Self::Script => {
@@ -75,12 +66,9 @@ impl ExecutionMode {
         }
     }
 
-    pub(crate) fn shell(&self) -> Option<(&ShellInvocation, &UnifiedExecShellMode)> {
+    pub(crate) fn shell(&self) -> Option<&ShellInvocation> {
         match self {
-            Self::Shell {
-                invocation,
-                shell_mode,
-            } => Some((invocation, shell_mode)),
+            Self::Shell { invocation } => Some(invocation),
             Self::Script => None,
         }
     }

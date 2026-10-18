@@ -458,6 +458,7 @@ async fn status_command_requests_thread_usage_for_remote_connection_metadata() {
         address: "wss://remote.example.com".to_string(),
         version: "v1.0.0".to_string(),
         is_local_daemon: false,
+        is_managed_daemon: false,
     });
 
     assert_matches!(rx.try_recv(), Ok(AppEvent::FetchModels { .. }));

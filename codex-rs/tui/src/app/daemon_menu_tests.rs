@@ -76,6 +76,7 @@ async fn daemon_menu_reports_local_status_without_update_actions() {
         address: "local".into(),
         version: "v0.156.0".into(),
         is_local_daemon: true,
+        is_managed_daemon: true,
     });
     app.open_daemon_menu();
     insta::assert_snapshot!(
@@ -112,6 +113,7 @@ async fn remote_daemon_menu_reports_status_without_update_actions() {
         address: "ws://example.test:1234".into(),
         version: "v0.153.0".into(),
         is_local_daemon: false,
+        is_managed_daemon: false,
     });
     app.open_daemon_menu();
     insta::assert_snapshot!(

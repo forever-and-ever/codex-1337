@@ -96,6 +96,7 @@ impl TranscriptHistory {
                 content,
                 phase,
                 internal_chat_message_metadata_passthrough,
+                ..
             } = item
                 && role == "user"
                 && content
@@ -127,6 +128,8 @@ impl TranscriptHistory {
                 if !text.is_empty() {
                     self.record(&ResponseItemEnvelope {
                         item: ResponseItem::Message {
+                            status: None,
+                            encrypted_content: None,
                             id: id.clone(),
                             role: role.clone(),
                             content: text,
@@ -229,7 +232,12 @@ impl TranscriptHistory {
 
 impl SectionHistory for TranscriptHistory {
     fn items(&self) -> Box<dyn Iterator<Item = &ResponseItem> + Send + '_> {
-        Box::new(self.items.iter().map(|(item, _)| &item.item))
+        Box::new(
+            self.items
+                .iter()
+                .filter(|(item, _)| !crate::is_inherited_manual_approval(item))
+                .map(|(item, _)| &item.item),
+        )
     }
 }
 

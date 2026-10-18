@@ -49,6 +49,7 @@ pub(super) async fn list(
     let page = service
         .list(ThreadListParams {
             originators: None,
+            excluded_thread_ids: None,
             cursor: args.cursor,
             limit: Some(limit),
             sort_key: Some(ThreadSortKey::UpdatedAt),

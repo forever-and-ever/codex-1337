@@ -1,8 +1,8 @@
 use crate::config::NetworkMode;
 use crate::config::NetworkProxyConfig;
 use crate::policy::DomainPattern;
-use crate::policy::compile_allowlist_globset;
-use crate::policy::compile_denylist_globset;
+use crate::policy::compile_allowlist;
+use crate::policy::compile_denylist;
 use crate::policy::is_global_wildcard_domain_pattern;
 use crate::runtime::ConfigState;
 use std::collections::HashSet;
@@ -45,8 +45,8 @@ pub fn build_config_state(
     let denied_domains = config.denied_domains().unwrap_or_default();
     validate_non_global_wildcard_domain_patterns("network.denied_domains", &denied_domains)
         .map_err(NetworkProxyConstraintError::into_anyhow)?;
-    let deny_set = compile_denylist_globset(&denied_domains)?;
-    let allow_set = compile_allowlist_globset(&allowed_domains)?;
+    let deny_set = compile_denylist(&denied_domains)?;
+    let allow_set = compile_allowlist(&allowed_domains)?;
     Ok(ConfigState {
         config,
         allow_set,

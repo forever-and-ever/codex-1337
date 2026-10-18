@@ -10,6 +10,7 @@ mod attribution;
 mod certs;
 mod config;
 mod credential_broker;
+mod domain_matcher;
 mod environment_policy;
 #[path = "hook_config.rs"]
 mod mitm_hook;

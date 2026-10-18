@@ -182,6 +182,9 @@ impl App {
             .tui
             .terminal_resize_reflow_max_rows =
             self.local_settings.tui.terminal_resize_reflow_max_rows;
+        self.chat_widget.local_settings.tui.session_picker_view =
+            self.local_settings.tui.session_picker_view;
+        self.chat_widget.local_settings.tui.resume_cwd = self.local_settings.tui.resume_cwd;
         self.config = config;
         self.chat_widget.sync_plugin_mentions_config(&self.config);
         Ok(())

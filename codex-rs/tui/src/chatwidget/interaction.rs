@@ -11,12 +11,16 @@ use crate::clipboard_copy::worker::CopyResult;
 pub(crate) enum KeyEventAction {
     None,
     CopyLastResponse(Arc<str>),
-    PasteImage,
+    PasteImage { text_fallback: Option<KeyCode> },
 }
 
 impl ChatWidget {
     pub(crate) fn pending_steer_client_id(&self) -> Option<&str> {
         self.input_queue.pending_steer.client_id()
+    }
+
+    pub(crate) fn clear_composer_selection(&mut self) {
+        self.bottom_pane.clear_composer_selection();
     }
 
     pub(crate) fn end_composer_drag(&mut self) {
@@ -35,17 +39,14 @@ impl ChatWidget {
         self.bottom_pane.handle_composer_mouse(event)
     }
 
-    /// Snapshot only the editable paste target, without changing pending submissions.
-    pub(crate) fn mouse_paste_target(
+    /// Snapshot the paste target without changing pending submissions. Unlike mouse paste,
+    /// a keyboard paste may replace a composer selection or complete an active popup.
+    pub(crate) fn clipboard_paste_target(
         &self,
         source: crate::clipboard_copy::SelectionTarget,
-    ) -> Option<(String, usize)> {
-        self.bottom_pane.can_paste_with_mouse(source).then(|| {
-            (
-                self.bottom_pane.composer_text(),
-                self.bottom_pane.composer_cursor(),
-            )
-        })
+        shortcut: Option<KeyCode>,
+    ) -> Option<crate::bottom_pane::ClipboardPasteTarget> {
+        self.bottom_pane.clipboard_paste_target(source, shortcut)
     }
 
     pub(crate) fn prepare_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {
@@ -69,7 +70,25 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn take_key_chord_reset(&mut self) -> bool {
+        std::mem::take(&mut self.bottom_pane.key_chord_reset_requested)
+    }
+
+    pub(crate) fn consume_view_transition_key_event(&mut self, key_event: KeyEvent) -> bool {
+        self.bottom_pane
+            .consume_view_transition_key_event(key_event)
+    }
+
+    #[cfg(test)]
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) -> KeyEventAction {
+        self.handle_key_event_with_activation_key(key_event, /*activation_key*/ None)
+    }
+
+    pub(crate) fn handle_key_event_with_activation_key(
+        &mut self,
+        key_event: KeyEvent,
+        activation_key: Option<crate::key_hint::KeyBinding>,
+    ) -> KeyEventAction {
         if self.handle_startup_submission_key(key_event) {
             return KeyEventAction::None;
         }
@@ -93,7 +112,8 @@ impl ChatWidget {
             let should_pause_active_goal = self
                 .bottom_pane
                 .active_view_will_interrupt_turn_on_key_event(key_event);
-            self.bottom_pane.handle_key_event(key_event);
+            self.bottom_pane
+                .handle_key_event_with_activation_key(key_event, activation_key);
             if should_pause_active_goal {
                 self.pause_active_goal_for_interrupt();
             }
@@ -104,7 +124,8 @@ impl ChatWidget {
         }
 
         if self.shortcut_overlay_visible() && key_hint::plain(KeyCode::Esc).is_press(key_event) {
-            self.bottom_pane.handle_key_event(key_event);
+            self.bottom_pane
+                .handle_key_event_with_activation_key(key_event, activation_key);
             return KeyEventAction::None;
         }
 
@@ -166,13 +187,12 @@ impl ChatWidget {
                 self.quit_shortcut_expires_at = None;
                 self.quit_shortcut_key = None;
             }
-            KeyEvent {
-                code: KeyCode::Char(c),
-                modifiers,
-                kind: KeyEventKind::Press,
-                ..
-            } if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-                && c.eq_ignore_ascii_case(&'v') =>
+            key if key.kind == KeyEventKind::Press
+                && ((matches!(key.code, KeyCode::Char(c) if c.eq_ignore_ascii_case(&'v'))
+                    && key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT))
+                    || (cfg!(windows) && key_hint::shift(KeyCode::Insert).is_press(key))) =>
             {
                 if Instant::now() < self.suppress_image_paste_until {
                     self.suppress_image_paste_until =
@@ -181,7 +201,14 @@ impl ChatWidget {
                 }
                 self.suppress_image_paste_until =
                     Instant::now() + clipboard::IMAGE_PASTE_REPEAT_WINDOW;
-                return KeyEventAction::PasteImage;
+                let text_fallback = (cfg!(windows)
+                    && (key.modifiers == KeyModifiers::CONTROL
+                        || key_hint::shift(KeyCode::Insert).is_press(key)))
+                .then_some(key.code);
+                if text_fallback.is_some() {
+                    self.bottom_pane.prepare_composer_clipboard_paste();
+                }
+                return KeyEventAction::PasteImage { text_fallback };
             }
             other if other.kind == KeyEventKind::Press => {
                 self.suppress_image_paste_until = Instant::now();
@@ -279,7 +306,9 @@ impl ChatWidget {
                 let had_modal_or_popup = !self.bottom_pane.no_modal_or_popup_active();
                 let should_pause_active_goal =
                     self.bottom_pane.should_interrupt_running_task(key_event);
-                let input_result = self.bottom_pane.handle_key_event(key_event);
+                let input_result = self
+                    .bottom_pane
+                    .handle_key_event_with_activation_key(key_event, activation_key);
                 if matches!(
                     input_result,
                     InputResult::None | InputResult::ParentOwnedInputBlocked
@@ -520,6 +549,10 @@ impl ChatWidget {
         self.refresh_startup_recovery();
     }
 
+    pub(crate) fn is_in_paste_burst(&self) -> bool {
+        self.bottom_pane.is_in_paste_burst()
+    }
+
     // Returns true if caller should skip rendering this frame (a future frame is scheduled).
     pub(crate) fn handle_paste_burst_tick(&mut self, frame_requester: FrameRequester) -> bool {
         if self.bottom_pane.flush_paste_burst_if_due() {
@@ -527,7 +560,7 @@ impl ChatWidget {
             // A paste just flushed; request an immediate redraw and skip this frame.
             self.request_redraw();
             true
-        } else if self.bottom_pane.is_in_paste_burst() {
+        } else if self.is_in_paste_burst() {
             // While capturing a burst, schedule a follow-up tick and skip this frame
             // to avoid redundant renders between ticks.
             frame_requester.schedule_maintenance_in(

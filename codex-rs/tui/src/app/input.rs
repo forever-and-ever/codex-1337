@@ -73,6 +73,28 @@ impl App {
         tui: &mut tui::Tui,
         key_event: KeyEvent,
     ) -> Option<KeyEvent> {
+        self.routed_key_activation = None;
+        if self.chat_widget.take_key_chord_reset() {
+            self.cancel_pending_key_chord();
+        }
+        if self
+            .chat_widget
+            .consume_view_transition_key_event(key_event)
+        {
+            return None;
+        }
+        // Pending config handoffs must see the physical key before a chord or global shortcut
+        // consumes it.
+        self.chat_widget
+            .observe_config_editor_transition_key_event(key_event);
+        if crate::text_selection::is_copy_key(key_event)
+            && !self.keymap.chat.interrupt_turn.is_pressed(key_event)
+            && self.handle_composer_copy_event(tui, &TuiEvent::Key(key_event), |tui, text| {
+                tui.copy_transcript_selection(text, crate::clipboard_copy::CopyFormat::PlainText)
+            })
+        {
+            return None;
+        }
         self.transcript_view.set_keymap_bindings(&self.keymap);
         if tui.is_owned_screen()
             && self.overlay.is_none()
@@ -175,6 +197,8 @@ impl App {
             }
             crate::keymap::KeyChordMatch::Completed(dispatch_event) => {
                 self.set_key_chord_hint_override(/*items*/ None);
+                // Keep the real key so the newly opened config editor ignores it until release.
+                self.routed_key_activation = Some(KeyBinding::from_event(key_event));
                 Some(dispatch_event)
             }
             crate::keymap::KeyChordMatch::Cancelled => {
@@ -186,6 +210,9 @@ impl App {
     }
 
     pub(super) fn expire_pending_key_chord(&mut self) {
+        if self.chat_widget.take_key_chord_reset() {
+            self.cancel_pending_key_chord();
+        }
         let contexts = self.active_keymap_contexts();
         if self.key_chord_matcher.expire(contexts) {
             self.set_key_chord_hint_override(/*items*/ None);
@@ -383,6 +410,7 @@ impl App {
         app_server: &mut AppServerSession,
         key_event: KeyEvent,
     ) {
+        let activation_key = self.routed_key_activation.take();
         if self
             .handle_subagent_panel_key(tui, app_server, key_event)
             .await
@@ -642,7 +670,9 @@ impl App {
             } else if self.should_reject_side_backtrack_esc(key_event) {
                 self.reject_side_backtrack_esc();
             } else {
-                let action = self.chat_widget.handle_key_event(key_event);
+                let action = self
+                    .chat_widget
+                    .handle_key_event_with_activation_key(key_event, activation_key);
                 self.handle_clipboard_key_action(tui, action);
             }
             return;
@@ -677,11 +707,14 @@ impl App {
                         self.reset_backtrack_state();
                     }
                 }
-                let action = self.chat_widget.handle_key_event(key_event);
+                let action = self
+                    .chat_widget
+                    .handle_key_event_with_activation_key(key_event, activation_key);
                 self.handle_clipboard_key_action(tui, action);
             }
             _ => {
-                self.chat_widget.handle_key_event(key_event);
+                self.chat_widget
+                    .handle_key_event_with_activation_key(key_event, activation_key);
             }
         };
     }

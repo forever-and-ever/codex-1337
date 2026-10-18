@@ -1,5 +1,6 @@
 use super::*;
 use crate::app::test_support;
+use crate::transcript_mode::TranscriptMode;
 use crossterm::event::KeyModifiers;
 use pretty_assertions::assert_eq;
 
@@ -8,13 +9,38 @@ fn policy_preserves_explicit_modes_and_terminal_ownership() {
     use VscodeDetection::Other;
     use VscodeDetection::Unknown;
     use VscodeDetection::VsCode;
-    for (platform_default, ssh, wsl, vscode, expected) in [
-        (true, false, false, Other, [false, true, true]),
-        (false, false, false, Other, [false, true, false]),
-        (true, true, false, Other, [false, false, false]),
-        (true, false, false, VsCode, [false, false, false]),
-        (true, false, true, Unknown, [false, true, false]),
-        (true, false, true, Other, [false, true, true]),
+    const SSH_UNAVAILABLE: &str = "Unavailable over SSH; use your terminal's paste command";
+    const VSCODE_UNAVAILABLE: &str = "VS Code handles pasting; use its terminal paste command";
+    const WSL_AUTO_UNAVAILABLE: &str =
+        "Auto cannot identify this WSL terminal; use On or your terminal's paste command";
+    const INLINE_UNAVAILABLE: &str =
+        "Unavailable in inline mode; use your terminal's paste command";
+    let on = if cfg!(target_os = "android") {
+        Err("Unavailable on Android")
+    } else {
+        Ok(true)
+    };
+    for (platform_default, ssh, wsl, vscode, on_status, auto_status) in [
+        (true, false, false, Other, on, Ok(true)),
+        (false, false, false, Other, on, Ok(false)),
+        (
+            true,
+            true,
+            false,
+            Other,
+            Err(SSH_UNAVAILABLE),
+            Err(SSH_UNAVAILABLE),
+        ),
+        (
+            true,
+            false,
+            false,
+            VsCode,
+            Err(VSCODE_UNAVAILABLE),
+            Err(VSCODE_UNAVAILABLE),
+        ),
+        (true, false, true, Unknown, on, Err(WSL_AUTO_UNAVAILABLE)),
+        (true, false, true, Other, on, Ok(true)),
     ] {
         let env = PasteEnvironment {
             primary: cfg!(target_os = "linux") && !wsl,
@@ -29,14 +55,23 @@ fn policy_preserves_explicit_modes_and_terminal_ownership() {
                 RightClickPaste::On,
                 RightClickPaste::Auto
             ]
-            .map(|mode| env.allows(SelectionTarget::Clipboard, mode)),
-            expected
-        );
-        assert_eq!(
-            env.allows(SelectionTarget::Primary, RightClickPaste::Off),
-            cfg!(target_os = "linux") && !ssh && !wsl && vscode != VsCode,
+            .map(|mode| env.status(mode, TranscriptMode::Owned)),
+            [Ok(false), on_status, auto_status]
         );
     }
+
+    let env = PasteEnvironment {
+        primary: false,
+        platform_default: true,
+        ssh: false,
+        wsl: false,
+        vscode: Other,
+    };
+    assert_eq!(
+        [RightClickPaste::Off, RightClickPaste::On]
+            .map(|mode| env.status(mode, TranscriptMode::Terminal)),
+        [Ok(false), Err(INLINE_UNAVAILABLE)]
+    );
 }
 
 #[tokio::test]
@@ -51,9 +86,15 @@ async fn pending_primary_paste_survives_release_but_not_other_input() {
         (MouseEventKind::ScrollDown, false),
     ] {
         app.pending_mouse_paste = Some(PendingPaste {
-            thread: None,
-            draft: (String::new(), 0),
+            target: (
+                None,
+                crate::bottom_pane::ClipboardPasteTarget::Draft(
+                    String::new(),
+                    crate::bottom_pane::TextArea::new().edit_target(),
+                ),
+            ),
             source: SelectionTarget::Primary,
+            shortcut: None,
             _request: Arc::new(()),
         });
         app.invalidate_mouse_paste(&TuiEvent::Mouse(MouseEvent {

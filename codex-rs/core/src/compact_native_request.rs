@@ -187,6 +187,7 @@ async fn collect(
                     turn_context,
                     &turn_context.initial_settings,
                     token_usage.as_ref(),
+                    crate::session::TokenUsageContext::SpendingOnly,
                 )
                 .await
                 .map_err(Miss::Failed)?;

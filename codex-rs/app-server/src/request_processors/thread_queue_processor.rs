@@ -1,4 +1,5 @@
 use crate::config_manager::ConfigManager;
+use codex_protocol::turn_input::AnnotatedResponseItem;
 use std::sync::Arc;
 
 use crate::error_code::internal_error;
@@ -361,6 +362,7 @@ pub(super) fn queue_error(error: QueueServiceError) -> JSONRPCErrorError {
 }
 
 fn api_queued_submission(value: QueuedItem) -> Result<QueuedSubmission, JSONRPCErrorError> {
+    let retain = matches!(&value.input, TurnInput::AnnotatedResponseItem(annotated) if annotated.annotations.retain);
     let (input, client_user_message_id, tool_output) = match value.input {
         TurnInput::UserInput { content, client_id } => (
             content.into_iter().map(Into::into).collect(),
@@ -374,6 +376,16 @@ fn api_queued_submission(value: QueuedItem) -> Result<QueuedSubmission, JSONRPCE
             namespace,
             output,
             ..
+        })
+        | TurnInput::AnnotatedResponseItem(AnnotatedResponseItem {
+            item:
+                ResponseItem::FunctionCallOutput {
+                    name: Some(name),
+                    namespace,
+                    output,
+                    ..
+                },
+            ..
         }) => (
             Vec::new(),
             value.id.clone(),
@@ -381,9 +393,12 @@ fn api_queued_submission(value: QueuedItem) -> Result<QueuedSubmission, JSONRPCE
                 name,
                 namespace,
                 output: output.body,
+                retain,
             })),
         ),
-        TurnInput::ResponseItem(_) | TurnInput::InterAgentCommunication(_) => {
+        TurnInput::ResponseItem(_)
+        | TurnInput::AnnotatedResponseItem(_)
+        | TurnInput::InterAgentCommunication(_) => {
             return Err(internal_error("unsupported queued input"));
         }
     };

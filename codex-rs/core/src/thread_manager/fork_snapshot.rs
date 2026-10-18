@@ -36,7 +36,7 @@ pub enum ForkSnapshot {
     Side,
 }
 
-pub(super) fn fork_history_from_snapshot(
+pub(crate) fn fork_history_from_snapshot(
     snapshot: ForkSnapshot,
     history: InitialHistory,
     interrupted_marker: InterruptedTurnHistoryMarker,

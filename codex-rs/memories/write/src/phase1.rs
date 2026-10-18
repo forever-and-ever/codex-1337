@@ -301,6 +301,8 @@ mod job {
         let mut prompt = Prompt::default();
         prompt.input = match config.memories.version {
             MemoryVersion::V1 => vec![ResponseItem::Message {
+                status: None,
+                encrypted_content: None,
                 id: Some(ResponseItemId::new("msg")),
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText { text: input_text }],
@@ -591,6 +593,8 @@ mod tests {
     #[test]
     fn serializes_memory_rollout_with_agents_removed_but_environment_kept() {
         let mixed_contextual_message = ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -612,6 +616,8 @@ mod tests {
             internal_chat_message_metadata_passthrough: None,
         };
         let skill_message = ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -623,6 +629,8 @@ mod tests {
             internal_chat_message_metadata_passthrough: None,
         };
         let subagent_message = ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -651,6 +659,8 @@ mod tests {
             parsed,
             vec![
                 ResponseItem::Message {
+                    encrypted_content: None,
+                    status: None,
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {

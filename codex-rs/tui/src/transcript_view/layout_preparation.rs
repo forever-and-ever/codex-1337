@@ -414,6 +414,12 @@ impl TranscriptView {
             let output_tokens = output_tokens.subset(&token_ids);
             let expanded_parts = expanded_parts.clone();
             let render = move |invocations: &invocation::Invocations| {
+                if cell
+                    .as_any()
+                    .is::<crate::rendered_selection::RenderedSurface>()
+                {
+                    return TextLayout::new(cell.display_hyperlink_lines(width), width);
+                }
                 let content_width = crate::transcript_geometry::content_width(width, mode);
                 // A member's clock is its item's header's.
                 let timestamp = if loose {

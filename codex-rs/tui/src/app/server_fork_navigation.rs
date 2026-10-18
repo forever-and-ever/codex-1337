@@ -35,7 +35,6 @@ use super::UserTurnReplay;
 use super::detach;
 use super::navigation_config;
 use super::session_lifecycle;
-use super::side;
 use super::tui;
 use super::ui_requests;
 use crate::app::safety_buffering::safety_retry_fork_point;
@@ -185,19 +184,8 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         parent_thread_id: ThreadId,
-        mut user_message: Option<UserMessage>,
+        user_message: Option<UserMessage>,
     ) -> AppRunControl {
-        if self
-            .side_threads
-            .values()
-            .any(|state| state.parent_thread_id != parent_thread_id)
-        {
-            self.restore_side_user_message(user_message.take());
-            self.sync_side_thread_ui();
-            self.chat_widget
-                .add_error_message(side::SIDE_ALREADY_OPEN_MESSAGE.into());
-            return AppRunControl::Continue;
-        }
         self.session_telemetry
             .counter("codex.thread.side", 1, &[("source", "slash_command")]);
         self.enqueue_side_fork(app_server, parent_thread_id, user_message);

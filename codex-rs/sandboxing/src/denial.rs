@@ -49,9 +49,10 @@ pub fn is_likely_executor_managed_sandbox_denied(exec_output: &ExecToolCallOutpu
 
     // Backend names and generic write failures also occur in ordinary command
     // output. Only permission diagnostics are evidence of a sandbox denial.
-    const DENIAL_DIAGNOSTICS: [&str; 3] = [
+    const DENIAL_DIAGNOSTICS: [&str; 4] = [
         "operation not permitted",
         "permission denied",
+        "access is denied",
         "read-only file system",
     ];
 

@@ -165,8 +165,11 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
             approval: None,
             retry: None,
         },
-        /*external_cancel*/ None,
-        Instant::now() + Duration::from_secs(15),
+        crate::guardian::review::ReviewAttemptOptions {
+            authorization: None,
+            external_cancel: None,
+            deadline: Instant::now() + Duration::from_secs(15),
+        },
         &route,
     ))
     .await;

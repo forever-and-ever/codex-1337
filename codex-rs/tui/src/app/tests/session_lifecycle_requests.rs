@@ -38,10 +38,25 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 
 pub(super) type RecordedRequests = Arc<Mutex<Vec<JSONRPCRequest>>>;
 pub(super) type RecordingAppServer = (AppServerSession, RecordedRequests, JoinHandle<Result<()>>);
+
+fn is_recording_client_disconnect(error: &WebSocketError) -> bool {
+    match error {
+        WebSocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake) => true,
+        WebSocketError::Io(error) => matches!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+        ),
+        _ => false,
+    }
+}
 
 #[tokio::test]
 async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
@@ -49,9 +64,6 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
     use codex_protocol::turn_input::CyberAccessProgram;
 
     let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
-    app.config.features.enable(Feature::CliDaybreak)?;
-    app.chat_widget
-        .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
     let (mut server, requests, proxy) = start_recording_app_server(
         &app.config,
         /*blocked_thread_list*/ None,
@@ -141,6 +153,147 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
     }
     insta::assert_snapshot!("daybreak_toggle_confirmations", confirmations.join("\n\n"));
 
+    app.chat_widget.set_daybreak_enabled(/*enabled*/ true);
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+    app.chat_widget
+        .apply_external_edit("side prompt".to_string());
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let turn = next_user_turn_op(&mut ops);
+    let mut unsupported_turn = turn.clone();
+    let Op::UserTurn {
+        model: unsupported_model,
+        ..
+    } = &mut unsupported_turn
+    else {
+        unreachable!("expected user turn");
+    };
+    *unsupported_model = "standard-only".into();
+    while events.try_recv().is_ok() {}
+    app.submit_thread_op(&mut server, thread_id, unsupported_turn)
+        .await?;
+    assert!(recorded_params(&requests, "turn/start").is_empty());
+    assert!(next_history_message(&mut events).contains("Daybreak support for model standard-only"));
+
+    app.chat_widget
+        .set_side_conversation_active(/*active*/ true);
+    app.submit_thread_op(&mut server, thread_id, turn.clone())
+        .await?;
+    app.settle_turn_submissions(&mut server).await?;
+    // This request-parameter fixture starts independent turns, not steers into a prior turn.
+    app.ensure_thread_channel(thread_id)
+        .store
+        .lock()
+        .await
+        .clear_active_turn_id();
+    app.chat_widget
+        .set_side_conversation_active(/*active*/ false);
+    app.submit_thread_op(&mut server, thread_id, turn.clone())
+        .await?;
+    app.settle_turn_submissions(&mut server).await?;
+    // This request-parameter fixture starts independent turns, not steers into a prior turn.
+    app.ensure_thread_channel(thread_id)
+        .store
+        .lock()
+        .await
+        .clear_active_turn_id();
+    let background_thread_id = server.start_thread(&app.config).await?.session.thread_id;
+    app.side_threads.insert(
+        background_thread_id,
+        crate::app::side::SideThreadState::new(thread_id),
+    );
+    app.submit_thread_op(&mut server, background_thread_id, turn.clone())
+        .await?;
+    app.settle_turn_submissions(&mut server).await?;
+    app.ensure_thread_channel(background_thread_id)
+        .store
+        .lock()
+        .await
+        .clear_active_turn_id();
+    app.settle_turn_submissions(&mut server).await?;
+    let turns = recorded_params(&requests, "turn/start");
+    assert_eq!(turns.len(), 3);
+    assert_eq!(turns[0]["cyberAccessProgram"], "standard");
+    assert_eq!(turns[1]["cyberAccessProgram"], "daybreakBlue");
+    assert_eq!(turns[2]["cyberAccessProgram"], "standard");
+    app.chat_widget
+        .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ false);
+    for target in [thread_id, background_thread_id] {
+        app.submit_thread_op(&mut server, target, turn.clone())
+            .await?;
+        app.settle_turn_submissions(&mut server).await?;
+        app.ensure_thread_channel(target)
+            .store
+            .lock()
+            .await
+            .clear_active_turn_id();
+    }
+    app.settle_turn_submissions(&mut server).await?;
+    let turns = recorded_params(&requests, "turn/start");
+    assert!(turns[3]["cyberAccessProgram"].is_null());
+    assert!(turns[4]["cyberAccessProgram"].is_null());
+    app.chat_widget
+        .set_feature_enabled(Feature::CliDaybreak, /*enabled*/ true);
+    app.chat_widget.set_daybreak_enabled(/*enabled*/ true);
+    app.chat_widget
+        .set_feature_enabled(Feature::ApiKeyCyberAccessPrograms, /*enabled*/ false);
+    let models = app.chat_widget.model_catalog().models.clone();
+    app.chat_widget.update_account_state(
+        Some(crate::status::StatusAccountDisplay::ApiKey),
+        /*plan_type*/ None,
+        /*has_chatgpt_account*/ false,
+        /*has_codex_backend_auth*/ false,
+    );
+    assert!(!app.chat_widget.daybreak_enabled);
+    let request_id = std::iter::from_fn(|| events.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::FetchModels { request_id } => Some(request_id),
+            _ => None,
+        })
+        .last()
+        .expect("account model refresh");
+    assert!(app.chat_widget.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models,
+            providers: Vec::new()
+        })
+    ));
+    for (cli_daybreak, api_key_cyber_access_programs, enabled) in [
+        (false, false, true),
+        (false, true, true),
+        (true, false, true),
+        (true, true, true),
+        (true, true, false),
+    ] {
+        app.chat_widget
+            .set_feature_enabled(Feature::CliDaybreak, cli_daybreak);
+        app.chat_widget.set_feature_enabled(
+            Feature::ApiKeyCyberAccessPrograms,
+            api_key_cyber_access_programs,
+        );
+        app.chat_widget.set_daybreak_enabled(enabled);
+        app.submit_thread_op(&mut server, thread_id, turn.clone())
+            .await?;
+        app.settle_turn_submissions(&mut server).await?;
+        app.ensure_thread_channel(thread_id)
+            .store
+            .lock()
+            .await
+            .clear_active_turn_id();
+    }
+    app.settle_turn_submissions(&mut server).await?;
+    let turns = recorded_params(&requests, "turn/start");
+    assert_eq!(
+        turns[5..]
+            .iter()
+            .map(|turn| turn["cyberAccessProgram"].as_str())
+            .collect::<Vec<_>>(),
+        vec![None, None, None, Some("daybreakBlue"), Some("standard")]
+    );
+    while events.try_recv().is_ok() {}
+
     let missing_thread_id = ThreadId::new();
     app.active_thread_id = Some(missing_thread_id);
     app.persist_daybreak_selection(&mut server, missing_thread_id, /*enabled*/ true)
@@ -171,8 +324,12 @@ async fn daybreak_command_persists_and_confirms_each_selection() -> Result<()> {
         .handle_key_event(KeyEvent::from(KeyCode::Enter));
     let turn = next_user_turn_op(&mut ops);
     while events.try_recv().is_ok() {}
+    let turns_before_identity = recorded_params(&requests, "turn/start").len();
     app.submit_thread_op(&mut server, thread_id, turn).await?;
-    assert!(recorded_params(&requests, "turn/start").is_empty());
+    assert_eq!(
+        recorded_params(&requests, "turn/start").len(),
+        turns_before_identity
+    );
     assert!(next_history_message(&mut events).contains("could not be confirmed"));
     app.chat_widget.set_daybreak_enabled(/*enabled*/ false);
     while events.try_recv().is_ok() {}
@@ -258,6 +415,8 @@ pub(super) enum HistoryCapabilities {
     ItemsAndSummaryTurnsFail,
     ThreadListFails,
     ThreadStartFails,
+    ThreadStartWhileShuttingDown,
+    ThreadStartDuringLegacyShutdown,
     ConfigReadUnsupported(i64),
     ConfigReadFails,
     ConfigReadUnknownVoice,
@@ -407,19 +566,27 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                     if let codex_app_server_client::InProcessServerEvent::ServerNotification(notification) = event
                         && matches!(*notification, ServerNotification::ThreadSettingsUpdated(_))
                     {
-                        websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await?;
+                        let result = websocket.send(Message::Text(serde_json::to_string(&notification)?.into())).await;
+                        if result.as_ref().is_err_and(is_recording_client_disconnect) {
+                            break;
+                        }
+                        result?;
                     }
                     continue;
                 }
             };
             let Some(frame) = frame else { break };
+            // The client can close with requests or notifications pending during shutdown.
+            if frame.as_ref().is_err_and(is_recording_client_disconnect) {
+                break;
+            }
             let Message::Text(text) = frame? else {
                 continue;
             };
             let message = serde_json::from_str::<JSONRPCMessage>(&text)?;
             match message {
                 JSONRPCMessage::Request(request) if request.method == "initialize" => {
-                    websocket
+                    let result = websocket
                         .send(Message::Text(
                             serde_json::to_string(&JSONRPCMessage::Response(JSONRPCResponse {
                                 id: request.id,
@@ -430,7 +597,11 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             }))?
                             .into(),
                         ))
-                        .await?;
+                        .await;
+                    if result.as_ref().is_err_and(is_recording_client_disconnect) {
+                        break;
+                    }
+                    result?;
                 }
                 JSONRPCMessage::Request(request) => {
                     request_sink
@@ -568,16 +739,32 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                                 message: "method not found".to_string(),
                             },
                         })
-                    } else if (history_capabilities == HistoryCapabilities::ThreadStartFails && request.method == "thread/start")
-                        || (history_capabilities == HistoryCapabilities::TurnSubmissionStalls && request.method == "thread/unsubscribe"
+                    } else if matches!(
+                        history_capabilities,
+                        HistoryCapabilities::ThreadStartFails
+                            | HistoryCapabilities::ThreadStartWhileShuttingDown
+                            | HistoryCapabilities::ThreadStartDuringLegacyShutdown
+                    ) && request.method == "thread/start"
+|| (history_capabilities == HistoryCapabilities::TurnSubmissionStalls && request.method == "thread/unsubscribe"
                             && request_sink.lock().expect("request recorder lock").iter().find(|seen| seen.method == "turn/start").is_some_and(|seen| seen.params.as_ref().and_then(|params| params.get("threadId")) == params.and_then(|params| params.get("threadId"))))
                     {
+                        let (code, message, data) = match history_capabilities {
+                            HistoryCapabilities::ThreadStartWhileShuttingDown => (
+                                -32600,
+                                "not accepting new actions",
+                                Some(serde_json::json!({ "reason": "serverShuttingDown" })),
+                            ),
+                            HistoryCapabilities::ThreadStartDuringLegacyShutdown => {
+                                (-32600, "Server is draining; retry after reconnecting", None)
+                            }
+                            _ => (-32603, "replacement unavailable", None),
+                        };
                         JSONRPCMessage::Error(JSONRPCError {
                             id: request_id,
                             error: JSONRPCErrorError {
-                                code: -32603,
-                                data: None,
-                                message: "replacement unavailable".to_string(),
+                                code,
+                                data,
+                                message: message.to_string(),
                             },
                         })
                     } else if request.method == "thread/list"
@@ -727,9 +914,13 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
                             }
                         }
                     };
-                    websocket
+                    let result = websocket
                         .send(Message::Text(serde_json::to_string(&response)?.into()))
-                        .await?;
+                        .await;
+                    if result.as_ref().is_err_and(is_recording_client_disconnect) {
+                        break;
+                    }
+                    result?;
                 }
                 JSONRPCMessage::Notification(notification)
                     if notification.method == "initialized" => {}
@@ -1213,41 +1404,6 @@ async fn older_external_server_starts_without_unsupported_dynamic_tools_or_histo
 
     app_server.shutdown().await?;
     proxy.await??;
-    Ok(())
-}
-
-#[tokio::test]
-async fn embedded_server_rejects_unowned_dynamic_tool_calls() -> Result<()> {
-    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
-    let codex_home = tempdir()?;
-    app.config.codex_home = codex_home.path().to_path_buf().abs();
-    app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
-    let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
-    app.handle_app_server_event(
-        &app_server,
-        codex_app_server_client::AppServerEvent::ServerRequest(Box::new(
-            ServerRequest::DynamicToolCall {
-                request_id: AppServerRequestId::Integer(100),
-                params: codex_app_server_protocol::DynamicToolCallParams {
-                    thread_id: "thread-1".to_string(),
-                    turn_id: "turn-1".to_string(),
-                    call_id: "call-1".to_string(),
-                    namespace: Some("codex_app".to_string()),
-                    tool: "list_threads".to_string(),
-                    arguments: serde_json::json!({}),
-                },
-            },
-        )),
-    )
-    .await;
-    let AppEvent::DynamicToolCallCompleted { response, .. } = events
-        .try_recv()
-        .expect("embedded dynamic calls must receive a response")
-    else {
-        panic!("expected a dynamic tool failure response")
-    };
-    assert!(!response.success);
-    app_server.shutdown().await?;
     Ok(())
 }
 

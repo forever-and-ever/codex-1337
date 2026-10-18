@@ -115,6 +115,9 @@ impl Diagnostics {
             ApiError::Transport(_) | ApiError::Stream(_) => {
                 json!({"kind":"uncertain_transport","message":self.text(&error.to_string())})
             }
+            ApiError::ResponseIncomplete(_) => {
+                json!({"kind":"response_incomplete","message":self.text(&error.to_string())})
+            }
             ApiError::ContextWindowExceeded
             | ApiError::ContentFilter
             | ApiError::QuotaExceeded

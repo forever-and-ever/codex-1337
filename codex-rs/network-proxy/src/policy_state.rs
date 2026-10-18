@@ -2,8 +2,8 @@
 use crate::NetworkMode;
 use crate::NetworkProxyConfig;
 use crate::NetworkProxyConstraints;
+use crate::domain_matcher::DomainPatternSet;
 use anyhow::Result;
-use globset::GlobSet;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -90,8 +90,8 @@ fn unix_timestamp() -> i64 {
 #[derive(Clone)]
 pub struct ConfigState {
     pub config: NetworkProxyConfig,
-    pub allow_set: GlobSet,
-    pub deny_set: GlobSet,
+    pub allow_set: DomainPatternSet,
+    pub deny_set: DomainPatternSet,
     pub constraints: NetworkProxyConstraints,
     pub blocked: VecDeque<BlockedRequest>,
     pub blocked_total: u64,

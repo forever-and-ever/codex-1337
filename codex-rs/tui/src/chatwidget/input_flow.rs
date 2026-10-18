@@ -115,6 +115,7 @@ impl ChatWidget {
                 SlashCommand::Model
                 | SlashCommand::Keymap
                 | SlashCommand::Memories
+                | SlashCommand::Config
                 | SlashCommand::Title
                 | SlashCommand::Statusline
                 | SlashCommand::Theme,

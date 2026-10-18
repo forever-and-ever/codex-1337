@@ -242,6 +242,9 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     });
     let mut prompt = Prompt {
         input: vec![ResponseItem::Message {
+            encrypted_content: None,
+            status: None,
+
             id: None,
             role: "user".into(),
             content: vec![ContentItem::InputText { text: "run".into() }],
@@ -293,6 +296,8 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         }
     }
     let expected_call = ResponseItem::CustomToolCall {
+        encrypted_content: None,
+
         id: None,
         status: None,
         call_id: "exec-call".into(),

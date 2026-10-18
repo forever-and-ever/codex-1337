@@ -78,6 +78,7 @@ mod interrupt;
 mod legacy;
 mod mailbox;
 mod residency;
+pub use residency::ThreadEvictionOutcome;
 mod resume;
 mod retirement;
 mod root_handoff;
@@ -197,7 +198,8 @@ impl LocalAgentControl {
         agent_communication_context: AgentCommunicationContext,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
-        self.ensure_message_recipient_loaded(agent_id, &communication.author)
+        let _residency_pin = self
+            .ensure_message_recipient_loaded(agent_id, &communication.author)
             .await?;
         if !communication.trigger_turn {
             let state = self.runtime.upgrade()?;

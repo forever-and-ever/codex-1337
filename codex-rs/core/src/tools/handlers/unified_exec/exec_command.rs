@@ -53,7 +53,6 @@ use super::ExecCommandArgs;
 use super::ExecCommandEnvironmentArgs;
 use super::get_command;
 use super::post_unified_exec_tool_use_payload;
-use super::shell_mode_for_environment;
 
 mod cell;
 
@@ -279,8 +278,6 @@ impl ExecCommandHandler {
                 (language.command(&args.cmd), ExecutionMode::Script)
             }
             PreparedExec::Shell => {
-                let shell_mode =
-                    shell_mode_for_environment(&turn.unified_exec_shell_mode, environment.as_ref());
                 // Remote environments may use a different OS and must build commands with their native
                 // shell; fall back to the session shell when the environment did not report one.
                 let shell = turn_environment
@@ -309,18 +306,13 @@ impl ExecCommandHandler {
                         )));
                     }
                 }
-                let resolved_command = get_command(
-                    &args,
-                    shell,
-                    &shell_mode,
-                    turn_environment.config().allow_login_shell,
-                )
-                .map_err(FunctionCallError::RespondToModel)?;
+                let resolved_command =
+                    get_command(&args, shell, turn_environment.config().allow_login_shell)
+                        .map_err(FunctionCallError::RespondToModel)?;
                 (
                     resolved_command.command,
                     ExecutionMode::Shell {
                         invocation: resolved_command.shell,
-                        shell_mode,
                     },
                 )
             }

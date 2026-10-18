@@ -44,7 +44,7 @@ pub(super) enum LocalThreadCompletion {
         server_name: String,
         request_id: AppServerRequestId,
         attempt_id: Uuid,
-        result: Result<UserVerificationProof, String>,
+        result: Result<UserVerificationProof, crate::app_command::UserVerificationFailure>,
     },
 }
 

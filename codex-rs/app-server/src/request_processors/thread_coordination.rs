@@ -183,17 +183,20 @@ impl ThreadCoordinationService {
         let lease = self.threads.thread_state_manager.lease_runtime(id).await;
         let deadline =
             tokio::time::Instant::now() + std::time::Duration::from_secs(/*secs*/ 10);
-        while self
-            .threads
-            .pending_thread_unloads
-            .lock()
-            .await
-            .contains(&id)
-        {
-            if tokio::time::Instant::now() >= deadline {
+        loop {
+            let completion = {
+                let pending = self.threads.pending_thread_unloads.lock().await;
+                pending.get(&id).map(tokio::sync::watch::Sender::subscribe)
+            };
+            let Some(mut completion) = completion else {
+                break;
+            };
+            if tokio::time::timeout_at(deadline, completion.changed())
+                .await
+                .is_err()
+            {
                 return Err(invalid_request("destination runtime is still closing"));
             }
-            tokio::time::sleep(std::time::Duration::from_millis(/*millis*/ 20)).await;
         }
         // A live newly-created thread need not have a materialized rollout.
         // Recheck only after acquiring the lease and draining pending unloads;
@@ -276,6 +279,7 @@ impl ThreadCoordinationService {
             .unwrap_or_default();
         let item = TurnToolOutput {
             name: "set".into(),
+            retain: false,
             namespace: Some("alarm".into()),
             output: FunctionCallOutputBody::Text(body),
         }

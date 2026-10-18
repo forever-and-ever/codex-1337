@@ -411,7 +411,7 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                 let blocks: Vec<String> = content
                     .iter()
                     .filter_map(|content| match content {
-                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                        ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                             Some(text.clone())
                         }
                         ContentItem::InputImage { .. } | ContentItem::InputAudio { .. } => None,

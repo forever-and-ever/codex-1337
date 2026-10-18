@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use crate::function_tool::OrCancelToolExt;
 use codex_tools::FunctionCallError;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
@@ -15,6 +16,7 @@ use codex_tools::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
 use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
 
 use super::context::FunctionToolOutput;
 use super::context::ToolInvocation;
@@ -178,11 +180,12 @@ impl Prerequisite {
     pub(super) async fn run(
         &self,
         mut admission: Option<Admission>,
+        cancellation: CancellationToken,
         future: impl Future<Output = Result<super::registry::AnyToolResult, FunctionCallError>>,
     ) -> Result<super::registry::AnyToolResult, FunctionCallError> {
         let result = async {
             if let Some(admission) = admission.as_mut() {
-                admission.wait().await?;
+                admission.wait().or_cancel_tool(&cancellation).await??;
             }
             CURRENT_CALL.scope(self.clone(), future).await
         }

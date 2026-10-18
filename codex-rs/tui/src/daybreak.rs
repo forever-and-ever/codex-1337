@@ -21,14 +21,16 @@ pub(crate) fn program_for_turn(
     let programs = models
         .iter()
         .find(|entry| entry.model == model)
-        .and_then(|entry| entry.available_access_programs.as_ref());
+        .and_then(|entry| entry.available_access_programs.as_ref())
+        .filter(|programs| !programs.cyber.is_empty());
+    // An explicit request must not fall back to ordinary access after an identity change.
     if enabled {
         programs
-            .and_then(codex_protocol::openai_models::ModelAccessPrograms::daybreak)
+            .and_then(|programs| programs.daybreak())
             .map(Some)
             .ok_or_else(|| format!("Daybreak support for model {model} could not be confirmed by the connected server. Use /daybreak to turn it off, or choose a compatible model and server."))
     } else {
-        Ok(programs.and_then(codex_protocol::openai_models::ModelAccessPrograms::standard))
+        Ok(programs.and_then(|programs| programs.standard()))
     }
 }
 

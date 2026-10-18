@@ -530,6 +530,7 @@ WHERE thread_id = ?
     let reopened = projection_store(home.path()).await;
     let mut params = ListItemsParams {
         thread_id,
+        item_ids: None,
         turn_id: Some("turn-2".to_string()),
         include_archived: false,
         position: None,
@@ -3018,6 +3019,8 @@ fn turn_completed(turn_id: &str) -> RolloutItem {
 fn user_message(message: &str) -> RolloutItem {
     RolloutItem::ResponseItem(
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {

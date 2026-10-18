@@ -6,7 +6,7 @@
       "type": "string"
     },
     "KeyName": {
-      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
+      "description": "The name of an `OpenRouter` key; config maps it to the file holding the secret.",
       "type": "string"
     },
     "OpenRouterKey": {

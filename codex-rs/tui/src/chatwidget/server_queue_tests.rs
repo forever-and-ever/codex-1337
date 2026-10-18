@@ -17,6 +17,7 @@ async fn incoming_messages_share_queue_controls_without_local_autosend() {
     let item = QueuedSubmission {
         id: "queued-1".into(), client_user_message_id: "queued-1".into(), input: Vec::new(),
         tool_output: Some(Box::new(TurnToolOutput {
+                retain: false,
             name: "send_message_to_thread".into(), namespace: Some("codex_tui".into()),
             output: FunctionCallOutputBody::Text("<codex_delegation>\n  <source_thread_id>source</source_thread_id>\n  <source_thread_name>SYSADMIN</source_thread_name>\n  <input>Check the service after your current turn.</input>\n</codex_delegation>".into()),
         })),

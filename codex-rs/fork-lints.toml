@@ -10,7 +10,10 @@ unexpected_cfgs = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 unused_lifetimes = "deny"
 unused_qualifications = "deny"
-unused_results = "deny"
+
+# House policy: a discard is a defect only where `#[must_use]` declares an
+# obligation, which `warnings` enforces through `unused_must_use`.
+unused_results = "allow"
 
 # Fork: Cargo hands every package dependency to each bin, example and test crate, so the lint misfires
 # on fork targets inside upstream packages.
@@ -39,6 +42,11 @@ upper_case_acronyms = "allow"
 
 # House policy: source linting cannot adjudicate transitive convergence.
 multiple_crate_versions = "allow"
+
+# House policy: `#[must_use]` declares an obligation; blanket annotation
+# erases the signal.
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
 
 # House policy: internal code needs no API documentation.
 missing_errors_doc = "allow"

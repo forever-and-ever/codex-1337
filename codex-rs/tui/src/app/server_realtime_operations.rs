@@ -278,9 +278,10 @@ impl App {
                     widget.mark_realtime_speech_uncertain(*delivery_id);
                 }
                 if current && let SubmissionFailure::Rejected(error) = failure {
-                    widget.on_realtime_error(format!(
-                        "thread/realtime/appendSpeech failed in TUI: {error}"
-                    ));
+                    widget.on_realtime_error(
+                        format!("thread/realtime/appendSpeech failed in TUI: {error}"),
+                        crate::chatwidget::RealtimeFailureCause::SpeechDelivery,
+                    );
                 } else {
                     widget.add_error_message(message);
                 }

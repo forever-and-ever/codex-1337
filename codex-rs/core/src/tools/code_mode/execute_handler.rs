@@ -4,6 +4,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::context::boxed_tool_output;
 use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
+use codex_features::Feature;
 use codex_prompts::ResolvedModelMessages;
 use codex_tools::IndirectNamespacePrefixes;
 use codex_tools::ToolName;
@@ -50,12 +51,22 @@ impl CodeModeExecuteHandler {
             session,
             turn: Arc::clone(&step_context.turn),
         };
+        let tool_description_first = step_context
+            .turn
+            .config
+            .features
+            .enabled(Feature::CodeModeToolDescriptionFirst);
         let mut enabled_tools = Vec::with_capacity(self.nested_tool_specs.len());
         for (spec, cached_runtime) in &self.nested_tool_specs {
-            let definitions = prepare_code_mode_tool_definitions(cached_runtime.as_deref(), || {
-                Cow::Borrowed(spec.as_ref())
-            });
-            enabled_tools.extend(definitions.iter().cloned());
+            let definitions = prepare_code_mode_tool_definitions(
+                cached_runtime.as_deref(),
+                || Cow::Borrowed(spec.as_ref()),
+                tool_description_first,
+            );
+            match definitions {
+                Cow::Borrowed(definitions) => enabled_tools.extend_from_slice(definitions),
+                Cow::Owned(definitions) => enabled_tools.extend(definitions),
+            }
         }
         enabled_tools.sort_by(|left, right| left.name.cmp(&right.name));
         enabled_tools.dedup_by(|left, right| left.name == right.name);

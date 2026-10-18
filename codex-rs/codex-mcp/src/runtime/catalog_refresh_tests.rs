@@ -1,5 +1,6 @@
 use super::*;
 use crate::connection_manager::tests::catalog_refresh::MutableCatalog;
+use codex_protocol::models::PermissionProfile;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]

@@ -28,7 +28,7 @@ fn discarded_tool_response_is_collectible_before_cell_ends() {
         pending_timeouts: HashMap::new(),
         stored_values: HashMap::new(),
         stored_value_writes: HashMap::new(),
-        enabled_tools: Vec::new(),
+        enabled_tools: Default::default(),
         next_tool_call_id: 1,
         next_timeout_id: 1,
         tool_call_id: "cell".to_string(),
@@ -90,9 +90,15 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (runtime_command_tx, _runtime_command_rx) = std_mpsc::channel();
     let tools = [
-        ToolName::namespaced("functions", "exec_command"),
-        ToolName::namespaced("mcp__fake__", "exec_command"),
-        ToolName::plain("write_stdin"),
+        (
+            "exec_command",
+            ToolName::namespaced("functions", "exec_command"),
+        ),
+        (
+            "mcp__fake__exec_command",
+            ToolName::namespaced("mcp__fake__", "exec_command"),
+        ),
+        ("write_stdin", ToolName::plain("write_stdin")),
     ];
     scope.set_slot(RuntimeState {
         event_tx,
@@ -102,9 +108,9 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         stored_value_writes: HashMap::new(),
         enabled_tools: tools
             .into_iter()
-            .map(|tool_name| {
-                enabled_tool_metadata(&ToolDefinition {
-                    name: tool_name.to_string(),
+            .map(|(name, tool_name)| {
+                enabled_tool_metadata(ToolDefinition {
+                    name: name.to_string(),
                     tool_name,
                     summary: String::new(),
                     description: String::new(),
@@ -121,7 +127,12 @@ fn native_result_presentation_follows_each_promise_and_current_values() {
         exit_requested: false,
         sh_calls: Vec::new(),
     });
-    super::super::globals::install_globals(scope).expect("install globals");
+    let enabled_tools = scope
+        .get_slot::<RuntimeState>()
+        .expect("runtime state")
+        .enabled_tools
+        .clone();
+    super::super::globals::install_globals(scope, &enabled_tools).expect("install globals");
     let promise = super::evaluate_main_module(scope, r#"
 const first = tools.exec_command({});
 const other = tools.mcp__fake__exec_command({});

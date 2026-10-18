@@ -121,7 +121,7 @@ fn exec_header_is_stable_when_deferred_output_schema_changes() {
     let before = render(&tool);
     tool.output_schema = Some(json!({"type":"object","properties":{"fresh":{"type":"boolean"}}}));
     assert_eq!(before, render(&tool));
-    let metadata = crate::enabled_tool_metadata(&augment_tool_definition(tool));
+    let metadata = crate::enabled_tool_metadata(augment_tool_definition(tool));
     assert!(
         metadata
             .describe_output()

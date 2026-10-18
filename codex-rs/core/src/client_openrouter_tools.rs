@@ -211,6 +211,8 @@ impl Projection {
 
     fn item(&self, item: ResponseItem, added: bool) -> ResponseItem {
         let ResponseItem::FunctionCall {
+            encrypted_content,
+            status,
             id,
             mut name,
             mut namespace,
@@ -224,6 +226,8 @@ impl Projection {
         };
         let Some(tool) = self.tools.iter().find(|tool| tool.alias == name) else {
             return ResponseItem::FunctionCall {
+                encrypted_content,
+                status,
                 id,
                 name,
                 namespace,
@@ -251,7 +255,8 @@ impl Projection {
             if let Some(input) = input {
                 return ResponseItem::CustomToolCall {
                     id,
-                    status: None,
+                    status,
+                    encrypted_content,
                     call_id,
                     name,
                     namespace,
@@ -264,6 +269,8 @@ impl Projection {
             // never turn a damaged JSON envelope into executable script text.
         }
         ResponseItem::FunctionCall {
+            encrypted_content,
+            status,
             id,
             name,
             namespace,
@@ -318,6 +325,8 @@ impl Projection {
 fn project_input(item: ResponseItem, calls: &HashMap<String, String>) -> ResponseItem {
     match item {
         ResponseItem::CustomToolCall {
+            encrypted_content,
+            status,
             id,
             name,
             namespace,
@@ -326,6 +335,8 @@ fn project_input(item: ResponseItem, calls: &HashMap<String, String>) -> Respons
             internal_chat_message_metadata_passthrough,
             ..
         } => ResponseItem::FunctionCall {
+            encrypted_content,
+            status,
             id,
             name: alias(&ToolName::new(namespace, name)),
             namespace: None,
@@ -354,6 +365,8 @@ fn project_input(item: ResponseItem, calls: &HashMap<String, String>) -> Respons
             internal_chat_message_metadata_passthrough,
         },
         ResponseItem::FunctionCall {
+            encrypted_content,
+            status,
             id,
             name,
             namespace,
@@ -362,6 +375,8 @@ fn project_input(item: ResponseItem, calls: &HashMap<String, String>) -> Respons
             call_id,
             internal_chat_message_metadata_passthrough,
         } => ResponseItem::FunctionCall {
+            encrypted_content,
+            status,
             id,
             name: alias(&ToolName::new(namespace, name)),
             namespace: None,

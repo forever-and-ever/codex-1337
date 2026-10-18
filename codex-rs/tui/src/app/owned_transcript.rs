@@ -1,6 +1,7 @@
 //! Compose screen-top hints, the owned transcript, and the composer with shared cursor geometry.
 //! At latest, reserve a cleared row above the composer; while reading, attach that row to a rule
 //! before current activity. Slash suggestions overlay already-painted rows without changing geometry.
+//! Turn tips remain outside transcript history; their painted rows are selectable.
 //! Plain Enter returns an empty composer to latest after transcript interactions and prompt editing.
 
 use super::turn_tips::TipSurface;
@@ -54,6 +55,8 @@ impl App {
         view.copy_on_select = self
             .local_settings
             .copy_on_select(&codex_terminal_detection::terminal_info());
+        view.copy_on_select_clear_selection =
+            self.local_settings.tui.copy_on_select_clear_selection;
         view.set_keymap_bindings(&self.keymap);
         view.set_presentation(view.is_detailed(), chat_widget.history_render_mode());
         let active_key = chat_widget.active_cell_transcript_key();
@@ -138,7 +141,21 @@ impl App {
         };
         self.sync_owned_transcript(screen_size.width);
         let transcript_width = screen_size.width.max(1);
-        let composer_hint = self.composer_hint(transcript_width);
+        let composer_hint = if self
+            .chat_widget
+            .rendered_selection
+            .borrow()
+            .view
+            .has_active_interaction()
+        {
+            Some(
+                ratatui::text::Line::from("Selecting text · esc cancel")
+                    .dim()
+                    .into(),
+            )
+        } else {
+            self.composer_hint(transcript_width)
+        };
         let now = Instant::now();
         let turn_tip = self.turn_tip(transcript_width, now, &tui.frame_requester());
         let working_tip = turn_tip
@@ -223,6 +240,7 @@ impl App {
         let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
         drop(preparation_stage);
         tui.draw(screen_size.height, |frame| {
+            chat_widget.rendered_selection.borrow_mut().areas.clear();
             ratatui::widgets::Clear.render(
                 Rect::new(/*x*/ 0, /*y*/ 0, screen_size.width, available),
                 frame.buffer,
@@ -240,6 +258,8 @@ impl App {
             );
             if let Some(gap) = composer_gap.as_mut() {
                 gap.needs_separator = available > header_height + 1
+                    // Keep the tip under the pointer when selection hints or copy feedback appear.
+                    && turn_tip.is_none()
                     && chat_widget.no_modal_or_popup_active()
                     && view.composer_gap_has_content(transcript_width, composer_hint.as_ref(), now);
             }
@@ -351,6 +371,14 @@ impl App {
             .filter(|_| chat_widget.no_modal_or_popup_active());
             feedback_tick =
                 view.render_composer_gap(follow_area, composer_hint.as_ref(), frame.buffer, now);
+            if let Some((_, tip)) = &turn_tip
+                && let Some(area) = tip.rendered.get()
+            {
+                chat_widget
+                    .rendered_selection
+                    .borrow_mut()
+                    .register(area, /*invalidate*/ false);
+            }
             chat_widget.note_rendered_width(screen_size.width);
             rendered_cursor = if live_work.is_focused() {
                 None
@@ -373,6 +401,11 @@ impl App {
                     cursor_style = header.cursor_style(header_area);
                 }
             }
+            // Register every selectable surface before validating the held selection.
+            chat_widget
+                .rendered_selection
+                .borrow_mut()
+                .render(frame.buffer);
             if let Some(dialog) = chat_widget.centered_dialog() {
                 let area = Rect::new(0, 0, screen_size.width, screen_size.height);
                 dialog.render(area, frame.buffer);
@@ -387,7 +420,7 @@ impl App {
             live_work.capture_painted_frame(composer_gap.is_some());
         })?;
         if let Some((surface, tip)) = &turn_tip
-            && tip.rendered.get()
+            && tip.rendered.get().is_some()
         {
             self.turn_tips.acknowledge(*surface);
         }
@@ -698,31 +731,15 @@ impl App {
             }
             return self.handle_owned_backtrack_event(tui, event);
         };
-        let resume_following = matches!(action, ViewAction::CopyAndFollow(_));
-        let copy_on_select = matches!(action, ViewAction::CopyOnSelect(_));
-        match action {
-            ViewAction::Changed => {}
-            ViewAction::PrimarySelection(text) => self.transcript_view.publish_primary(tui, &text),
-            ViewAction::CopyOnSelect(text) if cfg!(target_os = "linux") => {
-                self.transcript_view.publish_primary(tui, &text);
-            }
-            ViewAction::Copy(text)
-            | ViewAction::CopyOnSelect(text)
-            | ViewAction::CopyAndFollow(text) => {
-                let result =
-                    self.transcript_view
-                        .copy_selected_text(tui, &cells, &text, !copy_on_select);
-                if !copy_on_select || !cfg!(target_os = "linux") || result.is_err() {
-                    self.transcript_view
-                        .show_copy_feedback(&result, text.chars().count());
-                }
-                if resume_following
-                    && matches!(result, Ok(crate::clipboard_copy::CopyStatus::Pending(_)))
-                {
-                    self.transcript_view.follow_pending_copy();
-                }
-            }
-            ViewAction::OpenLink(url) => self.open_url_in_browser(url),
+        if let Some((characters, result)) = self.transcript_view.copy_action(
+            tui,
+            &self.transcript_cells,
+            &action,
+            crate::clipboard_copy::CopyFormat::Markdown,
+        ) {
+            self.transcript_view.show_copy_feedback(&result, characters);
+        } else if let ViewAction::OpenLink(url) = action {
+            self.open_url_in_browser(url);
         }
         self.request_owned_history(tui, app_server);
         tui.frame_requester().schedule_frame();

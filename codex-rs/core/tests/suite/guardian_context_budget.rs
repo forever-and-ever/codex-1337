@@ -151,6 +151,8 @@ async fn independent_review_preserves_oversized_instruction_order() -> Result<()
             .inject_response_items(vec![
                 responses::user_message_item(&followup),
                 ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
                     id: None,
                     role: "developer".to_owned(),
                     content: vec![ContentItem::InputText {
@@ -213,6 +215,7 @@ async fn independent_review_preserves_oversized_instruction_order() -> Result<()
 enum ReviewerResponse {
     Decision,
     ToolContinuation,
+    CachedCompactionContinuation,
     FileImageContinuation,
     UncompactableContinuation,
     CompactionError,
@@ -220,8 +223,9 @@ enum ReviewerResponse {
 }
 
 #[test_case(1, ReviewerResponse::Decision; "required_context_fails_closed")]
-#[test_case(7_000, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
-#[test_case(7_000, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
+#[test_case(4_500, ReviewerResponse::ToolContinuation; "oversized_tool_continuation_compacts")]
+#[test_case(7_000, ReviewerResponse::CachedCompactionContinuation; "cached_compaction_fits_reviewer_budget")]
+#[test_case(4_500, ReviewerResponse::FileImageContinuation; "uploaded_original_image_history_compacts")]
 #[test_case(5_000, ReviewerResponse::UncompactableContinuation; "ineffective_compaction_fails_closed")]
 #[test_case(7_000, ReviewerResponse::CompactionError; "compaction_service_error_does_not_request_user_approval")]
 #[test_case(6_000, ReviewerResponse::NextReview; "incoming_review_compacts_existing_history")]
@@ -290,6 +294,7 @@ async fn review_respects_complete_context_budget(
     if matches!(
         reviewer_response,
         ReviewerResponse::ToolContinuation
+            | ReviewerResponse::CachedCompactionContinuation
             | ReviewerResponse::FileImageContinuation
             | ReviewerResponse::UncompactableContinuation
             | ReviewerResponse::CompactionError
@@ -341,6 +346,11 @@ async fn review_respects_complete_context_budget(
                         })
                         .to_string(),
                     ),
+                    ReviewerResponse::CachedCompactionContinuation => ev_custom_tool_call(
+                        "reviewer-inspect",
+                        "exec",
+                        "text('inspection-output'.repeat(1000));",
+                    ),
                     ReviewerResponse::ToolContinuation
                     | ReviewerResponse::UncompactableContinuation
                     | ReviewerResponse::CompactionError => ev_custom_tool_call(
@@ -362,7 +372,9 @@ async fn review_respects_complete_context_budget(
     }
     if matches!(
         reviewer_response,
-        ReviewerResponse::ToolContinuation | ReviewerResponse::FileImageContinuation
+        ReviewerResponse::ToolContinuation
+            | ReviewerResponse::CachedCompactionContinuation
+            | ReviewerResponse::FileImageContinuation
     ) {
         events.insert(
             /*index*/ 2,
@@ -408,6 +420,13 @@ async fn review_respects_complete_context_budget(
             ReviewerResponse::UncompactableContinuation
         ) {
             "still oversized ".repeat(/*n*/ 4_000)
+        } else if matches!(
+            reviewer_response,
+            ReviewerResponse::CachedCompactionContinuation
+        ) {
+            // The opaque wire payload also carries cached token IDs. It must fit
+            // after compaction without being shortened or forcing another review.
+            format!("Previous review evidence.{}", "a".repeat(/*n*/ 18_000))
         } else {
             "Previous review evidence and inspection results.".to_owned()
         };
@@ -463,7 +482,9 @@ async fn review_respects_complete_context_budget(
     } else {
         let recovered = matches!(
             reviewer_response,
-            ReviewerResponse::ToolContinuation | ReviewerResponse::FileImageContinuation
+            ReviewerResponse::ToolContinuation
+                | ReviewerResponse::CachedCompactionContinuation
+                | ReviewerResponse::FileImageContinuation
         );
         assert_eq!(
             requests.len(),
@@ -509,6 +530,17 @@ async fn review_respects_complete_context_budget(
                     .to_string()
                     .contains("Previous review evidence")
             );
+            if matches!(
+                reviewer_response,
+                ReviewerResponse::CachedCompactionContinuation
+            ) {
+                let checkpoints = guardian_requests[1].inputs_of_type("compaction");
+                assert_eq!(
+                    checkpoints[0]["encrypted_content"],
+                    format!("Previous review evidence.{}", "a".repeat(/*n*/ 18_000)),
+                    "budgeting must preserve the complete encrypted checkpoint"
+                );
+            }
             assert_eq!(
                 guardian_requests[0].body_json()["client_metadata"]["thread_id"],
                 recovered["client_metadata"]["thread_id"]

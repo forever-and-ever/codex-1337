@@ -251,7 +251,7 @@ impl<'a> Encoder<'a> {
                 let blocks = content
                     .iter()
                     .map(|part| match part {
-                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                        ContentItem::InputText { text } | ContentItem::OutputText { text, .. } => {
                             Ok(json!({"type":"text", "text":text}))
                         }
                         ContentItem::InputImage { image, .. } => {

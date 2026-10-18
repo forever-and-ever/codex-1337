@@ -1,4 +1,4 @@
-//! Catalog namespace and MCP server prefixes follow the current model without changing dispatch.
+//! Catalog function and namespace prefixes follow the current model without changing dispatch.
 
 use super::super::code_mode::custom_tool_output_last_non_empty_text;
 use super::super::rmcp_client::remote_aware_environment_id;
@@ -91,6 +91,10 @@ async fn catalog_namespace_prefixes_follow_the_selected_model(
             model.supports_search_tool = include_search;
             model.model_messages.as_mut().expect("model messages").tools = Some(
                 serde_json::from_value(json!({
+                    "functions_namespace_functions_description_prefixes": if slug == "gpt-5.5" {
+                        json!({"exec": "Exec guidance.", "view_image": "Image guidance.",
+                            "list_agents": "Wrong namespace.", "echo": "Wrong namespace."})
+                    } else { json!({}) },
                     "indirect_description_prefixes": {
                         "namespaces": prefixes,
                         "mcp_servers": {"reports.one": mcp_prefix},
@@ -171,6 +175,7 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
                 .expect("exec"),
         );
         let description = exec["description"].as_str().expect("description");
+        assert_eq!(description.starts_with("Exec guidance.\n\n"), index == 0);
         // `exec` declares only its bootstrap tools; agent tools and MCP servers appear in its
         // roster, and their prefixes reach `describe_tool` contracts instead.
         for (&prefix, declared) in prefixes.iter().zip([true, false, false]) {
@@ -185,6 +190,19 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
                 .iter()
                 .all(|prefix| !json!(tools).to_string().contains(*prefix))
         );
+        if index == 0 {
+            for tool in &mut tools {
+                if tool["name"] == "view_image" {
+                    tool["description"] = json!(
+                        tool["description"]
+                            .as_str()
+                            .expect("tool description")
+                            .strip_prefix("Image guidance.\n\n")
+                            .expect("function prefix")
+                    );
+                }
+            }
+        }
         tools
     });
     assert_eq!(direct_specs[0], direct_specs[1]);
@@ -211,15 +229,18 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
         outputs.push(output);
     }
     let mut expected = outputs[1].clone();
-    for (description, prefix) in expected["descriptions"]
-        .as_array_mut()
-        .expect("tool descriptions")
-        .iter_mut()
-        .zip(prefixes)
-    {
-        *description = json!(format!(
+    expected["descriptions"][0] = json!(format!(
+        "Image guidance.\n\n{}",
+        expected["descriptions"][0]
+            .as_str()
+            .expect("tool description")
+    ));
+    for (index, prefix) in prefixes.iter().enumerate() {
+        expected["descriptions"][index] = json!(format!(
             "{prefix}\n\n{}",
-            description.as_str().expect("tool description")
+            expected["descriptions"][index]
+                .as_str()
+                .expect("tool description")
         ));
     }
     assert_eq!(outputs[0], expected);
@@ -227,7 +248,7 @@ text({descriptions, echo: report.structuredContent.echo, agent: agents.agents[0]
         insta::assert_snapshot!(
             "catalog_indirect_namespace_prefixes",
             context_snapshot::format_request_history_snapshot(
-                "Catalog namespace and raw MCP server prefixes annotate embedded docs and describe_tool contracts; a model switch clears them without changing nested dispatch.",
+                "Function and namespace prefixes follow the selected model in declarations and describe_tool contracts; model switches clear them without changing dispatch.",
                 &requests,
                 &ContextSnapshotOptions::default()
                     .rewrite_known_segments()

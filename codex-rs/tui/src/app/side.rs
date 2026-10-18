@@ -2,8 +2,8 @@
 //!
 //! A side conversation is an ephemeral fork used for a quick /side question while keeping the
 //! primary thread focused. This module owns the app-level lifecycle for those forks: switching into
-//! them, returning to their parent, and discarding them when normal thread navigation moves
-//! elsewhere. The fork receives hidden developer instructions that make inherited history reference
+//! them, returning to their parent, retaining them across normal navigation, and explicitly
+//! discarding them. The fork receives hidden developer instructions that make inherited history
 //! material only and steer the agent away from mutations unless the side conversation explicitly asks
 //! for them.
 
@@ -286,6 +286,12 @@ impl App {
             .map(|state| state.parent_thread_id)
     }
 
+    pub(super) fn side_thread_for_parent(&self, parent_thread_id: ThreadId) -> Option<ThreadId> {
+        self.side_threads.iter().find_map(|(thread_id, state)| {
+            (state.parent_thread_id == parent_thread_id).then_some(*thread_id)
+        })
+    }
+
     pub(super) fn set_side_parent_status(
         &mut self,
         parent_thread_id: ThreadId,
@@ -373,13 +379,8 @@ impl App {
         target_thread_id: ThreadId,
     ) -> Option<ThreadId> {
         let active_thread_id = self.current_displayed_thread_id()?;
-        let (&side_thread_id, state) = self.side_threads.iter().next()?;
-        if target_thread_id == side_thread_id || target_thread_id == active_thread_id {
-            return None;
-        }
-
-        (active_thread_id == side_thread_id || active_thread_id == state.parent_thread_id)
-            .then_some(side_thread_id)
+        let state = self.side_threads.get(&active_thread_id)?;
+        (target_thread_id == state.parent_thread_id).then_some(active_thread_id)
     }
 
     pub(super) async fn toggle_side_conversation(
@@ -390,12 +391,9 @@ impl App {
         let Some(active_thread_id) = self.current_displayed_thread_id() else {
             return Ok(());
         };
-        let Some((&side_thread_id, state)) = self.side_threads.iter().next() else {
-            return Ok(());
-        };
-        let target_thread_id = if active_thread_id == side_thread_id {
+        let target_thread_id = if let Some(state) = self.side_threads.get(&active_thread_id) {
             state.parent_thread_id
-        } else if active_thread_id == state.parent_thread_id {
+        } else if let Some(side_thread_id) = self.side_thread_for_parent(active_thread_id) {
             side_thread_id
         } else {
             return Ok(());
@@ -462,6 +460,8 @@ impl App {
 
     pub(super) fn side_boundary_prompt_item() -> ResponseItem {
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -547,7 +547,7 @@ impl App {
 
     pub(super) async fn handle_start_side(
         &mut self,
-        _tui: &mut tui::Tui,
+        tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         parent_thread_id: ThreadId,
         mut user_message: Option<crate::chatwidget::UserMessage>,
@@ -563,6 +563,21 @@ impl App {
             self.sync_side_thread_ui();
             self.chat_widget
                 .add_error_message("Wait for permissions to update before forking.".into());
+            return Ok(AppRunControl::Continue);
+        }
+
+        if let Some(side_thread_id) = self.side_thread_for_parent(parent_thread_id) {
+            self.select_agent_thread(tui, app_server, side_thread_id)
+                .await?;
+            if self.active_thread_id == Some(side_thread_id) {
+                if let Some(user_message) = user_message.take() {
+                    let _ = self
+                        .chat_widget
+                        .submit_user_message_as_plain_user_turn(user_message);
+                }
+            } else {
+                self.restore_side_user_message(user_message.take());
+            }
             return Ok(AppRunControl::Continue);
         }
 

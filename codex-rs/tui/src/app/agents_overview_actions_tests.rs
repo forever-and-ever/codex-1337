@@ -482,26 +482,24 @@ async fn hiding_tasks_keeps_selection_adjacent_in_display_order() -> Result<()> 
                 view.rows[view.selected_index().unwrap()].thread_id,
                 ThreadId::from_u128(/*value*/ 3)
             );
+            let order = match grouping {
+                AgentsOverviewGrouping::Project => [3, 2, 1, 4],
+                AgentsOverviewGrouping::Status => [3, 1, 4, 2],
+                AgentsOverviewGrouping::Model => [3, 4, 2, 1],
+            };
+            let expected = order
+                .into_iter()
+                .filter(|id| !filtered || *id != 2)
+                .map(ThreadId::from_u128);
             app.agents_overview.visible_thread_ids = view.thread_ids();
             app.chat_widget.show_bottom_pane_view(Box::new(view));
-            let expected = match (grouping, filtered) {
-                (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Status, false) => {
-                    vec![3, 2, 1, 4]
-                }
-                (AgentsOverviewGrouping::Project | AgentsOverviewGrouping::Status, true) => {
-                    vec![3, 1, 4]
-                }
-                (AgentsOverviewGrouping::Model, false) => vec![3, 4, 2, 1],
-                (AgentsOverviewGrouping::Model, true) => vec![3, 4, 1],
-            };
             for index in expected {
                 let selected = app
                     .chat_widget
                     .selected_index_for_present_view(AGENTS_OVERVIEW_VIEW_ID)
                     .unwrap();
                 assert_eq!(
-                    app.agents_overview.visible_thread_ids[selected],
-                    ThreadId::from_u128(index),
+                    app.agents_overview.visible_thread_ids[selected], index,
                     "{grouping:?}, filtered={filtered}"
                 );
                 let rendered = render_bottom_popup(&app.chat_widget, /*width*/ 100);
@@ -528,7 +526,7 @@ async fn hiding_tasks_keeps_selection_adjacent_in_display_order() -> Result<()> 
                 assert!(matches!(
                     &hide,
                     AppEvent::HideAgentsOverviewThread { thread_id }
-                        if *thread_id == ThreadId::from_u128(index)
+                        if *thread_id == index
                 ));
                 Box::pin(app.handle_event(&mut tui, &mut app_server, hide)).await?;
             }

@@ -295,7 +295,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
                             content
                                 .iter()
                                 .map(|part| {
-                                    let ContentItem::OutputText { text } = part else {
+                                    let ContentItem::OutputText { text, .. } = part else {
                                         panic!("expected output text");
                                     };
                                     text.as_str()

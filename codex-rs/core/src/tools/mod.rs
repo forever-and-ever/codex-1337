@@ -37,18 +37,6 @@ pub(crate) use executed_tool_calls::ExecutedToolCalls;
 pub(crate) use multi_agent_tool::MULTI_AGENT_V2_NAMESPACE_DESCRIPTION;
 pub use router::ToolRouter;
 
-pub(crate) fn tool_user_shell_type(
-    user_shell: &crate::shell::Shell,
-) -> codex_tools::ToolUserShellType {
-    match user_shell.shell_type {
-        crate::shell::ShellType::Zsh => codex_tools::ToolUserShellType::Zsh,
-        crate::shell::ShellType::Bash => codex_tools::ToolUserShellType::Bash,
-        crate::shell::ShellType::PowerShell => codex_tools::ToolUserShellType::PowerShell,
-        crate::shell::ShellType::Sh => codex_tools::ToolUserShellType::Sh,
-        crate::shell::ShellType::Cmd => codex_tools::ToolUserShellType::Cmd,
-    }
-}
-
 pub(crate) fn requested_tool_mode(turn_context: &TurnContext, model_info: &ModelInfo) -> ToolMode {
     model_info.tool_mode.unwrap_or_else(|| {
         if turn_context.config.features.enabled(Feature::CodeModeOnly) {

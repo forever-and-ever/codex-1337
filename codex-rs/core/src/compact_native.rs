@@ -146,6 +146,7 @@ pub(crate) async fn run_native_compaction(
     let (_, estimated_deleted_tokens) = trim_function_call_history_to_fit_context_window(
         &mut history,
         turn_context.as_ref(),
+        turn_context.model_context_window(),
         &base_instructions,
     );
     if estimated_deleted_tokens > 0 {
@@ -211,7 +212,7 @@ pub(crate) async fn run_native_compaction(
             }
         };
         let concession = concession(rung, &checkpoint.repairs, &rejections);
-        install_checkpoint(
+        Box::pin(install_checkpoint(
             sess,
             turn_context,
             replacement_step_context,
@@ -221,7 +222,7 @@ pub(crate) async fn run_native_compaction(
             source,
             trace_input_history,
             checkpoint,
-        )
+        ))
         .await?;
         if let Some(message) = concession {
             sess.send_event(turn_context, EventMsg::Warning(WarningEvent { message }))

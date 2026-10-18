@@ -1769,12 +1769,36 @@ async fn responses_websocket_uses_previous_response_id_when_prefix_after_complet
     server.shutdown().await;
 }
 
+#[test_case::test_case(vec![message_item("different")], "input_mismatch", "message"; "rewritten")]
+#[test_case::test_case(
+    vec![ResponseItem::Compaction {
+        id: None,
+        encrypted_content: "compacted".to_string(),
+        internal_chat_message_metadata_passthrough: None,
+    }],
+    "input_mismatch",
+    "compaction"; "replaced"
+)]
+#[test_case::test_case(
+    vec![message_item("hello"), assistant_message_item("1", "changed output")],
+    "input_mismatch",
+    "message"; "rewritten server output"
+)]
+#[test_case::test_case(vec![message_item("hello")], "input_shortened", "none"; "missing server output")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_websocket_creates_on_non_prefix() {
+async fn responses_websocket_creates_on_non_prefix(
+    input: Vec<ResponseItem>,
+    _reason: &str,
+    _current_item_type: &str,
+) {
     skip_if_no_network!();
 
     let server = start_websocket_server(vec![vec![
-        vec![ev_response_created("resp-1"), ev_completed("resp-1")],
+        vec![
+            ev_response_created("resp-1"),
+            ev_assistant_message("msg_1", "assistant output"),
+            ev_completed("resp-1"),
+        ],
         vec![ev_response_created("resp-2"), ev_completed("resp-2")],
     ]])
     .await;
@@ -1782,7 +1806,7 @@ async fn responses_websocket_creates_on_non_prefix() {
     let harness = websocket_harness(&server).await;
     let mut client_session = harness.client.new_session();
     let prompt_one = prompt_with_input(vec![message_item("hello")]);
-    let prompt_two = prompt_with_input(vec![message_item("different")]);
+    let prompt_two = prompt_with_input(input);
 
     stream_until_complete(&mut client_session, &harness, &prompt_one).await;
     stream_until_complete(&mut client_session, &harness, &prompt_two).await;
@@ -1889,9 +1913,15 @@ async fn responses_websocket_v2_creates_with_previous_response_id_on_prefix() {
     server.shutdown().await;
 }
 
+#[test_case::test_case(None, Some(json!({"type": "object", "properties": {}})), "text_changed"; "output schema")]
+#[test_case::test_case(Some("changed-model"), None, "model_changed"; "model")]
+#[test_case::test_case(Some("changed-model"), Some(json!({"type": "object"})), "model_changed"; "first changed property")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn responses_websocket_v2_creates_without_previous_response_id_when_non_input_fields_change()
-{
+async fn responses_websocket_v2_creates_without_previous_response_id_when_non_input_fields_change(
+    model: Option<&str>,
+    output_schema: Option<serde_json::Value>,
+    _reason: &str,
+) {
     skip_if_no_network!();
 
     let server = start_websocket_server(vec![vec![
@@ -1904,10 +1934,21 @@ async fn responses_websocket_v2_creates_without_previous_response_id_when_non_in
     let mut session = harness.client.new_session();
     let prompt_one = prompt_with_input(vec![message_item("hello")]);
     let mut prompt_two = prompt_with_input(vec![message_item("hello"), message_item("second")]);
-    prompt_two.output_schema = Some(json!({"type": "object", "properties": {}}));
+    prompt_two.output_schema = output_schema;
+    let mut model_info = harness.model_info.clone();
+    if let Some(model) = model {
+        model_info.slug = model.to_string();
+    }
 
     stream_until_complete(&mut session, &harness, &prompt_one).await;
-    stream_until_complete(&mut session, &harness, &prompt_two).await;
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &prompt_two,
+        &model_info,
+        "resp-2",
+    )
+    .await;
 
     let connection = server.single_connection();
     assert_eq!(connection.len(), 2);
@@ -2107,6 +2148,8 @@ async fn responses_websocket_v2_sets_openai_beta_header() {
 
 fn message_item(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".into(),
         content: vec![ContentItem::InputText { text: text.into() }],
@@ -2117,9 +2160,15 @@ fn message_item(text: &str) -> ResponseItem {
 
 fn assistant_message_item(id: &str, text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: Some(ResponseItemId::with_suffix("msg", id)),
         role: "assistant".into(),
-        content: vec![ContentItem::OutputText { text: text.into() }],
+        content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
+            text: text.into(),
+        }],
         phase: None,
         internal_chat_message_metadata_passthrough: None,
     }
@@ -2309,6 +2358,7 @@ async fn websocket_harness_with_provider_options_and_auth(
         config
             .features
             .enabled(Feature::ConcurrentReasoningSummaries),
+        config.features.enabled(Feature::OutputTokenReplay),
         /*attestation_provider*/ None,
         http_client_factory,
         config.workspace_routing_context(),

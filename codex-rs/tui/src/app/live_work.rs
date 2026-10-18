@@ -429,20 +429,18 @@ impl App {
         };
 
         let view = scope.view.selection_view();
-        match action {
-            ViewAction::PrimarySelection(text) | ViewAction::CopyOnSelect(text) => {
-                view.publish_primary(tui, &text);
+        if let Some((characters, result)) = view.copy_action(
+            tui,
+            &[],
+            &action,
+            crate::clipboard_copy::CopyFormat::PlainText,
+        ) {
+            if result == Ok(crate::clipboard_copy::CopyStatus::Confirmed) {
+                view.jump_to_latest();
             }
-            ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
-                let result = view.copy_selected_text(tui, &[], &text, true);
-                if result == Ok(crate::clipboard_copy::CopyStatus::Confirmed) {
-                    view.jump_to_latest();
-                }
-                self.transcript_view
-                    .show_copy_feedback(&result, text.chars().count());
-            }
-            ViewAction::Changed => {}
-            ViewAction::OpenLink(_) => unreachable!("Work selection never activates links"),
+            self.transcript_view.show_copy_feedback(&result, characters);
+        } else if matches!(action, ViewAction::OpenLink(_)) {
+            unreachable!("Work selection never activates links");
         }
         tui.frame_requester().schedule_frame();
         true

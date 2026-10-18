@@ -346,10 +346,44 @@ async fn thread_attachment_migration_preserves_existing_data() {
     .await
     .expect("existing attachment should be inserted using the released schema");
 
+    // The fork has released IDs through 65. Upstream later reused 60/61: do not
+    // renumber applied fork migrations or silently overwrite their checksums.
+    migrator_through(/*version*/ 65)
+        .run(&pool)
+        .await
+        .expect("released fork migrations should apply");
+    let released: Vec<(i64, Vec<u8>)> =
+        sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     STATE_MIGRATOR
         .run(&pool)
         .await
-        .expect("attachment migration should apply without rewriting released migrations");
+        .expect("upstream migrations should preserve the released fork schema");
+    let preserved: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+        "SELECT version, checksum FROM _sqlx_migrations WHERE version <= 65 ORDER BY version",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(released, preserved);
+    for table in [
+        "thread_farm_requests",
+        "guardian_review_feedback",
+        "thread_read_receipts",
+    ] {
+        assert!(
+            sqlx::query_scalar::<_, String>(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?"
+            )
+            .bind(table)
+            .fetch_optional(&pool)
+            .await
+            .unwrap()
+            .is_some()
+        );
+    }
     let section = sqlx::query_as::<_, (String, String, Option<String>)>(
         "SELECT id, name, appearance FROM thread_sections WHERE id = ?",
     )

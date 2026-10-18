@@ -27,8 +27,6 @@ use tokio::sync::mpsc;
 use crate::TaskFailureHandler;
 use crate::v8_init::ensure_v8_initialized;
 
-const EXIT_SENTINEL: &str = "__codex_code_mode_exit__";
-
 #[derive(Debug)]
 pub(crate) enum RuntimeCommand {
     ToolResponse { id: String, result: JsonValue },
@@ -97,9 +95,9 @@ pub(crate) fn spawn_runtime(
     let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
     let enabled_tools = request
         .enabled_tools
-        .iter()
+        .into_iter()
         .map(enabled_tool_metadata)
-        .collect::<Vec<_>>();
+        .collect::<Arc<[_]>>();
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
         enabled_tools,
@@ -145,7 +143,7 @@ fn spawn_supervised_runtime_thread(
 #[derive(Clone)]
 struct RuntimeConfig {
     tool_call_id: String,
-    enabled_tools: Vec<EnabledToolMetadata>,
+    enabled_tools: Arc<[EnabledToolMetadata]>,
     source: String,
     stored_values: HashMap<String, Arc<JsonValue>>,
 }
@@ -156,7 +154,8 @@ pub(super) struct RuntimeState {
     pending_timeouts: HashMap<u64, timers::ScheduledTimeout>,
     stored_values: HashMap<String, Arc<JsonValue>>,
     stored_value_writes: HashMap<String, Arc<JsonValue>>,
-    enabled_tools: Vec<EnabledToolMetadata>,
+    // TELOS(compact-contracts): on-demand discovery retains the cell's original schemas.
+    enabled_tools: Arc<[EnabledToolMetadata]>,
     next_tool_call_id: u64,
     next_timeout_id: u64,
     tool_call_id: String,
@@ -173,10 +172,7 @@ pub(super) struct PendingToolCall {
 
 pub(super) enum CompletionState {
     Pending,
-    Completed {
-        stored_value_writes: HashMap<String, Arc<JsonValue>>,
-        error_text: Option<String>,
-    },
+    Completed { error_text: Option<String> },
 }
 
 fn run_runtime(
@@ -199,6 +195,8 @@ fn run_runtime(
     let context = v8::Context::new(scope, Default::default());
     let scope = &mut v8::ContextScope::new(scope, context);
 
+    let enabled_tools = Arc::clone(&config.enabled_tools);
+
     scope.set_slot(RuntimeState {
         event_tx: event_tx.clone(),
         pending_tool_calls: HashMap::new(),
@@ -214,7 +212,7 @@ fn run_runtime(
         sh_calls: Vec::new(),
     });
 
-    if let Err(error_text) = globals::install_globals(scope) {
+    if let Err(error_text) = globals::install_globals(scope, &enabled_tools) {
         send_result(&event_tx, HashMap::new(), Some(error_text));
         return;
     }
@@ -224,17 +222,14 @@ fn run_runtime(
     let pending_promise = match module_loader::evaluate_main_module(scope, &config.source) {
         Ok(pending_promise) => pending_promise,
         Err(error_text) => {
-            capture_scope_send_error(scope, &event_tx, Some(error_text));
+            send_scope_result(scope, &event_tx, Some(error_text));
             return;
         }
     };
 
     match module_loader::completion_state(scope, pending_promise.as_ref()) {
-        CompletionState::Completed {
-            stored_value_writes,
-            error_text,
-        } => {
-            send_result(&event_tx, stored_value_writes, error_text);
+        CompletionState::Completed { error_text } => {
+            send_scope_result(scope, &event_tx, error_text);
             return;
         }
         CompletionState::Pending => {}
@@ -250,7 +245,7 @@ fn run_runtime(
                 if let Err(error_text) =
                     module_loader::resolve_tool_response(scope, &id, Ok(result))
                 {
-                    capture_scope_send_error(scope, &event_tx, Some(error_text));
+                    send_scope_result(scope, &event_tx, Some(error_text));
                     return;
                 }
             }
@@ -258,13 +253,13 @@ fn run_runtime(
                 if let Err(runtime_error) =
                     module_loader::resolve_tool_response(scope, &id, Err(error_text))
                 {
-                    capture_scope_send_error(scope, &event_tx, Some(runtime_error));
+                    send_scope_result(scope, &event_tx, Some(runtime_error));
                     return;
                 }
             }
             RuntimeCommand::TimeoutFired { id } => {
                 if let Err(runtime_error) = timers::invoke_timeout_callback(scope, id) {
-                    capture_scope_send_error(scope, &event_tx, Some(runtime_error));
+                    send_scope_result(scope, &event_tx, Some(runtime_error));
                     return;
                 }
             }
@@ -273,11 +268,8 @@ fn run_runtime(
 
         scope.perform_microtask_checkpoint();
         match module_loader::completion_state(scope, pending_promise.as_ref()) {
-            CompletionState::Completed {
-                stored_value_writes,
-                error_text,
-            } => {
-                send_result(&event_tx, stored_value_writes, error_text);
+            CompletionState::Completed { error_text } => {
+                send_scope_result(scope, &event_tx, error_text);
                 return;
             }
             CompletionState::Pending => {}
@@ -318,16 +310,18 @@ fn next_runtime_command(
     }
 }
 
-fn capture_scope_send_error(
+fn send_scope_result(
     scope: &mut v8::PinScope<'_, '_>,
     event_tx: &mpsc::UnboundedSender<RuntimeEvent>,
     error_text: Option<String>,
 ) {
-    let stored_value_writes = scope
-        .get_slot::<RuntimeState>()
+    // Error rendering can itself run JS getters, including exit(). Capture
+    // the result only after every call into the exiting isolate has returned.
+    let state = scope.get_slot::<RuntimeState>();
+    let stored_value_writes = state
         .map(|state| state.stored_value_writes.clone())
         .unwrap_or_default();
-
+    let error_text = error_text.filter(|_| !state.is_some_and(|state| state.exit_requested));
     send_result(event_tx, stored_value_writes, error_text);
 }
 
@@ -422,40 +416,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminate_execution_stops_cpu_bound_module() {
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        let (_runtime_tx, _runtime_control_tx, runtime_terminate_handle) = spawn_runtime(
-            HashMap::new(),
-            execute_request("while (true) {}"),
-            event_tx,
-            PendingRuntimeMode::Continue,
-            /*task_failure_handler*/ None,
-        )
-        .unwrap();
-
-        let started_event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
-            .await
-            .unwrap()
+    async fn terminate_execution_stops_javascript() {
+        for source in [
+            r#"notify("started"); while (true) {}"#,
+            // The failed first read enters JSON fallback, whose TryCatch must preserve termination.
+            r#"
+let reads = 0;
+const value = {
+    get image_url() {
+        if (++reads === 1) throw new Error("enter fallback");
+        notify("started");
+        while (true) {}
+    }
+};
+try { image(value); } catch {}
+text("continued after cancellation");
+"#,
+        ] {
+            let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+            let (_runtime_tx, _runtime_control_tx, runtime_terminate_handle) = spawn_runtime(
+                HashMap::new(),
+                execute_request(source),
+                event_tx,
+                PendingRuntimeMode::Continue,
+                /*task_failure_handler*/ None,
+            )
             .unwrap();
-        assert!(matches!(started_event, RuntimeEvent::Started));
 
-        assert!(runtime_terminate_handle.terminate_execution());
-
-        let result_event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        let RuntimeEvent::Result { error_text, .. } = result_event else {
-            panic!("expected runtime result after termination");
-        };
-        assert!(error_text.is_some());
-
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+            let started_event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
                 .await
                 .unwrap()
-                .is_none()
-        );
+                .unwrap();
+            assert!(matches!(started_event, RuntimeEvent::Started));
+
+            // Started precedes evaluation; the notification proves the workload is running.
+            assert!(matches!(
+                tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                    .await
+                    .unwrap(),
+                Some(RuntimeEvent::Notify { .. })
+            ));
+            assert!(runtime_terminate_handle.terminate_execution());
+
+            let result_event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let RuntimeEvent::Result { error_text, .. } = result_event else {
+                panic!("expected runtime result after termination");
+            };
+            assert!(error_text.is_some());
+
+            assert!(
+                tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
     }
 
     #[tokio::test]

@@ -365,6 +365,7 @@ async fn delegated_output(
     }
     Ok(TurnToolOutput {
         name: tool.to_owned(),
+        retain: false,
         namespace: Some(POLICY_NAMESPACE.into()),
         output: FunctionCallOutputBody::Text(prompt),
     })

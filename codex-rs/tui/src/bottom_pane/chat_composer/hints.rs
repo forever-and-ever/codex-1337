@@ -53,8 +53,10 @@ impl Renderable for ComposerHints<'_> {
             self.composer.footer.warning_notice_area.set(None);
             return;
         }
+        let content = content_area(area);
+        self.composer.render_hints(content, buf, self.options);
         self.composer
-            .render_hints(content_area(area), buf, self.options);
+            .register_rendered_selection([content.intersection(buf.area)], self.options);
         if area.height > 1 {
             Block::default()
                 .borders(ratatui::widgets::Borders::BOTTOM)
@@ -370,6 +372,26 @@ impl ChatComposer {
         self.footer.warning_notice_area.set(warning_area);
         if let Some((warning_area, line)) = warning_notice {
             line.render(warning_area, buf);
+        }
+    }
+
+    pub(super) fn register_rendered_selection(
+        &self,
+        areas: impl IntoIterator<Item = Rect>,
+        options: ComposerRenderOptions<'_>,
+    ) {
+        if let Some(selection) = options.rendered_selection
+            && !self.popup_active()
+            && options.footer.is_none_or(|footer| !footer.is_interactive)
+        {
+            let revision = (options.warning_count, self.footer_props().is_task_running);
+            let mut selection = selection.borrow_mut();
+            if self.footer.selection_revision.replace(revision) != revision {
+                selection.clear();
+            }
+            for area in areas {
+                selection.register(area, false);
+            }
         }
     }
 }

@@ -474,8 +474,14 @@ impl<'a> Decoder<'a> {
         Ok(match &open.block {
             Block::Text { text } => ResponseItem::Message {
                 id,
+                encrypted_content: None,
+                status: None,
                 role: "assistant".into(),
-                content: vec![ContentItem::OutputText { text: text.clone() }],
+                content: vec![ContentItem::OutputText {
+                    text: text.clone(),
+                    annotations: None,
+                    logprobs: None,
+                }],
                 phase: None,
                 internal_chat_message_metadata_passthrough: None,
             },
@@ -517,6 +523,8 @@ impl<'a> Decoder<'a> {
                         };
                         ResponseItem::FunctionCall {
                             id,
+                            encrypted_content: None,
+                            status: None,
                             name: name.clone(),
                             namespace: namespace.clone(),
                             arguments,
@@ -543,6 +551,7 @@ impl<'a> Decoder<'a> {
                         };
                         ResponseItem::CustomToolCall {
                             id,
+                            encrypted_content: None,
                             status: None,
                             name: name.clone(),
                             namespace: namespace.clone(),

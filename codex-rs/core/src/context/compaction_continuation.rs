@@ -256,7 +256,8 @@ impl ContextualUserFragment for CompactionContinuation {
 fn complete_text(content: &[ContentItem]) -> Option<String> {
     let mut text = String::new();
     for item in content {
-        let (ContentItem::InputText { text: part } | ContentItem::OutputText { text: part }) = item
+        let (ContentItem::InputText { text: part } | ContentItem::OutputText { text: part, .. }) =
+            item
         else {
             return None;
         };

@@ -118,7 +118,9 @@ fn print_callback(
             return;
         }
     };
-    if let Some(state) = scope.get_slot::<RuntimeState>() {
+    if let Some(state) = scope.get_slot::<RuntimeState>()
+        && !state.exit_requested
+    {
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText { text },
         ));
@@ -159,7 +161,9 @@ fn hold_callback(
         return;
     };
     let promise = v8::Global::new(scope, promise);
-    if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
+    if let Some(state) = scope.get_slot_mut::<RuntimeState>()
+        && !state.exit_requested
+    {
         state.sh_calls.push(promise);
     }
     retval.set(call);

@@ -240,6 +240,7 @@ impl ChatWidget {
                 transcript_hint: self.bottom_pane.transcript_shortcut_hint(),
             }))
         } else {
+            options.rendered_selection = Some(&self.rendered_selection);
             options.warning_count = self.warning_display_state.count;
             options.separate_status_line = options.command_popup_placement
                 != crate::bottom_pane::CommandPopupPlacement::AboveComposer;
@@ -277,6 +278,7 @@ impl ChatWidget {
         }
         self.bottom_pane
             .hint_renderable(crate::bottom_pane::ComposerRenderOptions {
+                rendered_selection: Some(&self.rendered_selection),
                 warning_count: self.warning_display_state.count,
                 separate_status_line: true,
                 hint_placement: crate::bottom_pane::ComposerHintPlacement::ScreenHeader,

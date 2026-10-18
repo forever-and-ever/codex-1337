@@ -85,6 +85,7 @@ impl ChatWidget {
             .as_ref()
             .map(|keymap| keymap.chat.clone())
             .unwrap_or_else(|| default_keymap.chat.clone());
+        let config_panel_tui = local_settings.tui.clone();
         let mut widget = Self {
             empty_state_animation: std::cell::RefCell::new(empty_state_animation),
             daybreak_enabled: false,
@@ -106,6 +107,7 @@ impl ChatWidget {
             raw_output_mode: local_settings.tui.raw_output_mode,
             config,
             local_settings,
+            config_panel_tui,
             effective_service_tier,
             skills_all: Vec::new(),
             skills_initial_state: None,
@@ -163,6 +165,7 @@ impl ChatWidget {
             backend_banner_notice_model: None,
             luna_reserve_notice_account_id: None,
             warning_display_state: WarningDisplayState::default(),
+            rendered_selection: Default::default(),
             rate_limit_switch_prompt: RateLimitSwitchPromptState::default(),
             add_credits_nudge_email_in_flight: None,
             adaptive_chunking: AdaptiveChunkingPolicy::default(),

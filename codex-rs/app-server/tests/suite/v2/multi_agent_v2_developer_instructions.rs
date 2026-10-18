@@ -1149,6 +1149,7 @@ features.shell_tool = false
                         codex_app_server_protocol::ThreadSourceKind::SubAgentThreadSpawn,
                     ]),
                     cursor: None,
+                    excluded_thread_ids: None,
                     limit: None,
                     sort_key: None,
                     sort_direction: None,

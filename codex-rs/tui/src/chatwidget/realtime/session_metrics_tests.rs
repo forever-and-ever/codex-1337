@@ -15,13 +15,19 @@ async fn terminal_error_during_retry_cleanup_records_one_failure() {
         chat.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
         chat.realtime_conversation.startup_retry = retry;
 
-        chat.on_realtime_error("connection lost".into());
+        chat.on_realtime_error(
+            "connection lost".into(),
+            RealtimeFailureCause::ConnectionUnknown,
+        );
 
         assert_eq!(
             chat.realtime_conversation.failure_recorded,
             expected_failure
         );
-        chat.on_realtime_error("duplicate error".into());
+        chat.on_realtime_error(
+            "duplicate error".into(),
+            RealtimeFailureCause::ConnectionUnknown,
+        );
         assert_eq!(
             chat.realtime_conversation.failure_recorded,
             expected_failure

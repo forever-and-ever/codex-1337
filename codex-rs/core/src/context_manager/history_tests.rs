@@ -84,9 +84,13 @@ fn pcm_wav_data_url(sample_count: u32) -> (String, usize) {
 
 fn assistant_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: text.to_string(),
         }],
         phase: None,
@@ -103,9 +107,13 @@ fn inter_agent_assistant_msg(text: &str) -> ResponseItem {
         /*trigger_turn*/ true,
     );
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: serde_json::to_string(&communication).unwrap(),
         }],
         phase: None,
@@ -691,9 +699,13 @@ fn world_state_reconciles_matching_legacy_history_once() {
 
 fn user_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: text.to_string(),
         }],
         phase: None,
@@ -703,6 +715,8 @@ fn user_msg(text: &str) -> ResponseItem {
 
 fn user_input_text_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -715,6 +729,8 @@ fn user_input_text_msg(text: &str) -> ResponseItem {
 
 fn developer_msg(text: &str) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText {
@@ -727,6 +743,8 @@ fn developer_msg(text: &str) -> ResponseItem {
 
 fn developer_msg_with_fragments(texts: &[&str]) -> ResponseItem {
     ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "developer".to_string(),
         content: texts
@@ -821,9 +839,13 @@ fn filters_non_api_messages() {
     let policy = TruncationPolicy::Tokens(10_000);
     // System message is not API messages; Other is ignored.
     let system = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "system".to_string(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "ignored".to_string(),
         }],
         phase: None,
@@ -868,6 +890,8 @@ fn retains_only_harness_authored_configuration_updates() {
             },
             ResponseItemEnvelope {
                 item: ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
                     id: None,
                     role: "system".to_string(),
                     content: vec![ContentItem::InputText {
@@ -1095,6 +1119,8 @@ fn record_annotated_items_preserves_metadata_while_processing_item(
 fn for_prompt_annotated_preserves_metadata_while_normalizing_item() {
     let envelope = ResponseItemEnvelope {
         item: ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -1178,6 +1204,8 @@ fn total_token_usage_includes_all_items_after_last_model_generated_item() {
 fn for_prompt_strips_media_when_model_does_not_support_it() {
     let items = vec![
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -1211,6 +1239,8 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
             ),
         },
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "view_image".to_string(),
             namespace: None,
@@ -1241,6 +1271,7 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
@@ -1277,6 +1308,8 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
 
     let expected = vec![
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![
@@ -1309,6 +1342,8 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
             ),
         },
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "view_image".to_string(),
             namespace: None,
@@ -1338,6 +1373,7 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
@@ -1379,6 +1415,8 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
     // With image support, images are preserved
     let modalities = default_input_modalities();
     let with_images = create_history_with_items(vec![ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -1405,6 +1443,8 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
     }
 
     let audio_message = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputAudio {
@@ -1424,6 +1464,7 @@ fn for_prompt_strips_media_when_model_does_not_support_it() {
 fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
     let history = create_history_with_items(vec![
         ResponseItem::ImageGenerationCall {
+            encrypted_content: None,
             id: Some(ResponseItemId::with_suffix("ig", "123")),
             status: "generating".to_string(),
             revised_prompt: Some("lobster".to_string()),
@@ -1431,6 +1472,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -1445,6 +1488,7 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
         history.for_prompt(&default_input_modalities()),
         vec![
             ResponseItem::ImageGenerationCall {
+                encrypted_content: None,
                 id: Some(ResponseItemId::with_suffix("ig", "123")),
                 status: "generating".to_string(),
                 revised_prompt: Some("lobster".to_string()),
@@ -1452,6 +1496,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
                 internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -1468,6 +1514,8 @@ fn for_prompt_preserves_image_generation_calls_when_images_are_supported() {
 fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
     let history = create_history_with_items(vec![
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -1477,6 +1525,7 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::ImageGenerationCall {
+            encrypted_content: None,
             id: Some(ResponseItemId::with_suffix("ig", "123")),
             status: "completed".to_string(),
             revised_prompt: Some("lobster".to_string()),
@@ -1489,6 +1538,8 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
         history.for_prompt(&[InputModality::Text]),
         vec![
             ResponseItem::Message {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText {
@@ -1498,6 +1549,7 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
                 internal_chat_message_metadata_passthrough: Some(unknown_content_metadata()),
             },
             ResponseItem::ImageGenerationCall {
+                encrypted_content: None,
                 id: Some(ResponseItemId::with_suffix("ig", "123")),
                 status: "completed".to_string(),
                 revised_prompt: Some("lobster".to_string()),
@@ -1554,6 +1606,8 @@ fn estimate_token_count_counts_recorded_base_instructions_once() {
 fn remove_first_item_removes_matching_output_for_function_call() {
     let items = vec![
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "do_it".to_string(),
             namespace: None,
@@ -1588,6 +1642,8 @@ fn remove_first_item_removes_matching_call_for_output() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "do_it".to_string(),
             namespace: None,
@@ -1606,6 +1662,7 @@ fn remove_first_item_removes_matching_call_for_output() {
 fn remove_first_item_handles_local_shell_pair() {
     let items = vec![
         ResponseItem::LocalShellCall {
+            encrypted_content: None,
             id: None,
             call_id: Some("call-3".to_string()),
             status: LocalShellStatus::Completed,
@@ -1692,6 +1749,8 @@ fn drop_last_n_user_turns_preserves_prefix() {
         ("steer", "Check the tests too."),
     ] {
         let message = ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: Some(ResponseItemId::with_suffix("msg", id)),
             role: "user".to_owned(),
             content: vec![ContentItem::InputText {
@@ -1920,6 +1979,8 @@ fn drop_last_n_user_turns_preserves_annotations_for_surviving_developer_fragment
     let turn_id = "rolled-back-turn";
     let model_switch = ModelSwitchInstructions::new("switched model instructions").render();
     let developer_message = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "developer".to_string(),
         content: vec![
@@ -1956,6 +2017,8 @@ fn drop_last_n_user_turns_preserves_annotations_for_surviving_developer_fragment
     assert_eq!(
         raw_items(&history),
         vec![ResponseItem::Message {
+            encrypted_content: None,
+            status: None,
             id: None,
             role: "developer".to_string(),
             content: vec![
@@ -2041,6 +2104,7 @@ fn drop_last_n_user_turns_clears_reference_context_for_mixed_developer_context_b
 fn remove_first_item_handles_custom_tool_pair() {
     let items = vec![
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "tool-1".to_string(),
@@ -2066,6 +2130,7 @@ fn remove_first_item_handles_custom_tool_pair() {
 fn normalization_retains_local_shell_outputs() {
     let items = vec![
         ResponseItem::LocalShellCall {
+            encrypted_content: None,
             id: None,
             call_id: Some("shell-1".to_string()),
             status: LocalShellStatus::Completed,
@@ -2297,9 +2362,11 @@ fn format_exec_output_prefers_line_marker_when_both_limits_exceeded() {
     assert_truncated_message_matches(&truncated, "line-0-", /*expected_removed*/ 17_423);
 }
 
-#[test]
-fn normalize_adds_missing_output_for_custom_tool_call() {
+#[test_case::test_case(false; "local")]
+#[test_case::test_case(true; "inherited")]
+fn normalize_adds_missing_output_for_custom_tool_call(inherited: bool) {
     let items = vec![ResponseItem::CustomToolCall {
+        encrypted_content: None,
         id: None,
         status: None,
         call_id: "tool-x".to_string(),
@@ -2309,6 +2376,10 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
         internal_chat_message_metadata_passthrough: None,
     }];
     let mut h = create_history_with_items(items);
+    Arc::make_mut(&mut h.items)[0]
+        .metadata
+        .get_or_insert_default()
+        .inherited_user_message = inherited;
 
     h.normalize_history(&default_input_modalities());
 
@@ -2316,6 +2387,7 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
         raw_items(&h),
         vec![
             ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: None,
                 call_id: "tool-x".to_string(),
@@ -2335,10 +2407,11 @@ fn normalize_adds_missing_output_for_custom_tool_call() {
     );
 }
 
-#[cfg(not(debug_assertions))]
-#[test]
-fn normalize_adds_missing_output_for_local_shell_call_with_id() {
+#[cfg_attr(not(debug_assertions), test_case::test_case(false; "local"))]
+#[test_case::test_case(true; "inherited")]
+fn normalize_adds_missing_output_for_local_shell_call_with_id(inherited: bool) {
     let items = vec![ResponseItem::LocalShellCall {
+        encrypted_content: None,
         id: None,
         call_id: Some("shell-1".to_string()),
         status: LocalShellStatus::Completed,
@@ -2352,6 +2425,10 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
         internal_chat_message_metadata_passthrough: None,
     }];
     let mut h = create_history_with_items(items);
+    Arc::make_mut(&mut h.items)[0]
+        .metadata
+        .get_or_insert_default()
+        .inherited_user_message = inherited;
 
     h.normalize_history(&default_input_modalities());
 
@@ -2359,6 +2436,7 @@ fn normalize_adds_missing_output_for_local_shell_call_with_id() {
         raw_items(&h),
         vec![
             ResponseItem::LocalShellCall {
+                encrypted_content: None,
                 id: None,
                 call_id: Some("shell-1".to_string()),
                 status: LocalShellStatus::Completed,
@@ -2424,6 +2502,8 @@ fn normalize_mixed_inserts_and_removals() {
     let items = vec![
         // Will get an inserted output
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "f1".to_string(),
             namespace: None,
@@ -2443,6 +2523,7 @@ fn normalize_mixed_inserts_and_removals() {
         },
         // Will get an inserted custom tool output
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "t1".to_string(),
@@ -2453,6 +2534,7 @@ fn normalize_mixed_inserts_and_removals() {
         },
         // Local shell call also gets an inserted function call output
         ResponseItem::LocalShellCall {
+            encrypted_content: None,
             id: None,
             call_id: Some("s1".to_string()),
             status: LocalShellStatus::Completed,
@@ -2474,6 +2556,8 @@ fn normalize_mixed_inserts_and_removals() {
         raw_items(&h),
         vec![
             ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: "f1".to_string(),
                 namespace: None,
@@ -2491,6 +2575,7 @@ fn normalize_mixed_inserts_and_removals() {
                 internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::CustomToolCall {
+                encrypted_content: None,
                 id: None,
                 status: None,
                 call_id: "t1".to_string(),
@@ -2507,6 +2592,7 @@ fn normalize_mixed_inserts_and_removals() {
                 internal_chat_message_metadata_passthrough: None,
             },
             ResponseItem::LocalShellCall {
+                encrypted_content: None,
                 id: None,
                 call_id: Some("s1".to_string()),
                 status: LocalShellStatus::Completed,
@@ -2534,6 +2620,8 @@ fn normalize_mixed_inserts_and_removals() {
 #[test]
 fn normalize_adds_missing_output_for_function_call_inserts_output() {
     let items = vec![ResponseItem::FunctionCall {
+        status: None,
+        encrypted_content: None,
         id: None,
         name: "do_it".to_string(),
         namespace: None,
@@ -2548,6 +2636,8 @@ fn normalize_adds_missing_output_for_function_call_inserts_output() {
         raw_items(&h),
         vec![
             ResponseItem::FunctionCall {
+                encrypted_content: None,
+                status: None,
                 id: None,
                 name: "do_it".to_string(),
                 namespace: None,
@@ -2587,6 +2677,8 @@ fn normalize_preserves_named_function_call_output_without_call_id() {
 fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history() {
     let items = vec![
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: Some(ResponseItemId::with_suffix("fc", "existing")),
             name: "do_it".to_string(),
             namespace: None,
@@ -2596,6 +2688,8 @@ fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history()
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: Some(ResponseItemId::with_suffix("msg", "later")),
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -2630,6 +2724,7 @@ fn for_prompt_assigns_stable_id_to_synthetic_output_without_reordering_history()
 #[test]
 fn normalize_adds_missing_output_for_tool_search_call() {
     let items = vec![ResponseItem::ToolSearchCall {
+        encrypted_content: None,
         id: None,
         call_id: Some("search-call-x".to_string()),
         status: Some("completed".to_string()),
@@ -2645,6 +2740,7 @@ fn normalize_adds_missing_output_for_tool_search_call() {
         raw_items(&h),
         vec![
             ResponseItem::ToolSearchCall {
+                encrypted_content: None,
                 id: None,
                 call_id: Some("search-call-x".to_string()),
                 status: Some("completed".to_string()),
@@ -2669,6 +2765,7 @@ fn normalize_adds_missing_output_for_tool_search_call() {
 #[should_panic]
 fn normalize_adds_missing_output_for_local_shell_call_with_id_panics_in_debug() {
     let items = vec![ResponseItem::LocalShellCall {
+        encrypted_content: None,
         id: None,
         call_id: Some("shell-1".to_string()),
         status: LocalShellStatus::Completed,
@@ -2783,6 +2880,8 @@ fn normalize_keeps_server_tool_search_output_without_matching_call() {
 fn normalize_mixed_inserts_and_removals_panics_in_debug() {
     let items = vec![
         ResponseItem::FunctionCall {
+            status: None,
+            encrypted_content: None,
             id: None,
             name: "f1".to_string(),
             namespace: None,
@@ -2800,6 +2899,7 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::CustomToolCall {
+            encrypted_content: None,
             id: None,
             status: None,
             call_id: "t1".to_string(),
@@ -2809,6 +2909,7 @@ fn normalize_mixed_inserts_and_removals_panics_in_debug() {
             internal_chat_message_metadata_passthrough: None,
         },
         ResponseItem::LocalShellCall {
+            encrypted_content: None,
             id: None,
             call_id: Some("s1".to_string()),
             status: LocalShellStatus::Completed,
@@ -2831,6 +2932,8 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
     let payload = "A".repeat(100_000);
     let image_url = format!("data:image/png;base64,{payload}");
     let image_item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -2846,6 +2949,8 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
         internal_chat_message_metadata_passthrough: None,
     };
     let text_only_item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputText {
@@ -2869,6 +2974,8 @@ fn image_data_url_payload_does_not_dominate_message_estimate() {
 #[test]
 fn file_images_use_detail_appropriate_estimates() {
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -2968,6 +3075,8 @@ fn image_data_url_payload_does_not_dominate_custom_tool_call_output_estimate() {
 fn audio_data_url_payload_does_not_dominate_message_estimate() {
     let (audio_url, _) = pcm_wav_data_url(/*sample_count*/ 801);
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputAudio { audio_url }],
@@ -3033,6 +3142,8 @@ fn malformed_audio_data_url_falls_back_to_whole_url_size_cost() {
     let audio_url = format!("data:audio/wav;base64,{payload}");
     let fallback_bytes = approx_bytes_for_tokens(approx_token_count(&audio_url)) as i64;
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputAudio { audio_url }],
@@ -3088,6 +3199,8 @@ fn record_items_omits_audio_that_exceeds_the_output_budget() {
 #[test]
 fn non_base64_image_urls_use_image_estimates() {
     let message_item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -3167,6 +3280,27 @@ fn passthrough_metadata_does_not_change_context_estimates() {
 }
 
 #[test]
+fn encrypted_compactions_use_replay_cache_estimate() {
+    for (encoded_len, expected_tokens) in [(0, 0), (1, 1), (11, 1), (12, 1), (13, 2), (8_000, 667)]
+    {
+        for item in [
+            ResponseItem::Compaction {
+                id: None,
+                encrypted_content: "a".repeat(encoded_len),
+                internal_chat_message_metadata_passthrough: None,
+            },
+            ResponseItem::ContextCompaction {
+                id: None,
+                encrypted_content: Some("a".repeat(encoded_len)),
+                internal_chat_message_metadata_passthrough: None,
+            },
+        ] {
+            assert_eq!(estimate_item_token_count(&item), expected_tokens);
+        }
+    }
+}
+
+#[test]
 fn encrypted_function_output_uses_plaintext_byte_estimate() {
     let encrypted_content = "A".repeat(1_868);
     let item = ResponseItem::FunctionCallOutput {
@@ -3210,6 +3344,8 @@ fn encrypted_function_output_uses_plaintext_byte_estimate() {
 #[test]
 fn data_url_without_base64_marker_uses_image_estimate() {
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -3258,6 +3394,8 @@ fn mixed_case_data_url_markers_are_adjusted() {
     let payload = "F".repeat(1_024);
     let image_url = format!("DATA:image/png;BASE64,{payload}");
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![ContentItem::InputImage {
@@ -3281,6 +3419,8 @@ fn multiple_inline_images_apply_multiple_fixed_costs() {
     let image_url_one = format!("data:image/png;base64,{payload_one}");
     let image_url_two = format!("data:image/jpeg;base64,{payload_two}");
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "user".to_string(),
         content: vec![
@@ -3417,9 +3557,13 @@ fn original_detail_webp_images_scale_with_dimensions() {
 #[test]
 fn text_only_items_count_decoded_content() {
     let item = ResponseItem::Message {
+        status: None,
+        encrypted_content: None,
         id: None,
         role: "assistant".to_string(),
         content: vec![ContentItem::OutputText {
+            annotations: None,
+            logprobs: None,
             text: "Hello, \"world\"!\nこんにちは".to_string(),
         }],
         phase: None,

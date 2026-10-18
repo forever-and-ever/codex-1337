@@ -38,6 +38,58 @@ working=false, response rows=1, 80x12
 ────────────────────────────────────────────────────────────────────────────────
   gpt-test default · /tmp/project
 
+working=false, response rows=1, 80x24
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+        [-] User
+            Show a response.
+
+              Response row 0
+
+            Done.
+  └ Tip: Try /help.
+
+                Worked for [duration] • [completion time]
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+
+
+› Ask Codex to do anything
+                                                                              󰜗
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
+Completion tip selected, 80x24
+  ? for shortcuts
+────────────────────────────────────────────────────────────────────────────────
+        [-] User
+            Show a response.
+
+              Response row 0
+
+            Done.
+  └ Tip: Try /help.
+
+                Worked for [duration] • [completion time]
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────
+                                                    Selecting text · esc cancel
+
+› Ask Codex to do anything
+                                                                              󰜗
+────────────────────────────────────────────────────────────────────────────────
+  gpt-test default · /tmp/project
+
 working=false, response rows=30, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────

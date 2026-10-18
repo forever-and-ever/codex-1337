@@ -459,6 +459,8 @@ async fn remote_compact_v2_retains_only_client_developer_messages_when_enabled(
     .await?;
     mock_server::run(&[harness.server()], async {
         let developer = |text: &str| ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "developer".to_string(),
             content: vec![ContentItem::InputText {

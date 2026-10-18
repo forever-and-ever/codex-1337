@@ -308,12 +308,20 @@ async fn review_bound_elicitation(
             return Ok(None);
         }
 
-        let GuardianElicitationReview::ApprovalRequest(guardian_request) =
-            guardian_elicitation_review_request(&request, originating_call_id)
+        let GuardianElicitationReview::ApprovalRequest {
+            request: guardian_request,
+            tool_call_id,
+        } = guardian_elicitation_review_request(&request, originating_call_id)
         else {
             return Ok(None);
         };
-        trusted_guardian_request.unwrap_or(*guardian_request).into()
+        match trusted_guardian_request {
+            Some(request) => request.into(),
+            None => crate::guardian::ReviewAction {
+                tool_call_id,
+                ..(*guardian_request).into()
+            },
+        }
     } else {
         let approval_policy = authority.approval_policy;
         match approval_policy {
@@ -374,12 +382,17 @@ async fn review_bound_elicitation(
                         })
                         .map_err(|error| error.to_string()),
                     category: GuardianScope::for_mcp_server(&request.server_name),
+                    tool_call_id: None,
                     request: Err(reason.to_owned()),
                 }
             }
-            GuardianElicitationReview::ApprovalRequest(guardian_request) => {
-                (*guardian_request).into()
-            }
+            GuardianElicitationReview::ApprovalRequest {
+                request: guardian_request,
+                tool_call_id,
+            } => crate::guardian::ReviewAction {
+                tool_call_id,
+                ..(*guardian_request).into()
+            },
         }
     };
     guardian_request.category = guardian_scope;

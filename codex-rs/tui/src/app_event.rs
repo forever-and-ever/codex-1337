@@ -17,7 +17,6 @@ use crate::inline_visualization::InlineVisualizationContext;
 use codex_app_server_protocol::AddCreditsNudgeCreditType;
 use codex_app_server_protocol::AddCreditsNudgeEmailStatus;
 use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
-use codex_app_server_protocol::DynamicToolCallResponse;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::MarketplaceAddResponse;
 use codex_app_server_protocol::MarketplaceRemoveResponse;
@@ -69,6 +68,12 @@ use codex_protocol::models::ActivePermissionProfile;
 use codex_realtime_webrtc::StartedRealtimeWebrtcSession;
 
 use crate::history_cell::HistoryCell;
+
+#[derive(Debug)]
+pub(crate) struct RealtimeWebrtcStartupFailure {
+    pub message: String,
+    pub cause: codex_realtime_webrtc::ConnectionError,
+}
 
 /// Global voice controls always apply to the one call's owner.
 #[derive(Clone, Copy, Debug)]
@@ -206,11 +211,12 @@ pub(crate) enum KeymapEditIntent {
     ReplaceOne { old_key: String },
 }
 
-/// Number of key strokes recorded by one `/keymap` capture.
+/// Kind of shortcut recorded by one `/keymap` capture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeymapCaptureMode {
     SingleKey,
     Chord,
+    LeaderChord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -629,13 +635,6 @@ pub(crate) enum AppEvent {
     /// Result of the fresh startup thread that is attached after the input UI is live.
     StartupThreadStarted {
         result: color_eyre::Result<AppServerStartedThread>,
-    },
-
-    /// Return a completed client-owned dynamic tool call to app server.
-    DynamicToolCallCompleted {
-        request_id: AppServerRequestId,
-        epoch: u64,
-        response: DynamicToolCallResponse,
     },
 
     /// Clear the terminal UI (screen + scrollback), start a fresh session, and keep the
@@ -1294,7 +1293,7 @@ pub(crate) enum AppEvent {
     RealtimeWebrtcOfferCreated {
         thread_id: ThreadId,
         attempt_id: u64,
-        result: Result<StartedRealtimeWebrtcSession, String>,
+        result: Result<StartedRealtimeWebrtcSession, RealtimeWebrtcStartupFailure>,
     },
 
     /// Result of establishing the WebRTC connection for an active voice attempt.
@@ -1381,6 +1380,11 @@ pub(crate) enum AppEvent {
     OpenProviderReasoning {
         provider: codex_app_server_protocol::ModelProviderOption,
         model: ModelPreset,
+    },
+    /// Finished the API-key compatibility check; do not check the same catalog again.
+    ApiKeyCompatModelsLoaded {
+        request_id: uuid::Uuid,
+        result: Result<crate::model_catalog::ModelListing, String>,
     },
 
     FetchPermissionProfiles {
@@ -1674,6 +1678,20 @@ pub(crate) enum AppEvent {
 
     /// Remember the Command Center grouping across launches.
     PersistAgentsOverviewGrouping(codex_config::types::AgentsOverviewGrouping),
+
+    /// Open an existing editor above the configuration panel.
+    OpenConfigEditor(crate::config_panel::ConfigEditorHandoff),
+
+    /// Schedule a notification preview with time to switch away from the terminal.
+    TestConfigNotification,
+
+    /// Send the matching scheduled preview regardless of the configured focus condition.
+    SendConfigTestNotification {
+        generation: u64,
+    },
+
+    /// Requests saving a local `/config` preference and refreshing its effective value.
+    SaveConfigPreference(crate::config_panel::ConfigPreference),
 
     /// Save the transcript renderer preference for the next launch only.
 

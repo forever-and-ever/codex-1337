@@ -47,6 +47,7 @@ async fn run_startup_for_test(
         Some(bootstrap),
         /*startup_hooks_browser*/ None,
         /*daemon_startup_warning*/ None,
+        /*managed_daemon*/ false,
         crate::startup_draft::tests::quiet_startup_test_pump(),
     )
     .await

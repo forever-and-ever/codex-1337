@@ -893,9 +893,8 @@ mod tests {
                     operations: Vec::new(),
                 });
             });
-            ui.try_draw_with_size(size, |frame| {
+            ui.draw_with_size(size, |frame| {
                 *frame.buffer_mut() = buffer;
-                Ok::<_, io::Error>(())
             })?;
             let capture = CAPTURE
                 .with_borrow_mut(Option::take)

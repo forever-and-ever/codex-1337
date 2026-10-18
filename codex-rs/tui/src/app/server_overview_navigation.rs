@@ -208,7 +208,13 @@ impl App {
                 {
                     let _ = self.agents_overview.input_states.insert(*thread_id, input);
                 }
-                let requests = store.pending_replay_requests();
+                let requests: Vec<_> = store
+                    .pending_replay_requests()
+                    .into_iter()
+                    .filter_map(|request| {
+                        self.pending_app_server_requests.buffered_request(request)
+                    })
+                    .collect();
                 if !requests.is_empty() {
                     self.agents_overview
                         .dispatched_requests

@@ -12,6 +12,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::InterAgentCommunication;
+use tokio::sync::OwnedRwLockReadGuard;
 
 impl LocalAgentControl {
     pub(super) async fn validate_message_provider(
@@ -51,10 +52,10 @@ impl LocalAgentControl {
         &self,
         recipient: ThreadId,
         author: &AgentPath,
-    ) -> CodexResult<()> {
+    ) -> CodexResult<Option<OwnedRwLockReadGuard<()>>> {
         let manager = self.runtime.upgrade()?;
-        if manager.get_thread(recipient).await.is_ok() {
-            return Ok(());
+        if let Ok(thread) = manager.get_thread(recipient).await {
+            return self.runtime.pin_v2_residency(&manager, &thread).await;
         }
         let sender = self
             .runtime

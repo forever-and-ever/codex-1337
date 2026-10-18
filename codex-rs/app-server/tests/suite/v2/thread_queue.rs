@@ -85,6 +85,7 @@ async fn queued_tool_output_waits_for_completion_without_becoming_user_input() -
     let (_, approval_id) = start_blocked_turn(&mut app, &thread_id).await?;
     let output = TurnToolOutput {
         name: "send_message_to_thread".to_string(),
+        retain: false,
         namespace: Some("other".to_string()),
         output: FunctionCallOutputBody::Text("attributed follow-up".to_string()),
     };

@@ -103,6 +103,7 @@ use uuid::Uuid;
 
 pub(crate) use codex_app_server_client::legacy_core;
 
+mod activation_key_guard;
 mod additional_dirs;
 mod analytics;
 mod app;
@@ -127,6 +128,7 @@ mod clipboard_paste;
 mod clock_format;
 mod collaboration_modes;
 mod color;
+mod config_panel;
 mod config_update;
 mod copy_input_guard;
 pub(crate) mod custom_terminal;
@@ -160,6 +162,7 @@ mod history_cell;
 mod hooks_rpc;
 mod inline_visualization;
 pub(crate) mod insert_history;
+mod terminal_program_status;
 pub use insert_history::insert_history_lines;
 mod footer_hint;
 mod key_hint;
@@ -171,6 +174,7 @@ pub(crate) mod live_work;
 pub(crate) mod live_wrap;
 mod local_settings;
 mod local_shell;
+mod rendered_selection;
 pub use live_wrap::RowBuilder;
 mod agent_status;
 mod idle_restart;
@@ -849,6 +853,7 @@ fn latest_session_lookup_params(
     lookup_mode: LatestSessionLookupMode,
 ) -> ThreadListParams {
     ThreadListParams {
+        excluded_thread_ids: None,
         originators: None,
         cursor: None,
         limit: Some(1),
@@ -1116,6 +1121,7 @@ async fn run_ratatui_app(
     environment_manager: Arc<EnvironmentManager>,
     embedded_network_policy: codex_app_server_client::EmbeddedNetworkPolicy,
     daemon_startup_warning: Option<String>,
+    managed_daemon: bool,
     launch_telemetry: daemon_telemetry::Launch<impl FnOnce(&AppServerTarget, bool)>,
     startup_draft: startup_draft::StartupDraft,
 ) -> color_eyre::Result<AppExitInfo> {
@@ -2007,6 +2013,7 @@ async fn run_ratatui_app(
         startup_bootstrap,
         startup_hooks_browser,
         daemon_startup_warning,
+        managed_daemon,
         startup_draft,
     )))
     .await;

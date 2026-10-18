@@ -208,7 +208,7 @@ fn legacy_mcp_tool_accepts_oversized_schema() {
                 .description
                 .contains("property_1023 (optional): string")
         );
-        let metadata = codex_code_mode::enabled_tool_metadata(&definition);
+        let metadata = codex_code_mode::enabled_tool_metadata(definition);
         let schemas: serde_json::Value = serde_json::from_str(&metadata.describe_schema()).unwrap();
         assert_eq!(
             schemas["input"]["properties"].as_object().unwrap().len(),

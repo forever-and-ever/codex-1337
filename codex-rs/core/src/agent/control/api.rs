@@ -148,10 +148,12 @@ impl AgentControl for LocalAgentControl {
             let (metadata, submission_id) = match input {
                 AgentInput::UserInput(input) => {
                     let receiver = self.get_agent_metadata(target);
-                    if receiver.is_some() {
+                    let _residency_pin = if receiver.is_some() {
                         self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
-                            .await?;
-                    }
+                            .await?
+                    } else {
+                        None
+                    };
                     let submission_id = self.send_input(target, input, start_options).await?;
                     (receiver.unwrap_or_default(), submission_id)
                 }
@@ -174,8 +176,21 @@ impl AgentControl for LocalAgentControl {
                             "target agent is missing an agent_path".to_string(),
                         )
                     })?;
-                    self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
-                        .await?;
+                    // Cold-restored children still reload lazily on any message. Only
+                    // locally evicted recipients can retain mail without reloading.
+                    // Loaded recipients go straight to delivery, which rejects sends
+                    // racing an in-progress eviction when it acquires the residency pin.
+                    let _residency_pin =
+                        if matches!(&message, crate::agent::types::AgentMessage::Encrypted(_))
+                            || mode == MessageDeliveryMode::TriggerTurn
+                            || (self.runtime.upgrade()?.get_thread(target).await.is_err()
+                                && self.runtime.registry.evicted_environments(target).is_none())
+                        {
+                            self.ensure_v2_agent_loaded(resume_config, target, /*parent*/ None)
+                                .await?
+                        } else {
+                            None
+                        };
                     if matches!(&message, crate::agent::types::AgentMessage::Encrypted(_)) {
                         let manager = self.runtime.upgrade()?;
                         let recipient = manager.get_thread(target).await?;
@@ -234,6 +249,7 @@ impl AgentControl for LocalAgentControl {
             let config = parent.session.get_config().await.as_ref().clone();
             self.ensure_v2_agent_loaded(config, child, Some(parent))
                 .await
+                .map(drop)
         })
     }
 

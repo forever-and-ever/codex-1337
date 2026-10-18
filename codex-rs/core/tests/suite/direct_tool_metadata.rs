@@ -58,14 +58,14 @@ pub(super) fn tool_call_metadata(mut item: Value) -> Value {
 #[test_case(false; "http")]
 #[test_case(true; "websocket")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn message_budget_sheds_inventory_without_changing_tool_results_or_history(
+async fn message_budget_sheds_arguments_without_losing_inventory_completeness(
     websocket: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let message_limit = 15 * 1024 * 1024;
     let call_count = 16;
     // Each argument fits 8 KiB and all observations fit Direct's 1 MiB budget.
-    // Only the final message budget should shed this inventory. HTTP includes
+    // Only the final message budget should shed recorded arguments. HTTP includes
     // the original call arguments; a WebSocket delta already has those upstream.
     let arguments = json!({"plan": [{"step": "x".repeat(7 * 1024), "status": "in_progress"}]});
     assert!(arguments.to_string().len() < 8 * 1024);
@@ -287,6 +287,7 @@ async fn message_budget_sheds_inventory_without_changing_tool_results_or_history
                             "max_bytes": max_bytes,
                         }},
                     }],
+                    "tool_calls_complete": true,
                 })
             );
             truncated_arguments += 1;
@@ -540,144 +541,146 @@ async fn direct_function_and_tool_search_mark_complete_attempts(
 
     let server = start_mock_server().await;
     mock_server::run(&[&server], async {
-        let mut builder = test_codex().with_config(move |config| {
-            configure_search_capable_model(config);
-            config.update_plan_enabled = true;
-            if metadata_enabled {
-                let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
-            } else {
-                let _ = config.features.disable(Feature::ExecutedToolCallMetadata);
-            }
-        });
-        let test = builder.build_with_auto_env(&server).await?;
-        let valid_arguments = json!({"plan": [{"step": "read", "status": "in_progress"}]});
-        let malformed_arguments = "{malformed";
-        let search_arguments =
-            json!({"query": "nonexistent-completeness-proof-tool", "limit": null});
-        // These calls exceed the old request budget but stay below Direct's retained-history limit.
-        let budget_arguments =
-            json!({"plan": [{"step": "x".repeat(7 * 1024), "status": "in_progress"}]});
-        let budget_arguments_json = budget_arguments.to_string();
-        assert!(budget_arguments_json.len() < 8 * 1024);
-        if budget_calls > 0 {
-            assert!(budget_calls * budget_arguments_json.len() > 128 * 1024);
-            assert!(budget_calls * budget_arguments_json.len() < 1024 * 1024);
+    let mut builder = test_codex().with_config(move |config| {
+        configure_search_capable_model(config);
+        config.update_plan_enabled = true;
+        if metadata_enabled {
+            let _ = config.features.enable(Feature::ExecutedToolCallMetadata);
+        } else {
+            let _ = config.features.disable(Feature::ExecutedToolCallMetadata);
         }
-        let mut events = vec![ev_response_created("resp-1")];
-        if budget_calls > 0 {
-            events.push(ev_function_call(
-                "plan-oversized",
-                "update_plan",
-                &json!({"plan": [{"step": "x".repeat(9 * 1024), "status": "in_progress"}]})
-                    .to_string(),
-            ));
-        }
-        for index in 0..budget_calls {
-            events.push(ev_function_call(
-                &format!("plan-budget-{index}"),
-                "update_plan",
-                &budget_arguments_json,
-            ));
-        }
-        events.extend([
-            ev_function_call("plan-valid", "update_plan", &valid_arguments.to_string()),
-            ev_function_call("plan-malformed", "update_plan", malformed_arguments),
-            ev_tool_search_call("search", &search_arguments),
-            ev_completed("resp-1"),
-        ]);
-        let mock = mount_sse_sequence(
-            &server,
-            vec![
-                sse(events),
-                sse(vec![
-                    ev_assistant_message("msg-1", "done"),
-                    ev_completed("resp-2"),
-                ]),
-            ],
-        )
-        .await;
-        test.submit_turn_with_approval_and_permission_profile(
-            "exercise direct attempts",
-            AskForApproval::Never,
-            PermissionProfile::Disabled,
-        )
-        .await?;
+    });
+    let test = builder.build_with_auto_env(&server).await?;
+    let valid_arguments = json!({"plan": [{"step": "read", "status": "in_progress"}]});
+    let malformed_arguments = "{malformed";
+    let search_arguments = json!({"query": "nonexistent-completeness-proof-tool", "limit": null});
+    // These calls exceed the old request budget but stay below Direct's retained-history limit.
+    let budget_arguments =
+        json!({"plan": [{"step": "x".repeat(7 * 1024), "status": "in_progress"}]});
+    let oversized_arguments =
+        json!({"plan": [{"step": "x".repeat(9 * 1024), "status": "in_progress"}]});
+    let budget_arguments_json = budget_arguments.to_string();
+    assert!(budget_arguments_json.len() < 8 * 1024);
+    if budget_calls > 0 {
+        assert!(budget_calls * budget_arguments_json.len() > 128 * 1024);
+        assert!(budget_calls * budget_arguments_json.len() < 1024 * 1024);
+    }
+    let mut events = vec![ev_response_created("resp-1")];
+    if budget_calls > 0 {
+        events.push(ev_function_call(
+            "plan-oversized",
+            "update_plan",
+            &oversized_arguments.to_string(),
+        ));
+    }
+    for index in 0..budget_calls {
+        events.push(ev_function_call(
+            &format!("plan-budget-{index}"),
+            "update_plan",
+            &budget_arguments_json,
+        ));
+    }
+    events.extend([
+        ev_function_call("plan-valid", "update_plan", &valid_arguments.to_string()),
+        ev_function_call("plan-malformed", "update_plan", malformed_arguments),
+        ev_tool_search_call("search", &search_arguments),
+        ev_completed("resp-1"),
+    ]);
+    let mock = mount_sse_sequence(
+        &server,
+        vec![
+            sse(events),
+            sse(vec![
+                ev_assistant_message("msg-1", "done"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+    test.submit_turn_with_approval_and_permission_profile(
+        "exercise direct attempts",
+        AskForApproval::Never,
+        PermissionProfile::Disabled,
+    )
+    .await?;
 
-        let requests = mock.requests();
-        assert_eq!(requests.len(), 2);
-        let request = &requests[1];
-        let valid_output = request.function_call_output("plan-valid");
-        let malformed_output = request.function_call_output("plan-malformed");
-        let search_output = request.tool_search_output("search");
-        assert_eq!(valid_output["output"], json!("Plan updated"));
-        assert!(
-            malformed_output["output"]
-                .as_str()
-                .expect("parse error output")
-                .starts_with("failed to parse function arguments:"),
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    let request = &requests[1];
+    let valid_output = request.function_call_output("plan-valid");
+    let malformed_output = request.function_call_output("plan-malformed");
+    let search_output = request.tool_search_output("search");
+    assert_eq!(valid_output["output"], json!("Plan updated"));
+    assert!(
+        malformed_output["output"]
+            .as_str()
+            .expect("parse error output")
+            .starts_with("failed to parse function arguments:"),
+    );
+    assert_eq!(search_output["execution"], json!("client"));
+
+    let mut metadata_bytes = 0;
+    for (output, name, arguments) in [
+        (valid_output, "update_plan", valid_arguments),
+        (malformed_output, "update_plan", json!(malformed_arguments)),
+        (
+            search_output,
+            "tool_search",
+            json!({"query": "nonexistent-completeness-proof-tool"}),
+        ),
+    ] {
+        let expected = if metadata_enabled {
+            json!({
+                "executed_tool_calls": [{"name": name, "arguments": arguments}],
+                "tool_calls_complete": true,
+            })
+        } else {
+            json!({})
+        };
+        let metadata = tool_call_metadata(output);
+        metadata_bytes += serde_json::to_vec(&metadata)?.len();
+        assert_eq!(metadata, expected);
+    }
+    if budget_calls > 0 {
+        let output = request.function_call_output("plan-oversized");
+        assert_eq!(output["output"], json!("Plan updated"));
+        let metadata = tool_call_metadata(output);
+        metadata_bytes += serde_json::to_vec(&metadata)?.len();
+        assert_eq!(
+            metadata,
+            json!({
+                "executed_tool_calls": [{"name": "update_plan", "arguments": oversized_arguments}],
+                "tool_calls_complete": true,
+            }),
         );
-        assert_eq!(search_output["execution"], json!("client"));
-
-        let mut metadata_bytes = 0;
-        for (output, name, arguments) in [
-            (valid_output, "update_plan", valid_arguments),
-            (malformed_output, "update_plan", json!(malformed_arguments)),
-            (
-                search_output,
-                "tool_search",
-                json!({"query": "nonexistent-completeness-proof-tool"}),
-            ),
-        ] {
-            let expected = if metadata_enabled {
-                json!({
-                    "executed_tool_calls": [{"name": name, "arguments": arguments}],
-                    "tool_calls_complete": true,
-                })
-            } else {
-                json!({})
-            };
-            let metadata = tool_call_metadata(output);
-            metadata_bytes += serde_json::to_vec(&metadata)?.len();
-            assert_eq!(metadata, expected);
-        }
-        if budget_calls > 0 {
-            let output = request.function_call_output("plan-oversized");
-            assert_eq!(output["output"], json!("Plan updated"));
-            let metadata = tool_call_metadata(output);
-            metadata_bytes += serde_json::to_vec(&metadata)?.len();
-            assert!(
-                metadata["executed_tool_calls"][0]["arguments"]
-                    .get("_codex_executed_tool_call_truncated")
-                    .is_some()
-            );
-            assert!(metadata.get("tool_calls_complete").is_none());
-        }
-        for index in 0..budget_calls {
-            let output = request.function_call_output(&format!("plan-budget-{index}"));
-            assert_eq!(output["output"], json!("Plan updated"));
-            let metadata = tool_call_metadata(output);
-            metadata_bytes += serde_json::to_vec(&metadata)?.len();
-            assert_eq!(
-                metadata,
-                json!({
-                    "executed_tool_calls": [{"name": "update_plan", "arguments": budget_arguments}],
-                    "tool_calls_complete": true,
-                })
-            );
-        }
-        if budget_calls > 0 {
-            assert!(metadata_bytes > 128 * 1024);
-        }
-        Ok(())
-    })
-    .await
+    }
+    for index in 0..budget_calls {
+        let output = request.function_call_output(&format!("plan-budget-{index}"));
+        assert_eq!(output["output"], json!("Plan updated"));
+        let metadata = tool_call_metadata(output);
+        metadata_bytes += serde_json::to_vec(&metadata)?.len();
+        assert_eq!(
+            metadata,
+            json!({
+                "executed_tool_calls": [{"name": "update_plan", "arguments": budget_arguments}],
+                "tool_calls_complete": true,
+            })
+        );
+    }
+    if budget_calls > 0 {
+        assert!(metadata_bytes > 128 * 1024);
+    }
+    Ok(())
+    }).await
 }
 
-#[test_case(false; "ungranted_provider")]
-#[test_case(true; "granted_provider")]
+#[test_case(false, false; "ungranted_provider")]
+#[test_case(true, false; "granted_provider_cold_fork")]
+#[test_case(true, true; "granted_provider_warm_fork")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn direct_metadata_limit_respects_provider_support(
     include_internal_metadata: bool,
+    fork_from_running_thread: bool,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
@@ -864,7 +867,14 @@ async fn direct_metadata_limit_respects_provider_support(
         }
 
         let rollout_path = test.codex.rollout_path().expect("rollout path");
-        test.codex.shutdown_and_wait().await?;
+        if fork_from_running_thread {
+            test.codex.flush_rollout().await?;
+        } else {
+            test.codex.shutdown_and_wait().await?;
+            test.thread_manager
+                .remove_thread(&test.session_configured.thread_id)
+                .await;
+        }
         let rollout = tokio::fs::read_to_string(&rollout_path).await?;
         let rollout = rollout
             .lines()
@@ -907,6 +917,10 @@ async fn direct_metadata_limit_respects_provider_support(
             .await
             .expect("shutdown fork");
 
+        if fork_from_running_thread {
+            test.codex.shutdown_and_wait().await?;
+        }
+
         let resumed = search_capable_apps_builder(apps.chatgpt_base_url)
             .with_config(configure_metadata)
             .resume(&server, test.home.clone(), rollout_path)
@@ -927,6 +941,36 @@ async fn direct_metadata_limit_respects_provider_support(
 
         let requests = responses.requests();
         assert_eq!(requests.len(), 7);
+        let expected_fork = if fork_from_running_thread {
+            "warm_fork"
+        } else {
+            "cold_fork"
+        };
+        let initialization = requests
+            .iter()
+            .map(|request| {
+                let body = request.body_json();
+                let metadata: Value = serde_json::from_str(
+                    body["client_metadata"]["x-codex-turn-metadata"]
+                        .as_str()
+                        .expect("turn metadata"),
+                )
+                .expect("valid turn metadata");
+                metadata["history_initialization"].clone()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            Value::Array(initialization),
+            json!([
+                "new",
+                "new",
+                "new",
+                expected_fork,
+                expected_fork,
+                "cold_resume",
+                "cold_resume"
+            ])
+        );
         for request in &requests[3..] {
             for original in [&first_output, &second_output] {
                 let call_id = original["call_id"].as_str().expect("call ID");
