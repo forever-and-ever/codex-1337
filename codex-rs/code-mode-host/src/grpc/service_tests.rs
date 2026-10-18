@@ -154,6 +154,7 @@ async fn execute_stream_starts_immediately_and_wait_preserves_missing_cells() {
                     cell_id: cell_id.clone(),
                     content_items: vec![proto::ContentItem {
                         item: Some(proto::content_item::Item::Text(proto::TextContent {
+                            max_tokens: None,
                             text: "before".to_string(),
                         })),
                     }],
@@ -186,6 +187,7 @@ async fn execute_stream_starts_immediately_and_wait_preserves_missing_cells() {
                     cell_id: cell_id.clone(),
                     content_items: vec![proto::ContentItem {
                         item: Some(proto::content_item::Item::Text(proto::TextContent {
+                            max_tokens: None,
                             text: "after".to_string(),
                         })),
                     }],

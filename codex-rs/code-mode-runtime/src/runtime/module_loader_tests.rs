@@ -139,6 +139,7 @@ const other = tools.mcp__fake__exec_command({});
 const running = tools.write_stdin({});
 const emptyOne = tools.exec_command({});
 const emptyTwo = tools.exec_command({});
+const shell = sh('first', 'middle', 'last');
 const result = await first;
 text(result); notify(result);
 text(result, {metadata:true});
@@ -168,7 +169,7 @@ result.exit_code = 0; result.output = "same";
 text([result,a,b,active]); notify([result,a,b,active]);
 result.output = "same \n\n"; text([result,a,b,active]); result.output = "same";
 text([a,b], {metadata:true}); notify([a,b], {metadata:true});
-text([result,result]);
+text([result,result], {max_tokens: 8});
 a.output = " "; text([a,b,b]);
 result.exit_code = 1; text([a,result]);
 result.session_id = 23; text([a,result]);
@@ -177,6 +178,7 @@ const sparse = [a,b]; delete sparse[0]; text(sparse);
 const custom = [a,b]; custom.toJSON = () => ({batch:"custom"}); text(custom);
 delete custom.toJSON; Object.setPrototypeOf(custom,{toJSON(){return {batch:"inherited"};}}); text(custom);
 const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); text(accessor);
+await shell;
 "#).expect("evaluate script");
     // Responses arrive in reverse order. Origin belongs to the promise, not delivery order.
     let completed = json!({"chunk_id":"abcd12", "wall_time_seconds":0.003421, "exit_code":0, "original_token_count":214, "output":"literal\n"});
@@ -193,6 +195,27 @@ const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); te
     resolve_tool_response(scope, "tool-2", Ok(completed.clone())).unwrap();
     resolve_tool_response(scope, "tool-1", Ok(completed.clone())).unwrap();
     scope.perform_microtask_checkpoint();
+    let shell_sections = ["first", "middle", "last"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            format!(
+                "[{}]\n{name}-head{}{name}-tail",
+                index + 1,
+                "x".repeat(1000)
+            )
+        })
+        .collect::<Vec<_>>();
+    for (index, section) in shell_sections.iter().enumerate() {
+        let output = section.split_once('\n').unwrap().1;
+        resolve_tool_response(
+            scope,
+            &format!("tool-{}", index + 6),
+            Ok(json!({"wall_time_seconds":0.0,"exit_code":0,"output":output})),
+        )
+        .unwrap();
+    }
+    scope.perform_microtask_checkpoint();
     assert!(matches!(
         super::completion_state(scope, promise.as_ref()),
         super::CompletionState::Completed {
@@ -202,15 +225,44 @@ const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); te
     ));
     let mut text = Vec::new();
     let mut notifications = Vec::new();
+    let mut batches = Vec::new();
     while let Ok(event) = event_rx.try_recv() {
         match event {
             RuntimeEvent::ContentItem(
-                codex_code_mode_protocol::FunctionCallOutputContentItem::InputText { text: value },
+                codex_code_mode_protocol::FunctionCallOutputContentItem::InputText {
+                    text: value,
+                    max_tokens: None,
+                },
             ) => text.push(value),
+            RuntimeEvent::ContentItem(
+                codex_code_mode_protocol::FunctionCallOutputContentItem::InputTextBatch {
+                    sections,
+                    max_tokens,
+                },
+            ) => {
+                batches.push((sections.clone(), max_tokens));
+                text.push(codex_protocol::join_execution_sections(sections));
+            }
             RuntimeEvent::Notify { text, .. } => notifications.push(text),
             _ => {}
         }
     }
+    assert!(batches.contains(&(
+        vec![
+            "[1]\nsame".to_string(),
+            "[2–3] Completed".to_string(),
+            "[4] Running (session 42)\npartial".to_string()
+        ],
+        None
+    )));
+    assert!(batches.contains(&(
+        vec!["[1]\nsame".to_string(), "[2]\nsame".to_string()],
+        Some(8)
+    )));
+    assert!(
+        batches.contains(&(shell_sections.clone(), None)),
+        "sh must preserve the first, middle, and last command as separate native sections"
+    );
     let full = completed.to_string();
     let mut modified = completed.clone();
     modified["output"] = json!(" \n");
@@ -281,6 +333,7 @@ const accessor = [a,b]; Object.defineProperty(accessor,0,{get(){return a;}}); te
             json!({"batch":"custom"}).to_string(),
             json!({"batch":"inherited"}).to_string(),
             json!([whitespace, empty_two]).to_string(),
+            codex_protocol::join_execution_sections(shell_sections),
         ]
     );
     assert_eq!(

@@ -137,6 +137,7 @@ async fn interrupt_yields_execute_and_wait_without_stopping_the_cell() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -171,6 +172,7 @@ async fn execute_waits_for_nested_tool_during_yield_grace() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -252,6 +254,7 @@ async fn execute_and_wait_clamp_yield_grace_without_stopping_the_cell() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -304,6 +307,7 @@ async fn wait_waits_for_nested_tool_during_yield_grace() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -570,6 +574,7 @@ async fn synchronous_exit_returns_successfully() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
             error_text: None,
@@ -672,6 +677,7 @@ throw {
                 code_mode_host_duration: None,
                 cell_id: cell_id("1"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "before".to_string(),
                 }],
                 error_text: failure.map(str::to_owned),
@@ -693,6 +699,7 @@ throw {
                 code_mode_host_duration: None,
                 cell_id: cell_id("2"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "before".to_string(),
                 }],
                 error_text: None,
@@ -737,6 +744,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before yield".to_string(),
             }],
         }
@@ -757,6 +765,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after tool".to_string(),
             }],
             error_text: None,
@@ -775,6 +784,7 @@ text("after exit");
             code_mode_host_duration: None,
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after tool".to_string(),
             }],
             error_text: None,
@@ -831,6 +841,7 @@ async fn stored_values_are_shared_between_cells_but_not_sessions() {
             code_mode_host_duration: None,
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "visible".to_string(),
             }],
             error_text: None,
@@ -842,6 +853,7 @@ async fn stored_values_are_shared_between_cells_but_not_sessions() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "undefined".to_string(),
             }],
             error_text: None,
@@ -879,10 +891,12 @@ text(load("key"));
             cell_id: cell_id("1"),
             content_items: vec![
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "Unable to store \"key\". Only plain serializable objects can be stored."
                         .to_string(),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "null".to_string(),
                 },
             ],
@@ -982,6 +996,7 @@ store("healthy", {[keys[0]]: "null"});
             (content_items, error_text),
             (
                 vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: expected_text.to_string()
                 }],
                 expected_error.map(str::to_string)
@@ -1060,6 +1075,7 @@ async fn execute_to_pending_returns_completed_for_synchronous_results() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string(),
             }],
             error_text: None,
@@ -1091,6 +1107,7 @@ async fn execute_to_pending_returns_once_the_runtime_is_quiescent() {
         ExecuteToPendingOutcome::Pending {
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
             pending_tool_call_ids: Vec::new(),
@@ -1270,6 +1287,7 @@ await new Promise(() => {});
         WaitToPendingOutcome::LiveCell(ExecuteToPendingOutcome::Pending {
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "after".to_string(),
             }],
             pending_tool_call_ids: Vec::new(),
@@ -1338,6 +1356,7 @@ text("done");
                 code_mode_host_duration: None,
                 cell_id: cell_id("1"),
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "done".to_string(),
                 }],
                 error_text: None,
@@ -1552,7 +1571,7 @@ text([
     else {
         panic!("global scope inspection failed unexpectedly: {response:?}");
     };
-    let Some(FunctionCallOutputContentItem::InputText { text }) = content_items.first() else {
+    let Some(FunctionCallOutputContentItem::InputText { text, .. }) = content_items.first() else {
         panic!("global scope inspection returned unexpected output: {content_items:?}");
     };
     let globals = serde_json::from_str::<Vec<String>>(text)
@@ -1664,7 +1683,7 @@ text([
     let actual = content_items[1..]
         .iter()
         .map(|item| {
-            let FunctionCallOutputContentItem::InputText { text } = item else {
+            let FunctionCallOutputContentItem::InputText { text, .. } = item else {
                 panic!("unexpected discovery output: {item:?}");
             };
             serde_json::from_str::<JsonValue>(text).unwrap_or_else(|_| serde_json::json!(text))
@@ -1718,6 +1737,7 @@ async fn v8_console_is_not_exposed_on_global_this() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "false".to_string(),
             }],
             error_text: None,
@@ -1759,6 +1779,7 @@ text(value);
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "jeudi 2 janvier \u{e0} 03:04:05".to_string(),
             }],
             error_text: None,
@@ -1799,6 +1820,7 @@ text(formatter.format(new Date("2025-01-02T03:04:05Z")));
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "jeudi 2 janvier \u{e0} 03:04:05".to_string(),
             }],
             error_text: None,
@@ -1836,6 +1858,7 @@ text(JSON.stringify(returnsUndefined));
             cell_id: cell_id("1"),
             content_items: vec![
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "first".to_string(),
                 },
                 FunctionCallOutputContentItem::InputImage {
@@ -1846,6 +1869,7 @@ text(JSON.stringify(returnsUndefined));
                     audio_url: "data:audio/wav;base64,YXVkaW8=".to_string(),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "[true,true,true,true]".to_string(),
                 },
             ],
@@ -1874,6 +1898,7 @@ async fn text_helper_serializes_objects() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: r#"{"json":true}"#.to_string(),
             }],
             error_text: None,
@@ -2073,6 +2098,7 @@ generatedImage({
                     detail: Some(crate::DEFAULT_IMAGE_DETAIL),
                 },
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "generated image save hint".to_string(),
                 },
             ],

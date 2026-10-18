@@ -95,19 +95,37 @@ pub(super) fn text_callback(
     } else {
         args.get(0)
     };
-    let text = match serialize_text(scope, value, args.get(1)) {
-        Ok((text, _)) => text,
+    let options = match super::native_result::text_options(scope, args.get(1)) {
+        Ok(options) => options,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
             return;
         }
     };
+    let max_tokens = options.max_tokens;
+    let mut sections =
+        match super::native_result::serialize_text_sections(scope, value, options.metadata) {
+            Ok((sections, _)) => sections,
+            Err(error_text) => {
+                throw_type_error(scope, &error_text);
+                return;
+            }
+        };
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-            FunctionCallOutputContentItem::InputText { text },
-        ));
+        let item = if sections.len() == 1 {
+            FunctionCallOutputContentItem::InputText {
+                text: sections.remove(0),
+                max_tokens,
+            }
+        } else {
+            FunctionCallOutputContentItem::InputTextBatch {
+                sections,
+                max_tokens,
+            }
+        };
+        let _ = state.event_tx.send(RuntimeEvent::ContentItem(item));
     }
     retval.set(v8::undefined(scope).into());
 }
@@ -196,7 +214,10 @@ pub(super) fn generated_image_callback(
         let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
         if let Some(text) = output_hint {
             let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-                FunctionCallOutputContentItem::InputText { text },
+                FunctionCallOutputContentItem::InputText {
+                    text,
+                    max_tokens: None,
+                },
             ));
         }
     }
@@ -298,7 +319,18 @@ pub(super) fn notify_callback(
     } else {
         args.get(0)
     };
-    let (text, native_execution) = match serialize_text(scope, value, args.get(1)) {
+    let options = match super::native_result::text_options(scope, args.get(1)) {
+        Ok(options) => options,
+        Err(error_text) => {
+            throw_type_error(scope, &error_text);
+            return;
+        }
+    };
+    if options.max_tokens.is_some() {
+        throw_type_error(scope, "max_tokens is only supported by text, not notify");
+        return;
+    }
+    let (text, native_execution) = match serialize_text(scope, value, options.metadata) {
         Ok(output) => output,
         Err(error_text) => {
             throw_type_error(scope, &error_text);

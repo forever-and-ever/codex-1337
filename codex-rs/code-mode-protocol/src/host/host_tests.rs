@@ -112,6 +112,7 @@ fn execute_request() -> WireExecuteRequest {
 fn content_items() -> Vec<WireContentItem> {
     vec![
         WireContentItem::InputText {
+            max_tokens: None,
             text: "hello".to_string(),
         },
         WireContentItem::InputImage {

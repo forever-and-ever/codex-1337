@@ -143,8 +143,15 @@ fn content_item(item: grpc::ContentItem) -> Result<FunctionCallOutputContentItem
         .item
         .ok_or_else(|| "code-mode execution returned an empty content item".to_string())?
     {
-        grpc::content_item::Item::Text(text) => {
-            Ok(FunctionCallOutputContentItem::InputText { text: text.text })
+        grpc::content_item::Item::Text(text) => Ok(FunctionCallOutputContentItem::InputText {
+            text: text.text,
+            max_tokens: text.max_tokens,
+        }),
+        grpc::content_item::Item::TextBatch(batch) => {
+            Ok(FunctionCallOutputContentItem::InputTextBatch {
+                sections: batch.sections,
+                max_tokens: batch.max_tokens,
+            })
         }
         grpc::content_item::Item::Image(image) => Ok(FunctionCallOutputContentItem::InputImage {
             image_url: image.image_url,

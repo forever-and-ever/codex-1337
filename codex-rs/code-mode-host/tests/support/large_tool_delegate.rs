@@ -21,6 +21,9 @@ impl CodeModeSessionDelegate for LargeToolResultDelegate {
         _cancellation: CancellationToken,
     ) -> ToolInvocationFuture<'a> {
         Box::pin(async move {
+            if invocation.tool_name == ToolName::plain("exec_command") {
+                return Ok(json!({"wall_time_seconds":0.0,"exit_code":0,"output":"native"}));
+            }
             if invocation.tool_name == ToolName::plain("fast") {
                 return Ok(json!({ "value": "isolated" }));
             }

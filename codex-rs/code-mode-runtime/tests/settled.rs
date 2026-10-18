@@ -43,7 +43,7 @@ async fn assert_output(source: &str, expected: Value) {
     let actual: Vec<Value> = content_items
         .into_iter()
         .map(|item| {
-            let FunctionCallOutputContentItem::InputText { text } = item else {
+            let FunctionCallOutputContentItem::InputText { text, .. } = item else {
                 panic!("unexpected output: {item:?}");
             };
             serde_json::from_str(&text).expect("JSON output")

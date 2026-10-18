@@ -69,12 +69,14 @@ async fn grpc_stdio_sessions_share_a_host_and_isolate_state() -> Result<()> {
     assert_eq!(
         execute(&first, "store(\"stored\", 42); text(load(\"stored\"));").await?,
         vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: "42".to_string()
         }]
     );
     assert_eq!(
         execute(&second, "text(typeof load(\"stored\"));").await?,
         vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: "undefined".to_string()
         }]
     );
@@ -82,6 +84,7 @@ async fn grpc_stdio_sessions_share_a_host_and_isolate_state() -> Result<()> {
     assert_eq!(
         execute(&second, "text(\"still open\");").await?,
         vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: "still open".to_string()
         }]
     );
@@ -143,6 +146,7 @@ async fn hung_grpc_stdio_host_is_reaped_and_the_session_recovers() -> Result<()>
     assert_eq!(
         execute(&session, r#"text(load("recovery") ?? "recovered");"#).await?,
         vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: "recovered".to_string()
         }]
     );

@@ -99,6 +99,7 @@ fn runtime_response_decodes_mixed_content_items() {
         content_items: vec![
             grpc::ContentItem {
                 item: Some(grpc::content_item::Item::Text(grpc::TextContent {
+                    max_tokens: None,
                     text: "hello".to_string(),
                 })),
             },
@@ -128,6 +129,7 @@ fn runtime_response_decodes_mixed_content_items() {
             cell_id: CellId::new("cell".to_string()),
             content_items: vec![
                 FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: "hello".to_string(),
                 },
                 FunctionCallOutputContentItem::InputImage {

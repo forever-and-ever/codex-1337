@@ -156,7 +156,7 @@ const earlyTimer = setTimeout(() => text("early timer"), 60000);
         tc.perform_microtask_checkpoint();
         assert!(
             matches!(event_rx.try_recv(), Ok(RuntimeEvent::ContentItem(
-            FunctionCallOutputContentItem::InputText { text }
+            FunctionCallOutputContentItem::InputText { text, max_tokens: None }
         )) if text == "before"),
             "{label}: pre-exit output"
         );

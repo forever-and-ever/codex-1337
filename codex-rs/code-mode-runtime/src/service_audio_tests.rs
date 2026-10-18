@@ -69,6 +69,7 @@ audio({{type:"audio",mimeType:"audio/wav",data:{payload:?}}});"#
         .await;
         let expected = if omitted {
             FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: SHORT_AUDIO_OMISSION_TEXT.to_string(),
             }
         } else {
@@ -129,12 +130,14 @@ async fn audio_helper_bounds_wav_data_and_preserves_outputs_after_yield() {
             code_mode_host_duration: None,
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "before".to_string(),
             }],
         }
     );
     let mut expected = vec![
         FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: SHORT_AUDIO_OMISSION_TEXT.to_string(),
         };
         3
@@ -143,6 +146,7 @@ async fn audio_helper_bounds_wav_data_and_preserves_outputs_after_yield() {
         audio_url: urls[3].clone(),
     });
     expected.push(FunctionCallOutputContentItem::InputText {
+        max_tokens: None,
         text: "after".to_string(),
     });
     assert_eq!(

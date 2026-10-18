@@ -407,16 +407,22 @@ async fn remote_session_persists_values_forwards_delegates_and_controls_cells() 
 
     let mut callback_request = execute_request(
         r#"
-const result = await tools.echo({ value: String(load("key")) });
+const result = await tools.exec_command({ value: String(load("key")) });
 notify("notice");
-text(result.value);
+let optionReads = 0;
+text(result.output, {
+  get metadata() { optionReads++; return true; },
+  get max_tokens() { optionReads++; return 2; },
+});
+text(String(optionReads));
+text([result, result, result], {max_tokens: 7});
 "#,
     );
     callback_request.tool_call_id = "call-2".to_string();
     callback_request.enabled_tools = vec![ToolDefinition {
         summary: String::new(),
-        name: "echo".to_string(),
-        tool_name: ToolName::plain("echo"),
+        name: "exec_command".to_string(),
+        tool_name: ToolName::plain("exec_command"),
         description: String::new(),
         kind: CodeModeToolKind::Function,
         input_schema: None,
@@ -428,9 +434,24 @@ text(result.value);
         RuntimeResponse::Result {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("2"),
-            content_items: vec![FunctionCallOutputContentItem::InputText {
-                text: "output".to_string(),
-            }],
+            content_items: vec![
+                FunctionCallOutputContentItem::InputText {
+                    text: "output".to_string(),
+                    max_tokens: Some(2)
+                },
+                FunctionCallOutputContentItem::InputText {
+                    text: "2".to_string(),
+                    max_tokens: None
+                },
+                FunctionCallOutputContentItem::InputTextBatch {
+                    sections: vec![
+                        "[1]\noutput".into(),
+                        "[2]\noutput".into(),
+                        "[3]\noutput".into()
+                    ],
+                    max_tokens: Some(7)
+                },
+            ],
             error_text: None,
         }
     );
@@ -439,7 +460,7 @@ text(result.value);
         vec![CodeModeNestedToolCall {
             cell_id: cell_id("2"),
             runtime_tool_call_id: "tool-1".to_string(),
-            tool_name: ToolName::plain("echo"),
+            tool_name: ToolName::plain("exec_command"),
             tool_kind: CodeModeToolKind::Function,
             input: Some(json!({ "value": "persisted" })),
         }]
@@ -637,6 +658,7 @@ return;
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: running_cell_id.clone(),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "hello world".to_string(),
             }],
         }
@@ -696,6 +718,7 @@ return;
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: running_cell_id,
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "hello".to_string(),
             }],
             error_text: None,
@@ -739,6 +762,7 @@ async fn oversized_execute_request_does_not_close_the_shared_host() {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "still alive".to_string(),
             }],
             error_text: None,
@@ -789,6 +813,7 @@ try {{
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "argument rejected".to_string(),
             }],
             error_text: None,
@@ -818,6 +843,7 @@ try {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "result rejected".to_string(),
             }],
             error_text: None,
@@ -836,6 +862,7 @@ try {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("3"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "still alive".to_string(),
             }],
             error_text: None,
@@ -882,6 +909,7 @@ async fn oversized_initial_response_does_not_close_the_shared_host() {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("2"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "still alive".to_string(),
             }],
             error_text: None,
@@ -1073,6 +1101,7 @@ async fn child_process_loss_cleans_up_and_rebuilds_the_shared_host() {
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("g2:1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "replacement".to_string(),
             }],
             error_text: None,

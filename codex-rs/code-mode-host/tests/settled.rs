@@ -96,7 +96,7 @@ async fn assert_partial_results(provider: &dyn CodeModeSessionProvider) {
                 panic!("cell completed before the slow tool was released: {response:?}");
             };
             partial.extend(content_items.into_iter().map(|item| {
-                let FunctionCallOutputContentItem::InputText { text } = item else {
+                let FunctionCallOutputContentItem::InputText { text, .. } = item else {
                     panic!("unexpected output: {item:?}");
                 };
                 serde_json::from_str::<serde_json::Value>(&text).expect("JSON output")
@@ -144,6 +144,7 @@ async fn assert_partial_results(provider: &dyn CodeModeSessionProvider) {
                 code_mode_host_duration: completed.code_mode_host_duration(),
                 cell_id,
                 content_items: vec![FunctionCallOutputContentItem::InputText {
+                    max_tokens: None,
                     text: json!({"index": 0, "status": "fulfilled", "value": "slow"}).to_string(),
                 }],
                 error_text: None,

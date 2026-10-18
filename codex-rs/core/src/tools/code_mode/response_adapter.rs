@@ -32,8 +32,11 @@ impl IntoProtocol<FunctionCallOutputContentItem>
     fn into_protocol(self) -> FunctionCallOutputContentItem {
         let value = self;
         match value {
-            codex_code_mode::FunctionCallOutputContentItem::InputText { text } => {
+            codex_code_mode::FunctionCallOutputContentItem::InputText { text, .. } => {
                 FunctionCallOutputContentItem::InputText { text }
+            }
+            codex_code_mode::FunctionCallOutputContentItem::InputTextBatch { .. } => {
+                unreachable!("section budgeting flattens native batches")
             }
             codex_code_mode::FunctionCallOutputContentItem::InputImage { image_url, detail } => {
                 FunctionCallOutputContentItem::InputImage {

@@ -72,6 +72,34 @@ fn completed_timing_preserves_content_and_distinguishes_zero_from_unavailable() 
             }
             assert_eq!(output.success_for_logging(), false);
             assert!(output.log_output().contains(expected_timing));
+            // Recording and replay used to prefix-truncate an already-budgeted cell,
+            // losing its later sections, media and recovery notice.
+            let mut envelope = crate::tools::registry::AnyToolResult {
+                call_id: "call".to_string(),
+                payload: ToolPayload::Custom {
+                    input: String::new(),
+                },
+                result: Box::new(output),
+                post_tool_use_payload: None,
+            }
+            .into_response();
+            let mut history = crate::context_manager::ContextManager::new();
+            history.record_annotated_items(
+                std::slice::from_mut(&mut envelope),
+                codex_protocol::protocol::TruncationPolicy::Tokens(1),
+            );
+            assert_eq!(history.annotated_items()[0].item, envelope.item);
+            let persisted = serde_json::to_value(&envelope.metadata).unwrap();
+            let replayed = codex_history::ResponseItemEnvelope {
+                item: envelope.item.clone(),
+                metadata: serde_json::from_value(persisted).unwrap(),
+            };
+            let mut history = crate::context_manager::ContextManager::new();
+            history.replay_annotated_item(
+                &replayed,
+                codex_protocol::protocol::TruncationPolicy::Bytes(1),
+            );
+            assert_eq!(history.annotated_items()[0].item, envelope.item);
         }
     }
 }

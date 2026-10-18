@@ -531,7 +531,7 @@ await new Promise(() => {});
             .await
             .unwrap()
             .unwrap();
-        let RuntimeEvent::ContentItem(FunctionCallOutputContentItem::InputText { text }) =
+        let RuntimeEvent::ContentItem(FunctionCallOutputContentItem::InputText { text, .. }) =
             content_event
         else {
             panic!("expected resumed runtime output");
@@ -604,6 +604,7 @@ setTimeout(() => text("late"), 3_600_000);
         assert_eq!(
             output,
             vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "done".to_string()
             }]
         );

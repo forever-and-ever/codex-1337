@@ -108,11 +108,15 @@ fn print_callback(
     let rendered = match calls.as_slice() {
         [call] => call
             .as_ref()
-            .and_then(|call| call.render(ExecutionOutputMetadata::Hidden)),
-        _ => SettledExecution::render_batch(calls, ExecutionOutputMetadata::Hidden),
+            .and_then(|call| call.render(ExecutionOutputMetadata::Hidden))
+            .map(|text| vec![text]),
+        _ => SettledExecution::render_batch_sections(calls, ExecutionOutputMetadata::Hidden),
     };
-    let text = match rendered.map_or_else(|| serialize_output_text(scope, settled), Ok) {
-        Ok(text) => text,
+    let mut sections = match rendered.map_or_else(
+        || serialize_output_text(scope, settled).map(|text| vec![text]),
+        Ok,
+    ) {
+        Ok(sections) => sections,
         Err(error_text) => {
             throw_type_error(scope, &error_text);
             return;
@@ -121,9 +125,18 @@ fn print_callback(
     if let Some(state) = scope.get_slot::<RuntimeState>()
         && state.exit_requested.is_none()
     {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(
-            FunctionCallOutputContentItem::InputText { text },
-        ));
+        let item = if sections.len() == 1 {
+            FunctionCallOutputContentItem::InputText {
+                text: sections.remove(0),
+                max_tokens: None,
+            }
+        } else {
+            FunctionCallOutputContentItem::InputTextBatch {
+                sections,
+                max_tokens: None,
+            }
+        };
+        let _ = state.event_tx.send(RuntimeEvent::ContentItem(item));
     }
 }
 

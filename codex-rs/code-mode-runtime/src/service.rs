@@ -11,8 +11,6 @@ use codex_code_mode_protocol::CodeModeToolKind;
 use codex_code_mode_protocol::DEFAULT_EXEC_YIELD_TIME_MS;
 use codex_code_mode_protocol::ExecuteRequest;
 use codex_code_mode_protocol::ExecuteToPendingOutcome;
-use codex_code_mode_protocol::FunctionCallOutputContentItem;
-use codex_code_mode_protocol::ImageDetail;
 use codex_code_mode_protocol::RuntimeResponse;
 use codex_code_mode_protocol::StartedCell;
 use codex_code_mode_protocol::WaitOutcome;
@@ -363,7 +361,7 @@ fn pending_outcome(
             pending_tool_call_ids,
         } => Ok(ExecuteToPendingOutcome::Pending {
             cell_id: cell_id.clone(),
-            content_items: content_items.into_iter().map(output_item).collect(),
+            content_items: content_items,
             pending_tool_call_ids,
         }),
         event => Ok(ExecuteToPendingOutcome::Completed(runtime_response(
@@ -379,7 +377,7 @@ fn runtime_response(
     match event {
         runtime::CellEvent::Yielded { content_items } => Ok(RuntimeResponse::Yielded {
             cell_id: cell_id.clone(),
-            content_items: content_items.into_iter().map(output_item).collect(),
+            content_items: content_items,
             code_mode_host_duration: None,
         }),
         runtime::CellEvent::Completed {
@@ -387,37 +385,17 @@ fn runtime_response(
             error_text,
         } => Ok(RuntimeResponse::Result {
             cell_id: cell_id.clone(),
-            content_items: content_items.into_iter().map(output_item).collect(),
+            content_items: content_items,
             error_text,
             code_mode_host_duration: None,
         }),
         runtime::CellEvent::Terminated { content_items } => Ok(RuntimeResponse::Terminated {
             cell_id: cell_id.clone(),
-            content_items: content_items.into_iter().map(output_item).collect(),
+            content_items: content_items,
             code_mode_host_duration: None,
         }),
         runtime::CellEvent::Pending { .. } => {
             Err("cell returned a pending frontier unexpectedly".to_string())
-        }
-    }
-}
-
-fn output_item(item: runtime::OutputItem) -> FunctionCallOutputContentItem {
-    match item {
-        runtime::OutputItem::Text { text } => FunctionCallOutputContentItem::InputText { text },
-        runtime::OutputItem::Image { image_url, detail } => {
-            FunctionCallOutputContentItem::InputImage {
-                image_url,
-                detail: detail.map(|detail| match detail {
-                    runtime::ImageDetail::Auto => ImageDetail::Auto,
-                    runtime::ImageDetail::Low => ImageDetail::Low,
-                    runtime::ImageDetail::High => ImageDetail::High,
-                    runtime::ImageDetail::Original => ImageDetail::Original,
-                }),
-            }
-        }
-        runtime::OutputItem::Audio { audio_url } => {
-            FunctionCallOutputContentItem::InputAudio { audio_url }
         }
     }
 }

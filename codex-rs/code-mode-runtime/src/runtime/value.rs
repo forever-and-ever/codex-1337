@@ -220,6 +220,7 @@ pub(super) fn normalize_output_audio(
         // Tiny tool-generated clips cannot be encoded reliably by audio models.
         if wav_duration_seconds(&audio_url).is_some_and(|duration| duration < 0.025) {
             return Ok(FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "Audio output omitted because the clip is shorter than 25 ms; use a longer clip."
                     .to_string(),
             });

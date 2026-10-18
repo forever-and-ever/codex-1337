@@ -72,29 +72,7 @@ pub(crate) enum CellEvent {
     },
 }
 
-/// Output emitted by a cell since its preceding observation.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum OutputItem {
-    Text {
-        text: String,
-    },
-    Image {
-        image_url: String,
-        detail: Option<ImageDetail>,
-    },
-    Audio {
-        audio_url: String,
-    },
-}
-
-/// Requested image fidelity for an output image.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ImageDetail {
-    Auto,
-    Low,
-    High,
-    Original,
-}
+pub(crate) type OutputItem = codex_code_mode_protocol::FunctionCallOutputContentItem;
 
 /// Transport-neutral input for creating a cell.
 ///

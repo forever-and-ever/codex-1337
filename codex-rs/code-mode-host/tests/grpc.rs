@@ -144,6 +144,7 @@ fn text_response(
         code_mode_host_duration,
         cell_id: cell_id(cell),
         content_items: vec![FunctionCallOutputContentItem::InputText {
+            max_tokens: None,
             text: value.to_string(),
         }],
         error_text: None,
@@ -302,8 +303,10 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
         started: Semaphore::new(0),
         release: Semaphore::new(0),
     });
-    let mut execute = request(r#"await tools.large({}); text("done");"#);
-    execute.enabled_tools = vec![tool("large")];
+    let mut execute = request(
+        r#"text('before', {max_tokens: 3}); await tools.large({}); text('done', {metadata: true, max_tokens: 7}); const r = await tools.exec_command({}); text([r,r,r], {max_tokens: 9});"#,
+    );
+    execute.enabled_tools = vec![tool("large"), tool("exec_command")];
     execute.yield_time_ms = Some(3_600_000);
     let signal = CancellationToken::new();
     signal.cancel();
@@ -315,7 +318,10 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
     let response = timeout(TEST_TIMEOUT, cell.initial_response())
         .await?
         .map_err(anyhow::Error::msg)?;
-    assert!(matches!(response, RuntimeResponse::Yielded { .. }));
+    let RuntimeResponse::Yielded { content_items, .. } = response else {
+        panic!("expected early yield")
+    };
+    let mut emitted = content_items;
     timeout(TEST_TIMEOUT, delegate.started.acquire())
         .await??
         .forget();
@@ -333,10 +339,10 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
     let response = timeout(TEST_TIMEOUT, wait)
         .await?
         .map_err(anyhow::Error::msg)?;
-    assert!(matches!(
-        response,
-        WaitOutcome::LiveCell(RuntimeResponse::Yielded { .. })
-    ));
+    let WaitOutcome::LiveCell(RuntimeResponse::Yielded { content_items, .. }) = response else {
+        panic!("expected interrupted wait")
+    };
+    emitted.extend(content_items);
 
     delegate.release.add_permits(1);
     let response = timeout(
@@ -351,16 +357,38 @@ async fn grpc_early_yield_preserves_cell_and_later_waits() -> Result<()> {
     )
     .await?
     .map_err(anyhow::Error::msg)?;
+    let WaitOutcome::LiveCell(RuntimeResponse::Result {
+        cell_id: observed_cell,
+        content_items,
+        error_text,
+        ..
+    }) = response
+    else {
+        panic!("expected completed cell")
+    };
+    assert_eq!(observed_cell, cell_id);
+    assert_eq!(error_text, None);
+    emitted.extend(content_items);
     assert_eq!(
-        response,
-        WaitOutcome::LiveCell(RuntimeResponse::Result {
-            code_mode_host_duration: response.code_mode_host_duration(),
-            cell_id,
-            content_items: vec![FunctionCallOutputContentItem::InputText {
+        emitted,
+        vec![
+            FunctionCallOutputContentItem::InputText {
+                text: "before".to_string(),
+                max_tokens: Some(3)
+            },
+            FunctionCallOutputContentItem::InputText {
                 text: "done".to_string(),
-            }],
-            error_text: None,
-        })
+                max_tokens: Some(7)
+            },
+            FunctionCallOutputContentItem::InputTextBatch {
+                sections: vec![
+                    "[1]\nnative".into(),
+                    "[2]\nnative".into(),
+                    "[3]\nnative".into()
+                ],
+                max_tokens: Some(9)
+            },
+        ]
     );
     session.shutdown().await.map_err(anyhow::Error::msg)?;
     Ok(())
@@ -986,6 +1014,7 @@ async fn large_unary_tool_completion_does_not_block_an_independent_session() -> 
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "8388608".to_string(),
             }],
             error_text: None,
@@ -1041,6 +1070,7 @@ async fn single_subscription_processes_slow_and_fast_tools_concurrently() -> Res
             code_mode_host_duration: actual.code_mode_host_duration(),
             cell_id: cell_id("1"),
             content_items: vec![FunctionCallOutputContentItem::InputText {
+                max_tokens: None,
                 text: "8388608".to_string(),
             }],
             error_text: None,

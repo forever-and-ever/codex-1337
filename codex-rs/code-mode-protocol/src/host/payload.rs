@@ -278,6 +278,13 @@ impl From<WireImageDetail> for ImageDetail {
 pub enum WireContentItem {
     InputText {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_tokens: Option<u64>,
+    },
+    InputTextBatch {
+        sections: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_tokens: Option<u64>,
     },
     InputImage {
         image_url: String,
@@ -292,7 +299,16 @@ pub enum WireContentItem {
 impl From<FunctionCallOutputContentItem> for WireContentItem {
     fn from(value: FunctionCallOutputContentItem) -> Self {
         match value {
-            FunctionCallOutputContentItem::InputText { text } => Self::InputText { text },
+            FunctionCallOutputContentItem::InputText { text, max_tokens } => {
+                Self::InputText { text, max_tokens }
+            }
+            FunctionCallOutputContentItem::InputTextBatch {
+                sections,
+                max_tokens,
+            } => Self::InputTextBatch {
+                sections,
+                max_tokens,
+            },
             FunctionCallOutputContentItem::InputImage { image_url, detail } => Self::InputImage {
                 image_url,
                 detail: detail.map(Into::into),
@@ -307,7 +323,14 @@ impl From<FunctionCallOutputContentItem> for WireContentItem {
 impl From<WireContentItem> for FunctionCallOutputContentItem {
     fn from(value: WireContentItem) -> Self {
         match value {
-            WireContentItem::InputText { text } => Self::InputText { text },
+            WireContentItem::InputText { text, max_tokens } => Self::InputText { text, max_tokens },
+            WireContentItem::InputTextBatch {
+                sections,
+                max_tokens,
+            } => Self::InputTextBatch {
+                sections,
+                max_tokens,
+            },
             WireContentItem::InputImage { image_url, detail } => Self::InputImage {
                 image_url,
                 detail: detail.map(Into::into),
