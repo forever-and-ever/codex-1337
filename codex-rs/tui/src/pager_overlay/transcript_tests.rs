@@ -746,7 +746,7 @@ fn completing_agent_and_plan_streams_preserves_reading_in_later_fragments() {
         } else {
             let mut controller = StreamController::new(
                 Some(usize::from(
-                    area.width - crate::transcript_geometry::GUTTER_COLUMNS - 2,
+                    area.width - crate::transcript_geometry::TITLE_COLUMN,
                 )),
                 cwd,
                 HistoryRenderMode::Rich,

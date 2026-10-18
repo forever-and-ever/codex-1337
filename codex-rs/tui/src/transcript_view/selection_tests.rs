@@ -9,6 +9,7 @@ use crate::history_cell::AgentMessageCell;
 use crate::history_cell::PlainHistoryCell;
 use crate::history_cell::StreamingAgentTailCell;
 use crate::transcript_geometry::GUTTER_COLUMNS;
+use crate::transcript_geometry::TITLE_COLUMN;
 use codex_app_server_protocol::CommandExecutionSource;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
@@ -288,14 +289,14 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         render(
             &mut view,
             &cells,
-            /*width*/ GUTTER_COLUMNS + 28,
+            /*width*/ TITLE_COLUMN + 26,
             /*height*/ 3,
         );
         view.scroll(&cells, /*rows*/ -1);
         let before = render(
             &mut view,
             &cells,
-            /*width*/ GUTTER_COLUMNS + 28,
+            /*width*/ TITLE_COLUMN + 26,
             /*height*/ 3,
         );
         assert!(matches!(
@@ -309,7 +310,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
                 render(
                     &mut view,
                     &cells,
-                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*width*/ TITLE_COLUMN + 26,
                     /*height*/ 3
                 ),
                 before
@@ -318,7 +319,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         let position = view.position;
         let down = MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: GUTTER_COLUMNS + 9,
+            column: TITLE_COLUMN + 7,
             row: 1,
             modifiers: KeyModifiers::NONE,
         };
@@ -326,7 +327,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         release(
             &mut view,
             &cells,
-            /*column*/ GUTTER_COLUMNS + 9,
+            /*column*/ TITLE_COLUMN + 7,
             /*row*/ 1,
         );
         assert_eq!(
@@ -334,7 +335,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
                 render(
                     &mut view,
                     &cells,
-                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*width*/ TITLE_COLUMN + 26,
                     /*height*/ 3
                 ),
                 view.position,
@@ -349,7 +350,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         release(
             &mut view,
             &cells,
-            /*column*/ GUTTER_COLUMNS + 9,
+            /*column*/ TITLE_COLUMN + 7,
             /*row*/ 1,
         );
         assert_eq!(
@@ -357,7 +358,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
                 render(
                     &mut view,
                     &cells,
-                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*width*/ TITLE_COLUMN + 26,
                     /*height*/ 3
                 ),
                 view.position,
@@ -369,7 +370,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
         let after = render(
             &mut view,
             &cells,
-            /*width*/ GUTTER_COLUMNS + 28,
+            /*width*/ TITLE_COLUMN + 26,
             /*height*/ 3,
         );
         assert_eq!(
@@ -377,7 +378,7 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
             (before, position, None)
         );
         // Repeated clicks on padding or a separator must not select adjacent source text.
-        for (column, row) in [(GUTTER_COLUMNS + 27, down.row), (down.column, 0)] {
+        for (column, row) in [(TITLE_COLUMN + 25, down.row), (down.column, 0)] {
             for clicks in [2, 3] {
                 view.last_click = Some((Instant::now(), column, row, clicks - 1));
                 view.handle_mouse(
@@ -396,13 +397,13 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
     insta::assert_snapshot!(frames.join("\n\n"), @"
     prepend=false
 
-                  • alpha beta gamma
-                    second line
+                alpha beta gamma
+                second line
 
     prepend=true
 
-                  • alpha beta gamma
-                    second line
+                alpha beta gamma
+                second line
     ");
 }
 
@@ -449,8 +450,8 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
     );
     live(&mut view, &unrelated, /*revision*/ 2);
     insta::assert_snapshot!(render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 28, /*height*/ 4), @"
-    • first
-      tail selected
+    first
+        tail selected
     ");
     render(
         &mut view,
@@ -565,34 +566,34 @@ fn word_and_line_drags_keep_the_initial_unit_when_direction_changes() {
     render(
         &mut view,
         &cells,
-        /*width*/ GUTTER_COLUMNS + 28,
+        /*width*/ TITLE_COLUMN + 26,
         /*height*/ 5,
     );
     view.begin_selection(
         &cells,
-        /*column*/ GUTTER_COLUMNS + 9,
+        /*column*/ TITLE_COLUMN + 7,
         /*row*/ 0,
         /*clicks*/ 2,
     );
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 16, /*row*/ 0);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 14, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("beta gamma"));
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 3, /*row*/ 0);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 1, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("alpha beta"));
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 16, /*row*/ 0);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 14, /*row*/ 0);
     assert_eq!(view.selected_text(&cells).as_deref(), Some("beta gamma"));
 
     view.begin_selection(
         &cells,
-        /*column*/ GUTTER_COLUMNS + 4,
+        /*column*/ TITLE_COLUMN + 2,
         /*row*/ 1,
         /*clicks*/ 3,
     );
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 3, /*row*/ 0);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 1, /*row*/ 0);
     assert_eq!(
         view.selected_text(&cells).as_deref(),
         Some("alpha beta gamma\nsecond line\n")
     );
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 4, /*row*/ 2);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 2, /*row*/ 2);
     assert_eq!(
         view.selected_text(&cells).as_deref(),
         Some("second line\nthird")
@@ -647,12 +648,12 @@ fn plain_and_shift_arrows_move_selection_on_press_and_repeat() {
                 render(
                     &mut view,
                     &cells,
-                    /*width*/ GUTTER_COLUMNS + 28,
+                    /*width*/ TITLE_COLUMN + 26,
                     /*height*/ 5,
                 );
                 view.begin_selection(
                     &cells,
-                    /*column*/ GUTTER_COLUMNS + 3,
+                    /*column*/ TITLE_COLUMN + 1,
                     /*row*/ 1,
                     /*clicks*/ 1,
                 );
@@ -684,12 +685,12 @@ fn modified_arrows_end_selection_and_return_input_to_the_owner() {
                     render(
                         &mut view,
                         &cells,
-                        /*width*/ GUTTER_COLUMNS + 28,
+                        /*width*/ TITLE_COLUMN + 26,
                         /*height*/ 5,
                     );
                     view.begin_selection(
                         &cells,
-                        /*column*/ GUTTER_COLUMNS + 9,
+                        /*column*/ TITLE_COLUMN + 7,
                         /*row*/ 0,
                         /*clicks*/ 2,
                     );
@@ -722,12 +723,12 @@ fn released_arrows_preserve_selection_and_reading_position() {
             render(
                 &mut view,
                 &cells,
-                /*width*/ GUTTER_COLUMNS + 28,
+                /*width*/ TITLE_COLUMN + 26,
                 /*height*/ 5,
             );
             view.begin_selection(
                 &cells,
-                /*column*/ GUTTER_COLUMNS + 9,
+                /*column*/ TITLE_COLUMN + 7,
                 /*row*/ 0,
                 /*clicks*/ 2,
             );

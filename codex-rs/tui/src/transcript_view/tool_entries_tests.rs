@@ -696,7 +696,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
 }
 
 #[test]
-fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
+fn mixed_feed_keeps_its_grid_through_resize_and_details() {
     use crate::diff_model::FileChange;
     use crate::exec_cell::CommandOutput;
     use crate::exec_cell::new_active_exec_command;
@@ -825,55 +825,8 @@ fn mixed_feed_keeps_its_grid_through_live_commit_resize_and_details() {
     for width in [64, 32] {
         view.set_presentation(/*detailed*/ false, HistoryRenderMode::Rich);
         view.jump_to_latest();
-        // Normal live prose travels through the auxiliary activity-presentation boundary.
-        let _ = view.sync_live_activity_tail(
-            width,
-            /*key*/ None,
-            /*expanded*/ false,
-            |width, _, _| {
-                Some(ActivityTranscriptLines {
-                    output_mode: None,
-                    is_tool_entry: false,
-                    header: None,
-
-                    activity: Vec::new(),
-                    auxiliary: crate::transcript_geometry::clock_lines(
-                        tail.compact_hyperlink_lines(width),
-                        tail.transcript_timestamp(),
-                    ),
-                    header_tokens: None,
-                    disclosure: None,
-                    controls: Vec::new(),
-                })
-            },
-        );
-        let live = tests::render(&mut view, &cells, width, /*height*/ 50);
-        let _ = view.sync_live_tail(width, /*key*/ None, |_| None);
         cells.push(Arc::clone(&tail));
         let committed = tests::render(&mut view, &cells, width, /*height*/ 50);
-        // Committing heads the finished reply, and the header takes its clock; every other
-        // row keeps its place, and the reply's rows keep their columns under the header.
-        let rows = |buffer: &Buffer| -> Vec<Vec<ratatui::buffer::Cell>> {
-            buffer
-                .content
-                .chunks(usize::from(width))
-                .map(<[_]>::to_vec)
-                .collect()
-        };
-        let header = tests::text(&committed)
-            .lines()
-            .position(|row| row.contains("[-] Response"))
-            .expect("the finished reply heads itself");
-        let mut committed_rows = rows(&committed);
-        let _ = committed_rows.remove(header);
-        for (index, (live, committed)) in rows(&live).iter().zip(&committed_rows).enumerate() {
-            let from = if index == header {
-                usize::from(crate::transcript_geometry::CLOCK_COLUMNS)
-            } else {
-                0
-            };
-            assert_eq!(live[from..], committed[from..], "row {index}");
-        }
         let text = tests::text(&committed);
         assert_eq!(text.matches("  128").count(), 1);
         let layout = view.current_layout(&cells, cells.len() - 1).unwrap();

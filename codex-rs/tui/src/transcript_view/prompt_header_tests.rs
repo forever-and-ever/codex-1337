@@ -96,11 +96,17 @@ fn pinned_prompt_matches_the_original_prompt_style() {
         let mut expected = Buffer::empty(Rect::new(
             /*x*/ 0, /*y*/ 0, width, /*height*/ 3,
         ));
-        TextLayout::new(prompt.transcript_hyperlink_lines(width), width).render(
-            expected.area,
-            &mut expected,
-            /*start_row*/ 0,
-        );
+        TextLayout::new(
+            crate::transcript_geometry::gutter_lines(
+                prompt.retained_hyperlink_lines(
+                    width - crate::transcript_geometry::TITLE_COLUMN,
+                    false,
+                ),
+                crate::transcript_geometry::TITLE_COLUMN,
+            ),
+            width,
+        )
+        .render(expected.area, &mut expected, /*start_row*/ 0);
         let cells: Vec<Arc<dyn HistoryCell>> = vec![
             Arc::new(prompt),
             cell("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight"),

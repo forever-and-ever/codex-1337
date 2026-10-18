@@ -2123,6 +2123,15 @@ fn user_history_cell_wraps_long_urls_inside_the_message_gutter() {
     assert!(linked_rows.len() > 1, "expected the long URL to wrap");
     assert!(
         linked_rows.iter().all(|line| {
+            line.line
+                .spans
+                .first()
+                .is_some_and(|span| span.content == "  ")
+        }),
+        "wrapped URL rows must retain the user-message gutter: {linked_rows:?}"
+    );
+    assert!(
+        linked_rows.iter().all(|line| {
             line.hyperlinks
                 .iter()
                 .all(|hyperlink| hyperlink.destination == url)
@@ -2741,6 +2750,12 @@ fn agent_markdown_cell_renders_source_at_different_widths() {
     let cell = AgentMarkdownCell::new(source.to_string(), &test_cwd());
 
     let lines_80 = render_lines(&cell.display_lines(/*width*/ 80));
+    assert!(
+        lines_80.first().is_some_and(|line| line.starts_with("• ")),
+        "first line should start with bullet prefix: {:?}",
+        lines_80[0]
+    );
+
     let lines_32 = render_lines(&cell.display_lines(/*width*/ 32));
     assert!(
         lines_32.len() > lines_80.len(),
@@ -2759,7 +2774,7 @@ fn agent_markdown_cell_does_not_split_words_after_inline_markdown() {
         "expected wrapping to stop before 'strikethrough': {lines:?}",
     );
     assert!(
-        lines[1].starts_with("strikethrough,"),
+        lines[1].starts_with("  strikethrough,"),
         "expected the next line to resume with the full word: {lines:?}",
     );
 }
@@ -2782,10 +2797,19 @@ fn streamed_agent_list_paragraph_preserves_item_indent_when_wrapped() {
         lines
             .iter()
             .filter(|line| line.contains("paired output") || line.contains("suggestions."))
-            .all(|line| line.starts_with("   ")),
-        "expected all wrapped paragraph rows to retain the list indent: {lines:?}",
+            .all(|line| line.starts_with("     ")),
+        "expected all wrapped paragraph rows to retain the assistant gutter and list indent: {lines:?}",
     );
     insta::assert_snapshot!(lines.join("\n"));
+}
+
+#[test]
+fn agent_markdown_cell_narrow_width_shows_prefix_only() {
+    let source = "narrow width coverage\n";
+    let cell = AgentMarkdownCell::new(source.to_string(), &test_cwd());
+
+    let lines = render_lines(&cell.display_lines(/*width*/ 2));
+    assert_eq!(lines, vec!["• ".to_string()]);
 }
 
 #[test]

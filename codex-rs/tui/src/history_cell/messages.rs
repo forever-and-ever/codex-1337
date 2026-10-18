@@ -4,7 +4,6 @@
 use super::markdown_render_cache::MarkdownRenderCache;
 use super::*;
 use crate::style::accent_color_on;
-use crate::style::history_prompt_style;
 use crate::style::history_response_style;
 use crate::terminal_hyperlinks::annotate_web_urls;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
@@ -188,7 +187,11 @@ impl HistoryCell for UserHistoryCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        presentation::user_lines(self, width)
+        presentation::user_lines(self, width, presentation::Surface::Inline)
+    }
+
+    fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
+        presentation::user_lines(self, width, presentation::Surface::Transcript)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -403,7 +406,11 @@ impl HistoryCell for AgentMessageCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        presentation::agent_lines(self, width)
+        presentation::agent_lines(self, width, presentation::Surface::Inline)
+    }
+
+    fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
+        presentation::agent_lines(self, width, presentation::Surface::Transcript)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -530,12 +537,8 @@ fn message_band(mut lines: Vec<HyperlinkLine>, band: Style) -> Vec<HyperlinkLine
 }
 
 impl AgentMarkdownCell {
-    fn render_lines(
-        &self,
-        width: u16,
-        list_spacing: crate::markdown_render::ListSpacing,
-    ) -> Vec<HyperlinkLine> {
-        presentation::markdown_lines(self, width, list_spacing)
+    fn render_lines(&self, width: u16, surface: presentation::Surface) -> Vec<HyperlinkLine> {
+        presentation::markdown_lines(self, width, surface)
     }
 }
 
@@ -551,11 +554,11 @@ impl HistoryCell for AgentMarkdownCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::AfterMultiline)
+        self.render_lines(width, presentation::Surface::Inline)
     }
 
     fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
-        self.render_lines(width, crate::markdown_render::ListSpacing::Uniform)
+        self.render_lines(width, presentation::Surface::Transcript)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {

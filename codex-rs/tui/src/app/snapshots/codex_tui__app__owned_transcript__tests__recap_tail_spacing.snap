@@ -17,7 +17,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 80x10, Message after recap
   ? for shortcuts
 
-              • Follow-up response.
+            Follow-up response.
 ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -57,7 +57,7 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 ────────────────────────────────────────────────────────────────────────────────
                          Next: Review the changes.
 
-              • Follow-up response.
+            Follow-up response.
 ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -97,9 +97,9 @@ expression: "normalize_snapshot_paths(snapshots.join(\"\\n\\n\"))"
 32x12, Message after recap
   ? for shortcuts
 ────────────────────────────────
+                         es.
 
-              • Follow-up
-                response.
+            Follow-up response.
 ────────────────────────────────
 
 

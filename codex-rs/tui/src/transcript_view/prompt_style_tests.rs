@@ -130,7 +130,7 @@ fn reserved_margin_uses_the_same_alignment_for_painting_and_selection() {
 }
 
 fn styled_prompt_lines(cell: &dyn HistoryCell, width: u16, style: Style) -> Vec<HyperlinkLine> {
-    cell.display_hyperlink_lines(width)
+    cell.retained_hyperlink_lines(width, false)
         .into_iter()
         .map(|mut line| {
             line.line.style = style;

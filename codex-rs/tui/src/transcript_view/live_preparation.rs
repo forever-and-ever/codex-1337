@@ -74,7 +74,9 @@ impl OwnedLiveTail {
             .filter(|_| active)
             .chain(self.auxiliary.iter())
         {
-            let body = if detailed {
+            let body = if crate::history_cell::is_message(cell.as_ref()) {
+                crate::history_cell::fullscreen_session_lines(cell.as_ref(), width, detailed, mode)
+            } else if detailed {
                 cell.transcript_hyperlink_lines(width)
             } else if cell.as_any().is::<crate::history_cell::SessionInfoCell>() {
                 crate::history_cell::fullscreen_session_lines(cell.as_ref(), width, false, mode)
@@ -111,12 +113,25 @@ impl OwnedLiveTail {
         search: bool,
     ) -> TextLayout {
         let width = key.width;
-        let content_width = crate::transcript_geometry::content_width(width, key.mode);
+        let columns = if self
+            .active
+            .as_deref()
+            .is_some_and(crate::history_cell::is_message)
+        {
+            crate::transcript_geometry::TITLE_COLUMN
+        } else {
+            crate::transcript_geometry::GUTTER_COLUMNS
+        };
+        let content_width = if key.mode == HistoryRenderMode::Rich {
+            width.saturating_sub(columns).max(1)
+        } else {
+            width
+        };
         if key.detailed {
             let lines = self.lines(content_width, true, key.mode, true);
             return TextLayout::new(
                 if key.mode == HistoryRenderMode::Rich {
-                    crate::transcript_geometry::rich_lines(lines)
+                    crate::transcript_geometry::gutter_lines(lines, columns)
                 } else {
                     lines
                 },
@@ -160,7 +175,9 @@ impl OwnedLiveTail {
             let activity = active.map_or_else(Vec::new, |cell| {
                 let lines = if expanded && has_activity {
                     cell.expanded_output_lines(content_width, key.output_mode)
-                } else if cell.as_any().is::<crate::history_cell::SessionInfoCell>() {
+                } else if crate::history_cell::is_message(cell)
+                    || cell.as_any().is::<crate::history_cell::SessionInfoCell>()
+                {
                     crate::history_cell::fullscreen_session_lines(
                         cell,
                         content_width,
@@ -206,12 +223,7 @@ impl OwnedLiveTail {
             controls,
         };
         if key.mode == HistoryRenderMode::Rich {
-            layout::activity_layout(
-                lines,
-                crate::transcript_geometry::GUTTER_COLUMNS,
-                width,
-                expanded,
-            )
+            layout::activity_layout(lines, columns, width, expanded)
         } else {
             let mut lines = lines;
             lines.activity.extend(lines.auxiliary);

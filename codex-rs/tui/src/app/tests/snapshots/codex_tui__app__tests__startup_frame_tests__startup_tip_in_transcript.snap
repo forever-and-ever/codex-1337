@@ -9,7 +9,7 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
                 >_ OpenAI Codex (v0.162.1-1337)
                    /tmp/project
 
-              • Conversation continues here.
+            Conversation continues here.
 
 
 
@@ -31,8 +31,8 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
                 >_ OpenAI Codex…
                    /tmp/project
 
-              • Conversation
-                continues here.
+            Conversation
+            continues here.
 
 
 

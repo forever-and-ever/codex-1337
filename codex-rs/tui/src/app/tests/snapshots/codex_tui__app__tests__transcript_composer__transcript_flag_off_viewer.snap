@@ -1,12 +1,11 @@
 ---
 source: tui/src/app/tests/transcript_composer.rs
-assertion_line: 270
 expression: buffer_text(&buffer)
 ---
 / T R A N S C R I P T / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / / /
-              › first
+            first
 
-              › second
+            second
 
 
 

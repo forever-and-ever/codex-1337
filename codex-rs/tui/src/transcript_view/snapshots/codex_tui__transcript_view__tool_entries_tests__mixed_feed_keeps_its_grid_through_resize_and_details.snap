@@ -4,7 +4,7 @@ expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
         [-] User
-              › Review the layout
+            Review the layout
 
   14:17       • Activity Reviewing layout
 
@@ -23,13 +23,13 @@ width=64
         [+]       bar.rs (+1, -0)
 
   14:17 [-] Response
-              • The layout keeps prose, code, and tools aligned.
+            The layout keeps prose, code, and tools aligned.
 
-                  source_indent();
+              source_indent();
 
 expanded width=64
         [-] User
-              › Review the layout
+            Review the layout
 
   14:17       • Activity Reviewing layout
 
@@ -50,12 +50,12 @@ expanded width=64
         [+]       bar.rs (+1, -0)
 
   14:17 [-] Response
-              • The layout keeps prose, code, and tools aligned.
+            The layout keeps prose, code, and tools aligned.
 
-                  source_indent();
+              source_indent();
 
 detailed width=64
-              › Review the layout
+            Review the layout
 
   14:17       • Activity Reviewing layout
 
@@ -76,14 +76,13 @@ detailed width=64
                   bar.rs (+1, -0)
                   1 +new line
 
-  14:17       • The layout keeps prose, code, and tools aligned.
+  14:17     The layout keeps prose, code, and tools aligned.
 
-                  source_indent();
+              source_indent();
 
 width=32
         [-] User
-              › Review the
-                layout
+            Review the layout
 
   14:17       • Activity
                 Reviewing layout
@@ -114,16 +113,14 @@ width=32
         [+]       bar.… (+1, -0)
 
   14:17 [-] Response
-              • The layout keeps
-                prose, code, and
-                tools aligned.
+            The layout keeps
+            prose, code, and
+            tools aligned.
 
-
-                source_indent();
+              source_indent();
 
 detailed width=32
-              › Review the
-                layout
+            Review the layout
 
   14:17       • Activity
                 Reviewing layout
@@ -147,9 +144,8 @@ detailed width=32
                   bar.… (+1, -0)
                   1 +new line
 
-  14:17       • The layout keeps
-                prose, code, and
-                tools aligned.
+  14:17     The layout keeps
+            prose, code, and
+            tools aligned.
 
-
-                source_indent();
+              source_indent();

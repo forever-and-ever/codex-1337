@@ -9,6 +9,7 @@ use pretty_assertions::assert_eq;
 use std::path::Path;
 
 use crate::transcript_geometry::GUTTER_COLUMNS;
+use crate::transcript_geometry::TITLE_COLUMN;
 
 fn payload(view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]) -> String {
     let selected = view.selected_text(cells).unwrap();
@@ -405,7 +406,7 @@ fn find_and_shift_click_release_copy_payload() {
                         .row_for_offset(row.layout.text().find("needle").unwrap())
             })
             .unwrap() as u16;
-    view.extend_selection(/*column*/ GUTTER_COLUMNS + 6, row);
+    view.extend_selection(/*column*/ TITLE_COLUMN + 4, row);
     assert!(view.copy_mode.is_none());
     assert_eq!(payload(&mut view, &cells), "bold");
 }

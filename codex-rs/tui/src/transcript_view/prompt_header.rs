@@ -47,11 +47,8 @@ pub(super) fn line(
     };
     Some(truncate_line_with_ellipsis_if_overflow(
         Line::from(vec![
-            if prompt.spoken {
-                "› ".red().bold()
-            } else {
-                "› ".bold().dim()
-            },
+            " ".repeat(usize::from(crate::transcript_geometry::TITLE_COLUMN))
+                .into(),
             message.into(),
         ])
         .style(crate::style::history_prompt_style()),

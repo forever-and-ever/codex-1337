@@ -27,7 +27,7 @@ working=true, response rows=1, 80x6
 working=false, response rows=1, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-              • Done.
+            Done.
 
                 Worked for [duration] • [completion time]
 ────────────────────────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ working=false, response rows=1, 80x12
 working=false, response rows=30, 80x12
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-              • Done.
+            Done.
 
                 Worked for [duration] • [completion time]
 ────────────────────────────────────────────────────────────────────────────────

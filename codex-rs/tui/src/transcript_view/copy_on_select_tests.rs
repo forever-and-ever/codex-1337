@@ -155,7 +155,11 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
         "[example.com](https://example.com/docs)".into(),
         std::path::Path::new("/"),
     ))];
-    for (drag, release) in [(None, 2), (Some(5), 5), (Some(5), 2)] {
+    let message_mouse = |kind, column| MouseEvent {
+        column: crate::transcript_geometry::TITLE_COLUMN + column,
+        ..mouse(kind, 0)
+    };
+    for (drag, release) in [(None, 0), (Some(3), 3), (Some(3), 0)] {
         let mut view = TranscriptView {
             copy_on_select: true,
             ..Default::default()
@@ -166,7 +170,7 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
             /*width*/ GUTTER_COLUMNS + 80,
             /*height*/ 1,
         );
-        let down = mouse(MouseEventKind::Down(MouseButton::Left), /*column*/ 2);
+        let down = message_mouse(MouseEventKind::Down(MouseButton::Left), 0);
         assert!(matches!(
             view.handle_mouse(down, &cells),
             Some(ViewAction::Changed)
@@ -174,14 +178,14 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
         if let Some(column) = drag {
             assert!(matches!(
                 view.handle_mouse(
-                    mouse(MouseEventKind::Drag(MouseButton::Left), column),
+                    message_mouse(MouseEventKind::Drag(MouseButton::Left), column),
                     &cells
                 ),
                 Some(ViewAction::Changed)
             ));
         }
         let action = view.handle_mouse(
-            mouse(MouseEventKind::Up(MouseButton::Left), release),
+            message_mouse(MouseEventKind::Up(MouseButton::Left), release),
             &cells,
         );
         match (drag, release, action) {
@@ -189,11 +193,11 @@ fn copy_on_select_preserves_link_activation_and_ignores_empty_drags() {
                 assert_eq!(url, "https://example.com/docs");
                 assert_eq!(view.selected_text(&cells), None);
             }
-            (Some(_), 5, Some(ViewAction::CopyOnSelect(copied))) => {
+            (Some(_), 3, Some(ViewAction::CopyOnSelect(copied))) => {
                 assert_eq!(copied, "exa");
                 assert_eq!(view.selected_text(&cells).as_deref(), Some("exa"));
             }
-            (Some(_), 2, Some(ViewAction::Changed)) => {
+            (Some(_), 0, Some(ViewAction::Changed)) => {
                 assert_eq!(view.selected_text(&cells), None);
             }
             _ => panic!("only a nonempty link drag should copy"),
