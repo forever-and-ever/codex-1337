@@ -2159,6 +2159,7 @@ mod tests {
             item: TurnItem::UserMessage(UserMessageItem {
                 id: "item-1".to_string(),
                 client_id: None,
+                source_response_item_id: None,
                 content: Vec::new(),
             }),
             started_at_ms: Some(0),

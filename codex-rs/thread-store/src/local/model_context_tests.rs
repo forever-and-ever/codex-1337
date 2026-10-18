@@ -667,6 +667,7 @@ fn completed_user_message(turn_id: &str, message: &str) -> RolloutItem {
         item: TurnItem::UserMessage(UserMessageItem {
             id: format!("user-{turn_id}"),
             client_id: None,
+            source_response_item_id: None,
             content: vec![UserInput::Text {
                 text: message.to_string(),
                 text_elements: Vec::new(),
