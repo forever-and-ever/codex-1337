@@ -57,14 +57,14 @@ impl App {
     ) {
         self.request_server(
             app_server,
-            super::super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
-            super::super::turn_submissions::ui_requests::UiRequestKind::Mutation,
+            turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
+            turn_submissions::ui_requests::UiRequestKind::Mutation,
             "Selecting permissions",
             move |handle| async move {
                 handle
                     .thread_settings_update(
                         codex_app_server_protocol::RequestId::String(
-                            uuid::Uuid::new_v4().to_string(),
+                            Uuid::new_v4().to_string(),
                         ),
                         params,
                     )
@@ -269,14 +269,14 @@ impl App {
                     if app.current_displayed_thread_id() != origin {
                         if let Some(thread_id) = origin
                             && (approval_policy_override.is_some() || approvals_reviewer_override.is_some() || permission_profile_override.is_some()) {
-                            let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+                            let params = ThreadSettingsUpdateParams {
                                 thread_id: thread_id.to_string(),
                                 approval_policy: approval_policy_override,
                                 approvals_reviewer: approvals_reviewer_override.map(codex_app_server_protocol::ApprovalsReviewer::from),
                                 permissions: active_permission_profile_override.as_ref().map(|profile| profile.id.clone()),
                                 ..Default::default()
                             };
-                            app.enqueue_server_operation(server, thread_id, super::super::turn_submissions::ServerOperation::Mutation(super::super::turn_submissions::ThreadMutation::Settings(Box::new(params))));
+                            app.enqueue_server_operation(server, thread_id, turn_submissions::ServerOperation::Mutation(turn_submissions::ThreadMutation::Settings(Box::new(params))));
                         }
                         app.chat_widget.add_info_message("Experimental features saved. Runtime changes still target the original conversation.".into(), None);
                         return Ok(());
@@ -462,7 +462,7 @@ impl App {
                     .thread_memory_mode_set(
                         codex_app_server_protocol::RequestId::String(format!(
                             "tui-memory-mode-{}",
-                            uuid::Uuid::new_v4()
+                            Uuid::new_v4()
                         )),
                         codex_app_server_protocol::ThreadMemoryModeSetParams {
                             thread_id: thread_id.to_string(),
@@ -500,7 +500,7 @@ impl App {
                     .memory_reset(
                         codex_app_server_protocol::RequestId::String(format!(
                             "tui-memory-reset-{}",
-                            uuid::Uuid::new_v4()
+                            Uuid::new_v4()
                         )),
                         None,
                     )
@@ -544,7 +544,7 @@ impl App {
         else {
             unreachable!("feature settings require a turn-context override");
         };
-        let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+        let params = ThreadSettingsUpdateParams {
             thread_id: thread_id.to_string(),
             cwd,
             approval_policy,
@@ -561,8 +561,8 @@ impl App {
         self.enqueue_server_operation(
             server,
             thread_id,
-            super::super::turn_submissions::ServerOperation::Mutation(
-                super::super::turn_submissions::ThreadMutation::Settings(Box::new(params)),
+            turn_submissions::ServerOperation::Mutation(
+                turn_submissions::ThreadMutation::Settings(Box::new(params)),
             ),
         );
     }
@@ -587,7 +587,7 @@ impl App {
             return;
         }
         let preset = auto_review_mode();
-        let params = codex_app_server_protocol::ThreadSettingsUpdateParams {
+        let params = ThreadSettingsUpdateParams {
             thread_id: thread_id.to_string(),
             approval_policy: approval_policy_from_effective_config(effective_config),
             approvals_reviewer: approvals_reviewer_from_effective_config(effective_config)
@@ -598,8 +598,8 @@ impl App {
         self.enqueue_server_operation(
             server,
             thread_id,
-            super::super::turn_submissions::ServerOperation::Mutation(
-                super::super::turn_submissions::ThreadMutation::Settings(Box::new(params)),
+            turn_submissions::ServerOperation::Mutation(
+                turn_submissions::ThreadMutation::Settings(Box::new(params)),
             ),
         );
     }

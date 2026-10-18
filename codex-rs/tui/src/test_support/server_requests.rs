@@ -3,9 +3,9 @@
 use crate::app_server_session::typed_requests::SessionRpc;
 
 pub(crate) async fn thread_goal_get(
-    server: &crate::app_server_session::AppServerSession,
-    thread_id: codex_protocol::ThreadId,
-) -> color_eyre::Result<codex_app_server_protocol::ThreadGoalGetResponse> {
+    server: &AppServerSession,
+    thread_id: ThreadId,
+) -> Result<codex_app_server_protocol::ThreadGoalGetResponse> {
     use codex_app_server_protocol::RequestId;
     use codex_app_server_protocol::ThreadGoalGetParams;
     Ok(server
@@ -20,12 +20,12 @@ pub(crate) async fn thread_goal_get(
 }
 
 pub(crate) async fn thread_goal_set(
-    server: &crate::app_server_session::AppServerSession,
-    thread_id: codex_protocol::ThreadId,
+    server: &AppServerSession,
+    thread_id: ThreadId,
     objective: Option<String>,
     status: Option<codex_app_server_protocol::ThreadGoalStatus>,
     token_budget: Option<Option<i64>>,
-) -> color_eyre::Result<codex_app_server_protocol::ThreadGoalSetResponse> {
+) -> Result<codex_app_server_protocol::ThreadGoalSetResponse> {
     use codex_app_server_protocol::RequestId;
     use codex_app_server_protocol::ThreadGoalMutationOrigin;
     use codex_app_server_protocol::ThreadGoalSetParams;

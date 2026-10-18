@@ -72,7 +72,7 @@ fn durable_state_dir() -> Option<PathBuf> {
     }
 }
 
-/// Parity boundary with Jira-at-home ProjectLayout::bind. Git administrative paths
+/// Parity boundary with Jira-at-home `ProjectLayout::bind`. Git administrative paths
 /// may legitimately leave the checkout; issue storage paths may never follow links.
 fn project_identity(cwd: &Path) -> std::io::Result<PathBuf> {
     let canonical = cwd.canonicalize()?;

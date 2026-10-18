@@ -37,6 +37,7 @@ impl EmbeddedNetworkPolicy {
     }
 
     /// Attaches the live application policy before an environment can start connecting.
+    #[must_use]
     pub fn bind(
         &self,
         factory: codex_http_client::HttpClientFactory,
@@ -65,6 +66,7 @@ impl EmbeddedNetworkPolicy {
     }
 
     /// Limits cloud discovery and each authentication request to their exact local-policy endpoints.
+    #[must_use]
     pub fn bind_bootstrap_auth(
         &self,
         mut auth: codex_login::AuthConfig,
@@ -95,6 +97,7 @@ impl EmbeddedNetworkPolicy {
 }
 
 /// Destinations that application requirements allow.
+#[must_use]
 pub fn destination_policy(application: Option<&ApplicationRequirementsToml>) -> DestinationPolicy {
     match application.and_then(|application| application.network.as_ref()) {
         Some(network) if network.enabled => DestinationPolicy::Restricted {

@@ -133,15 +133,12 @@ impl Shimmer for Rubik {
             }
         };
         row.mark = [0, 4]
-            .map(|first| match flash {
-                Some(flash) => Ink::of('█').fg(flash),
-                None => {
-                    let bits = (0..4)
-                        .filter(|&q| !stickers[first + q])
-                        .map(|q| QUADRANT_BITS[q])
-                        .sum::<usize>();
-                    Ink::of(QUADRANTS[bits]).fg(dim(a)).bg(dim(b))
-                }
+            .map(|first| if let Some(flash) = flash { Ink::of('█').fg(flash) } else {
+                let bits = (0..4)
+                    .filter(|&q| !stickers[first + q])
+                    .map(|q| QUADRANT_BITS[q])
+                    .sum::<usize>();
+                Ink::of(QUADRANTS[bits]).fg(dim(a)).bg(dim(b))
             })
             .to_vec();
         row.header = stage.letters(|i, _| match flash {

@@ -4,7 +4,7 @@ use super::*;
 
 impl FrameScheduler {
     pub(super) async fn run_prepared(mut self) {
-        const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
+        const ONE_YEAR: Duration = Duration::from_hours(8760);
         let mut deadlines: [Option<Instant>; 3] = [None; 3];
         loop {
             let target = deadlines
@@ -28,7 +28,7 @@ impl FrameScheduler {
                     // sleep branch, coalescing multiple requests into a single draw.
                     continue;
                 }
-                _ = &mut deadline => {
+                () = &mut deadline => {
                     // The timer can be ready alongside queued requests. Drain a bounded
                     // burst before emitting, rather than painting after the first request
                     // and then again for the rest of the same burst.

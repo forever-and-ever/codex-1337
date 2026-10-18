@@ -168,7 +168,7 @@ impl InputQueue {
                 return;
             }
             tokio::select! {
-                _ = changed => {}
+                () = changed => {}
                 result = active.changed() => {
                     let execution = *active.borrow();
                     if result.is_err() || execution.active < 2
@@ -179,7 +179,7 @@ impl InputQueue {
                     // Also retry ordinary-mail admission when execution capacity is released.
                     return;
                 }
-                _ = async {
+                () = async {
                     match batch {
                         Some((deadline, _)) => sleep_until(deadline).await,
                         None => std::future::pending().await,

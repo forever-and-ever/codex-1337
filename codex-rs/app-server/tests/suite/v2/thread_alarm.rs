@@ -115,7 +115,7 @@ impl AlarmApp {
                         anyhow::bail!("{method}: {}", error.error.message)
                     }
                     JSONRPCMessage::Notification(notification) => {
-                        self.pending.push_back(notification)
+                        self.pending.push_back(notification);
                     }
                     message => anyhow::bail!("unexpected daemon message: {message:?}"),
                 }
@@ -139,7 +139,7 @@ impl AlarmApp {
                 }
                 match self.message().await? {
                     JSONRPCMessage::Notification(notification) => {
-                        self.pending.push_back(notification)
+                        self.pending.push_back(notification);
                     }
                     message => anyhow::bail!("unexpected daemon message: {message:?}"),
                 }

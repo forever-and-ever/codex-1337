@@ -33,7 +33,7 @@ pub(super) struct DirectoryInput {
     source_cwd: AbsolutePathBuf,
     cwd: AbsolutePathBuf,
     permissions: PermissionAuthority,
-    input: Option<crate::chatwidget::ThreadInputState>,
+    input: Option<ThreadInputState>,
     latest_turn_id: Option<String>,
     history: DirectoryHistory,
     tracked: Vec<ThreadId>,
@@ -65,7 +65,7 @@ pub(super) struct DirectoryReady {
 
 pub(super) struct DirectoryReplacement {
     ready: DirectoryReady,
-    started: crate::app_server_session::AppServerStartedThread,
+    started: AppServerStartedThread,
 }
 
 pub(super) struct DirectoryTrustAdmission {
@@ -177,7 +177,7 @@ enum DirectoryOutcome {
     Status(Result<(), String>),
     Acquired(PreparedSession),
     Detached(detach::DetachReceipt),
-    Hooks(Result<api::HooksListEntry, String>),
+    Hooks(Result<HooksListEntry, String>),
     Terminated,
 }
 
@@ -191,7 +191,7 @@ async fn terminals(
         let result = preparation::request(
             RequestPolicy::Interactive,
             handle,
-            api::ClientRequest::ThreadBackgroundTerminalsList {
+            ClientRequest::ThreadBackgroundTerminalsList {
                 request_id: api::RequestId::String(format!(
                     "tui-directory-{id}-{thread_id}-terminals"
                 )),
@@ -590,7 +590,7 @@ impl App {
                     .permissions
                     .active_permission_profile()
                     .is_some_and(|profile| {
-                        profile.id == codex_protocol::models::BUILT_IN_PERMISSION_PROFILE_WORKSPACE
+                        profile.id == BUILT_IN_PERMISSION_PROFILE_WORKSPACE
                     }));
         if defaults {
             let cwd = context.input.cwd.to_path_buf();
@@ -904,7 +904,7 @@ impl App {
                 match result {
                     Ok(()) => {
                         self.acquire_directory_replacement(server, operation, ready)
-                            .await
+                            .await;
                     }
                     Err(error) => self.working_directory_error(error),
                 }
@@ -1032,23 +1032,7 @@ impl App {
                 let valid = matching
                     && fences.is_empty()
                     && self.directory_authority_matches(input, true).await;
-                if !valid {
-                    if matching {
-                        if fences.is_empty() {
-                            self.directory_detached_source();
-                        } else {
-                            self.working_directory_error("Directory detachment was not confirmed. Close and reopen this TUI to resynchronize; no detach was retried.");
-                        }
-                    }
-                    self.directory_cleanup(
-                        operation,
-                        handle,
-                        source,
-                        target,
-                        input.history,
-                        if same_epoch { fences } else { Vec::new() },
-                    );
-                } else {
+                if valid {
                     let history = input.history;
                     let DirectoryReplacement { ready, started } = *replacement;
                     let DirectoryReady {
@@ -1091,6 +1075,22 @@ impl App {
                                 DirectoryEffect::Hooks(cwd.to_path_buf()),
                             ));
                     }
+                } else {
+                    if matching {
+                        if fences.is_empty() {
+                            self.directory_detached_source();
+                        } else {
+                            self.working_directory_error("Directory detachment was not confirmed. Close and reopen this TUI to resynchronize; no detach was retried.");
+                        }
+                    }
+                    self.directory_cleanup(
+                        operation,
+                        handle,
+                        source,
+                        target,
+                        input.history,
+                        if same_epoch { fences } else { Vec::new() },
+                    );
                 }
             }
             (DirectoryStage::Hooks(thread_id), DirectoryOutcome::Hooks(result)) if matching => {
@@ -1099,7 +1099,7 @@ impl App {
                         Ok(hooks)
                             if hooks.hooks.iter().any(crate::hooks_rpc::hook_needs_review) =>
                         {
-                            self.chat_widget.open_hooks_browser(hooks)
+                            self.chat_widget.open_hooks_browser(hooks);
                         }
                         Ok(_) => {}
                         Err(error) => self
@@ -1114,7 +1114,7 @@ impl App {
                 }
                 match stage {
                     DirectoryStage::Acquiring(_) if same_epoch => {
-                        self.retain_navigation_uncertainty(operation, Vec::new(), false)
+                        self.retain_navigation_uncertainty(operation, Vec::new(), false);
                     }
                     DirectoryStage::Detaching { replacement, plan } => self.directory_cleanup(
                         operation,

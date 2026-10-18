@@ -87,7 +87,7 @@ impl ThreadManagerState {
                 .read()
                 .await
                 .get(&parent)
-                .map(|thread| {
+                .map_or(AccountInheritance::None, |thread| {
                     if thread.session.provider_id == config.model_provider_id {
                         AccountInheritance::SameProvider(
                             thread.session.services.auth_manager.clone(),
@@ -97,7 +97,6 @@ impl ThreadManagerState {
                         AccountInheritance::OtherProvider
                     }
                 })
-                .unwrap_or(AccountInheritance::None)
         } else {
             AccountInheritance::None
         };

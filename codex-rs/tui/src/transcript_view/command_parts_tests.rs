@@ -52,7 +52,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     assert!(live.contains("live auxiliary"));
     view.sync_live_tail(80, None, |_| None);
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell.clone())];
-    let assert_title_color = |buffer: &ratatui::buffer::Buffer, title: &str, active| {
+    let assert_title_color = |buffer: &Buffer, title: &str, active| {
         let text = tests::text(buffer);
         let (row, line) = text
             .lines()
@@ -90,7 +90,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     let retained_calls = crate::history_cell::invocation::collect(cells[0].as_ref());
     let retained_prepared = view.invocations.prepared(
         &retained_calls[0],
-        super::invocation::PreparationSource::Retained(&cells[0]),
+        invocation::PreparationSource::Retained(&cells[0]),
     );
     assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
     // Another call arriving must not evict an unchanged, already-open source pane.
@@ -104,7 +104,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &retained_prepared,
         &view.invocations.prepared(
             &retained_calls[0],
-            super::invocation::PreparationSource::Retained(&cells[0]),
+            invocation::PreparationSource::Retained(&cells[0]),
         )
     ));
     for _ in 0..3 {
@@ -720,7 +720,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &view
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         true,
         80,
         false,
@@ -739,7 +739,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &view
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         80,
         true,
         80,
@@ -767,7 +767,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 &call,
                 &view
                     .invocations
-                    .prepared(&call, super::invocation::PreparationSource::Uncached),
+                    .prepared(&call, invocation::PreparationSource::Uncached),
                 true,
                 width,
                 full,
@@ -831,7 +831,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &opaque
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         80,
         true,
         80,
@@ -886,7 +886,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         payload: ToolInputPayload::Text("echo sample".into()),
     });
     let key = |revision, tick| {
-        Some(crate::chatwidget::ActiveCellTranscriptKey {
+        Some(ActiveCellTranscriptKey {
             cacheable: true,
             revision,
             is_stream_continuation: false,
@@ -902,7 +902,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     }
     let prepared = reuse
         .invocations
-        .prepared(&call, super::invocation::PreparationSource::Live(11));
+        .prepared(&call, invocation::PreparationSource::Live(11));
     assert_eq!(prepared.work(), [1, 1, 0, 0]);
     reuse
         .invocations
@@ -941,7 +941,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     let updated_call = crate::history_cell::invocation::collect(&updated).remove(0);
     let changed = reuse.invocations.prepared(
         &updated_call,
-        super::invocation::PreparationSource::Live(12),
+        invocation::PreparationSource::Live(12),
     );
     assert!(!std::rc::Rc::ptr_eq(&prepared, &changed));
     assert_eq!(changed.work(), [1, 1, 1, 1]);
@@ -957,7 +957,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &changed,
         &reuse.invocations.prepared(
             &updated_call,
-            super::invocation::PreparationSource::Live(12),
+            invocation::PreparationSource::Live(12),
         )
     ));
     // A final delimiter remains copyable without becoming an extra painted row.
@@ -969,7 +969,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             payload: ToolInputPayload::Text(source.into()),
         };
         let lines = call.raw_input(Some(&input)).unwrap();
-        let layout = super::text::TextLayout::new(lines, 80);
+        let layout = TextLayout::new(lines, 80);
         assert_eq!(layout.text(), source);
         assert_eq!(layout.row_count(), source.lines().count());
         let narrow = layout.rewrap(6);

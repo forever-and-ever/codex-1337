@@ -1,4 +1,4 @@
-//! Checklist progress metadata, separate from the model's update_plan arguments.
+//! Checklist progress metadata, separate from the model's `update_plan` arguments.
 
 use crate::plan_tool::UpdatePlanArgs;
 use schemars::JsonSchema;

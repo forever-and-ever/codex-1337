@@ -39,6 +39,7 @@ impl AnthropicAuthContext {
         })
     }
 
+    #[must_use]
     pub fn discovery_account_id(&self) -> Option<&AccountId> {
         self.discovery_account.as_ref()
     }
@@ -96,6 +97,7 @@ impl AnthropicRequestAuth {
         })
     }
 
+    #[must_use]
     pub fn auth(&self) -> SharedAuthProvider {
         Arc::clone(&self.auth)
     }

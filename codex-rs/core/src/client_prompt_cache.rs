@@ -33,7 +33,7 @@ use tokio_util::sync::CancellationToken;
 /// Provider retention policy for passive estimates and supported keepalive replays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WarmingLore {
-    /// GPT-6-family OpenAI requests use the default 30-minute minimum retention.
+    /// GPT-6-family `OpenAI` requests use the default 30-minute minimum retention.
     /// This deployment adopts that window for API and subscription routes; passive estimates
     /// do not enable request replay.
     OpenAi,
@@ -43,15 +43,16 @@ pub enum WarmingLore {
 }
 
 impl WarmingLore {
+    #[must_use]
     pub fn lifetime(self) -> Duration {
         match self {
-            Self::OpenAi => Duration::from_secs(/*secs*/ 30 * 60),
+            Self::OpenAi => Duration::from_mins(/*secs*/ 30),
             Self::Claude {
                 ttl: AnthropicCacheTtl::FiveMinutes,
-            } => Duration::from_secs(/*secs*/ 5 * 60),
+            } => Duration::from_mins(/*secs*/ 5),
             Self::Claude {
                 ttl: AnthropicCacheTtl::OneHour,
-            } => Duration::from_secs(/*secs*/ 60 * 60),
+            } => Duration::from_hours(/*secs*/ 1),
         }
     }
 }
@@ -278,7 +279,7 @@ impl ModelClient {
             let mut dispatch = Some(dispatch);
             loop {
                 let event = tokio::select! {
-                    _ = dropped.cancelled() => break,
+                    () = dropped.cancelled() => break,
                     event = stream.next() => event,
                 };
                 let Some(event) = event else {
@@ -342,6 +343,7 @@ pub struct RequestStart {
 }
 
 impl RequestStart {
+    #[must_use]
     pub fn now() -> Self {
         Self {
             wall: SystemTime::now(),
@@ -349,10 +351,12 @@ impl RequestStart {
         }
     }
 
+    #[must_use]
     pub fn wall(self) -> SystemTime {
         self.wall
     }
 
+    #[must_use]
     pub fn age(self) -> Duration {
         self.monotonic
             .elapsed()

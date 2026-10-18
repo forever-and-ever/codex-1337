@@ -60,6 +60,7 @@ pub struct Model {
 }
 
 impl Model {
+    #[must_use]
     pub fn supports_tools(&self) -> bool {
         self.supported_parameters
             .iter()
@@ -99,6 +100,7 @@ impl TryFrom<String> for Price {
 }
 
 impl Price {
+    #[must_use]
     pub fn per_mtok(self) -> Usd {
         self.0
     }

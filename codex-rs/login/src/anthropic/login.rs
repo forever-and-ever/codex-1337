@@ -115,7 +115,7 @@ impl LoginAttempt {
             tokio::select! {
                 biased;
                 _ = callback_cancelled.wait_for(|cancelled| *cancelled) => Err(cancel_error()),
-                _ = tokio::time::sleep_until(deadline) => Err(timeout_error()),
+                () = tokio::time::sleep_until(deadline) => Err(timeout_error()),
                 result = callback::receive(listener, &callback_state) => result,
             }
         });
@@ -134,10 +134,12 @@ impl LoginAttempt {
         })
     }
 
+    #[must_use]
     pub fn authorization_url(&self) -> &str {
         &self.authorization_url
     }
 
+    #[must_use]
     pub fn cancel_handle(&self) -> LoginCancelHandle {
         self.cancel.clone()
     }
@@ -149,7 +151,7 @@ impl LoginAttempt {
         let result = tokio::select! {
             biased;
             _ = cancelled.wait_for(|cancelled| *cancelled) => Err(cancel_error()),
-            _ = tokio::time::sleep_until(self.deadline) => Err(timeout_error()),
+            () = tokio::time::sleep_until(self.deadline) => Err(timeout_error()),
             result = self.authorize() => result,
         };
         if let Some(callback) = self.callback.take() {

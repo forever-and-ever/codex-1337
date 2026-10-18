@@ -48,7 +48,7 @@ async fn provider_thread_starts_without_openai_account() -> Result<()> {
     let request = app
         .send_request("account/read", Some(json!({"threadId": started.thread.id})))
         .await?;
-    let account: codex_app_server_protocol::GetAccountResponse =
+    let account: GetAccountResponse =
         timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
     assert_eq!(account.account_id, None);
     assert_eq!(account.account, None);
@@ -503,7 +503,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
             }
         }
     );
-    let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed_attempts = attempts.clone();
     Mock::given(method("POST"))
         .and(path("/api/codex/rate-limit-reset-credits/consume"))
@@ -912,7 +912,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         app.read_stream_until_request_message(),
     )
     .await??;
-    let codex_app_server_protocol::ServerRequest::ToolRequestUserInput {
+    let ServerRequest::ToolRequestUserInput {
         request_id: tool_id,
         ..
     } = tool
@@ -1045,11 +1045,11 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
         )
         .await??;
         let (thread_id, request_id) = match request {
-            codex_app_server_protocol::ServerRequest::ToolRequestUserInput {
+            ServerRequest::ToolRequestUserInput {
                 request_id,
                 params,
             } => (params.thread_id, request_id),
-            codex_app_server_protocol::ServerRequest::CommandExecutionRequestApproval {
+            ServerRequest::CommandExecutionRequestApproval {
                 request_id,
                 params,
             } => (params.thread_id, request_id),
@@ -1262,7 +1262,7 @@ async fn conversation_accounts_survive_selection_login_and_fork() -> Result<()> 
                         .as_ref()
                         .is_some_and(|params| params["threadId"] == legacy.thread.id) =>
             {
-                root_idle = true
+                root_idle = true;
             }
             codex_app_server_protocol::JSONRPCMessage::Request(request)
                 if request.method == "item/commandExecution/requestApproval" =>

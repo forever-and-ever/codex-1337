@@ -11,10 +11,10 @@ use codex_app_server_protocol::ThreadRevertResponse;
 use tokio::sync::oneshot;
 
 pub(super) struct PendingRevert {
-    id: uuid::Uuid,
+    id: Uuid,
     thread_id: ThreadId,
     epoch: u64,
-    store: Arc<tokio::sync::Mutex<ThreadEventStore>>,
+    store: Arc<Mutex<ThreadEventStore>>,
     selected_cell: Arc<dyn HistoryCell>,
     latest_turn_id: Option<String>,
     prompt: Option<UserMessage>,
@@ -112,7 +112,7 @@ impl App {
             )
         };
         let nth_user_message = crate::app_backtrack::user_count(&self.transcript_cells[..index]);
-        let id = uuid::Uuid::new_v4();
+        let id = Uuid::new_v4();
         self.chat_widget
             .set_prompt_revert_notice(Some("Reverting…"));
         let original_prompt = prompt.clone();
@@ -170,7 +170,7 @@ impl App {
     pub(super) async fn prompt_revert_prepared(
         &mut self,
         server: &mut AppServerSession,
-        id: uuid::Uuid,
+        id: Uuid,
         result: Result<RevertSelection, String>,
     ) {
         if self
@@ -233,7 +233,7 @@ impl App {
                     params: ThreadRevertParams { thread_id: thread_id.to_string(), before_turn_id },
                 }).await.map_err(|error| {
                     // Only pre-mutation validation errors prove history is unchanged.
-                    if matches!(&error, codex_app_server_client::TypedRequestError::Server { source, .. } if !matches!(source.code, -32602..=-32600)) {
+                    if matches!(&error, TypedRequestError::Server { source, .. } if !matches!(source.code, -32602..=-32600)) {
                         revert_transport_error(std::io::ErrorKind::Other, error.to_string())
                     } else { error }
                 })?;
@@ -244,7 +244,7 @@ impl App {
             },
             move |app, _, result| {
                 let result = result.map_err(|failure| RevertFailure {
-                    uncertain: !matches!(failure, super::turn_submissions::SubmissionFailure::Rejected(_)),
+                    uncertain: !matches!(failure, turn_submissions::SubmissionFailure::Rejected(_)),
                     message: failure.to_string(),
                 });
                 app.app_event_tx.send(AppEvent::PromptRevertFinished { id, result });
@@ -279,7 +279,7 @@ impl App {
         use super::turn_submissions::DraftOrigin;
         use super::turn_submissions::SubmissionDraft;
         let drafts = vec![SubmissionDraft {
-            client_id: uuid::Uuid::new_v4().to_string(),
+            client_id: Uuid::new_v4().to_string(),
             message: prompt,
             origin: DraftOrigin::Message {
                 source: crate::chatwidget::UserMessageSource::Prompt,
@@ -340,7 +340,7 @@ impl App {
         clippy::expect_used,
         reason = "The matching pending prompt edit was checked before taking it."
     )]
-    pub(super) async fn reconcile_prompt_revert(&mut self, id: uuid::Uuid) {
+    pub(super) async fn reconcile_prompt_revert(&mut self, id: Uuid) {
         if self
             .pending_revert
             .as_ref()
@@ -396,7 +396,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
-        id: uuid::Uuid,
+        id: Uuid,
         result: Result<ThreadRevertResponse, RevertFailure>,
     ) -> Result<()> {
         if self
@@ -530,8 +530,8 @@ impl App {
 fn revert_transport_error(
     kind: std::io::ErrorKind,
     message: impl Into<String>,
-) -> codex_app_server_client::TypedRequestError {
-    codex_app_server_client::TypedRequestError::Transport {
+) -> TypedRequestError {
+    TypedRequestError::Transport {
         method: "thread/revert".into(),
         source: std::io::Error::new(kind, message.into()),
     }

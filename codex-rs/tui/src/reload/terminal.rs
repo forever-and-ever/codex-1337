@@ -22,8 +22,8 @@ pub(super) struct RealTerminal {
 impl RealTerminal {
     pub(super) fn suspend(&self) -> io::Result<()> {
         crossterm::terminal::disable_raw_mode()?;
-        std::io::stdout().write_all(RESET_TERMINAL)?;
-        std::io::stdout().flush()?;
+        io::stdout().write_all(RESET_TERMINAL)?;
+        io::stdout().flush()?;
         // Do not leave the shell's shared open-file descriptions nonblocking.
         // SAFETY: both descriptors remain owned throughout suspension.
         unsafe {
@@ -93,7 +93,7 @@ impl Drop for RealTerminal {
             );
         }
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = std::io::stdout().write_all(RESET_TERMINAL);
-        let _ = std::io::stdout().flush();
+        let _ = io::stdout().write_all(RESET_TERMINAL);
+        let _ = io::stdout().flush();
     }
 }

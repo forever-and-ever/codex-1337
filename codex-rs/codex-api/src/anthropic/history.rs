@@ -96,8 +96,8 @@ pub(super) struct Encoder<'a> {
     pending: Vec<(String, CallKind)>,
     /// Content recorded while the open batch awaited results. Canonical history is
     /// chronological, and hosts record goal updates and delegation receipts the moment they
-    /// are accepted, even during a long tool call. A tool_result must directly answer its
-    /// tool_use, so this content follows the completed batch, where the model could first
+    /// are accepted, even during a long tool call. A `tool_result` must directly answer its
+    /// `tool_use`, so this content follows the completed batch, where the model could first
     /// have observed it.
     deferred: Vec<Message>,
 }

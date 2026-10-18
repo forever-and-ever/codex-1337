@@ -8,7 +8,7 @@
 //! plain prose: a directly following setext underline (===/---), and a late pipe that makes
 //! the current line table-eligible. A pipe freezes that line until its structure is known.
 //! Canonical replacement resolves both, rather than delaying every paragraph until a blank line.
-//! Safe complete words on an unterminated prose line wrap with the final renderer's FirstFit:
+//! Safe complete words on an unterminated prose line wrap with the final renderer's `FirstFit`:
 //! completed rows never roll; only the last row grows. Source parsing and unresolved-block
 //! rendering run on the worker, never in the delta handler or paint path.
 //!
@@ -37,7 +37,7 @@ use std::time::Instant;
 
 pub(super) enum Rows {
     Inline(Vec<HyperlinkLine>),
-    Shared(crate::history_cell::SharedRows),
+    Shared(history_cell::SharedRows),
 }
 impl Rows {
     pub(super) fn is_empty(&self) -> bool {
@@ -110,7 +110,7 @@ enum Work {
 pub(crate) struct Background {
     work: Work,
     commands: Vec<Command>,
-    lines: VecDeque<crate::history_cell::RowChunk>,
+    lines: VecDeque<history_cell::RowChunk>,
     queued: usize,
     tail: Vec<HyperlinkLine>,
     lane: Lane,
@@ -185,7 +185,7 @@ impl Background {
                 }
                 self.queued += lines.rows.len();
                 if !lines.rows.is_empty() {
-                    self.lines.push_back(crate::history_cell::RowChunk {
+                    self.lines.push_back(history_cell::RowChunk {
                         range: 0..lines.rows.len(),
                         rows: lines.rows,
                     });
@@ -255,9 +255,9 @@ impl Background {
         clippy::expect_used,
         reason = "A chunk selected from the exclusively borrowed queue remains at its front until removed."
     )]
-    fn drain(&mut self, max: usize) -> crate::history_cell::SharedRows {
+    fn drain(&mut self, max: usize) -> history_cell::SharedRows {
         self.poll();
-        let mut rows = crate::history_cell::SharedRows::default();
+        let mut rows = history_cell::SharedRows::default();
         while rows.len() < max {
             let Some(chunk) = self.lines.front_mut() else {
                 break;
@@ -266,7 +266,7 @@ impl Background {
             if count == chunk.range.len() {
                 rows.push(self.lines.pop_front().expect("front chunk"));
             } else {
-                rows.push(crate::history_cell::RowChunk {
+                rows.push(history_cell::RowChunk {
                     rows: Arc::clone(&chunk.rows),
                     range: chunk.range.start..chunk.range.start + count,
                 });
@@ -366,7 +366,7 @@ impl Core {
                     }
                     background.queued += ready.rows.len();
                     if !ready.rows.is_empty() {
-                        background.lines.push_back(crate::history_cell::RowChunk {
+                        background.lines.push_back(history_cell::RowChunk {
                             range: 0..ready.rows.len(),
                             rows: ready.rows,
                         });
@@ -386,20 +386,20 @@ impl Core {
 
     pub(super) fn wrap_rows(
         &self,
-        rows: crate::history_cell::SharedRows,
-        projection: crate::history_cell::RowProjection,
+        rows: history_cell::SharedRows,
+        projection: history_cell::RowProjection,
         item_id: Option<String>,
         reserved: usize,
-    ) -> Box<dyn crate::history_cell::HistoryCell> {
+    ) -> Box<dyn HistoryCell> {
         let Self::Background(core) = self else {
             unreachable!("shared rows belong to prepared streams");
         };
-        Box::new(crate::history_cell::StreamRowsCell {
+        Box::new(history_cell::StreamRowsCell {
             mode: core.mode,
             width: core.width,
             reserved,
             item_id,
-            content: crate::history_cell::StreamRowContent::Shared { rows, projection },
+            content: history_cell::StreamRowContent::Shared { rows, projection },
         })
     }
 

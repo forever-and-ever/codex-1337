@@ -130,8 +130,8 @@ fn peer(fd: i32) -> io::Result<libc::ucred> {
             fd,
             libc::SOL_SOCKET,
             libc::SO_PEERCRED,
-            (&mut cred as *mut libc::ucred).cast(),
-            &mut size,
+            (&raw mut cred).cast(),
+            &raw mut size,
         )
     };
     if result != 0 {

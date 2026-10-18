@@ -232,7 +232,9 @@ impl CodexThread {
                 // Automatic captures locally before catalog I/O so settings and history
                 // retain one checkpoint boundary. A fresh route discards both the history
                 // and any read error; mandatory persistence errors above still reject it.
-                let history = if request.mode != FarmMode::Fresh {
+                let history = if request.mode == FarmMode::Fresh {
+                    None
+                } else {
                     Some(
                         async {
                             let state = self.session.services.local_agent_runtime.upgrade()?;
@@ -253,8 +255,6 @@ impl CodexThread {
                         }
                         .await,
                     )
-                } else {
-                    None
                 };
                 (turn, history)
             };

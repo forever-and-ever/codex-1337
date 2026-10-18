@@ -8,7 +8,7 @@ fn stalled_and_rejected_workers_share_the_original_deadline() {
     assert_eq!(stalled.poll(start + CANDIDATE), Transition::Rollback);
     assert_eq!(
         stalled.poll(start + CANDIDATE),
-        Transition::Wait(TOTAL - CANDIDATE)
+        Transition::Wait(TOTAL.checked_sub(CANDIDATE).unwrap())
     );
     assert_eq!(stalled.poll(start + TOTAL), Transition::Failed);
 

@@ -267,10 +267,10 @@ impl HeaderPreparation {
 
     pub(super) fn render(
         &self,
-        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
+        output_tokens: &tool_output_tokens::ToolOutputTokens,
         expanded: &HashSet<String>,
         mode: OutputMode,
-        invocations: &super::invocation::Invocations,
+        invocations: &invocation::Invocations,
         full: bool,
         width: u16,
     ) -> HeaderRows {
@@ -479,13 +479,10 @@ impl FeedIndex {
             let mut opens = Vec::new();
             for node in &cell_nodes[index] {
                 let name = names[*node];
-                let position = match items[item].steps.iter().position(|step| step == name) {
-                    Some(position) => position,
-                    None => {
-                        items[item].steps.push(name.to_string());
-                        opens.push(items[item].steps.len() - 1);
-                        items[item].steps.len() - 1
-                    }
+                let position = if let Some(position) = items[item].steps.iter().position(|step| step == name) { position } else {
+                    items[item].steps.push(name.to_string());
+                    opens.push(items[item].steps.len() - 1);
+                    items[item].steps.len() - 1
                 };
                 steps.push(position);
             }
@@ -622,7 +619,7 @@ impl FeedIndex {
             return item.segments.iter().flatten().any(|index| {
                 cells[*index]
                     .as_any()
-                    .is::<crate::history_cell::CodeModeCell>()
+                    .is::<CodeModeCell>()
             });
         }
         let content_width =
@@ -879,10 +876,10 @@ impl FeedIndex {
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
-        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
+        output_tokens: &tool_output_tokens::ToolOutputTokens,
         expanded: &HashSet<String>,
         mode: OutputMode,
-        invocations: &super::invocation::Invocations,
+        invocations: &invocation::Invocations,
         full: bool,
         width: u16,
     ) -> HeaderRows {
@@ -910,7 +907,7 @@ impl FeedIndex {
             if header.disclosure.unfolded() {
                 let source = match header.title {
                     Title::Owned(index) => {
-                        super::invocation::PreparationSource::Retained(&cells[index])
+                        invocation::PreparationSource::Retained(&cells[index])
                     }
                     _ => unreachable!("invocation header requires an owned source"),
                 };
@@ -1072,7 +1069,7 @@ impl FeedIndex {
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         bills: &StepBills,
-        output_tokens: &super::tool_output_tokens::ToolOutputTokens,
+        output_tokens: &tool_output_tokens::ToolOutputTokens,
     ) -> Option<Figures> {
         let item = &self.items[header.item];
         let cell = header.scope.first().and_then(|index| cells.get(*index));
@@ -1326,8 +1323,8 @@ const SPLIT: [usize; 3] = [5, 5, 7];
 const SPLIT_WIDTH: usize = 2 * SPLIT.len() + SPLIT[0] + SPLIT[1] + SPLIT[2];
 /// What the split's columns hold, said after them.
 const LEGEND: &str = "(thought, output, self)";
-const MIN_TITLE: usize = 16 + super::invocation::CONTROL_COLUMNS;
-const MAX_TITLE: usize = 48 + super::invocation::CONTROL_COLUMNS;
+const MIN_TITLE: usize = 16 + invocation::CONTROL_COLUMNS;
+const MAX_TITLE: usize = 48 + invocation::CONTROL_COLUMNS;
 
 /// How far a header's figures reach along its row.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1590,7 +1587,7 @@ impl TranscriptView {
                 row_bias: row,
             });
         }
-        self.disclosure.focused = Some(super::disclosure::ActivityFocus {
+        self.disclosure.focused = Some(disclosure::ActivityFocus {
             ids: self.activity_ids(cells, site),
             target,
         });

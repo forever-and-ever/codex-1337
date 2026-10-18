@@ -13,8 +13,7 @@ pub(crate) fn alarm_label(alarm: &AlarmSummary) -> String {
 }
 
 fn clock_label(at: i64) -> String {
-    DateTime::from_timestamp_millis(at)
-        .map(|time| {
+    DateTime::from_timestamp_millis(at).map_or_else(|| at.to_string(), |time| {
             let time = time.with_timezone(&Local);
             let format = if time.date_naive() == Local::now().date_naive() {
                 "%H:%M"
@@ -23,7 +22,6 @@ fn clock_label(at: i64) -> String {
             };
             time.format(format).to_string()
         })
-        .unwrap_or_else(|| at.to_string())
 }
 
 pub(crate) fn alarm_detail(alarm: &AlarmSummary) -> String {

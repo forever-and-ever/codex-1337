@@ -263,7 +263,7 @@ fn interleaved_tools_signed_blocks_and_cumulative_usage() {
     let mut output = Vec::new();
     let mut tool_deltas = Vec::new();
     let mut addressed_deltas = Vec::new();
-    let mut reconstructed = std::collections::BTreeMap::<ResponseItemId, String>::new();
+    let mut reconstructed = BTreeMap::<ResponseItemId, String>::new();
     let mut usage = None;
     for frame in frames {
         for event in decoder.decode(&frame.to_string()).unwrap() {

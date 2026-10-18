@@ -16,8 +16,8 @@ impl App {
             let generation = self.navigation_generation();
             self.request_server_prepared(
                 app_server,
-                super::super::turn_submissions::ui_requests::UiRequestScope::Connection,
-                super::super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+                turn_submissions::ui_requests::UiRequestScope::Connection,
+                turn_submissions::ui_requests::UiRequestKind::ReadOnly,
                 "Waiting for directory-change settings",
                 move |app, _| {
                     let current = app.current_displayed_thread_id() == Some(thread_id)

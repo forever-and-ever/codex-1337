@@ -298,23 +298,20 @@ impl TurnRequestProcessor {
                     })
                     .map(|cached| cached.state.clone())
             };
-            let state = match cached {
-                Some(state) => state,
-                None => {
-                    let state = fetch_state(&client, &key.path)
-                        .await
-                        .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
-                    self.openrouter_key_cache.0.lock().await.insert(
-                        key.name.clone(),
-                        CachedKeyStatus {
-                            path: key.path.clone(),
-                            base_url: url.to_owned(),
-                            at: Instant::now(),
-                            state: state.clone(),
-                        },
-                    );
-                    state
-                }
+            let state = if let Some(state) = cached { state } else {
+                let state = fetch_state(&client, &key.path)
+                    .await
+                    .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
+                self.openrouter_key_cache.0.lock().await.insert(
+                    key.name.clone(),
+                    CachedKeyStatus {
+                        path: key.path.clone(),
+                        base_url: url.to_owned(),
+                        at: Instant::now(),
+                        state: state.clone(),
+                    },
+                );
+                state
             };
             statuses.push(OpenRouterKeyStatus { key, state });
         }
@@ -610,7 +607,7 @@ impl TurnRequestProcessor {
         let default_saved = apply(config, [default_key(&name)])
             .await
             .map_err(|error| {
-                tracing::warn!(code = error.code, "Cannot save default OpenRouter key")
+                tracing::warn!(code = error.code, "Cannot save default OpenRouter key");
             })
             .is_ok();
         Ok(Some(

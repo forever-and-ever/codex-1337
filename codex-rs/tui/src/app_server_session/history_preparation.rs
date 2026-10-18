@@ -210,7 +210,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     turn_cursor: Option<String>,
     item_cursor: Option<String>,
     config: Option<&Config>,
-    local_settings: Option<&crate::local_settings::LocalSettings>,
+    local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
 ) -> (Result<()>, HistoryPaginationUpdate) {
     prepare_history_with_progress(
@@ -234,7 +234,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
     turn_cursor: Option<String>,
     item_cursor: Option<String>,
     config: Option<&Config>,
-    local_settings: Option<&crate::local_settings::LocalSettings>,
+    local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
     progress: &(dyn Fn() + Send + Sync),
 ) -> (Result<()>, HistoryPaginationUpdate) {

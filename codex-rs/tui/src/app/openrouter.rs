@@ -37,7 +37,7 @@ impl App {
             },
             Event::KeyNameSubmitted { thread_id, input } => match input.parse() {
                 Ok(name) => {
-                    self.handle_openrouter_event(server, Event::KeyPathPrompt { thread_id, name })
+                    self.handle_openrouter_event(server, Event::KeyPathPrompt { thread_id, name });
                 }
                 Err(error) => self.chat_widget.openrouter_key_name_prompt(
                     thread_id,
@@ -53,7 +53,7 @@ impl App {
                 thread_id,
                 name,
                 input,
-            } => match codex_utils_absolute_path::AbsolutePathBuf::try_from(input.as_str()) {
+            } => match AbsolutePathBuf::try_from(input.as_str()) {
                 Ok(path) => self.handle_openrouter_event(
                     server,
                     Event::Request(Request::AddKey {
@@ -75,11 +75,11 @@ impl App {
             },
             Event::AddModel { menu } => {
                 self.chat_widget
-                    .openrouter_model_prompt(menu, String::new(), None)
+                    .openrouter_model_prompt(menu, String::new(), None);
             }
             Event::KeyNamePrompt { thread_id } => {
                 self.chat_widget
-                    .openrouter_key_name_prompt(thread_id, String::new(), None)
+                    .openrouter_key_name_prompt(thread_id, String::new(), None);
             }
             Event::KeyPathPrompt { thread_id, name } => self
                 .chat_widget
@@ -88,7 +88,7 @@ impl App {
                 .chat_widget
                 .openrouter_remove_key_confirm(thread_id, name),
             Event::Request(request) => {
-                let id = uuid::Uuid::new_v4();
+                let id = Uuid::new_v4();
                 let thread_id = self.current_displayed_thread_id();
                 if !self.chat_widget.start_openrouter_request(id, &request) {
                     return;
@@ -279,7 +279,7 @@ impl App {
                             .refresh_openrouter_status(StatusRefresh::Now);
                     }
                     (request, Err(error)) => {
-                        self.chat_widget.show_openrouter_failure(request, error)
+                        self.chat_widget.show_openrouter_failure(request, error);
                     }
                     (_, Ok(_)) => self
                         .chat_widget

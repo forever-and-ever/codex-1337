@@ -11,9 +11,9 @@ const LOCAL_COMPLETION_CAPACITY: usize = 64;
 pub(super) enum LocalThreadCompletion {
     Submission {
         thread_id: ThreadId,
-        id: uuid::Uuid,
+        id: Uuid,
         epoch: u64,
-        outcome: Box<super::turn_submissions::SubmissionOutcome>,
+        outcome: Box<turn_submissions::SubmissionOutcome>,
     },
     HistoryLookup {
         thread_id: ThreadId,
@@ -29,7 +29,7 @@ pub(super) enum LocalThreadCompletion {
         thread_id: ThreadId,
         server_name: String,
         request_id: AppServerRequestId,
-        attempt_id: uuid::Uuid,
+        attempt_id: Uuid,
         result: Result<UserVerificationProof, String>,
     },
 }

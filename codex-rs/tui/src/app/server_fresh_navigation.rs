@@ -79,7 +79,7 @@ enum FreshOutcome {
 enum FreshEffect {
     Defaults {
         cwd: PathBuf,
-        config: Box<super::navigation_config::ConfigRebuild>,
+        config: Box<navigation_config::ConfigRebuild>,
     },
     Start(Box<StartPreparation>),
     Name {
@@ -152,7 +152,7 @@ impl App {
 
     pub(in crate::app) async fn enqueue_parked_draft_restore(&mut self, server: &AppServerSession) {
         let plan = self
-            .prepare_detach_plan(detach::DetachScope::Navigation { destination: None })
+            .prepare_detach_plan(DetachScope::Navigation { destination: None })
             .await;
         self.enqueue_navigation(
             server,
@@ -305,7 +305,7 @@ impl App {
         ready: Box<FreshReady>,
     ) {
         let plan = self
-            .prepare_detach_plan(detach::DetachScope::Navigation {
+            .prepare_detach_plan(DetachScope::Navigation {
                 destination: Some(ready.started.session.thread_id),
             })
             .await;
@@ -493,7 +493,7 @@ impl App {
                     Err(error) => {
                         ready.name_error = Some(format!(
                             "Failed to name the new session: {error}. No name write was retried."
-                        ))
+                        ));
                     }
                 }
                 self.detach_for_fresh_commit(server, operation, ready).await;
@@ -549,7 +549,7 @@ impl App {
                             false,
                         ),
                     FreshStage::Starting(_) if same_epoch => {
-                        self.retain_navigation_uncertainty(operation, Vec::new(), false)
+                        self.retain_navigation_uncertainty(operation, Vec::new(), false);
                     }
                     FreshStage::Naming(ready) => self.start_navigation_cleanup(
                         operation,

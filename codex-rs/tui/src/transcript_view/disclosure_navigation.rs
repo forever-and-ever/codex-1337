@@ -31,7 +31,7 @@ impl TranscriptView {
     pub(super) fn resume_fold_navigation(&mut self) {
         let source = std::mem::replace(
             &mut self.layout_source,
-            super::presented::LayoutSource::Presented,
+            presented::LayoutSource::Presented,
         );
         for _ in 0..8 {
             let Some((cells, index, action)) = self.deferred_folds.pop_front() else {

@@ -73,7 +73,7 @@ impl App {
             .model_reasoning_effort
             .as_ref()
             .and_then(|effort| serde_json::to_value(effort).ok());
-        super::startup::spawn_startup_thread_start(
+        startup::spawn_startup_thread_start(
             server,
             self.local_settings.clone(),
             self.config.clone(),

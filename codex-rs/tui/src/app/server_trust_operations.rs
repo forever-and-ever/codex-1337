@@ -8,7 +8,7 @@ use codex_app_server_client::TypedRequestError;
 enum TrustConsent {
     Resume(Box<ResumeTrustConsent>),
     DirectoryChange(Box<directory::DirectoryTrustAdmission>),
-    Dashboard(Box<crate::app::agents_overview::trust::DashboardTrustAdmission>),
+    Dashboard(Box<agents_overview::trust::DashboardTrustAdmission>),
 }
 
 pub(super) enum ResumeTrustConsent {
@@ -67,7 +67,7 @@ impl TrustOperation {
         match &*self.consent {
             TrustConsent::Resume(consent) => match consent.as_ref() {
                 ResumeTrustConsent::Directory { consent, .. } => {
-                    consent.clone().send(handle, id).await?
+                    consent.clone().send(handle, id).await?;
                 }
                 ResumeTrustConsent::Hooks { updates, .. } => {
                     write_hook_trusts_typed(handle, updates.clone()).await?;
@@ -75,7 +75,7 @@ impl TrustOperation {
             },
             TrustConsent::Dashboard(consent) => consent.send(handle, id).await?,
             TrustConsent::DirectoryChange(consent) => {
-                consent.consent.clone().send(handle, id).await?
+                consent.consent.clone().send(handle, id).await?;
             }
         }
         Ok(OperationReceipt::TrustSaved)
@@ -86,7 +86,7 @@ impl App {
     pub(in crate::app) fn admit_dashboard_trust(
         &mut self,
         server: &AppServerSession,
-        consent: crate::app::agents_overview::trust::DashboardTrustAdmission,
+        consent: agents_overview::trust::DashboardTrustAdmission,
     ) {
         self.enqueue_connection_operation(
             server,

@@ -310,7 +310,7 @@ impl App {
             if let Err(error) = self
                 .chat_widget
                 .set_permission_profile_from_session_snapshot(
-                    crate::legacy_core::config::PermissionProfileSnapshot::from_session_snapshot(
+                    PermissionProfileSnapshot::from_session_snapshot(
                         destination.permissions.permission_profile().clone(),
                         destination.permissions.active_permission_profile(),
                     ),
@@ -332,7 +332,7 @@ impl App {
                 .runtime_approval_policy_override
                 .is_none_or(|policy| policy.policy().to_core() != approval)
             {
-                self.runtime_approval_policy_override = (api::AskForApproval::from(approval)
+                self.runtime_approval_policy_override = (AskForApproval::from(approval)
                     != baseline.approval)
                     .then_some(RuntimeApprovalPolicyOverride::Restored(approval.into()));
             }

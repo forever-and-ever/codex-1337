@@ -56,8 +56,8 @@ pub(super) enum ResumePurpose {
 
 #[derive(Clone)]
 pub(super) struct OverviewBaseline {
-    approval: api::AskForApproval,
-    reviewer: codex_config::types::ApprovalsReviewer,
+    approval: AskForApproval,
+    reviewer: ApprovalsReviewer,
     permissions: RuntimePermissionProfileOverride,
 }
 
@@ -92,7 +92,7 @@ impl ResumeContext {
 
 pub(super) struct ResumeReady {
     context: ResumeContext,
-    started: crate::app_server_session::AppServerStartedThread,
+    started: AppServerStartedThread,
     presentation: ResumePresentation,
 }
 
@@ -211,9 +211,9 @@ enum ResumeOutcome {
     Thread(Result<api::Thread>),
     Project(Result<Option<RemoteProjectTrust>>),
     Rechecked(Result<api::Thread>),
-    Hooks(Result<api::HooksListEntry, String>),
+    Hooks(Result<HooksListEntry, String>),
     Acquired(PreparedSession),
-    Cached(crate::app_server_session::AppServerStartedThread),
+    Cached(AppServerStartedThread),
     Viewed(PreparedView),
     Detached(detach::DetachReceipt),
     Loaded(Result<Vec<(ThreadId, Result<api::Thread>)>>),
@@ -222,8 +222,8 @@ enum ResumeOutcome {
 }
 
 enum ResumeEffect {
-    Refresh(Box<super::navigation_config::ConfigRebuild>),
-    Rebuild(Box<super::navigation_config::ConfigRebuild>),
+    Refresh(Box<navigation_config::ConfigRebuild>),
+    Rebuild(Box<navigation_config::ConfigRebuild>),
     Thread(ThreadId),
     Project {
         cwd: PathBuf,
@@ -232,7 +232,7 @@ enum ResumeEffect {
     Recheck(ThreadId),
     Hooks(PathBuf),
     Acquire(Box<ResumePreparation>),
-    Cached(Box<crate::app_server_session::AppServerStartedThread>),
+    Cached(Box<AppServerStartedThread>),
     View(Box<ViewPreparation>),
     Detach(detach::DetachPlan),
     Loaded(ThreadId),
@@ -336,7 +336,7 @@ impl App {
                         preparation::request(
                             RequestPolicy::Interactive,
                             &handle,
-                            api::ClientRequest::ThreadGoalGet {
+                            ClientRequest::ThreadGoalGet {
                                 request_id: api::RequestId::String(format!(
                                     "tui-navigation-{id}-goal"
                                 )),
@@ -442,7 +442,7 @@ impl App {
         server: &mut AppServerSession,
         operation: PendingNavigation,
         context: Box<ResumeContext>,
-        hooks: api::HooksListEntry,
+        hooks: HooksListEntry,
     ) -> Result<()> {
         let decision = match choose_startup_hooks_review(tui, &context.config, hooks, None).await {
             Ok(decision) => decision,
@@ -453,10 +453,10 @@ impl App {
         };
         match decision {
             HooksReviewDecision::Continue => {
-                self.acquire_resumed_thread(server, operation, context)
+                self.acquire_resumed_thread(server, operation, context);
             }
             HooksReviewDecision::OpenHooksBrowser(hooks) => {
-                self.chat_widget.open_hooks_browser(hooks)
+                self.chat_widget.open_hooks_browser(hooks);
             }
             HooksReviewDecision::TrustAll(hooks) => self.transfer_navigation_trust(
                 server,
@@ -478,7 +478,7 @@ impl App {
     ) -> Result<()> {
         match consent {
             ResumeTrustConsent::Hooks { context, .. } => {
-                self.acquire_resumed_thread(server, operation, context.clone())
+                self.acquire_resumed_thread(server, operation, context.clone());
             }
             ResumeTrustConsent::Directory { context, plan, .. } => {
                 let context = context.clone();
@@ -612,7 +612,7 @@ impl App {
             self.retain_overview_origin().await;
         }
         let plan = self
-            .prepare_detach_plan(detach::DetachScope::Navigation {
+            .prepare_detach_plan(DetachScope::Navigation {
                 destination: Some(ready.started.session.thread_id),
             })
             .await;
@@ -868,7 +868,7 @@ impl App {
                 match result {
                     Ok(hooks) => {
                         self.review_resume_hooks(tui, server, operation, context, hooks)
-                            .await?
+                            .await?;
                     }
                     Err(error) => self
                         .add_agents_overview_error(format!("Unable to load folder hooks: {error}")),
@@ -966,7 +966,7 @@ impl App {
                                 presentation: ResumePresentation::ReadOnly(notice),
                             }),
                         )
-                        .await
+                        .await;
                     }
                     Err(error) => self.add_agents_overview_error(format!(
                         "Failed to view thread open elsewhere: {error:#}"
@@ -1012,7 +1012,7 @@ impl App {
                         ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank
                             if same_epoch && !fences.is_empty() =>
                         {
-                            self.retain_navigation_uncertainty(operation, fences, false)
+                            self.retain_navigation_uncertainty(operation, fences, false);
                         }
                         ResumePresentation::ReadOnly(_) | ResumePresentation::CachedBlank => {}
                     }
@@ -1035,7 +1035,7 @@ impl App {
                             self.apply_loaded_subagent_observations(thread_id, observations);
                         }
                         Err(error) => {
-                            tracing::warn!(%error, "failed to list loaded threads for subagent backfill")
+                            tracing::warn!(%error, "failed to list loaded threads for subagent backfill");
                         }
                     }
                     if matches!(
@@ -1079,7 +1079,7 @@ impl App {
                             }
                         }
                         Err(error) => {
-                            tracing::warn!(%error, "failed to read thread goal after resume")
+                            tracing::warn!(%error, "failed to read thread goal after resume");
                         }
                     }
                 }
@@ -1130,7 +1130,7 @@ impl App {
         mut operation: PendingNavigation,
         target: SessionTarget,
         source: ResumeSource,
-        plan: Box<super::navigation_config::ConfigRebuild>,
+        plan: Box<navigation_config::ConfigRebuild>,
     ) {
         operation.intent = NavigationIntent::Resume(ResumeStage::Rebuilding { target, source });
         self.spawn_resume_effect(
@@ -1192,10 +1192,10 @@ impl App {
         }
         let purpose = ResumePurpose::from_source(source, &config);
         let context = Box::new(ResumeContext {
-            purpose,
             target,
             config,
             settings,
+            purpose,
         });
         if let Some(thread) = loaded {
             return self

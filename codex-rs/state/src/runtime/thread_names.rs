@@ -32,12 +32,12 @@ impl StateRuntime {
             .execute(&mut *tx)
             .await?;
         let row = sqlx::query(
-            r#"SELECT name,
+            r"SELECT name,
     CASE WHEN json_valid(source)
         THEN json_type(source, '$.subagent') IS NULL
             AND json_type(source, '$.internal') IS NULL
         ELSE 1 END AS claims_name
-FROM threads WHERE id = ?"#,
+FROM threads WHERE id = ?",
         )
         .bind(thread_id.to_string())
         .fetch_optional(&mut *tx)
@@ -57,12 +57,12 @@ FROM threads WHERE id = ?"#,
             let mut suffix = 0_u64;
             loop {
                 let taken = sqlx::query_scalar::<_, bool>(
-                    r#"SELECT EXISTS(SELECT 1 FROM threads
+                    r"SELECT EXISTS(SELECT 1 FROM threads
 WHERE archived = 0 AND id != ? AND name = ? COLLATE NOCASE
     AND CASE WHEN json_valid(source)
         THEN json_type(source, '$.subagent') IS NULL
             AND json_type(source, '$.internal') IS NULL
-        ELSE 1 END)"#,
+        ELSE 1 END)",
                 )
                 .bind(thread_id.to_string())
                 .bind(&candidate)
@@ -109,13 +109,13 @@ WHERE archived = 0 AND id != ? AND name = ? COLLATE NOCASE
             "legacy thread names must be imported before resolving name claims"
         );
         let ids = sqlx::query_scalar::<_, String>(
-            r#"SELECT id FROM threads
+            r"SELECT id FROM threads
 WHERE archived = 0 AND name = ? COLLATE NOCASE
     AND CASE WHEN json_valid(source)
         THEN json_type(source, '$.subagent') IS NULL
             AND json_type(source, '$.internal') IS NULL
         ELSE 1 END
-ORDER BY id"#,
+ORDER BY id",
         )
         .bind(name.trim())
         .fetch_all(self.pool.as_ref())

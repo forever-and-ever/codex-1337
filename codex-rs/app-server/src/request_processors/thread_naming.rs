@@ -118,7 +118,7 @@ impl ThreadRequestProcessor {
         &self,
         name: &str,
         claimant: Option<ThreadId>,
-    ) -> Result<Vec<codex_state::ThreadMetadata>, JSONRPCErrorError> {
+    ) -> Result<Vec<ThreadMetadata>, JSONRPCErrorError> {
         self.thread_store
             .ensure_thread_name_claims()
             .await
@@ -156,7 +156,7 @@ impl ThreadRequestProcessor {
     async fn name_conflict(
         &self,
         name: &str,
-        owners: Vec<codex_state::ThreadMetadata>,
+        owners: Vec<ThreadMetadata>,
     ) -> JSONRPCErrorError {
         let mut conflicts = Vec::with_capacity(owners.len());
         for owner in owners {
@@ -192,7 +192,7 @@ impl ThreadRequestProcessor {
         name: &str,
         claimant: Option<ThreadId>,
         confirmed_ids: Option<&[String]>,
-    ) -> Result<Vec<codex_state::ThreadMetadata>, JSONRPCErrorError> {
+    ) -> Result<Vec<ThreadMetadata>, JSONRPCErrorError> {
         let owners = self.name_owners(name, claimant).await?;
         if owners.is_empty() {
             return Ok(Vec::new());

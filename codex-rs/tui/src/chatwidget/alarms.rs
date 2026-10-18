@@ -10,9 +10,8 @@ pub(super) struct Alarms {
 
 impl ChatWidget {
     pub(super) fn on_alarms_updated(&mut self, update: ThreadAlarmsUpdatedNotification) {
-        if !self
-            .thread_id
-            .is_some_and(|id| id.to_string() == update.thread_id)
+        if self
+            .thread_id.is_none_or(|id| id.to_string() != update.thread_id)
         {
             return;
         }

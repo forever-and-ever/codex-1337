@@ -45,7 +45,7 @@ pub const DEFAULT_IN_PROCESS_CHANNEL_CAPACITY: usize = codex_app_server_transpor
 /// Even on the in-process path, successful responses still travel back through
 /// the same JSON-RPC result envelope used by socket/stdio transports because
 /// `MessageProcessor` continues to produce that shape internally.
-pub type RequestResult = std::result::Result<JsonRpcResult, JSONRPCErrorError>;
+pub type RequestResult = Result<JsonRpcResult, JSONRPCErrorError>;
 
 /// Event emitted from the app-server to the in-process client.
 ///
@@ -107,6 +107,7 @@ pub struct InProcessClientStartArgs {
 
 impl InProcessClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
+    #[must_use]
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
             explicit_gateway_oauth: false,

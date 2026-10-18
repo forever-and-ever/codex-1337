@@ -14,7 +14,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         turn_id: "turn-1".into(),
         activity: "Check lifecycle and narrow-terminal wrapping".into(),
         emitted_at: Some(
-            chrono::Local
+            Local
                 .with_ymd_and_hms(2026, 10, 2, 13, 4, 5)
                 .single()
                 .unwrap()
@@ -127,13 +127,13 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         }),
     );
     assert_eq!(history.len(), 2);
-    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran before".into()]);
+    let mut tool = PlainHistoryCell::new(vec!["• Ran before".into()]);
     tool.tool_entry = true;
     history.insert(0, Arc::new(tool));
-    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran next".into()]);
+    let mut tool = PlainHistoryCell::new(vec!["• Ran next".into()]);
     tool.tool_entry = true;
     history.insert(1, Arc::new(tool));
-    let mut tool = history_cell::PlainHistoryCell::new(vec!["• Ran after".into()]);
+    let mut tool = PlainHistoryCell::new(vec!["• Ran after".into()]);
     tool.tool_entry = true;
     history.push(Arc::new(tool));
     let area = Rect::new(
@@ -158,7 +158,7 @@ async fn work_status_below_composer_clears_with_activity_transcript_entries() {
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 32);
         let mut buffer = Buffer::empty(area);
         let mut view = crate::transcript_view::TranscriptView::default();
-        view.set_presentation(detailed, history_cell::HistoryRenderMode::Rich);
+        view.set_presentation(detailed, HistoryRenderMode::Rich);
         view.render(area, &mut buffer, &history);
         let activity_columns: Vec<_> = buffer
             .content()

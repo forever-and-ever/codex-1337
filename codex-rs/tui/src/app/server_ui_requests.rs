@@ -139,7 +139,7 @@ where
         Box::pin(async move {
             tokio::select! {
                 biased;
-                _ = completion.cancelled.cancelled() => Ok(UiReply(SyncMutex::new(None))),
+                () = completion.cancelled.cancelled() => Ok(UiReply(SyncMutex::new(None))),
                 result = request(handle) => {
                     let value = result?;
                     Ok(UiReply(SyncMutex::new(Some(Box::new(TypedReply { completion, value })))))

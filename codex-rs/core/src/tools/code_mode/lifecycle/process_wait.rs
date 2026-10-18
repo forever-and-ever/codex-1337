@@ -68,7 +68,7 @@ impl CodeModeService {
             let _ = opened.send(());
             tokio::select! {
                 _ = released => {},
-                _ = scope.shutdown.cancelled() => {},
+                () = scope.shutdown.cancelled() => {},
             }
             scope
                 .record(

@@ -99,7 +99,7 @@ pub(super) struct ServerOperations {
 
 impl Default for ServerOperations {
     fn default() -> Self {
-        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        let (control_tx, control_rx) = unbounded_channel();
         Self {
             lanes: HashMap::new(),
             navigation: navigation::NavigationOwner::default(),
@@ -206,7 +206,7 @@ struct ReadyTurn {
 #[derive(Debug)]
 pub(crate) enum SubagentTextSource {
     Prompt,
-    QuestionAnswer(Box<crate::chatwidget::ThreadInputState>),
+    QuestionAnswer(Box<ThreadInputState>),
 }
 
 impl SubagentTextSource {
@@ -222,7 +222,7 @@ enum TurnOrigin {
     User(Box<UserTurnReplay>),
     Subagent {
         expected_turn_id: Option<String>,
-        source: crate::app::turn_submissions::SubagentTextSource,
+        source: SubagentTextSource,
     },
 }
 
@@ -260,7 +260,7 @@ impl UserTurnReplay {
         items.extend(input);
     }
 
-    fn inherit_permissions(&mut self, session: &crate::session_state::ThreadSessionState) {
+    fn inherit_permissions(&mut self, session: &ThreadSessionState) {
         let AppCommand::UserTurn {
             approval_policy,
             approvals_reviewer,
@@ -457,7 +457,7 @@ pub(super) enum SubmissionReceipt {
     },
     Cancelled(bool),
     Deferred(String),
-    Continued(Box<codex_app_server_protocol::Turn>),
+    Continued(Box<Turn>),
 }
 
 #[derive(Debug)]
@@ -643,13 +643,13 @@ impl ServerOperations {
         self.lanes.get(&OperationLane::Realtime(thread_id)).is_some_and(|lane|
             lane.active.order < order && !matches!(lane.state, LaneState::Uncertain)
                 && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                    if matches!(&**operation, ServerOperation::Realtime(realtime::RealtimeOperation::Start { .. }))))
+                    if matches!(&**operation, ServerOperation::Realtime(RealtimeOperation::Start { .. }))))
     }
 
     fn realtime_stop_precedes(&self, thread_id: ThreadId, order: u64) -> bool {
         self.lanes.get(&OperationLane::Control(thread_id)).is_some_and(|lane|
             lane.active.order < order && matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. }))))
+                if matches!(&**operation, ServerOperation::Control(ControlOperation::RealtimeStop { .. }))))
     }
 
     pub(in crate::app) fn epoch(&self) -> u64 {
@@ -722,7 +722,7 @@ async fn recoverable_drafts(
     for entry in entries.iter().rev() {
         if let SubmissionRequest::Turn(turn) = &entry.request
             && let TurnOrigin::Subagent {
-                source: crate::app::turn_submissions::SubagentTextSource::QuestionAnswer(input),
+                source: SubagentTextSource::QuestionAnswer(input),
                 ..
             } = &turn.origin
         {

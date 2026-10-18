@@ -19,14 +19,14 @@ pub(crate) async fn loaded_observations(
     policy: RequestPolicy,
     handle: &AppServerRequestHandle,
     root: ThreadId,
-) -> Result<Vec<(ThreadId, Result<codex_app_server_protocol::Thread>)>> {
+) -> Result<Vec<(ThreadId, Result<Thread>)>> {
     let response: codex_app_server_protocol::ThreadLoadedListResponse = request(
         policy,
         handle,
-        codex_app_server_protocol::ClientRequest::ThreadLoadedList {
-            request_id: codex_app_server_protocol::RequestId::String(format!(
+        ClientRequest::ThreadLoadedList {
+            request_id: RequestId::String(format!(
                 "tui-discover-{}",
-                uuid::Uuid::new_v4()
+                Uuid::new_v4()
             )),
             params: codex_app_server_protocol::ThreadLoadedListParams {
                 cursor: None,
@@ -107,7 +107,7 @@ pub(crate) enum RequestPolicy {
 
 pub(crate) async fn request<T: serde::de::DeserializeOwned>(
     policy: RequestPolicy,
-    handle: &codex_app_server_client::AppServerRequestHandle,
+    handle: &AppServerRequestHandle,
     request: ClientRequest,
 ) -> std::result::Result<T, TypedRequestError> {
     if matches!(policy, RequestPolicy::Unbounded) {
@@ -234,7 +234,7 @@ impl StartPreparation {
         let mut custody = SubscriptionCustody::NewThreadUncertain;
         let selected_profile = params.permissions.is_some();
         let result = async {
-            let request_id = RequestId::String(format!("tui-start-{}", uuid::Uuid::new_v4()));
+            let request_id = RequestId::String(format!("tui-start-{}", Uuid::new_v4()));
             let (response, support, task_tools_available) =
                 request_thread_start_with_history_fallback(&handle, request_id, params)
                     .await
@@ -328,7 +328,7 @@ impl ViewPreparation {
                 if thread.history_mode == ThreadHistoryMode::Legacy { return Err(error); }
                 tracing::warn!("Failed to page read-only thread history; trying summary pages");
                 let page: ThreadTurnsListResponse = request(policy, &handle, ClientRequest::ThreadTurnsList {
-                    request_id: RequestId::String(format!("tui-read-only-{}", uuid::Uuid::new_v4())),
+                    request_id: RequestId::String(format!("tui-read-only-{}", Uuid::new_v4())),
                     params: ThreadTurnsListParams {
                         thread_id: thread_id.to_string(), cursor: None, limit: Some(100),
                         sort_direction: Some(SortDirection::Desc), items_view: Some(TurnItemsView::Summary),
@@ -462,7 +462,7 @@ impl AppServerSession {
     pub(crate) fn prepare_resume_thread(
         &self,
         policy: RequestPolicy,
-        local_settings: &crate::local_settings::LocalSettings,
+        local_settings: &LocalSettings,
         config: Config,
         thread_id: ThreadId,
         model_settings: ResumeModelSettings,
@@ -557,7 +557,7 @@ impl ResumePreparation {
         if params.exclude_turns {
             rollout_maintenance_guard = None;
         }
-        let request_id = RequestId::String(format!("tui-resume-{}", uuid::Uuid::new_v4()));
+        let request_id = RequestId::String(format!("tui-resume-{}", Uuid::new_v4()));
         custody = SubscriptionCustody::Uncertain(thread_id);
         let resume_response = handle.request_typed(ClientRequest::ThreadResume {
                 request_id,
@@ -572,7 +572,7 @@ impl ResumePreparation {
             {
                 observations.history_support = ThreadHistorySupport::LegacyOnly;
                 params.exclude_turns = false;
-                let request_id = RequestId::String(format!("tui-resume-{}", uuid::Uuid::new_v4()));
+                let request_id = RequestId::String(format!("tui-resume-{}", Uuid::new_v4()));
                 handle.request_typed(ClientRequest::ThreadResume { request_id, params })
                     .await
                     .map_err(|err| {

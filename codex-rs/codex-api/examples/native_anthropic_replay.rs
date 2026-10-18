@@ -1,4 +1,4 @@
-//! Offline native Messages replay. Input and output follow scripts/native_anthropic/README.md.
+//! Offline native Messages replay. Input and output follow `scripts/native_anthropic/README.md`.
 
 use anyhow::Context;
 use anyhow::Result;

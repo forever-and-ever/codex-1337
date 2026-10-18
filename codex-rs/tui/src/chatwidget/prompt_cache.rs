@@ -36,7 +36,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_prompt_cache_missed(&mut self, missed: ThreadPromptCacheMissedNotification) {
-        let tokens = crate::status::format_tokens_compact(missed.rewritten_tokens);
+        let tokens = format_tokens_compact(missed.rewritten_tokens);
         self.add_warning_message(if missed.while_warming {
             format!("Cache missed while warming: rewrote {tokens} tokens. Warming stopped.")
         } else {

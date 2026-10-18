@@ -37,7 +37,7 @@ impl App {
             move |handle| async move {
                 let response: ThreadReadResponse = handle
                     .thread_read(
-                        RequestId::String(format!("tui-daybreak-read-{}", uuid::Uuid::new_v4())),
+                        RequestId::String(format!("tui-daybreak-read-{}", Uuid::new_v4())),
                         ThreadReadParams {
                             thread_id: thread_id.to_string(),
                             include_turns: false,
@@ -69,7 +69,7 @@ impl App {
                                     .thread_metadata_update(
                                         RequestId::String(format!(
                                             "tui-daybreak-save-{}",
-                                            uuid::Uuid::new_v4()
+                                            Uuid::new_v4()
                                         )),
                                         ThreadMetadataUpdateParams {
                                             thread_id: thread_id.to_string(),
@@ -160,7 +160,7 @@ impl App {
                                             .additional
                                             .get("daybreak")
                                             .and_then(serde_json::Value::as_bool)
-                                            .unwrap_or(false)
+                                            .unwrap_or(false);
                                     }
                                 }
                                 Err(error) => app.chat_widget.add_error_message(format!(

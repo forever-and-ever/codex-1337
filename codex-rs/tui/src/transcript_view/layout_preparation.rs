@@ -284,7 +284,7 @@ impl TranscriptView {
                 .get(index)
                 .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some())
         {
-            feed::Seat::LOOSE
+            Seat::LOOSE
         } else {
             self.feed_seat(cells, index)
         };
@@ -406,7 +406,7 @@ impl TranscriptView {
                 .collect();
             let output_tokens = output_tokens.subset(&token_ids);
             let expanded_parts = expanded_parts.clone();
-            let render = move |invocations: &crate::transcript_view::invocation::Invocations| {
+            let render = move |invocations: &invocation::Invocations| {
                 let content_width = crate::transcript_geometry::content_width(width, mode);
                 // A member's clock is its item's header's.
                 let timestamp = if loose {
@@ -476,7 +476,7 @@ impl TranscriptView {
                     .then(|| {
                         invocations.layout(
                             cell.as_ref(),
-                            crate::transcript_view::invocation::PreparationSource::Retained(&cell),
+                            invocation::PreparationSource::Retained(&cell),
                             width,
                             input_open,
                             seat.content,

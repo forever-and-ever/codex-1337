@@ -81,7 +81,7 @@ async fn process(
     loop {
         let start = Instant::now();
         let poll = tokio::select! {
-            _ = tx.closed() => return Ok(()),
+            () = tx.closed() => return Ok(()),
             poll = timeout(idle_timeout, events.next()) => poll,
         };
         if let Some(telemetry) = &telemetry {

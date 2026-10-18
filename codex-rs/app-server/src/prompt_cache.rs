@@ -39,9 +39,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 /// A can-warm event keeps the cache warm this long.
-const HOLD: Duration = Duration::from_secs(/*secs*/ 8 * 60 * 60);
+const HOLD: Duration = Duration::from_hours(/*secs*/ 8);
 /// Replays land this long before the cache would expire.
-const LEAD: Duration = Duration::from_secs(/*secs*/ 3 * 60);
+const LEAD: Duration = Duration::from_mins(/*secs*/ 3);
 const MAX_REPLAYS: usize = 64;
 const MAX_REPLAY_BYTES: usize = 128_000_000;
 

@@ -157,7 +157,7 @@ impl App {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(event) => {
-                row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total())
+                row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total());
             }
             _ => return,
         }

@@ -445,10 +445,10 @@ impl Invocation<'_> {
         match &self.source {
             Source::Code(block) => match block.status().map(|(status, _)| status) {
                 Some(codex_protocol::code_mode::CodeModeStatus::Failed) => {
-                    title.push_span(" · failed".red())
+                    title.push_span(" · failed".red());
                 }
                 Some(codex_protocol::code_mode::CodeModeStatus::Interrupted) => {
-                    title.push_span(" · interrupted".red())
+                    title.push_span(" · interrupted".red());
                 }
                 None if block.is_active() => title.push_span(" · running".dim()),
                 _ => {}
@@ -458,10 +458,10 @@ impl Invocation<'_> {
                 Some(output) => match output.outcome {
                     crate::exec_cell::CommandOutcome::Exited(0) => {}
                     crate::exec_cell::CommandOutcome::Exited(code) => {
-                        title.push_span(format!(" · failed ({code})").red())
+                        title.push_span(format!(" · failed ({code})").red());
                     }
                     crate::exec_cell::CommandOutcome::Declined => {
-                        title.push_span(" · declined".red())
+                        title.push_span(" · declined".red());
                     }
                 },
                 _ => {}
@@ -605,11 +605,9 @@ impl Invocation<'_> {
             }
             Source::Command(call) => {
                 let script = input
-                    .filter(|input| input.name.is_default_namespace() && input.name.name == "bash")
-                    .map(|input| input.payload.text().to_owned())
-                    .unwrap_or_else(|| {
+                    .filter(|input| input.name.is_default_namespace() && input.name.name == "bash").map_or_else(|| {
                         crate::exec_command::strip_bash_lc_and_escape(&call.command)
-                    });
+                    }, |input| input.payload.text().to_owned());
                 let lines = match crate::exec_cell::rows::formatted_input(&script) {
                     Some(lines) => lines,
                     None if input.is_none() => {
@@ -747,22 +745,22 @@ impl Invocation<'_> {
         for output in &self.outputs {
             match output.captured_output() {
                 FunctionCallOutputBody::Text(text) => {
-                    lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                    lines.extend(captured_lines(text, ContextAuthor::Environment, mode));
                 }
                 FunctionCallOutputBody::ContentItems(items) => {
                     for item in items {
                         match item {
                             FunctionCallOutputContentItem::InputText { text } => {
-                                lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                                lines.extend(captured_lines(text, ContextAuthor::Environment, mode));
                             }
                             FunctionCallOutputContentItem::InputImage { .. } => {
-                                lines.push(client_notice("Image attachment"))
+                                lines.push(client_notice("Image attachment"));
                             }
                             FunctionCallOutputContentItem::InputAudio { .. } => {
-                                lines.push(client_notice("Audio attachment"))
+                                lines.push(client_notice("Audio attachment"));
                             }
                             FunctionCallOutputContentItem::EncryptedContent { .. } => {
-                                lines.push(client_notice("Encrypted content"))
+                                lines.push(client_notice("Encrypted content"));
                             }
                         }
                     }

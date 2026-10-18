@@ -94,8 +94,8 @@ pub(super) async fn listen(
                 }
             };
             tokio::select! {
-                _ = disconnect.cancelled() => {},
-                _ = forwarding => {},
+                () = disconnect.cancelled() => {},
+                () = forwarding => {},
             }
             let _ = commands.send(Command::Detach(connection)).await;
         });

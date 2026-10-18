@@ -200,7 +200,7 @@ fn project(native: NativeModel) -> Result<Option<ModelInfo>, ApiError> {
     match thinking {
         AnthropicThinkingMode::Disabled => {}
         AnthropicThinkingMode::Adaptive => {
-            efforts.extend(native_capabilities.supported_efforts.iter().cloned())
+            efforts.extend(native_capabilities.supported_efforts.iter().cloned());
         }
         AnthropicThinkingMode::Manual => efforts.extend(
             [

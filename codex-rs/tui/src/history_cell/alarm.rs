@@ -145,9 +145,9 @@ impl crate::transcript_view::FeedEntry for AlarmSoundingCell {
         &self,
         width: u16,
         _expanded: &std::collections::HashSet<String>,
-        _mode: super::output_provenance::OutputMode,
-    ) -> super::activity_parts::ActivityParts {
-        super::activity_parts::ActivityParts {
+        _mode: OutputMode,
+    ) -> activity_parts::ActivityParts {
+        activity_parts::ActivityParts {
             lines: adaptive_wrap_lines(self.full_body(), RtOptions::new(usize::from(width)))
                 .into_iter()
                 .map(Into::into)

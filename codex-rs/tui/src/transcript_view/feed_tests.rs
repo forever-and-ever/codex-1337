@@ -289,7 +289,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     ));
     view.record_step_admission(step("resp-3", &["exec-1"], &[], Admission::Pending));
     view.seat_thoughts(&mut cells);
-    let clock = crate::history_cell::HistoryTimestamp::from_millis(CLOCK_MS)
+    let clock = HistoryTimestamp::from_millis(CLOCK_MS)
         .unwrap()
         .span()
         .content
@@ -394,7 +394,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let code = cells
         .iter()
-        .position(|cell| cell.as_any().is::<crate::history_cell::CodeModeCell>())
+        .position(|cell| cell.as_any().is::<CodeModeCell>())
         .unwrap();
     let control = |call_id: &str, action| FoldTarget::Invocation {
         call_id: call_id.into(),
@@ -596,7 +596,7 @@ fn steps_fold_under_one_header_with_their_figures() {
     live_view.paste_search("text(");
     live_view.sync_search_invocation_tail(80, None, cells[0].as_ref(), Vec::new());
     assert!((0..512).any(|_| !live_view.advance_search(&[])));
-    assert!(live_view.is_search_expanded(super::super::EntryKey::Live));
+    assert!(live_view.is_search_expanded(EntryKey::Live));
     live_view.cancel_search();
     let target = |action| FoldTarget::Invocation {
         call_id: exec.into(),

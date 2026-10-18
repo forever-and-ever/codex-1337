@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 async fn user_owned_mcp(
     State(gate): State<Arc<ModelGate>>,
-    uri: axum::http::Uri,
+    uri: http::Uri,
     Json(body): Json<Value>,
 ) -> Response {
     gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
@@ -46,7 +46,7 @@ async fn user_owned_mcp(
             gate.changed.notify_one();
             json!({"content": [{"type": "text", "text": format!("user-owned:{server}/{name}")}], "isError": false})
         }
-        _ => return axum::http::StatusCode::ACCEPTED.into_response(),
+        _ => return http::StatusCode::ACCEPTED.into_response(),
     };
     Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})).into_response()
 }

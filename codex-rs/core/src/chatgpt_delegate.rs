@@ -1,4 +1,4 @@
-//! Borrows subscription-only OpenAI access without rebinding the conversation.
+//! Borrows subscription-only `OpenAI` access without rebinding the conversation.
 
 use crate::agent::child_config::switch_agent_provider;
 use crate::config::Config;
@@ -129,7 +129,7 @@ pub(crate) fn uses_chatgpt_login(provider: &ModelProviderInfo) -> bool {
         && provider.auth.is_none()
 }
 
-/// Claude and OpenRouter conversations search through a borrowed ChatGPT login, so the hosted-search
+/// Claude and `OpenRouter` conversations search through a borrowed `ChatGPT` login, so the hosted-search
 /// capability and its rollout flag do not gate them.
 pub(crate) fn delegates_web_search(turn: &TurnContext) -> bool {
     matches!(

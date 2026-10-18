@@ -35,7 +35,7 @@ fn jira_browser_surface_snapshot() {
             2 => browser.form = Some(JiraForm::new(Some(issue.clone()))),
             3 => {
                 browser.error =
-                    Some("Issue bug/slow-input already exists; choose another slug".into())
+                    Some("Issue bug/slow-input already exists; choose another slug".into());
             }
             4 => {
                 let mut child = issue.clone();

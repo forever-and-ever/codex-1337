@@ -228,7 +228,7 @@ impl ForkPreparation {
             custody = SubscriptionCustody::NewThreadUncertain;
             let response: ThreadForkResponse = match handle
                 .request_typed(ClientRequest::ThreadFork {
-                    request_id: RequestId::String(format!("tui-fork-{}", uuid::Uuid::new_v4())),
+                    request_id: RequestId::String(format!("tui-fork-{}", Uuid::new_v4())),
                     params: params.clone(),
                 })
                 .await
@@ -243,7 +243,7 @@ impl ForkPreparation {
                         .request_typed(ClientRequest::ThreadFork {
                             request_id: RequestId::String(format!(
                                 "tui-fork-{}",
-                                uuid::Uuid::new_v4()
+                                Uuid::new_v4()
                             )),
                             params,
                         })
@@ -276,13 +276,13 @@ impl ForkPreparation {
                     .map(serde_json::to_value)
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 let injected: std::result::Result<ThreadInjectItemsResponse, TypedRequestError> =
-                    super::session_preparation::request(
+                    session_preparation::request(
                         policy,
                         &handle,
                         ClientRequest::ThreadInjectItems {
                             request_id: RequestId::String(format!(
                                 "tui-side-boundary-{}",
-                                uuid::Uuid::new_v4()
+                                Uuid::new_v4()
                             )),
                             params: ThreadInjectItemsParams {
                                 thread_id: child.to_string(),

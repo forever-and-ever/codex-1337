@@ -10,12 +10,12 @@ impl TextLayout {
     pub(in crate::transcript_view) fn retained_bytes(&self) -> usize {
         // A conservative allocation weight, available without walking a large cell on
         // the UI task. Logical/display/source strings are charged independently.
-        std::mem::size_of::<Self>()
+        size_of::<Self>()
             + self.text.capacity() * 4
-            + self.logical.capacity() * std::mem::size_of::<LogicalLine>()
+            + self.logical.capacity() * size_of::<LogicalLine>()
             + self.rows.capacity()
-                * (std::mem::size_of::<TextRow>()
-                    + 4 * std::mem::size_of::<ratatui::text::Span<'static>>())
+                * (size_of::<TextRow>()
+                    + 4 * size_of::<ratatui::text::Span<'static>>())
     }
 
     pub(in crate::transcript_view) fn same_presentation(&self, other: &Self) -> bool {

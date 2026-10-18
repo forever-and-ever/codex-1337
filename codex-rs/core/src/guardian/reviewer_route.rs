@@ -1,4 +1,4 @@
-//! Routes borrowed ChatGPT approval reviews without permitting hidden parent-provider billing.
+//! Routes borrowed `ChatGPT` approval reviews without permitting hidden parent-provider billing.
 
 use super::GuardianReviewContext;
 use crate::agent::child_config::switch_agent_provider;
@@ -233,7 +233,7 @@ pub(super) async fn run_review_attempt<Run, Attempt>(
 )
 where
     Run: FnMut(ReviewerRoute) -> Attempt,
-    Attempt: std::future::Future<
+    Attempt: Future<
             Output = (
                 GuardianReviewOutcome,
                 codex_analytics::GuardianReviewAnalyticsResult,

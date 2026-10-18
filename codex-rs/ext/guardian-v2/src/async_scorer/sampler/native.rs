@@ -53,19 +53,15 @@ pub(super) async fn model(
     // Replacing it never mutates a catalogue already borrowed by a dispatched request.
     let catalog = {
         let mut catalog = sampler.native_catalog.lock().await;
-        match catalog
+        if let Some(catalog) = catalog
             .as_ref()
-            .filter(|catalog| catalog.account_id == account_id)
-        {
-            Some(catalog) => Arc::clone(catalog),
-            None => {
-                let scope = Arc::new(Catalog {
-                    account_id: account_id.into(),
-                    model: OnceCell::new(),
-                });
-                *catalog = Some(Arc::clone(&scope));
-                scope
-            }
+            .filter(|catalog| catalog.account_id == account_id) { Arc::clone(catalog) } else {
+            let scope = Arc::new(Catalog {
+                account_id: account_id.into(),
+                model: OnceCell::new(),
+            });
+            *catalog = Some(Arc::clone(&scope));
+            scope
         }
     };
     catalog

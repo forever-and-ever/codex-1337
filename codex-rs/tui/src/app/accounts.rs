@@ -13,14 +13,14 @@ use codex_app_server_protocol::ThreadAccountSelectResponse;
 #[derive(Default)]
 pub(super) struct AccountUi {
     serial: u64,
-    picker_request: Option<uuid::Uuid>,
+    picker_request: Option<Uuid>,
     pub(super) selection_request: Option<ThreadId>,
     login_request: Option<ThreadId>,
     claude_login: Option<String>,
     early_login_completions:
-        std::collections::VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
+        VecDeque<codex_app_server_protocol::AccountLoginCompletedNotification>,
     nickname_request: Option<ThreadId>,
-    pending: std::collections::HashMap<ThreadId, String>,
+    pending: HashMap<ThreadId, String>,
     pub(super) displayed: Option<(ThreadId, codex_app_server_protocol::GetAccountResponse)>,
 }
 
@@ -38,7 +38,7 @@ impl App {
                 handle
                     .logout_account(
                         codex_app_server_protocol::RequestId::String(
-                            uuid::Uuid::new_v4().to_string(),
+                            Uuid::new_v4().to_string(),
                         ),
                         thread_id.map(|id| codex_app_server_protocol::AccountScopeParams {
                             thread_id: Some(id.to_string()),
@@ -212,7 +212,7 @@ impl App {
                     ClientRequest::GetAccount {
                         request_id: codex_app_server_protocol::RequestId::String(format!(
                             "thread-account-{}",
-                            uuid::Uuid::new_v4()
+                            Uuid::new_v4()
                         )),
                         params: codex_app_server_protocol::GetAccountParams {
                             new_thread: None,
@@ -293,8 +293,7 @@ impl App {
             .display_name
             .clone()
             .or_else(|| match &response.account {
-                Some(Account::Chatgpt { email, .. })
-                | Some(Account::ClaudeSubscription { email }) => email.clone(),
+                Some(Account::Chatgpt { email, .. } | Account::ClaudeSubscription { email }) => email.clone(),
                 Some(Account::ApiKey {}) | None => None,
             })
             .or_else(|| response.account_id.clone());
@@ -398,7 +397,7 @@ impl App {
         {
             return;
         }
-        let serial = uuid::Uuid::new_v4();
+        let serial = Uuid::new_v4();
         self.account_ui.picker_request = Some(serial);
         self.chat_widget.show_account_picker_loading();
         let request_id = server.next_request_id();
@@ -430,7 +429,7 @@ impl App {
     pub(super) fn apply_account_picker(
         &mut self,
         thread_id: ThreadId,
-        serial: uuid::Uuid,
+        serial: Uuid,
         result: Result<ThreadAccountListResponse, String>,
     ) {
         if self.account_ui.picker_request != Some(serial) {
@@ -565,7 +564,7 @@ impl App {
                 .chat_widget
                 .add_error_message(format!("Cannot change account: {error}")),
             Err(error) => {
-                tracing::warn!(%thread_id, %error, "cannot change background conversation account")
+                tracing::warn!(%thread_id, %error, "cannot change background conversation account");
             }
         }
     }

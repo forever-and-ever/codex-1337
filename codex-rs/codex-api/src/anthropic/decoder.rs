@@ -23,6 +23,7 @@ use std::collections::BTreeSet;
 const MAX_BLOCKS: usize = 1024;
 
 /// Interprets the native completion disposition after upstream usage is recorded.
+#[must_use]
 pub fn anthropic_context_window_exceeded(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -31,6 +32,7 @@ pub fn anthropic_context_window_exceeded(metadata: &ResponseUsageMetadata) -> bo
 }
 
 /// Reports native output truncation after upstream usage is recorded.
+#[must_use]
 pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -38,6 +40,7 @@ pub fn anthropic_output_limit_exceeded(metadata: &ResponseUsageMetadata) -> bool
     )
 }
 /// Reports a native refusal after upstream usage is recorded.
+#[must_use]
 pub fn anthropic_refused(metadata: &ResponseUsageMetadata) -> bool {
     matches!(
         anthropic_stop_reason(metadata),
@@ -295,14 +298,14 @@ impl<'a> Decoder<'a> {
                         events.push(ResponseEvent::OutputTextDelta {
                             item_id: open.item_id.clone(),
                             delta: text.clone(),
-                        })
+                        });
                     }
                     Block::Thinking { thinking, .. } if !thinking.is_empty() => {
                         events.push(ResponseEvent::ReasoningSummaryDelta {
                             item_id: open.item_id.clone(),
                             delta: thinking.clone(),
                             summary_index: 0,
-                        })
+                        });
                     }
                     _ => {}
                 }
@@ -339,7 +342,7 @@ impl<'a> Decoder<'a> {
                         Delta::Signature { signature: part },
                     ) => signature.push_str(&part),
                     (Block::Compaction { content, .. }, Delta::Compaction { content: part }) => {
-                        content.push_str(&part)
+                        content.push_str(&part);
                     }
                     _ => {
                         return Err(ApiError::NativeStream(

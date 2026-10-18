@@ -168,7 +168,7 @@ pub(super) async fn send(
             let result = match target.request.action {
                 AgentsOverviewAction::Archive => handle
                     .request_typed::<api::ThreadArchiveResponse>(
-                        api::ClientRequest::ThreadArchive {
+                        ClientRequest::ThreadArchive {
                             request_id,
                             params: api::ThreadArchiveParams {
                                 thread_id: target.request.thread_id.to_string(),
@@ -178,7 +178,7 @@ pub(super) async fn send(
                     .await
                     .map(|_| ()),
                 AgentsOverviewAction::Delete => handle
-                    .request_typed::<api::ThreadDeleteResponse>(api::ClientRequest::ThreadDelete {
+                    .request_typed::<api::ThreadDeleteResponse>(ClientRequest::ThreadDelete {
                         request_id,
                         params: api::ThreadDeleteParams {
                             thread_id: target.request.thread_id.to_string(),
@@ -326,7 +326,7 @@ impl App {
     fn present_removal_failure(&mut self, target: &RemovalTarget, error: &impl std::fmt::Display) {
         match target.request.source {
             RemovalSource::Overview => {
-                self.show_thread_removal_failure(target.request.action, error)
+                self.show_thread_removal_failure(target.request.action, error);
             }
             RemovalSource::Current => {
                 let verb = match target.request.action {
@@ -352,7 +352,7 @@ impl App {
 
     async fn prepare_removal_detach(&mut self) -> detach::DetachPlan {
         let mut plan = self
-            .prepare_detach_plan(detach::DetachScope::Navigation { destination: None })
+            .prepare_detach_plan(DetachScope::Navigation { destination: None })
             .await;
         plan.targets.retain(|target| {
             matches!(target.kind, detach::DetachKind::Side { .. })
@@ -414,7 +414,7 @@ impl App {
                         }
                         let target = RemovalTarget { request, primary };
                         let mut plan = self
-                            .prepare_detach_plan(detach::DetachScope::Navigation {
+                            .prepare_detach_plan(DetachScope::Navigation {
                                 destination: None,
                             })
                             .await;

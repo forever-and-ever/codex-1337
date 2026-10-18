@@ -35,6 +35,7 @@ struct RecordWire {
 }
 
 impl AccountStore {
+    #[must_use]
     pub fn new(codex_home: PathBuf) -> Self {
         Self {
             directory: codex_home.join("anthropic").join("accounts"),
@@ -100,7 +101,7 @@ impl AccountStore {
                 match file.try_lock() {
                     Ok(()) => return Ok(()),
                     Err(TryLockError::WouldBlock) => {
-                        tokio::time::sleep(Duration::from_millis(/*millis*/ 25)).await
+                        tokio::time::sleep(Duration::from_millis(/*millis*/ 25)).await;
                     }
                     Err(error) => return Err(io::Error::from(error)),
                 }

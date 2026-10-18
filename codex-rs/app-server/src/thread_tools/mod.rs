@@ -376,7 +376,7 @@ async fn delegated_output(
 fn parse<T: DeserializeOwned>(arguments: Value) -> Result<T, String> {
     serde_json::from_value(arguments).map_err(|err| err.to_string())
 }
-fn error(error: codex_app_server_protocol::JSONRPCErrorError) -> String {
+fn error(error: JSONRPCErrorError) -> String {
     error.message
 }
 fn same_thread(a: &str, b: &str) -> bool {

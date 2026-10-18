@@ -37,11 +37,11 @@ async fn quiet_interval_and_installed_generation_gate_replacement() -> anyhow::R
     assert!(restart.tick().now_or_never().is_none());
     // A long-running turn becoming idle still earns a full five-minute interval.
     restart.set_ready(/*ready*/ true);
-    tokio::time::advance(IDLE - Duration::from_secs(/*secs*/ 1)).await;
+    tokio::time::advance(IDLE.checked_sub(Duration::from_secs(/*secs*/ 1)).unwrap()).await;
     assert!(restart.tick().now_or_never().is_none());
     // Fresh user activity restarts the entire quiet interval.
     restart.postpone();
-    tokio::time::advance(IDLE - Duration::from_secs(/*secs*/ 1)).await;
+    tokio::time::advance(IDLE.checked_sub(Duration::from_secs(/*secs*/ 1)).unwrap()).await;
     assert!(restart.tick().now_or_never().is_none());
     tokio::time::advance(Duration::from_secs(/*secs*/ 1)).await;
     assert_eq!(restart.tick().now_or_never(), Some(()));

@@ -377,7 +377,7 @@ impl HistoryCell for ToolOutputCell {
     fn expanded_hyperlink_lines(
         &self,
         width: u16,
-    ) -> Vec<crate::terminal_hyperlinks::HyperlinkLine> {
+    ) -> Vec<HyperlinkLine> {
         let mut lines = self.compact_hyperlink_lines(width);
         lines.extend(self.transcript_hyperlink_lines(width));
         lines

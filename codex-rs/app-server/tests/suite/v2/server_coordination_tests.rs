@@ -82,10 +82,10 @@ impl Default for ModelGate {
     }
 }
 
-async fn retired_frontend_transport(State(gate): State<Arc<ModelGate>>) -> axum::http::StatusCode {
+async fn retired_frontend_transport(State(gate): State<Arc<ModelGate>>) -> http::StatusCode {
     gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
     gate.changed.notify_one();
-    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    http::StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn frontend_transport_config(endpoint: &str) -> Value {
@@ -148,7 +148,7 @@ async fn persist_destination(
                 JSONRPCMessage::Response(response)
                     if response.id == codex_app_server_protocol::RequestId::Integer(id) =>
                 {
-                    started = true
+                    started = true;
                 }
                 JSONRPCMessage::Notification(notification)
                     if notification.method == "turn/completed"
@@ -157,7 +157,7 @@ async fn persist_destination(
                             .as_ref()
                             .is_some_and(|params| params["threadId"] == thread_id) =>
                 {
-                    completed = true
+                    completed = true;
                 }
                 JSONRPCMessage::Error(error) => {
                     anyhow::bail!("destination setup failed: {error:?}")
@@ -557,7 +557,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
                 break;
             }
             JSONRPCMessage::Request(request) if request.method == "item/tool/requestUserInput" => {
-                pending_approval = Some(request)
+                pending_approval = Some(request);
             }
             JSONRPCMessage::Error(error) => anyhow::bail!("initialize failed: {error:?}"),
             _ => {}
@@ -582,12 +582,12 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
                 JSONRPCMessage::Response(response)
                     if response.id == codex_app_server_protocol::RequestId::Integer(2) =>
                 {
-                    resumed = true
+                    resumed = true;
                 }
                 JSONRPCMessage::Request(request)
                     if request.method == "item/tool/requestUserInput" =>
                 {
-                    approval = Some(request)
+                    approval = Some(request);
                 }
                 JSONRPCMessage::Error(error) => anyhow::bail!("resume failed: {error:?}"),
                 _ => {}

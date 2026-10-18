@@ -52,7 +52,7 @@ enum ForkPurpose {
     },
     Safety(Box<SafetyContinuation>),
     Side {
-        prompt: Option<crate::chatwidget::UserMessage>,
+        prompt: Option<UserMessage>,
     },
 }
 
@@ -111,7 +111,7 @@ impl ForkStage {
 }
 
 enum ForkEffect {
-    Refresh(Box<super::navigation_config::ConfigRebuild>),
+    Refresh(Box<navigation_config::ConfigRebuild>),
     Begin,
     Interrupt {
         thread_id: ThreadId,
@@ -148,7 +148,7 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         parent_thread_id: ThreadId,
-        mut user_message: Option<crate::chatwidget::UserMessage>,
+        mut user_message: Option<UserMessage>,
     ) -> Result<AppRunControl> {
         if self
             .side_threads
@@ -158,7 +158,7 @@ impl App {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();
             self.chat_widget
-                .add_error_message(crate::app::side::SIDE_ALREADY_OPEN_MESSAGE.into());
+                .add_error_message(side::SIDE_ALREADY_OPEN_MESSAGE.into());
             return Ok(AppRunControl::Continue);
         }
         self.session_telemetry
@@ -171,7 +171,7 @@ impl App {
         &mut self,
         server: &AppServerSession,
         thread_id: ThreadId,
-        prompt: Option<crate::chatwidget::UserMessage>,
+        prompt: Option<UserMessage>,
     ) {
         let input = ForkInput {
             origin: OperationOrigin::Thread {
@@ -215,8 +215,8 @@ impl App {
         };
         self.request_server_prepared(
             server,
-            super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
-            super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+            ui_requests::UiRequestScope::Thread(thread_id),
+            ui_requests::UiRequestKind::ReadOnly,
             "Preparing fork settings",
             move |app, _| {
                 let current = app.current_displayed_thread_id() == Some(thread_id)
@@ -340,7 +340,7 @@ impl App {
                         preparation::request::<api::TurnInterruptResponse>(
                             RequestPolicy::Interactive,
                             &handle,
-                            api::ClientRequest::TurnInterrupt {
+                            ClientRequest::TurnInterrupt {
                                 request_id: api::RequestId::String(format!(
                                     "tui-safety-interrupt-{id}"
                                 )),
@@ -619,7 +619,7 @@ impl App {
                 );
             }
             self.side_threads
-                .insert(target, crate::app::side::SideThreadState::new(parent));
+                .insert(target, SideThreadState::new(parent));
             self.upsert_agent_picker_thread(target, None, None, false);
             if let Some(profile) = ready.context.input.permissions.selection() {
                 self.agents_overview
@@ -674,7 +674,7 @@ impl App {
             .replace_chat_widget_with_app_server_thread(
                 tui,
                 ready.started,
-                crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
+                session_lifecycle::ThreadAttachPresentation::SessionLineage,
                 None,
             )
             .await;
@@ -713,7 +713,7 @@ impl App {
                 self.chat_widget
                     .add_info_message("Fork created. You can continue here.".into(), None);
                 if (from_locked_thread || from_agents_overview)
-                    && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
+                    && tui.presentation_mode() != tui::PresentationMode::Frozen
                 {
                     if let Err(error) = tui.discard_pending_input_before_interactive_screen() {
                         tracing::warn!(%error, "failed to discard input after forking");
@@ -862,11 +862,9 @@ impl App {
                             .is_err_and(|error| !matches!(error, TypedRequestError::Server { .. }));
                         let error =
                             result
-                                .err()
-                                .map(|error| error.to_string())
-                                .unwrap_or_else(|| {
+                                .err().map_or_else(|| {
                                     "Retry canceled after stopping the original attempt.".into()
-                                });
+                                }, |error| error.to_string());
                         self.fork_failure(&mut context.input, error, matching);
                         if uncertain && same_epoch {
                             let source = context.input.thread_id();
@@ -899,7 +897,7 @@ impl App {
                         .into_iter()
                         .flat_map(|turn| &turn.items)
                         .filter_map(|item| match item {
-                            api::ThreadItem::UserMessage { content, .. } => Some(content),
+                            ThreadItem::UserMessage { content, .. } => Some(content),
                             _ => None,
                         })
                         .skip(1)
@@ -911,14 +909,14 @@ impl App {
                             .chain(content.iter().cloned())
                         }),
                 );
-                if !self.fork_authority_matches(&context.input).await {
+                if self.fork_authority_matches(&context.input).await {
+                    self.acquire_fork_navigation(server, operation, context);
+                } else {
                     self.fork_failure(
                         &mut context.input,
                         "Retry canceled because its source task changed.",
                         true,
                     );
-                } else {
-                    self.acquire_fork_navigation(server, operation, context);
                 }
             }
             (ForkStage::Acquiring(mut context), ForkOutcome::Acquired(prepared)) => {
@@ -977,11 +975,9 @@ impl App {
                             self.fork_failure(
                                 &mut context.input,
                                 result
-                                    .err()
-                                    .map(|error| error.to_string())
-                                    .unwrap_or_else(|| {
+                                    .err().map_or_else(|| {
                                         "Fork canceled because its source task changed.".into()
-                                    }),
+                                    }, |error| error.to_string()),
                                 matching,
                             );
                         }
@@ -996,13 +992,13 @@ impl App {
                                     Vec::new(),
                                     CleanupContinuation::Done,
                                     false,
-                                )
+                                );
                             }
                             SubscriptionCustody::Uncertain(target) if same_epoch => {
-                                self.retain_navigation_uncertainty(operation, vec![target], false)
+                                self.retain_navigation_uncertainty(operation, vec![target], false);
                             }
                             SubscriptionCustody::NewThreadUncertain if same_epoch => {
-                                self.retain_navigation_uncertainty(operation, Vec::new(), false)
+                                self.retain_navigation_uncertainty(operation, Vec::new(), false);
                             }
                             _ => {}
                         }
@@ -1074,7 +1070,7 @@ impl App {
                         false,
                     ),
                     _ if resource && same_epoch => {
-                        self.retain_navigation_uncertainty(operation, vec![source], false)
+                        self.retain_navigation_uncertainty(operation, vec![source], false);
                     }
                     _ => {}
                 }

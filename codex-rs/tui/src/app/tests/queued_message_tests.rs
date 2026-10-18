@@ -47,7 +47,7 @@ async fn queued_edit_acknowledgement_preserves_the_original_threads_draft() -> R
         app.chat_widget.apply_external_edit("current draft".into());
         app.queued_messages.mutations.insert(
             original,
-            super::super::queued_messages::QueueMutation {
+            queued_messages::QueueMutation {
                 item: item.clone(),
                 action: PendingSteerCancelAction::Edit,
             },
@@ -77,7 +77,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let (mut app, _home) = make_history_test_app().await?;
     // This case tests submission routing, not the paste-burst first-character delay.
     app.local_settings.tui.disable_paste_burst = Some(true);
-    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, mut events) = unbounded_channel();
     app.app_event_tx = AppEventSender::new(tx);
     let (mut server, requests, proxy) = start_recording_app_server_with_history(
         &app.config,
@@ -88,7 +88,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         LoaderOverrides::without_managed_config_for_tests(),
     )
     .await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut tui = tui::test_support::make_test_tui()?;
     let started = server.start_thread(&app.config).await?;
     let thread_id = started.session.thread_id;
     app.replace_chat_widget_with_app_server_thread(
@@ -103,8 +103,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // continuation stays ahead of an already-queued connection barrier.
     use super::super::turn_submissions::ui_requests::UiRequestKind;
     use super::super::turn_submissions::ui_requests::UiRequestScope;
-    let applied = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (release, stalled) = tokio::sync::oneshot::channel();
+    let applied = Arc::new(Mutex::new(Vec::new()));
+    let (release, stalled) = oneshot::channel();
     let first_applied = Arc::clone(&applied);
     app.request_server(
         &server,
@@ -160,7 +160,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(applied.lock().unwrap().is_empty());
     release.send(1_u32).unwrap();
     for _ in 0..3 {
-        let completion = tokio::time::timeout(
+        let completion = time::timeout(
             Duration::from_secs(5),
             app.server_operations.control_rx.recv(),
         )
@@ -174,7 +174,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // Cancellation stops a blocked read and suppresses a result that was
     // already delivered but has not yet been applied by the UI task.
     for already_delivered in [false, true] {
-        let (release, blocked) = tokio::sync::oneshot::channel::<u32>();
+        let (release, blocked) = oneshot::channel::<u32>();
         let cancelled_applied = Arc::clone(&applied);
         let handle = app.request_server(
             &server,
@@ -189,7 +189,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         );
         let completion = if already_delivered {
             release.send(9).unwrap();
-            let completion = tokio::time::timeout(
+            let completion = time::timeout(
                 Duration::from_secs(5),
                 app.server_operations.control_rx.recv(),
             )
@@ -199,7 +199,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             completion
         } else {
             handle.cancel();
-            let completion = tokio::time::timeout(
+            let completion = time::timeout(
                 Duration::from_secs(5),
                 app.server_operations.control_rx.recv(),
             )
@@ -227,7 +227,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             Ok(())
         },
     );
-    let stale = tokio::time::timeout(
+    let stale = time::timeout(
         Duration::from_secs(5),
         app.server_operations.control_rx.recv(),
     )
@@ -235,7 +235,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .expect("stale UI request completion");
     app.handle_submission_event(
         &server,
-        super::super::turn_submissions::SubmissionEvent::Retire,
+        turn_submissions::SubmissionEvent::Retire,
     )
     .await;
     app.handle_server_completion(&mut tui, &mut server, stale)
@@ -244,10 +244,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     while events.try_recv().is_ok() {}
     let rich_inputs = |text: &str| {
         vec![
-            codex_app_server_protocol::UserInput::Text {
+            UserInput::Text {
                 text: text.into(),
                 text_elements: vec![
-                    codex_protocol::user_input::TextElement::new(
+                    TextElement::new(
                         codex_protocol::user_input::ByteRange {
                             start: 0,
                             end: text.len(),
@@ -257,11 +257,11 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
                     .into(),
                 ],
             },
-            codex_app_server_protocol::UserInput::LocalImage {
+            UserInput::LocalImage {
                 path: "queue-image.png".into(),
                 detail: None,
             },
-            codex_app_server_protocol::UserInput::Image {
+            UserInput::Image {
                 image: codex_app_server_protocol::ImageReference::Inline {
                     url: "data:image/png;base64,cXVldWU=".into(),
                 },
@@ -287,13 +287,13 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .submit_user_message_as_plain_user_turn(rich_prompt.clone())
         .expect("submit ordinary prompt");
     // This failed against the synchronous routing: no subsequent App event could be serviced.
-    tokio::time::timeout(
+    time::timeout(
         Duration::from_secs(5),
         app.submit_thread_op(&mut server, thread_id, first),
     )
     .await
     .expect("server-controlled submission blocked the App loop")?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/start").is_empty() {
             tokio::task::yield_now().await;
         }
@@ -305,11 +305,11 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &server,
         thread_id,
         None,
-        vec![codex_app_server_protocol::UserInput::Text {
+        vec![UserInput::Text {
             text: "waiting follow-up".into(),
             text_elements: Vec::new(),
         }],
-        crate::app::turn_submissions::SubagentTextSource::Prompt,
+        turn_submissions::SubagentTextSource::Prompt,
     );
     assert_eq!(recorded_params(&requests, "turn/start").len(), 1);
     let preview = render_bottom_popup(&app.chat_widget, 80);
@@ -348,7 +348,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     Box::pin(app.handle_event(
         &mut tui,
         &mut server,
-        AppEvent::InsertHistoryCell(Box::new(history_cell::PlainHistoryCell::new(vec![
+        AppEvent::InsertHistoryCell(Box::new(PlainHistoryCell::new(vec![
             "completion while sending".into(),
         ]))),
     ))
@@ -374,14 +374,14 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &server,
         thread_id,
         None,
-        vec![codex_app_server_protocol::UserInput::Text {
+        vec![UserInput::Text {
             text: "unsent successor".into(),
             text_elements: Vec::new(),
         }],
-        crate::app::turn_submissions::SubagentTextSource::Prompt,
+        turn_submissions::SubagentTextSource::Prompt,
     );
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    time::pause();
+    time::advance(Duration::from_secs(31)).await;
     let completion = app
         .thread_delivery
         .completion_rx
@@ -390,7 +390,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .expect("uncertain receipt");
     app.handle_local_thread_completion(&mut server, completion)
         .await?;
-    tokio::time::resume();
+    time::resume();
     assert!(app.server_operations.is_empty());
     assert_eq!(app.chat_widget.composer_text_with_pending(), "live draft");
     let recovered = render_bottom_popup(&app.chat_widget, 100);
@@ -424,10 +424,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             thread_id,
             None,
             rich_inputs(text),
-            crate::app::turn_submissions::SubagentTextSource::Prompt,
+            turn_submissions::SubagentTextSource::Prompt,
         );
     }
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/start").len() < 2 {
             tokio::task::yield_now().await;
         }
@@ -449,7 +449,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     Box::pin(app.handle_event(
         &mut tui,
         &mut server,
-        AppEvent::Submission(crate::app::turn_submissions::SubmissionEvent::Retire),
+        AppEvent::Submission(turn_submissions::SubmissionEvent::Retire),
     ))
     .await?;
     assert!(app.server_operations.is_empty());
@@ -509,7 +509,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     )
     .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "skills/list").len() == skills_before {
             tokio::task::yield_now().await;
         }
@@ -527,21 +527,21 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let interrupts_before = recorded_params(&requests, "turn/interrupt").len();
     app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
         .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/interrupt").len() < interrupts_before + 1 {
             tokio::task::yield_now().await;
         }
     })
     .await?;
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    time::pause();
+    time::advance(Duration::from_secs(31)).await;
     let control = app
         .server_operations
         .control_rx
         .recv()
         .await
         .expect("unknown interrupt receipt");
-    let super::super::turn_submissions::ServerCompletion::Request(control) = control else {
+    let turn_submissions::ServerCompletion::Request(control) = control else {
         panic!("expected request completion");
     };
     app.finish_submission(
@@ -552,7 +552,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         control.outcome,
     )
     .await?;
-    tokio::time::resume();
+    time::resume();
     assert!(
         urgent_store
             .lock()
@@ -567,7 +567,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // An unknown receipt never resends itself, but does not disable a new deliberate control.
     app.submit_thread_op(&mut server, other_id, AppCommand::interrupt())
         .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/interrupt").len() < interrupts_before + 2 {
             tokio::task::yield_now().await;
         }
@@ -607,10 +607,10 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await;
     assert!(app.chat_widget.composer_text_with_pending().is_empty());
     let rename_id = match app.server_operations.preview(Some(thread_id)).thread {
-        crate::app::turn_submissions::ThreadSubmissionPreview::Sending { waiting, .. } => waiting
+        turn_submissions::ThreadSubmissionPreview::Sending { waiting, .. } => waiting
             .into_iter()
             .find_map(|entry| match entry {
-                crate::app::turn_submissions::SubmissionPreviewEntry::Operation {
+                turn_submissions::SubmissionPreviewEntry::Operation {
                     id,
                     text: "Renaming conversation",
                 } => Some(id),
@@ -621,15 +621,15 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     };
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::Edit {
+        turn_submissions::SubmissionEvent::Edit {
             thread_id,
             id: rename_id,
-            action: crate::app_command::PendingSteerCancelAction::Remove,
+            action: PendingSteerCancelAction::Remove,
         },
     )
     .await;
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    time::pause();
+    time::advance(Duration::from_secs(31)).await;
     let completion = app
         .thread_delivery
         .completion_rx
@@ -638,7 +638,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .expect("skills timeout");
     app.handle_local_thread_completion(&mut server, completion)
         .await?;
-    tokio::time::resume();
+    time::resume();
     app.settle_turn_submissions(&mut server).await?;
     assert_eq!(
         recorded_params(&requests, "skills/list").len(),
@@ -663,7 +663,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     )
     .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "skills/list").len() < skills_before + 2 {
             tokio::task::yield_now().await;
         }
@@ -692,7 +692,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     Box::pin(app.handle_event(&mut tui, &mut server, compact)).await?;
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::Retire,
+        turn_submissions::SubmissionEvent::Retire,
     )
     .await;
     assert!(
@@ -718,7 +718,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         crate::onboarding::DirectoryTrustOptions::default(),
     )?;
     app.agents_overview.new_session_draft =
-        Some(Box::new(crate::startup_draft::StartupDraftPump::new(
+        Some(Box::new(StartupDraftPump::new(
             &tui,
             crate::startup_draft::StartupDraftInitialScreen::Onboarding,
             crate::startup_draft::StartupDraftSessionAction::NewFromCommandCenter,
@@ -726,18 +726,18 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let writes_before_consent = recorded_params(&requests, "config/batchWrite").len();
     app.admit_dashboard_trust(
         &server,
-        crate::app::agents_overview::trust::DashboardTrustAdmission::Directory {
+        agents_overview::trust::DashboardTrustAdmission::Directory {
             consent: crate::onboarding::onboarding_screen::DirectoryTrustConsent::Path(
                 consent_cwd.to_path_buf(),
             ),
-            preparation: crate::app::agents_overview::trust::DashboardPreparation {
+            preparation: agents_overview::trust::DashboardPreparation {
                 config: app.config.clone(),
                 remote_cwd: None,
             },
             plan: consent_plan,
         },
     );
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "config/batchWrite").len() == writes_before_consent {
             tokio::task::yield_now().await;
         }
@@ -781,7 +781,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .set_active_turn_id("consent-control".into());
     let interrupts_before_consent = recorded_params(&requests, "turn/interrupt").len();
     app.stop_agents_overview_thread(&server, other_id);
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "turn/interrupt").len() == interrupts_before_consent {
             tokio::task::yield_now().await;
         }
@@ -790,8 +790,8 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     // Replacing the selection cannot cancel or re-admit the already accepted config write.
     app.supersede_pending_navigation();
     assert!(app.agents_overview.new_session_draft.is_some());
-    tokio::time::pause();
-    tokio::time::advance(Duration::from_secs(31)).await;
+    time::pause();
+    time::advance(Duration::from_secs(31)).await;
     while !app.pending_configuration_is_uncertain() {
         let completion = app
             .server_operations
@@ -802,7 +802,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         app.handle_server_completion(&mut tui, &mut server, completion)
             .await?;
     }
-    tokio::time::resume();
+    time::resume();
     assert!(app.pending_configuration_is_uncertain());
     assert!(!app.pumped_configuration_ready());
     assert_eq!(
@@ -817,7 +817,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::Retire,
+        turn_submissions::SubmissionEvent::Retire,
     )
     .await;
     assert!(app.server_operations.is_empty());
@@ -838,7 +838,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .await?;
     let approval = ServerRequest::FileChangeRequestApproval {
         request_id: codex_app_server_protocol::RequestId::Integer(991),
-        params: codex_app_server_protocol::FileChangeRequestApprovalParams {
+        params: FileChangeRequestApprovalParams {
             thread_id: other_id.to_string(),
             turn_id: "response-turn".into(),
             item_id: "response-patch".into(),
@@ -865,13 +865,13 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         !app.try_resolve_app_server_request(&server, other_id, &decision)
             .await?
     );
-    let delivery = tokio::time::timeout(
+    let delivery = time::timeout(
         Duration::from_secs(5),
         app.server_operations.control_rx.recv(),
     )
     .await?
     .expect("owned response-delivery receipt");
-    let super::super::turn_submissions::ServerCompletion::Request(delivery) = delivery else {
+    let turn_submissions::ServerCompletion::Request(delivery) = delivery else {
         panic!("expected request completion");
     };
     app.finish_submission(
@@ -882,7 +882,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         delivery.outcome,
     )
     .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "server/request/response").len() == responses_before {
             tokio::task::yield_now().await;
         }
@@ -894,7 +894,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::Retire,
+        turn_submissions::SubmissionEvent::Retire,
     )
     .await;
     assert!(app.server_operations.is_empty());
@@ -913,7 +913,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     )
     .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "thread/realtime/listVoices").is_empty() {
             tokio::task::yield_now().await;
         }
@@ -930,7 +930,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     assert!(app.chat_widget.composer_text_with_pending().contains('x'));
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::Retire,
+        turn_submissions::SubmissionEvent::Retire,
     )
     .await;
     assert!(!app.chat_widget.may_receive_realtime_transcripts());
@@ -946,12 +946,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let visible_before = app.current_displayed_thread_id();
     app.chat_widget
         .apply_external_edit("navigation draft".into());
-    tokio::time::timeout(
+    time::timeout(
         Duration::from_secs(5),
         app.select_agent_thread(&mut tui, &mut server, thread_id),
     )
     .await??;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "thread/read").len() == reads_before {
             tokio::task::yield_now().await;
         }
@@ -966,12 +966,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await;
     assert!(app.chat_widget.composer_text_with_pending().contains('x'));
     let navigation = match app.server_operations.preview(visible_before).navigation {
-        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        Some(turn_submissions::NavigationPreview::Preparing { id }) => id,
         _ => panic!("pending navigation remains visible and cancellable"),
     };
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: navigation },
+        turn_submissions::SubmissionEvent::CancelNavigation { id: navigation },
     )
     .await;
     assert!(app.server_operations.is_empty());
@@ -1011,7 +1011,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     app.resume_target_session(
         &mut tui,
         &mut server,
-        crate::resume_picker::SessionTarget {
+        SessionTarget {
             path: None,
             thread_id,
             cwd: Some(app.config.cwd.to_path_buf()),
@@ -1019,13 +1019,13 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         },
     )
     .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "config/read").len() == config_reads_before_resume {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("owned resume metadata receipt")).await?;
                 }
-                _ = tokio::task::yield_now() => {}
+                () = tokio::task::yield_now() => {}
             }
         }
         Ok::<_, color_eyre::Report>(())
@@ -1040,12 +1040,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     .await;
     assert!(app.chat_widget.composer_text_with_pending().contains('x'));
     let pending = match app.server_operations.preview(visible_before).navigation {
-        Some(super::super::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        Some(turn_submissions::NavigationPreview::Preparing { id }) => id,
         preview => panic!("expected owned resume metadata: {preview:?}"),
     };
     app.handle_submission_event(
         &server,
-        super::super::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+        turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
     )
     .await;
     app.harness_overrides.cwd = resume_cwd_override;
@@ -1066,37 +1066,37 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         .pending_navigation_admission()
         .expect("admitted acquisition");
     assert!(order > epoch);
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while resumes_for(acquisition_x) == 0 {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("liveness receipt")).await?;
                 }
-                _ = tokio::task::yield_now() => {}
+                () = tokio::task::yield_now() => {}
             }
         }
         Ok::<_, color_eyre::Report>(())
     })
     .await??;
     let pending = match app.server_operations.preview(visible_before).navigation {
-        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        Some(turn_submissions::NavigationPreview::Preparing { id }) => id,
         _ => panic!("running acquisition remains cancellable"),
     };
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+        turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
     )
     .await;
     assert_eq!(app.current_displayed_thread_id(), visible_before);
     app.select_agent_thread(&mut tui, &mut server, acquisition_y)
         .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while resumes_for(acquisition_y) == 0 {
             tokio::select! {
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("unrelated liveness receipt")).await?;
                 }
-                _ = tokio::task::yield_now() => {}
+                () = tokio::task::yield_now() => {}
             }
         }
         Ok::<_, color_eyre::Report>(())
@@ -1129,7 +1129,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     assert!(matches!(
         app.server_operations.preview(visible_before).navigation,
-        Some(crate::app::turn_submissions::NavigationPreview::Preparing { .. })
+        Some(turn_submissions::NavigationPreview::Preparing { .. })
     ));
     // Canceling a fresh defaults read recovers its never-admitted rich input, independently
     // of the older resource owners and without replacing text typed after admission.
@@ -1137,19 +1137,19 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let configs_before = recorded_params(&requests, "config/read").len();
     app.start_fresh_session(&mut tui, &mut server, None, Some(rich_prompt.clone()), None)
         .await;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "config/read").len() == configs_before {
             tokio::task::yield_now().await;
         }
     })
     .await?;
     let pending = match app.server_operations.preview(visible_before).navigation {
-        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        Some(turn_submissions::NavigationPreview::Preparing { id }) => id,
         _ => panic!("fresh defaults remain cancellable"),
     };
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+        turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
     )
     .await;
     let recovered = recovered_message(&mut app);
@@ -1175,7 +1175,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     let source_draft = recovered_message(&mut app);
     app.fork_current_thread(&mut tui, &mut server, None, Vec::new(), false)
         .await?;
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while recorded_params(&requests, "thread/fork").len() == forks_before {
             tokio::select! {
                 completion = app.thread_delivery.completion_rx.recv() => {
@@ -1184,7 +1184,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
                 completion = app.server_operations.control_rx.recv() => {
                     app.handle_server_completion(&mut tui, &mut server, completion.expect("owned fork preparation")).await?;
                 }
-                _ = tokio::task::yield_now() => {}
+                () = tokio::task::yield_now() => {}
             }
         }
         Ok::<_, color_eyre::Report>(())
@@ -1209,12 +1209,12 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     );
     assert!(render_bottom_popup(&app.chat_widget, 200).contains("newer draft"));
     let pending = match app.server_operations.preview(Some(other_id)).navigation {
-        Some(crate::app::turn_submissions::NavigationPreview::Preparing { id }) => id,
+        Some(turn_submissions::NavigationPreview::Preparing { id }) => id,
         preview => panic!("fork acquisition remains owned: {preview:?}"),
     };
     app.handle_submission_event(
         &server,
-        crate::app::turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
+        turn_submissions::SubmissionEvent::CancelNavigation { id: pending },
     )
     .await;
     assert!(!app.chat_widget.fork_in_progress);
@@ -1232,7 +1232,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
     app.ensure_thread_channel(closing_side).mark_live();
     app.side_threads.insert(
         closing_side,
-        super::super::side::SideThreadState {
+        SideThreadState {
             parent_thread_id: other_id,
             parent_status: None,
         },
@@ -1243,11 +1243,11 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
         &server,
         closing_side,
         None,
-        vec![codex_app_server_protocol::UserInput::Text {
+        vec![UserInput::Text {
             text: "unsent closed-side draft".into(),
             text_elements: Vec::new(),
         }],
-        crate::app::turn_submissions::SubagentTextSource::Prompt,
+        turn_submissions::SubagentTextSource::Prompt,
     );
     assert_eq!(recorded_params(&requests, "turn/start").len(), 2);
     let draft_before_detach = recovered_message(&mut app);
@@ -1256,7 +1256,7 @@ async fn stalled_submission_does_not_block_queued_edit_or_typing() -> Result<()>
             .await,
         AppRunControl::Continue
     ));
-    tokio::time::timeout(Duration::from_secs(5), async {
+    time::timeout(Duration::from_secs(5), async {
         while app.thread_event_channels[&other_id].attachment() == ThreadEventAttachment::Live {
             let completion = app
                 .server_operations

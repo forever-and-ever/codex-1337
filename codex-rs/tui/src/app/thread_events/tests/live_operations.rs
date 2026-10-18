@@ -11,7 +11,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
 
     fn event(thread: ThreadId, turn: &str, item: ThreadItem, started: bool) -> ServerNotification {
         if started {
-            ServerNotification::ItemStarted(codex_app_server_protocol::ItemStartedNotification {
+            ServerNotification::ItemStarted(ItemStartedNotification {
                 thread_id: thread.to_string(),
                 turn_id: turn.to_owned(),
                 item,
@@ -19,7 +19,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             })
         } else {
             ServerNotification::ItemCompleted(
-                codex_app_server_protocol::ItemCompletedNotification {
+                ItemCompletedNotification {
                     thread_id: thread.to_string(),
                     turn_id: turn.to_owned(),
                     item,
@@ -196,7 +196,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             row.summary.to_string()
                 == format!(
                     "Waiting for ({})",
-                    crate::history_cell::code_mode_owner_label(&target)
+                    history_cell::code_mode_owner_label(&target)
                 )
         })
         .unwrap();
@@ -210,7 +210,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
         execution.summary.to_string(),
         format!(
             "Running ({})",
-            crate::history_cell::code_mode_owner_label(&owner)
+            history_cell::code_mode_owner_label(&owner)
         )
     );
     store.push_notification(event(

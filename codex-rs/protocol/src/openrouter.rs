@@ -1,4 +1,4 @@
-//! OpenRouter values shared by config, the API client, core and the app-server protocol.
+//! `OpenRouter` values shared by config, the API client, core and the app-server protocol.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -44,7 +44,7 @@ macro_rules! string_value {
     };
 }
 
-/// The name of an OpenRouter key; config maps it to the file holding the secret.
+/// The name of an `OpenRouter` key; config maps it to the file holding the secret.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
 )]
@@ -54,6 +54,7 @@ macro_rules! string_value {
 pub struct KeyName(String);
 
 impl KeyName {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -76,7 +77,7 @@ impl FromStr for KeyName {
 }
 string_value!(KeyName);
 
-/// The OpenRouter model id sent as `model`: `[~]author/name[:variant]` or `@preset/name`.
+/// The `OpenRouter` model id sent as `model`: `[~]author/name[:variant]` or `@preset/name`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
 #[serde(try_from = "String", into = "String")]
 #[ts(type = "string")]
@@ -86,6 +87,7 @@ pub enum ModelSlug {
 }
 
 impl ModelSlug {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         match self {
             Self::Model(value) | Self::Preset(value) => value,
@@ -143,7 +145,7 @@ impl JsonSchema for ModelSlug {
     }
 }
 
-/// An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.
+/// An `OpenRouter` endpoint, `host[/variant][/region][/tier]`; a base slug names a host.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
 )]
@@ -153,11 +155,13 @@ impl JsonSchema for ModelSlug {
 pub struct EndpointSlug(String);
 
 impl EndpointSlug {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Whether this slug names the endpoint `tag` or a slash-delimited prefix of it.
+    #[must_use]
     pub fn matches(&self, tag: &str) -> bool {
         tag == self.as_str()
             || tag
@@ -187,15 +191,18 @@ pub struct EndpointSet(BTreeSet<EndpointSlug>);
 
 impl EndpointSet {
     /// `None` when `slugs` is empty.
+    #[must_use]
     pub fn new(slugs: BTreeSet<EndpointSlug>) -> Option<Self> {
         (!slugs.is_empty()).then_some(Self(slugs))
     }
 
+    #[must_use]
     pub fn slugs(&self) -> &BTreeSet<EndpointSlug> {
         &self.0
     }
 
     /// Whether some slug in the set matches the endpoint `tag`.
+    #[must_use]
     pub fn matches(&self, tag: &str) -> bool {
         self.0.iter().any(|slug| slug.matches(tag))
     }
@@ -227,6 +234,7 @@ pub enum EndpointFilter {
 
 impl EndpointFilter {
     /// Whether the endpoint `tag` may serve under this filter.
+    #[must_use]
     pub fn admits(&self, tag: &str) -> bool {
         match self {
             Self::All => true,
@@ -327,9 +335,11 @@ struct EndpointFilterIgnore {
 pub struct Usd(i64);
 
 impl Usd {
+    #[must_use]
     pub const fn from_nanodollars(value: i64) -> Self {
         Self(value)
     }
+    #[must_use]
     pub const fn nanodollars(self) -> i64 {
         self.0
     }
@@ -419,6 +429,7 @@ pub fn add_cost(total: &mut Option<Usd>, cost: Option<Usd>) {
 }
 
 /// The spend accrued between two running totals, never negative.
+#[must_use]
 pub fn cost_since(total: Option<Usd>, previous: Option<Usd>) -> Option<Usd> {
     total.map(|total| {
         Usd::from_nanodollars(

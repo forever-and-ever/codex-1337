@@ -207,7 +207,7 @@ impl ChatWidget {
 
     pub(crate) fn submission_draft_from_inputs(
         client_id: String,
-        input: &[codex_app_server_protocol::UserInput],
+        input: &[UserInput],
         source: UserMessageSource,
     ) -> SubmissionDraft {
         let mut display = Self::user_message_display_from_inputs(input);
@@ -216,7 +216,7 @@ impl ChatWidget {
             display.message = input
                 .iter()
                 .filter_map(|item| {
-                    if let codex_app_server_protocol::UserInput::Text { text, .. } = item {
+                    if let UserInput::Text { text, .. } = item {
                         Some(text.as_str())
                     } else {
                         None
@@ -296,7 +296,7 @@ impl ChatWidget {
         {
             CancellationEffect::Edit(message) => self.restore_submission_messages(vec![message]),
             CancellationEffect::AlreadySent => {
-                self.add_info_message("Pending steer has already been sent.".into(), None)
+                self.add_info_message("Pending steer has already been sent.".into(), None);
             }
             CancellationEffect::Unchanged | CancellationEffect::Removed => {}
         }

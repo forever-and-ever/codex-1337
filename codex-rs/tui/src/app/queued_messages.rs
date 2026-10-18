@@ -126,7 +126,7 @@ impl App {
                             self.queued_messages.mutations.contains_key(&thread_id),
                         ),
                         Err(error) => {
-                            tracing::warn!(%thread_id, %error, "could not refresh queued messages")
+                            tracing::warn!(%thread_id, %error, "could not refresh queued messages");
                         }
                     }
                 }

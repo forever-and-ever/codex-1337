@@ -255,7 +255,7 @@ pub(super) fn project_stream(
     tokio::spawn(async move {
         loop {
             let event = tokio::select! {
-                _ = tx.closed() => return,
+                () = tx.closed() => return,
                 event = stream.rx_event.recv() => event,
             };
             let Some(event) = event else {

@@ -248,7 +248,7 @@ impl App {
     pub(in crate::app) fn refresh_retained_thread_input(
         &mut self,
         thread_id: ThreadId,
-        input: Option<&crate::chatwidget::ThreadInputState>,
+        input: Option<&ThreadInputState>,
     ) {
         // Retained tasks outlive the channel reset; refresh their fallback at the final handoff.
         if let Some(retained) = self.agents_overview.input_states.get_mut(&thread_id)
@@ -327,7 +327,7 @@ impl App {
                     vec![draft],
                     DraftDisposition::Edit,
                 )
-                .await
+                .await;
             }
             OperationOrigin::Connection => self
                 .chat_widget
@@ -344,7 +344,7 @@ impl App {
         while let Ok(completion) = self.server_operations.control_rx.try_recv() {
             match completion {
                 ServerCompletion::RecoverDraft(recovery) => {
-                    self.recover_local_navigation_draft(recovery).await
+                    self.recover_local_navigation_draft(recovery).await;
                 }
                 completion => retained.push(completion),
             }
@@ -587,7 +587,7 @@ impl App {
                 return Ok(control);
             }
             NavigationReceipt::Cleaned(result) => {
-                self.finish_navigation_cleanup(server, operation, matching, result)
+                self.finish_navigation_cleanup(server, operation, matching, result);
             }
             NavigationReceipt::Fresh(receipt) => {
                 self.finish_fresh_navigation(tui, server, operation, matching, receipt)
@@ -616,7 +616,7 @@ impl App {
                         &self.environment_manager,
                         &defaults,
                     );
-                    super::new_session::overlay_new_session_defaults(
+                    new_session::overlay_new_session_defaults(
                         &mut preparation.config,
                         &defaults.config,
                         &preparation.cli_kv_overrides,
@@ -756,7 +756,7 @@ impl App {
             {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
-                    tracing::warn!(%error, "failed to close superseded picker session")
+                    tracing::warn!(%error, "failed to close superseded picker session");
                 }
                 Err(_) => tracing::warn!("superseded picker cleanup task terminated unexpectedly"),
             }

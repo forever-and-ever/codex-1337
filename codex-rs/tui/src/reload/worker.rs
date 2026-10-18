@@ -48,9 +48,10 @@ pub(crate) fn suspend_host() -> io::Result<()> {
     control::suspend(&worker.directory, worker.generation)
 }
 
+#[must_use]
 pub fn should_host() -> bool {
     use std::io::IsTerminal;
-    !is_direct_worker() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    !is_direct_worker() && io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
 fn is_direct_worker() -> bool {

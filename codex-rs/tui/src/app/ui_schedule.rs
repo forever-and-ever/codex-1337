@@ -265,7 +265,7 @@ impl App {
     pub(crate) fn defer_input_frame(
         tui: &mut tui::Tui,
         event: &TuiEvent,
-        screen_size: ratatui::layout::Size,
+        screen_size: Size,
     ) -> bool {
         if matches!(event, TuiEvent::Draw) {
             let requester = tui.frame_requester();
@@ -391,8 +391,8 @@ pub(super) async fn drive(
     let mut waiting_for_initial_session_header = true;
     let exit_reason_result = 'ui: loop {
         schedule.drain_ready(tui_events).await;
-        for _ in 0..ui_schedule::INPUT_BATCH {
-            let admitted = ui_schedule::input_admitted(
+        for _ in 0..INPUT_BATCH {
+            let admitted = input_admitted(
                 app,
                 !app_event_rx.is_empty(),
                 pending_startup_draft.is_some(),
@@ -406,7 +406,7 @@ pub(super) async fn drive(
             if !matches!(event, TuiEvent::FocusLost) {
                 idle_restart.postpone();
             }
-            let interactive = ui_schedule::is_interactive(&event);
+            let interactive = is_interactive(&event);
             let result = app
                 .apply_scheduled_input(
                     tui,
@@ -472,7 +472,7 @@ pub(super) async fn drive(
         if app.overlay.is_none() {
             if !tui.is_owned_screen() && tui.is_alt_screen_active() {
                 app.close_transcript_overlay(tui);
-            } else if let Err(err) = tui.set_overlay_input(crate::tui::OverlayInput::Default) {
+            } else if let Err(err) = tui.set_overlay_input(tui::OverlayInput::Default) {
                 break Err(err.into());
             }
         }
@@ -541,7 +541,7 @@ pub(super) async fn drive(
             }
         }
         idle_restart.set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());
-        let block_terminal_input_for_pending_startup_events = !ui_schedule::input_admitted(
+        let block_terminal_input_for_pending_startup_events = !input_admitted(
             app,
             has_pending_app_events,
             pending_startup_draft.is_some(),
@@ -699,13 +699,10 @@ pub(super) async fn drive(
                 && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ServerEvent);
-                match app_server_event {
-                    Some(event) => app.handle_app_server_event(app_server, event).await,
-                    None => {
-                        listen_for_app_server_events = false;
-                        app.begin_reconnect();
-                        tracing::warn!("app-server event stream closed");
-                    }
+                if let Some(event) = app_server_event { app.handle_app_server_event(app_server, event).await } else {
+                    listen_for_app_server_events = false;
+                    app.begin_reconnect();
+                    tracing::warn!("app-server event stream closed");
                 }
                 AppRunControl::Continue
             }
@@ -750,7 +747,7 @@ pub(super) async fn drive(
                     }
                     None => std::future::pending().await,
                 }
-            }, if tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+            }, if tui.presentation_mode() == tui::PresentationMode::Normal => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
                 app.chat_widget.refresh_goal_status_indicator_for_time_tick();
@@ -766,7 +763,7 @@ pub(super) async fn drive(
                     None => std::future::pending().await,
                 }
             }, if !has_pending_app_events
-                && tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+                && tui.presentation_mode() == tui::PresentationMode::Normal => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
                 crate::session_log::log_commit_tick();

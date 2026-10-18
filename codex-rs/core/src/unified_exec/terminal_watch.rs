@@ -62,6 +62,7 @@ pub struct TerminalWatch {
 pub struct TerminalExitProbe(Arc<UnifiedExecProcess>);
 
 impl TerminalExitProbe {
+    #[must_use]
     pub fn has_exited(&self) -> bool {
         self.0.has_exited()
     }
@@ -258,17 +259,21 @@ impl Drop for TerminalWatch {
 }
 
 impl TerminalWatch {
+    #[must_use]
     pub fn command(&self) -> &str {
         &self.command
     }
+    #[must_use]
     pub fn pattern(&self) -> Option<&str> {
         self.pattern.as_ref().map(|pattern| pattern.as_str())
     }
+    #[must_use]
     pub fn retained_output(&self) -> &str {
         &self.retained
     }
 
     /// Inspects the watched process's exit state while `wait` owns the watch.
+    #[must_use]
     pub fn exit_probe(&self) -> TerminalExitProbe {
         TerminalExitProbe(Arc::clone(&self.process))
     }

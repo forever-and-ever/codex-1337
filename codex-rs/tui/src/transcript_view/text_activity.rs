@@ -263,7 +263,7 @@ impl TextLayout {
     pub(in crate::transcript_view) fn fold_position(
         &self,
         target: &FoldTarget,
-    ) -> Option<(usize, std::ops::Range<u16>, usize)> {
+    ) -> Option<(usize, Range<u16>, usize)> {
         self.disclosure_controls
             .iter()
             .find(|control| control.target.same_control(target))

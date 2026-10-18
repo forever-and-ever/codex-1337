@@ -135,9 +135,7 @@ pub(super) async fn wait(
         if same_thread(&target.thread_id, caller) {
             return Err("wait_threads cannot wait on the calling task".to_string());
         }
-        let canonical_id = ThreadId::from_string(&target.thread_id)
-            .map(|thread_id| thread_id.to_string())
-            .unwrap_or_else(|_| target.thread_id.clone());
+        let canonical_id = ThreadId::from_string(&target.thread_id).map_or_else(|_| target.thread_id.clone(), |thread_id| thread_id.to_string());
         if !unique_targets.insert(canonical_id) {
             return Err("wait_threads received duplicate target tasks".to_string());
         }
@@ -370,7 +368,7 @@ pub(super) async fn wait(
                     }
                 }
                 Ok(Err(message)) => {
-                    errors.push(json!({"threadId": target.thread_id, "message": message.message}))
+                    errors.push(json!({"threadId": target.thread_id, "message": message.message}));
                 }
                 Err(_) => errors.push(json!({
                     "threadId": target.thread_id,

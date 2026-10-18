@@ -100,12 +100,9 @@ impl Catalog {
             .acquire()
             .await
             .unwrap_or_else(|_| unreachable!("catalog refresh semaphore is never closed"));
-        let preferences = match read_openrouter_config(&self.home).await {
-            Ok(preferences) => preferences,
-            Err(_) => {
-                tracing::warn!("Cannot read OpenRouter model preferences");
-                return Vec::new();
-            }
+        let preferences = if let Ok(preferences) = read_openrouter_config(&self.home).await { preferences } else {
+            tracing::warn!("Cannot read OpenRouter model preferences");
+            return Vec::new();
         };
         if let Some(snapshot) = self.snapshot.read().await.as_ref()
             && snapshot.identity == preferences.models

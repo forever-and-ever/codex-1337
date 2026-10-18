@@ -101,7 +101,7 @@ impl App {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
         input: Vec<codex_app_server_protocol::UserInput>,
-        source: crate::app::turn_submissions::SubagentTextSource,
+        source: SubagentTextSource,
     ) {
         let client_id = Uuid::new_v4().to_string();
         let draft = ChatWidget::submission_draft_from_inputs(
@@ -211,7 +211,7 @@ impl App {
         &mut self,
         thread_id: ThreadId,
         submission: &PendingSubmission,
-        turn: codex_app_server_protocol::Turn,
+        turn: Turn,
     ) {
         let SubmissionRequest::Continuation { review, .. } = &submission.request else {
             unreachable!("continuation receipt without reviewed intent");
@@ -361,7 +361,7 @@ impl App {
                         OperationLane::Exit | OperationLane::Response(_) => true,
                         OperationLane::Control(thread_id) => {
                             !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                                if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. })))
+                                if matches!(&**operation, ServerOperation::Control(ControlOperation::RealtimeStop { .. })))
                                 || !self.server_operations.realtime_start_precedes(*thread_id, lane.active.order)
                         }
                         OperationLane::Thread(thread_id) => barrier.is_none_or(|order| lane.active.order < order)
@@ -412,7 +412,7 @@ impl App {
         let scope = active.origin.scope();
         let permitted = match &active.request {
             SubmissionRequest::Operation(operation) => match &**operation {
-                ServerOperation::Control(control::ControlOperation::RealtimeStop {
+                ServerOperation::Control(ControlOperation::RealtimeStop {
                     attempt_id,
                 }) => {
                     let thread_id = active.origin.thread().0;
@@ -450,7 +450,7 @@ impl App {
             let outcome = if !permitted {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimeDiscarded))
             } else if !settings_supported
-                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ServerOperation::Mutation(requests::ThreadMutation::Settings(_))))
+                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ServerOperation::Mutation(ThreadMutation::Settings(_))))
             {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::SettingsUnsupported))
             } else {
@@ -630,7 +630,7 @@ impl App {
                         self.chat_widget.add_error_message("Voice preference was saved, but confirmation was interrupted by a connection change. No write was retried.".into());
                     }
                     if let SubmissionRequest::Operation(operation) = &lane.active.request
-                        && let ServerOperation::Control(control::ControlOperation::DetachAndExit {
+                        && let ServerOperation::Control(ControlOperation::DetachAndExit {
                             reason,
                             ..
                         }) = &**operation
@@ -657,7 +657,7 @@ impl App {
                         task.abort();
                     }
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                        if matches!(&**operation, ServerOperation::Control(control::ControlOperation::Interrupt { .. } | control::ControlOperation::InterruptActive { .. })))
+                        if matches!(&**operation, ServerOperation::Control(ControlOperation::Interrupt { .. } | ControlOperation::InterruptActive { .. })))
                     {
                         lane.active
                             .origin
@@ -897,8 +897,8 @@ impl App {
             if matches!(
                 &**operation,
                 ServerOperation::Control(
-                    control::ControlOperation::Interrupt { .. }
-                        | control::ControlOperation::InterruptActive { .. }
+                    ControlOperation::Interrupt { .. }
+                        | ControlOperation::InterruptActive { .. }
                 )
             ) {
                 // This is the sole active control lease for this captured store. A successor
@@ -907,7 +907,7 @@ impl App {
             }
             let applicable = matches!(
                 &**operation,
-                ServerOperation::Control(control::ControlOperation::DetachAndExit { .. })
+                ServerOperation::Control(ControlOperation::DetachAndExit { .. })
             ) || match &origin {
                 OperationOrigin::Connection => true,
                 OperationOrigin::Thread { thread_id, store } => self
@@ -943,7 +943,7 @@ impl App {
                         if matches!(
                             &**operation,
                             ServerOperation::Control(
-                                control::ControlOperation::InterruptActive { .. }
+                                ControlOperation::InterruptActive { .. }
                             )
                         ) {
                             self.refresh_agents_overview_threads(server);
@@ -1045,12 +1045,12 @@ impl App {
                             TurnObservation::Missing { expected }
                                 if store.active_turn_id() == Some(expected.as_str()) =>
                             {
-                                store.clear_active_turn_id()
+                                store.clear_active_turn_id();
                             }
                             TurnObservation::Mismatch { expected, actual }
                                 if store.active_turn_id() == Some(expected.as_str()) =>
                             {
-                                store.set_active_turn_id(actual)
+                                store.set_active_turn_id(actual);
                             }
                             _ => {}
                         }
@@ -1223,7 +1223,7 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
     ) -> Result<()> {
-        let mut tui = crate::tui::test_support::make_test_tui()?;
+        let mut tui = tui::test_support::make_test_tui()?;
         tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.is_empty() {
                 tokio::select! {
@@ -1327,7 +1327,7 @@ impl App {
         server: &mut AppServerSession,
     ) -> Result<()> {
         self.open_agent_picker(server).await;
-        let mut tui = crate::tui::test_support::make_test_tui()?;
+        let mut tui = tui::test_support::make_test_tui()?;
         self.settle_navigation(&mut tui, server).await.map(|_| ())
     }
 }

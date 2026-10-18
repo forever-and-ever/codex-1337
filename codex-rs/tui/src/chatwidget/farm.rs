@@ -220,7 +220,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::ReconcileFarm {
                         request_id: reconcile_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()
@@ -234,7 +234,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::DiscardFarm {
                         request_id: request_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()
@@ -247,7 +247,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::RestoreFarmDraft {
                         request_id: restore_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()

@@ -250,7 +250,7 @@ async fn farm_spawns_and_replays_without_steering_parent(
             ThreadStatus::Active { .. }
         )),
         ParentState::Idle | ParentState::Pristine => {
-            assert_eq!(parent_before_completion.thread.status, ThreadStatus::Idle)
+            assert_eq!(parent_before_completion.thread.status, ThreadStatus::Idle);
         }
     }
     assert_eq!(
@@ -738,7 +738,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
     } else {
         assert_eq!(record, None);
     }
-    assert!(
+    assert_eq!(
         server
             .received_requests()
             .await
@@ -749,8 +749,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
                 |request| request.body_json::<Value>().expect("response request")["model"]
                     == "farm-model"
             )
-            .count()
-            == usize::from(mode == ThreadFarmMode::Automatic)
+            .count(), usize::from(mode == ThreadFarmMode::Automatic)
     );
     // Simulate interruption immediately after durable claim. Reconciliation is not
     // permission to start a fresh child, even if current executor validation differs.
@@ -812,7 +811,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
             json!({"farmOutcome": "uncertain", "requestId": params.request_id, "childThreadId": null, "agentPath": null})
         )
     );
-    assert!(
+    assert_eq!(
         server
             .received_requests()
             .await
@@ -823,8 +822,7 @@ async fn farm_provider_lock_rejects_before_claiming_request(mode: ThreadFarmMode
                 |request| request.body_json::<Value>().expect("response request")["model"]
                     == "farm-model"
             )
-            .count()
-            == usize::from(mode == ThreadFarmMode::Automatic)
+            .count(), usize::from(mode == ThreadFarmMode::Automatic)
     );
     restarted.shutdown_gracefully().await?;
     Ok(())

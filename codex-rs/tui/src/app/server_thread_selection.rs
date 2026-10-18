@@ -16,7 +16,7 @@ pub(super) enum SelectStage {
         thread_id: ThreadId,
         after: SelectionAfter,
     },
-    DiscardSide(super::super::detach::DetachPlan),
+    DiscardSide(detach::DetachPlan),
     Resume {
         context: Box<SelectionContext>,
         kind: SelectionKind,
@@ -86,14 +86,14 @@ pub(super) enum SelectionReceipt {
         handle: AppServerRequestHandle,
     },
     Fallback(PreparedHistory),
-    SideDetached(super::super::detach::DetachReceipt),
+    SideDetached(detach::DetachReceipt),
     Terminated,
 }
 
 enum SelectionEffect {
     DiscardSide {
         handle: AppServerRequestHandle,
-        plan: super::super::detach::DetachPlan,
+        plan: detach::DetachPlan,
     },
     Liveness {
         thread_id: ThreadId,
@@ -152,13 +152,13 @@ impl App {
                 match effect {
                     SelectionEffect::DiscardSide { handle, plan } => {
                         let receipt = match tokio::time::timeout(
-                            super::super::worker::ACK_TIMEOUT,
-                            super::super::detach::send(&handle, id, &plan),
+                            ACK_TIMEOUT,
+                            detach::send(&handle, id, &plan),
                         )
                         .await
                         {
-                            Ok(results) => super::super::detach::DetachReceipt::Complete(results),
-                            Err(_) => super::super::detach::DetachReceipt::BudgetExpired,
+                            Ok(results) => detach::DetachReceipt::Complete(results),
+                            Err(_) => detach::DetachReceipt::BudgetExpired,
                         };
                         SelectionReceipt::SideDetached(receipt)
                     }
@@ -242,8 +242,8 @@ impl App {
             (SelectStage::DiscardSide(plan), SelectionReceipt::SideDetached(receipt)) => {
                 if same_epoch {
                     let unknown = match &receipt {
-                        super::super::detach::DetachReceipt::BudgetExpired => true,
-                        super::super::detach::DetachReceipt::Complete(results) => {
+                        detach::DetachReceipt::BudgetExpired => true,
+                        detach::DetachReceipt::Complete(results) => {
                             results.iter().any(|result| result.result.is_err())
                         }
                     };
@@ -364,7 +364,7 @@ impl App {
                                     *context,
                                     SelectedThread::ReadOnly(Box::new(thread)),
                                 )
-                                .await?
+                                .await?;
                             }
                             result => {
                                 if self.thread_event_channels.contains_key(&context.thread_id) {
@@ -626,11 +626,11 @@ impl App {
             .active_turn_id_for_thread(thread_id)
             .await
             .unwrap_or_default();
-        let plan = super::super::detach::DetachPlan {
-            targets: vec![super::super::detach::DetachTarget {
+        let plan = detach::DetachPlan {
+            targets: vec![detach::DetachTarget {
                 thread_id,
                 store,
-                kind: super::super::detach::DetachKind::Side {
+                kind: detach::DetachKind::Side {
                     turn_id,
                     replay_only,
                 },

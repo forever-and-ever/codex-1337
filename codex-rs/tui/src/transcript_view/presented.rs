@@ -188,29 +188,26 @@ impl TranscriptView {
             return;
         }
         let previous = self.position;
-        let scroll = match self.deferred_scroll.take() {
-            Some(mut scroll) => {
-                scroll.rows = scroll.rows.saturating_add(rows);
-                scroll
-            }
-            None => {
-                let Some(first) = self.visible.first() else {
-                    return;
-                };
-                let offset = first.layout.position_at(first.row, 0);
-                Scroll {
-                    origin: Position::Reading(Anchor {
-                        key: first.key,
-                        index: first.index,
-                        offset,
-                        row_bias: first.layout.row_for_offset(offset) as isize - first.row as isize,
-                    }),
-                    rows,
-                    cells: self
-                        .snapshot_cells()
-                        .or_else(|| self.presented_cells.clone())
-                        .unwrap_or_else(|| Arc::from(cells)),
-                }
+        let scroll = if let Some(mut scroll) = self.deferred_scroll.take() {
+            scroll.rows = scroll.rows.saturating_add(rows);
+            scroll
+        } else {
+            let Some(first) = self.visible.first() else {
+                return;
+            };
+            let offset = first.layout.position_at(first.row, 0);
+            Scroll {
+                origin: Position::Reading(Anchor {
+                    key: first.key,
+                    index: first.index,
+                    offset,
+                    row_bias: first.layout.row_for_offset(offset) as isize - first.row as isize,
+                }),
+                rows,
+                cells: self
+                    .snapshot_cells()
+                    .or_else(|| self.presented_cells.clone())
+                    .unwrap_or_else(|| Arc::from(cells)),
             }
         };
         self.position = scroll.origin;
@@ -247,8 +244,7 @@ impl TranscriptView {
             .filter(|(width, _)| *width == area.width);
         let preparing_cells = inflight
             .as_ref()
-            .map(|(_, cells)| cells.as_ref())
-            .unwrap_or(cells);
+            .map_or(cells, |(_, cells)| cells.as_ref());
         let mut prepared = Buffer::empty(area);
         self.render_prepared(area, &mut prepared, preparing_cells);
         if !self.cache.waiting && !self.live_preparation.is_pending() {

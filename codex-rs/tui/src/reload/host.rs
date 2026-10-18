@@ -147,7 +147,7 @@ async fn supervise(
         tokio::select! {
             _ = terminate.recv() => break 128 + libc::SIGTERM,
             _ = hangup.recv() => break 128 + libc::SIGHUP,
-            _ = async {
+            () = async {
                 match wake_after {
                     Some(duration) => tokio::time::sleep(duration).await,
                     None => std::future::pending().await,
@@ -328,7 +328,7 @@ async fn supervise(
                 let mut bytes = [0; 4096];
                 match ready.try_io(|fd| worker_process::read(fd.get_ref().as_raw_fd(), &mut bytes)) {
                     Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted => {},
-                    Ok(Ok(0)) | Ok(Err(_)) => host.output_open = false,
+                    Ok(Ok(0) | Err(_)) => host.output_open = false,
                     Ok(Ok(count)) => {
                         if host.reload.replacing() { host.pending_output.extend(&bytes[..count]); }
                         else { host.output.extend(&bytes[..count]); }

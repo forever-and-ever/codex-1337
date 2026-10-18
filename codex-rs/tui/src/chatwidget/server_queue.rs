@@ -23,7 +23,7 @@ pub(crate) fn queued_message_text(item: &QueuedSubmission) -> Option<String> {
     item.input
         .iter()
         .map(|input| match input {
-            codex_app_server_protocol::UserInput::Text { text, .. } => Some(text.clone()),
+            UserInput::Text { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()

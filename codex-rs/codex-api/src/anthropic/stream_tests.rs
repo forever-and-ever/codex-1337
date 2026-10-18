@@ -71,7 +71,7 @@ async fn fragmented_utf8_crlf_sse_and_terminal_failures_are_not_replayed() {
             while let Some(event) = stream.next().await {
                 match event {
                     Ok(ResponseEvent::OutputItemDone(item)) => {
-                        observed.push(serde_json::to_value(item).unwrap())
+                        observed.push(serde_json::to_value(item).unwrap());
                     }
                     Ok(ResponseEvent::Completed {
                         token_usage,

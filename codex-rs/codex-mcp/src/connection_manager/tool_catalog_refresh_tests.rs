@@ -23,7 +23,7 @@ pub(crate) struct MutableCatalog {
 }
 
 impl MutableCatalog {
-    pub(crate) async fn new() -> anyhow::Result<Self> {
+    pub(crate) async fn new() -> Result<Self> {
         Self::from_tools(vec![
             create_test_tool("docs", "search").tool,
             create_test_tool("docs", "removed").tool,
@@ -31,7 +31,7 @@ impl MutableCatalog {
         .await
     }
 
-    pub(crate) async fn from_tools(tools: Vec<Tool>) -> anyhow::Result<Self> {
+    pub(crate) async fn from_tools(tools: Vec<Tool>) -> Result<Self> {
         let tools = Arc::new(tokio::sync::RwLock::new(tools));
         let control = Arc::new(RefreshControl::default());
         let client = Arc::new(
@@ -61,7 +61,7 @@ impl MutableCatalog {
             "test",
             &client,
             Some(Duration::from_secs(5)),
-            crate::pagination::MAX_MCP_CATALOG_ITEMS,
+            MAX_MCP_CATALOG_ITEMS,
             /*server_instructions*/ None,
         )
         .await?;
@@ -106,7 +106,7 @@ impl MutableCatalog {
         })
     }
 
-    pub(crate) async fn notify(&self) -> anyhow::Result<()> {
+    pub(crate) async fn notify(&self) -> Result<()> {
         let before = self.client.tool_list_revision().await?;
         let peer = self
             .control
@@ -130,7 +130,7 @@ impl MutableCatalog {
 
 #[tokio::test]
 async fn ordinary_catalog_refresh_coalesces_and_preserves_failed_and_racing_notifications()
--> anyhow::Result<()> {
+-> Result<()> {
     let fixture = MutableCatalog::new().await?;
     // A startup notification after the initial list must not be consumed by readiness.
     fixture.notify().await?;

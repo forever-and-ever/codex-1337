@@ -8,10 +8,10 @@ use codex_app_server_protocol as api;
 #[derive(Clone)]
 pub(in crate::app) enum ServerOperation {
     Mutation(ThreadMutation),
-    Control(control::ControlOperation),
+    Control(ControlOperation),
     Catalog(CatalogRequest),
     Connection(ConnectionMutation),
-    Realtime(realtime::RealtimeOperation),
+    Realtime(RealtimeOperation),
     Response(Box<ServerRequestDelivery>),
 }
 
@@ -23,40 +23,40 @@ pub(in crate::app) enum ThreadMutation {
     CleanBackgroundTerminals,
     DisarmAlarm(String),
     ServerShell(String),
-    Settings(Box<api::ThreadSettingsUpdateParams>),
+    Settings(Box<ThreadSettingsUpdateParams>),
     GuardianApproval(serde_json::Value),
-    UiRequest(super::ui_requests::UiRequest),
+    UiRequest(ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
 pub(in crate::app) enum CatalogRequest {
     Skills {
-        params: api::SkillsListParams,
+        params: SkillsListParams,
         cwd: PathBuf,
     },
-    UiRequest(super::ui_requests::UiRequest),
+    UiRequest(ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
 pub(in crate::app) enum ConnectionMutation {
     ReloadUserConfig,
-    Voice(super::voice_preferences::VoicePreferenceOperation),
+    Voice(voice_preferences::VoicePreferenceOperation),
     ModelDefaults {
         edits: Vec<api::ConfigEdit>,
         setting: String,
     },
-    Removal(super::removal::RemovalOperation),
-    Trust(super::navigation::trust::TrustOperation),
-    UiRequest(super::ui_requests::UiRequest),
+    Removal(removal::RemovalOperation),
+    Trust(navigation::trust::TrustOperation),
+    UiRequest(ui_requests::UiRequest),
 }
 
 #[derive(Clone)]
 pub(in crate::app) enum ServerRequestDelivery {
     Resolved {
-        resolution: super::super::app_server_requests::AppServerRequestResolution,
+        resolution: app_server_requests::AppServerRequestResolution,
         command: Box<AppCommand>,
     },
-    DynamicTool(super::super::app_server_requests::AppServerRequestResolution),
+    DynamicTool(app_server_requests::AppServerRequestResolution),
     Rejected {
         request_id: codex_app_server_protocol::RequestId,
         error: codex_app_server_protocol::JSONRPCErrorError,
@@ -95,19 +95,19 @@ pub(in crate::app) enum OperationReceipt {
     SettingsUpdated,
     SettingsUnsupported,
     GuardianApproved,
-    Skills(api::SkillsListResponse),
+    Skills(SkillsListResponse),
     ConfigReloaded,
-    VoicePreference(super::voice_preferences::VoicePreferenceReceipt),
+    VoicePreference(voice_preferences::VoicePreferenceReceipt),
     RealtimePrepared(Result<Option<codex_protocol::protocol::RealtimeVoice>, String>),
     RealtimeStarted,
     RealtimeSpeechAccepted,
     RealtimeDiscarded,
     RealtimeStopped,
     ServerRequestDelivered,
-    ModelDefaultsSaved(api::ConfigWriteResponse),
-    Removal(super::removal::RemovalReceipt),
+    ModelDefaultsSaved(ConfigWriteResponse),
+    Removal(removal::RemovalReceipt),
     TrustSaved,
-    UiRequest(super::ui_requests::UiReply),
+    UiRequest(UiReply),
     UiRequestApplied,
 }
 
@@ -116,15 +116,15 @@ impl ServerOperation {
         match self {
             Self::Response(_) => "Delivering app-server response",
             Self::Realtime(operation) => operation.label(),
-            Self::Control(control::ControlOperation::RealtimeStop { .. }) => "Stopping voice mode",
-            Self::Control(control::ControlOperation::DetachAndExit { .. }) => {
+            Self::Control(ControlOperation::RealtimeStop { .. }) => "Stopping voice mode",
+            Self::Control(ControlOperation::DetachAndExit { .. }) => {
                 "Detaching frontend before exit"
             }
-            Self::Control(control::ControlOperation::Interrupt { .. }) => "Interrupting turn",
-            Self::Control(control::ControlOperation::InterruptActive { .. }) => {
+            Self::Control(ControlOperation::Interrupt { .. }) => "Interrupting turn",
+            Self::Control(ControlOperation::InterruptActive { .. }) => {
                 "Stopping background task"
             }
-            Self::Control(control::ControlOperation::StopAndExit { .. }) => {
+            Self::Control(ControlOperation::StopAndExit { .. }) => {
                 "Stopping task before exit"
             }
             Self::Mutation(mutation) => match mutation {
@@ -146,20 +146,20 @@ impl ServerOperation {
             Self::Connection(ConnectionMutation::Removal(operation)) => operation.label(),
             Self::Connection(ConnectionMutation::ModelDefaults { .. }) => "Saving default model",
             Self::Connection(ConnectionMutation::Voice(operation)) => match operation {
-                super::voice_preferences::VoicePreferenceOperation::Open { .. } => {
+                voice_preferences::VoicePreferenceOperation::Open { .. } => {
                     "Loading voice preferences"
                 }
-                super::voice_preferences::VoicePreferenceOperation::Save { .. } => {
+                voice_preferences::VoicePreferenceOperation::Save { .. } => {
                     "Saving voice preference"
                 }
-                super::voice_preferences::VoicePreferenceOperation::Confirm { .. } => {
+                voice_preferences::VoicePreferenceOperation::Confirm { .. } => {
                     "Confirming saved voice preference"
                 }
             },
         }
     }
 
-    pub(super) fn ui_request(&self) -> Option<&super::ui_requests::UiRequest> {
+    pub(super) fn ui_request(&self) -> Option<&ui_requests::UiRequest> {
         match self {
             Self::Mutation(ThreadMutation::UiRequest(request))
             | Self::Catalog(CatalogRequest::UiRequest(request))
@@ -177,7 +177,7 @@ impl ServerOperation {
             Self::Control(_)
                 | Self::Response(_)
                 | Self::Connection(ConnectionMutation::Voice(
-                    super::voice_preferences::VoicePreferenceOperation::Confirm { .. }
+                    voice_preferences::VoicePreferenceOperation::Confirm { .. }
                 ))
         )
     }
@@ -191,7 +191,7 @@ impl ServerOperation {
             Self::Response(_) => OperationLane::Response(scope),
             Self::Realtime(_) => OperationLane::Realtime(thread_id()),
             Self::Connection(_) => OperationLane::Connection,
-            Self::Control(control::ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
+            Self::Control(ControlOperation::DetachAndExit { .. }) => OperationLane::Exit,
             Self::Control(_) => OperationLane::Control(thread_id()),
             Self::Mutation(_) | Self::Catalog(_) => OperationLane::Thread(thread_id()),
         }
@@ -223,10 +223,10 @@ pub(super) async fn send(
             return operation.send(handle, id).await;
         }
         ServerOperation::Connection(ConnectionMutation::ReloadUserConfig) => {
-            let _: api::ConfigWriteResponse = handle
-                .request_typed(api::ClientRequest::ConfigBatchWrite {
+            let _: ConfigWriteResponse = handle
+                .request_typed(ClientRequest::ConfigBatchWrite {
                     request_id,
-                    params: api::ConfigBatchWriteParams {
+                    params: ConfigBatchWriteParams {
                         edits: Vec::new(),
                         file_path: None,
                         expected_version: None,
@@ -238,9 +238,9 @@ pub(super) async fn send(
         }
         ServerOperation::Connection(ConnectionMutation::ModelDefaults { edits, .. }) => {
             let response = handle
-                .request_typed(api::ClientRequest::ConfigBatchWrite {
+                .request_typed(ClientRequest::ConfigBatchWrite {
                     request_id,
-                    params: api::ConfigBatchWriteParams {
+                    params: ConfigBatchWriteParams {
                         edits,
                         file_path: None,
                         expected_version: None,
@@ -251,10 +251,10 @@ pub(super) async fn send(
             return Ok(OperationReceipt::ModelDefaultsSaved(response));
         }
         ServerOperation::Connection(ConnectionMutation::Removal(operation)) => {
-            return super::removal::send(handle, id, operation).await;
+            return removal::send(handle, id, operation).await;
         }
         ServerOperation::Connection(ConnectionMutation::Voice(operation)) => {
-            return super::voice_preferences::send(handle, id, operation).await;
+            return voice_preferences::send(handle, id, operation).await;
         }
         _ => {}
     }
@@ -274,7 +274,7 @@ pub(super) async fn send(
             }
             ThreadMutation::Compact => {
                 let _: api::ThreadCompactStartResponse = handle
-                    .request_typed(api::ClientRequest::ThreadCompactStart {
+                    .request_typed(ClientRequest::ThreadCompactStart {
                         request_id,
                         params: api::ThreadCompactStartParams { thread_id: thread },
                     })
@@ -292,7 +292,7 @@ pub(super) async fn send(
             ThreadMutation::Review(target) => {
                 let previous_latest = store.lock().await.latest_turn_id.clone();
                 let response = handle
-                    .request_typed(api::ClientRequest::ReviewStart {
+                    .request_typed(ClientRequest::ReviewStart {
                         request_id,
                         params: api::ReviewStartParams {
                             thread_id: thread,
@@ -308,7 +308,7 @@ pub(super) async fn send(
             }
             ThreadMutation::CleanBackgroundTerminals => {
                 let _: api::ThreadBackgroundTerminalsCleanResponse = handle
-                    .request_typed(api::ClientRequest::ThreadBackgroundTerminalsClean {
+                    .request_typed(ClientRequest::ThreadBackgroundTerminalsClean {
                         request_id,
                         params: api::ThreadBackgroundTerminalsCleanParams { thread_id: thread },
                     })
@@ -317,7 +317,7 @@ pub(super) async fn send(
             }
             ThreadMutation::DisarmAlarm(id) => {
                 let _: api::ThreadAlarmDisarmResponse = handle
-                    .request_typed(api::ClientRequest::ThreadAlarmDisarm {
+                    .request_typed(ClientRequest::ThreadAlarmDisarm {
                         request_id,
                         params: api::ThreadAlarmDisarmParams {
                             thread_id: thread,
@@ -329,7 +329,7 @@ pub(super) async fn send(
             }
             ThreadMutation::ServerShell(command) => {
                 let _: api::ThreadShellCommandResponse = handle
-                    .request_typed(api::ClientRequest::ThreadShellCommand {
+                    .request_typed(ClientRequest::ThreadShellCommand {
                         request_id,
                         params: api::ThreadShellCommandParams {
                             thread_id: thread,
@@ -349,7 +349,7 @@ pub(super) async fn send(
             }
             ThreadMutation::GuardianApproval(event) => {
                 let _: api::ThreadApproveGuardianDeniedActionResponse = handle
-                    .request_typed(api::ClientRequest::ThreadApproveGuardianDeniedAction {
+                    .request_typed(ClientRequest::ThreadApproveGuardianDeniedAction {
                         request_id,
                         params: api::ThreadApproveGuardianDeniedActionParams {
                             thread_id: thread,
@@ -364,7 +364,7 @@ pub(super) async fn send(
             unreachable!("UI request dispatched before thread projection")
         }
         ServerOperation::Catalog(CatalogRequest::Skills { params, .. }) => handle
-            .request_typed(api::ClientRequest::SkillsList { request_id, params })
+            .request_typed(ClientRequest::SkillsList { request_id, params })
             .await
             .map(OperationReceipt::Skills),
         ServerOperation::Connection(_) => {
@@ -398,7 +398,7 @@ impl App {
             OperationReceipt::ModelDefaultsSaved(response),
         ) = (operation, &receipt)
         {
-            if response.status == api::WriteStatus::OkOverridden {
+            if response.status == WriteStatus::OkOverridden {
                 self.chat_widget.add_warning_message(format!("Saved {setting}, but a higher-priority configuration layer overrides the saved value."));
             }
             return Ok(());
@@ -430,7 +430,7 @@ impl App {
             }
             OperationReceipt::RealtimeSpeechAccepted => {
                 if let ServerOperation::Realtime(
-                    operation @ realtime::RealtimeOperation::Speech { delivery_id, .. },
+                    operation @ RealtimeOperation::Speech { delivery_id, .. },
                 ) = operation
                     && self.realtime_operation_is_current(thread_id, operation)
                     && let Some(widget) = self.voice_widget_for_thread(thread_id)
@@ -447,7 +447,7 @@ impl App {
                 .send(AppEvent::Exit(ExitMode::ShutdownAfterInterrupt)),
             OperationReceipt::Interrupted => {}
             OperationReceipt::ExitDetached(receipt) => {
-                if let ServerOperation::Control(control::ControlOperation::DetachAndExit {
+                if let ServerOperation::Control(ControlOperation::DetachAndExit {
                     plan,
                     reason,
                 }) = operation
@@ -545,7 +545,7 @@ impl App {
             return;
         }
         if let ServerOperation::Connection(ConnectionMutation::Voice(
-            super::voice_preferences::VoicePreferenceOperation::Confirm { .. },
+            voice_preferences::VoicePreferenceOperation::Confirm { .. },
         )) = operation
         {
             self.chat_widget.add_error_message("Voice preference was saved, but its effective value could not be confirmed. No write was retried.".into());
@@ -563,7 +563,7 @@ impl App {
             && let SubmissionFailure::Rejected(error) = failure
             && self.confirm_thread_name_conflict(
                 error,
-                super::super::thread_name::ThreadNameRequest::Rename {
+                thread_name::ThreadNameRequest::Rename {
                     thread_id,
                     name: params.name.clone(),
                 },
@@ -596,7 +596,7 @@ impl App {
         }
         if matches!(
             operation,
-            ServerOperation::Control(control::ControlOperation::InterruptActive { .. })
+            ServerOperation::Control(ControlOperation::InterruptActive { .. })
         ) {
             self.add_agents_overview_error(message);
             return;
@@ -633,7 +633,7 @@ impl App {
             }
             match &**operation {
                 ServerOperation::Realtime(operation) => {
-                    self.cancel_unsent_realtime_operation(thread_id, operation)
+                    self.cancel_unsent_realtime_operation(thread_id, operation);
                 }
                 ServerOperation::Mutation(ThreadMutation::DisarmAlarm(id)) => {
                     if let Some(widget) = self.voice_widget_for_thread(thread_id) {

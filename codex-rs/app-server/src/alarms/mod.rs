@@ -161,7 +161,7 @@ impl Alarms {
                 while let Some(publication) = pending_publications.recv().await {
                     match publication {
                         Publication::Broadcast(notification) => {
-                            outgoing.send_server_notification(notification).await
+                            outgoing.send_server_notification(notification).await;
                         }
                         Publication::To(connection, notification) => {
                             outgoing
@@ -169,7 +169,7 @@ impl Alarms {
                                     &[connection],
                                     notification,
                                 )
-                                .await
+                                .await;
                         }
                     }
                 }

@@ -34,6 +34,7 @@ pub enum AnthropicRepair {
 /// The result encodes unless it holds no conversation at all. Accepted items keep their exact
 /// encoding, so the cacheable prefix before the first repair is undisturbed. Tool declarations
 /// only choose replay aliases and never decide acceptance, so none are consulted.
+#[must_use]
 pub fn salvage_anthropic_history(
     input: Vec<ResponseItem>,
     modalities: &[InputModality],

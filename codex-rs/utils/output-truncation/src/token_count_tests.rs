@@ -16,14 +16,14 @@ fn tool_text_matches_reference_tokenizer_without_interpreting_control_markers() 
             Some(expected)
         );
         assert_eq!(
-            count_o200k_arrival(&codex_protocol::step_admission::ArrivalSource::Captured {
+            count_o200k_arrival(&ArrivalSource::Captured {
                 blocks: vec![text.into()],
             }),
             Some(expected)
         );
         assert_eq!(
             count_o200k_arrival(
-                &codex_protocol::step_admission::ArrivalSource::ToolDeclarations {
+                &ArrivalSource::ToolDeclarations {
                     text: text.into(),
                 }
             ),

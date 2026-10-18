@@ -68,10 +68,9 @@ impl WorldStateSnapshot {
             };
             // Partial positional annotations are not proof of instruction ownership.
             if content.is_empty()
-                || !metadata
+                || metadata
                     .content_item_kinds
-                    .as_ref()
-                    .is_some_and(|kinds| kinds.len() == content.len())
+                    .as_ref().is_none_or(|kinds| kinds.len() != content.len())
             {
                 result.push(envelope);
                 continue;

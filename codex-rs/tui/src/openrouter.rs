@@ -1,4 +1,4 @@
-//! OpenRouter UI actions retain their menu origin across server round trips.
+//! `OpenRouter` UI actions retain their menu origin across server round trips.
 
 use crate::model_catalog::ModelListing;
 use codex_app_server_protocol::ModelProviderOption;

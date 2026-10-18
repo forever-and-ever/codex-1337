@@ -6,11 +6,11 @@ impl App {
     pub(super) async fn dispatch_submission_event(
         &mut self,
         app_server: &mut AppServerSession,
-        event: super::super::turn_submissions::SubmissionEvent,
+        event: turn_submissions::SubmissionEvent,
     ) {
         let retired = matches!(
             &event,
-            super::super::turn_submissions::SubmissionEvent::Retire
+            turn_submissions::SubmissionEvent::Retire
         );
         self.handle_submission_event(app_server, event).await;
         if retired {

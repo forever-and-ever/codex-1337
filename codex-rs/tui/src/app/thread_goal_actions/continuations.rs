@@ -134,7 +134,7 @@ impl App {
                         }
                     }
                     Err(error) => {
-                        tracing::warn!("failed to read thread goal after resume: {}", error)
+                        tracing::warn!("failed to read thread goal after resume: {}", error);
                     }
                 }
                 Ok(())
@@ -214,7 +214,7 @@ impl App {
                     match result {
                         Ok(response) => match response.goal.as_ref() {
                             Some(goal) if should_confirm_before_replacing_goal(goal) => {
-                                app.show_replace_thread_goal_confirmation(thread_id, draft)
+                                app.show_replace_thread_goal_confirmation(thread_id, draft);
                             }
                             existing => app.enqueue_goal_draft(
                                 server,

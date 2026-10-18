@@ -19,7 +19,7 @@ use pretty_assertions::assert_eq;
 async fn session_draft_switches_provider_without_creating_threads_or_losing_input() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let (mut server, requests, proxy) = start_recording_remote_app_server(&app.config).await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut tui = tui::test_support::make_test_tui()?;
     app.chat_widget.session_draft = Some(SessionDraft::Editing);
     // Routing discovery can publish the global login after draft bootstrap has
     // already resolved a different account for the new conversation.
@@ -193,7 +193,7 @@ async fn session_draft_switches_provider_without_creating_threads_or_losing_inpu
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     app.start_draft_session(&server);
     app.start_draft_session(&server);
-    let started = tokio::time::timeout(Duration::from_secs(10), async {
+    let started = time::timeout(Duration::from_secs(10), async {
         loop {
             if let Some(AppEvent::StartupThreadStarted { result }) = events.recv().await {
                 break result;
@@ -221,7 +221,7 @@ async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> R
     let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
     let backend = tokio::spawn(async move {
         let (stream, _) = listener.accept().await?;
-        super::disconnect::serve_reconnect_requests(
+        disconnect::serve_reconnect_requests(
             tokio_tungstenite::accept_async(stream).await?,
             |_| std::future::ready(None),
         )
@@ -231,15 +231,15 @@ async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> R
     app.chat_widget.insert_str("Still unsent");
     app.app_server_target = AppServerTarget::Remote { endpoint };
     assert!(app.begin_reconnect());
-    assert!(app.reconnect.presentation == super::super::reconnect::ReconnectPresentation::Draft);
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    let connected = super::super::reconnect::reconnect(
+    assert!(app.reconnect.presentation == reconnect::ReconnectPresentation::Draft);
+    let mut tui = tui::test_support::make_test_tui()?;
+    let connected = reconnect::reconnect(
         app.app_server_target.clone(),
         app.config.clone(),
         app.local_settings.clone(),
         /*thread_id*/ None,
         /*remote_cwd*/ None,
-        super::super::reconnect::ReconnectPresentation::Draft,
+        reconnect::ReconnectPresentation::Draft,
     )
     .await?;
     app.finish_reconnect(
@@ -253,7 +253,7 @@ async fn session_draft_reconnects_without_creating_or_submitting_a_thread() -> R
     assert_eq!(app.chat_widget.session_draft, Some(SessionDraft::Editing));
     assert_eq!(app.chat_widget.composer_text_with_pending(), "Still unsent");
     server.shutdown().await?;
-    let methods = tokio::time::timeout(Duration::from_secs(5), backend).await???;
+    let methods = time::timeout(Duration::from_secs(5), backend).await???;
     assert!(
         !methods
             .iter()

@@ -1,6 +1,7 @@
 use crate::ModelProviderAdapter;
 
 impl ModelProviderAdapter {
+    #[must_use]
     pub fn speaks_anthropic_messages(self) -> bool {
         match self {
             Self::ClaudeSubscription => true,
@@ -8,6 +9,7 @@ impl ModelProviderAdapter {
         }
     }
 
+    #[must_use]
     pub fn borrows_chatgpt(self) -> bool {
         match self {
             Self::ClaudeSubscription | Self::OpenRouter => true,
@@ -15,6 +17,7 @@ impl ModelProviderAdapter {
         }
     }
 
+    #[must_use]
     pub fn supports_background_scoring(self) -> bool {
         match self {
             Self::OpenaiCompatible | Self::ClaudeSubscription => true,

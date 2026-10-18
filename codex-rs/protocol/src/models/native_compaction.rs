@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// Signed provider-native checkpoints are not OpenAI encrypted compaction items.
+/// Signed provider-native checkpoints are not `OpenAI` encrypted compaction items.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "provider", rename_all = "snake_case")]
 pub enum NativeCompaction {
@@ -49,10 +49,12 @@ impl AnthropicSignedCompaction {
     pub const MAX_OUTPUT_TOKENS: std::num::NonZeroU32 =
         std::num::NonZeroU32::new(/*n*/ 32_768).unwrap();
 
+    #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
 
+    #[must_use]
     pub fn signature(&self) -> &str {
         &self.signature
     }

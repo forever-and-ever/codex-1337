@@ -289,7 +289,7 @@ impl ToolOutputGroup {
             let items = &turn.items[start..=end];
             let present = items
                 .iter()
-                .map(codex_app_server_protocol::ThreadItem::id)
+                .map(ThreadItem::id)
                 .collect::<HashSet<_>>();
             (ids.is_subset(&present)
                 && items.iter().all(|item| {

@@ -159,7 +159,7 @@ impl ChatWidget {
             actions: vec![Box::new(move |tx| {
                 tx.send(AppEvent::OpenRouter(Event::AddModel {
                     menu: add_menu.clone(),
-                }))
+                }));
             })],
             dismiss_on_select: false,
             ..Default::default()
@@ -196,7 +196,7 @@ impl ChatWidget {
                 tx.send(AppEvent::OpenRouter(Event::ModelSubmitted {
                     menu: menu.clone(),
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -235,7 +235,7 @@ impl ChatWidget {
     pub(crate) fn show_openrouter_failure(&mut self, request: Request, error: String) {
         match request {
             Request::Save { menu, slug } => {
-                self.openrouter_model_prompt(menu, slug.to_string(), Some(error))
+                self.openrouter_model_prompt(menu, slug.to_string(), Some(error));
             }
             Request::AddKey {
                 thread_id,
@@ -265,7 +265,7 @@ impl ChatWidget {
                     items: vec![SelectionItem {
                         name: "Retry".into(),
                         actions: vec![Box::new(move |tx| {
-                            tx.send(AppEvent::OpenRouter(Event::Request(tx_request.clone())))
+                            tx.send(AppEvent::OpenRouter(Event::Request(tx_request.clone())));
                         })],
                         dismiss_on_select: true,
                         ..Default::default()
@@ -292,7 +292,7 @@ impl ChatWidget {
                 tx.send(AppEvent::OpenRouter(Event::KeyNameSubmitted {
                     thread_id,
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -320,7 +320,7 @@ impl ChatWidget {
                     thread_id,
                     name: name.clone(),
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -388,7 +388,7 @@ impl ChatWidget {
                         thread_id,
                         account_id: name.to_string(),
                         provider: codex_app_server_protocol::AccountProvider::OpenRouter,
-                    })
+                    });
                 })],
                 secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
                     key: key_hint::ctrl(KeyCode::Char('d')),
@@ -397,7 +397,7 @@ impl ChatWidget {
                         tx.send(AppEvent::OpenRouter(Event::RemoveKeyConfirm {
                             thread_id,
                             name: remove_name.clone(),
-                        }))
+                        }));
                     }),
                 }),
                 dismiss_on_select: true,
@@ -407,7 +407,7 @@ impl ChatWidget {
         items.push(SelectionItem {
             name: "Add OpenRouter key…".into(),
             actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::OpenRouter(Event::KeyNamePrompt { thread_id }))
+                tx.send(AppEvent::OpenRouter(Event::KeyNamePrompt { thread_id }));
             })],
             dismiss_on_select: true,
             ..Default::default()
@@ -478,7 +478,7 @@ impl ChatWidget {
                 .as_ref()
                 .and_then(|info| info.total_token_usage.cost);
             let status = result.as_ref().map_err(ToString::to_string);
-            self.add_to_history(history_cell::PlainHistoryCell::new(views::status_lines(
+            self.add_to_history(PlainHistoryCell::new(views::status_lines(
                 status.as_ref().copied().map_err(String::as_str),
                 spend,
             )));

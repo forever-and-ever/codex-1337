@@ -4,10 +4,10 @@ use super::*;
 
 pub(in crate::app) async fn settle_frontend_requests(
     app: &mut App,
-    tui: &mut crate::tui::Tui,
+    tui: &mut tui::Tui,
     server: &mut AppServerSession,
-    events: &mut tokio::sync::mpsc::UnboundedReceiver<AppEvent>,
-) -> color_eyre::Result<()> {
+    events: &mut mpsc::UnboundedReceiver<AppEvent>,
+) -> Result<()> {
     tokio::time::timeout(Duration::from_secs(10), async {
         while app.active_export.is_some() || app.pending_revert.is_some()
             || app.pending_thread_switch_resets != 0 || !events.is_empty()

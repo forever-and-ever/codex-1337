@@ -20,10 +20,10 @@ pub(super) async fn ensure_thread_name_claims(store: &LocalThreadStore) -> Threa
                 .thread_name_claims_imported()
                 .await
                 .map_err(name_claim_error)?;
-            let names = if !imported {
-                read_legacy_names(store, db.as_ref()).await?
-            } else {
+            let names = if imported {
                 Vec::new()
+            } else {
+                read_legacy_names(store, db.as_ref()).await?
             };
             db.import_legacy_thread_names(&names)
                 .await

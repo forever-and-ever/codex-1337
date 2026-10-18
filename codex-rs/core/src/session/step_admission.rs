@@ -96,7 +96,7 @@ impl StepMark {
                     TurnItem::StepAdmission(item)
                         if orphan.as_ref().is_some_and(|mark| mark.item.id == item.id) =>
                     {
-                        orphan = None
+                        orphan = None;
                     }
                     TurnItem::Arrival(item) => {
                         if let Some(mark) = orphan
@@ -141,7 +141,7 @@ impl ResponseMembers {
             | ResponseItem::CustomToolCall { call_id, .. } => self.calls.push(call_id.clone()),
             ResponseItem::LocalShellCall { call_id, .. }
             | ResponseItem::ToolSearchCall { call_id, .. } => {
-                self.calls.extend(call_id.iter().cloned())
+                self.calls.extend(call_id.iter().cloned());
             }
             ResponseItem::Message {
                 role, id: Some(id), ..
@@ -446,10 +446,9 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                         } => None,
                     })
                     .collect::<Option<Vec<_>>>()
-                    .map(
-                        |blocks| codex_protocol::step_admission::ArrivalSource::Captured { blocks },
-                    )
-                    .unwrap_or(codex_protocol::step_admission::ArrivalSource::Unavailable),
+                    .map_or(
+                        codex_protocol::step_admission::ArrivalSource::Unavailable, |blocks| codex_protocol::step_admission::ArrivalSource::Captured { blocks },
+                    ),
                 label: author.clone(),
             }),
             ResponseItem::AdditionalTools { tools, .. } => {
@@ -458,11 +457,10 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                     kind: ArrivalKind::Injection,
                     label: "Additional tools".to_string(),
                     source: serde_json::to_string(tools)
-                        .map(|text| {
+                        .map_or(codex_protocol::step_admission::ArrivalSource::Unavailable, |text| {
                             codex_protocol::step_admission::ArrivalSource::ToolDeclarations { text }
-                        })
-                        .unwrap_or(codex_protocol::step_admission::ArrivalSource::Unavailable),
-                })
+                        }),
+                });
             }
             ResponseItem::ConfigurationUpdate { .. } => admitted.arrivals.push(Incoming {
                 source_index,

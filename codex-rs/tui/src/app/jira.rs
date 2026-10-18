@@ -168,7 +168,7 @@ impl App {
                     return Ok(true);
                 }
                 if let Some(form) = &mut browser.form {
-                    if super::jira_view::is_action_key(*key) {
+                    if jira_view::is_action_key(*key) {
                         let action = JiraAction::Save {
                             previous: form.previous.as_ref().map(|issue| issue.revision.clone()),
                             key: form.key(),
@@ -188,19 +188,19 @@ impl App {
                             browser.reveal_selection = true;
                         }
                         (KeyModifiers::NONE, KeyCode::Esc) if key.kind == KeyEventKind::Press => {
-                            self.jira = None
+                            self.jira = None;
                         }
                         (KeyModifiers::NONE, KeyCode::Up) => {
-                            browser.select_neighbor(/*delta*/ -1)
+                            browser.select_neighbor(/*delta*/ -1);
                         }
                         (KeyModifiers::NONE, KeyCode::Down) => {
-                            browser.select_neighbor(/*delta*/ 1)
+                            browser.select_neighbor(/*delta*/ 1);
                         }
                         (KeyModifiers::NONE, KeyCode::PageUp) => {
-                            browser.scroll_body(/*delta*/ -10)
+                            browser.scroll_body(/*delta*/ -10);
                         }
                         (KeyModifiers::NONE, KeyCode::PageDown) => {
-                            browser.scroll_body(/*delta*/ 10)
+                            browser.scroll_body(/*delta*/ 10);
                         }
                         (KeyModifiers::CONTROL, KeyCode::Char('n'))
                             if key.kind == KeyEventKind::Press =>
@@ -452,7 +452,7 @@ impl App {
                 browser.select(selected);
             }
             _ => {
-                browser.error = Some("Unexpected Jira response; nothing further dispatched.".into())
+                browser.error = Some("Unexpected Jira response; nothing further dispatched.".into());
             }
         }
         self.request_jira_preview(server);

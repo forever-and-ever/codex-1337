@@ -31,9 +31,7 @@ pub(super) fn summary(alarm: &ThreadAlarm) -> Option<AlarmSummary> {
 }
 
 pub(super) fn time(at: i64) -> String {
-    DateTime::from_timestamp_millis(at)
-        .map(|at| at.with_timezone(&Local).to_rfc3339())
-        .unwrap_or_else(|| at.to_string())
+    DateTime::from_timestamp_millis(at).map_or_else(|| at.to_string(), |at| at.with_timezone(&Local).to_rfc3339())
 }
 
 pub(super) fn condition(condition: &AlarmCondition) -> String {

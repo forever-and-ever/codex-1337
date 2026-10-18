@@ -1,5 +1,5 @@
 //! Turn-scoped pairing for command starts synthesized before core launches a command.
-//! A native terminal disarms its sentinel. Turn end drains the rest before TurnCompleted;
+//! A native terminal disarms its sentinel. Turn end drains the rest before `TurnCompleted`;
 //! teardown drops them without I/O, leaving the client's owner reaping as the final boundary.
 
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;

@@ -1,4 +1,4 @@
-//! Multiple ChatGPT logins in the existing credential-store document.
+//! Multiple `ChatGPT` logins in the existing credential-store document.
 //! The flattened active record retains the upstream single-login representation.
 
 use std::collections::BTreeMap;
@@ -133,7 +133,7 @@ impl AuthDocument {
     }
 
     /// A login joins the saved accounts. It displaces the active login only when it renews that
-    /// account, when no ChatGPT account is active, or when it has no identity to be saved under;
+    /// account, when no `ChatGPT` account is active, or when it has no identity to be saved under;
     /// choosing among saved accounts belongs to `/account`.
     pub fn admit(&mut self, auth: AuthDotJson) {
         if let Some(id) = identity(&auth)

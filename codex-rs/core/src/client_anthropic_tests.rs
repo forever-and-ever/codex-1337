@@ -303,7 +303,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     for item in &mut calls {
         match item {
             ResponseItem::Reasoning { id, .. } | ResponseItem::CustomToolCall { id, .. } => {
-                *id = None
+                *id = None;
             }
             _ => panic!("unexpected completed native item"),
         }
@@ -417,7 +417,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
     let (_, usage) = replay.send(|| true).await?.expect("wanted replay sent");
     assert_eq!(
         usage,
-        codex_protocol::protocol::TokenUsage {
+        TokenUsage {
             input_tokens: 105,
             cached_input_tokens: 100,
             total_tokens: 105,

@@ -59,7 +59,7 @@ pub(super) async fn unsubscribe(
     thread_id: ThreadId,
 ) -> Result<(), TypedRequestError> {
     handle
-        .request_typed::<api::ThreadUnsubscribeResponse>(api::ClientRequest::ThreadUnsubscribe {
+        .request_typed::<api::ThreadUnsubscribeResponse>(ClientRequest::ThreadUnsubscribe {
             request_id: api::RequestId::String(format!(
                 "tui-operation-{id}-{thread_id}-unsubscribe"
             )),
@@ -79,7 +79,7 @@ pub(super) async fn send(
     if let Some(thread_id) = plan.voice {
         // Audio helper resources have already been retired locally. Stop is best effort, bounded.
         let stop = handle.request_typed::<api::ThreadRealtimeStopResponse>(
-            api::ClientRequest::ThreadRealtimeStop {
+            ClientRequest::ThreadRealtimeStop {
                 request_id: api::RequestId::String(format!("tui-operation-{id}-voice-stop")),
                 params: api::ThreadRealtimeStopParams {
                     thread_id: thread_id.to_string(),
@@ -152,7 +152,7 @@ impl App {
                     voice,
                 };
             }
-        };
+        }
         let mut targets = Vec::new();
         // Side conversations stop before unsubscribing; ordinary conversations keep running.
         for thread_id in self.side_threads.keys().copied().collect::<Vec<_>>() {

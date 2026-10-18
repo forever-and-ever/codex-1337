@@ -7,7 +7,7 @@ impl IssuingElicitationReviewer for GuardianMcpElicitationReviewer {
     fn approval_authority(
         self: Arc<Self>,
         request: ElicitationReviewRequest,
-    ) -> futures::future::BoxFuture<
+    ) -> BoxFuture<
         'static,
         anyhow::Result<Option<codex_mcp::PreparedElicitationReview>>,
     > {
@@ -56,7 +56,7 @@ fn invocation_call_id(request: &ElicitationReviewRequest) -> anyhow::Result<Opti
 
 struct ElicitationReviewContext {
     review: crate::guardian::GuardianReviewContext,
-    config: Arc<codex_mcp::McpConfig>,
+    config: Arc<McpConfig>,
     invocation: Option<McpToolApprovalContext>,
     cancellation: CancellationToken,
 }
@@ -114,7 +114,7 @@ async fn issuing_context(
 
 fn project_authority(
     context: &crate::guardian::GuardianReviewContext,
-    config: &codex_mcp::McpConfig,
+    config: &McpConfig,
     server_name: &str,
 ) -> ElicitationApprovalAuthority {
     let thread_profile = context

@@ -19,7 +19,7 @@ impl HistoryObservation {
 }
 
 pub(crate) async fn load(
-    handle: &codex_app_server_client::AppServerRequestHandle,
+    handle: &AppServerRequestHandle,
     thread_id: ThreadId,
     through: Option<&str>,
     tracking: Option<(&Config, &LocalSettings)>,
@@ -58,7 +58,7 @@ pub(crate) async fn load(
 }
 
 pub(crate) async fn legacy(
-    handle: &codex_app_server_client::AppServerRequestHandle,
+    handle: &AppServerRequestHandle,
     thread_id: ThreadId,
 ) -> Result<Thread> {
     preparation::read_thread(RequestPolicy::Interactive, handle, thread_id, true).await

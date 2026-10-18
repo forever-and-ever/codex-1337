@@ -92,7 +92,7 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
         /*failed_thread_name*/ None,
     )
     .await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let mut tui = tui::test_support::make_test_tui()?;
     while let Ok(effect) = effects.try_recv() {
         app.handle_event(&mut tui, &mut server, effect).await?;
     }
@@ -170,7 +170,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
     let batch = HistoryLookupResponse::Batch {
         cursor: codex_message_history::HistoryBatchCursor::new(/*end_offset*/ 1),
         log_id: 1,
-        entries: vec![crate::app_event::HistoryBatchEntryResponse {
+        entries: vec![HistoryBatchEntryResponse {
             offset: 0,
             entry: Some("retained batch".to_string()),
         }],

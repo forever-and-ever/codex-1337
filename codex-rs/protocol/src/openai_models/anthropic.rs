@@ -19,6 +19,7 @@ pub struct AnthropicModelCapabilities {
 impl AnthropicModelCapabilities {
     /// Codex's manual effort policy, not an upstream-advertised budget.
     /// A request with a lower output cap must also check that its budget fits.
+    #[must_use]
     pub fn manual_thinking_budget(&self, effort: &ReasoningEffort) -> Option<NonZeroU32> {
         if self.thinking != AnthropicThinkingMode::Manual {
             return None;

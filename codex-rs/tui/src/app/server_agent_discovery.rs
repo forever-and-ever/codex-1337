@@ -192,7 +192,7 @@ impl App {
                 }
             }
             (_, DiscoveryReceipt::Terminated) => {
-                self.add_agents_overview_error("Agent discovery terminated unexpectedly.".into())
+                self.add_agents_overview_error("Agent discovery terminated unexpectedly.".into());
             }
             _ => unreachable!("discovery family received a different receipt"),
         }
@@ -225,22 +225,22 @@ impl App {
                 let preview = if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                     match channel.store.try_lock() {
                         Ok(store) => {
-                            crate::app::agent_status_feed::AgentStatusThreadPreview::from_store(
+                            agent_status_feed::AgentStatusThreadPreview::from_store(
                                 agent_path, &store,
                             )
                         }
-                        Err(_) => crate::app::agent_status_feed::AgentStatusThreadPreview::empty(
+                        Err(_) => agent_status_feed::AgentStatusThreadPreview::empty(
                             agent_path,
                         ),
                     }
                 } else {
-                    crate::app::agent_status_feed::AgentStatusThreadPreview::empty(agent_path)
+                    agent_status_feed::AgentStatusThreadPreview::empty(agent_path)
                 };
                 entries.push(preview);
             }
 
             self.chat_widget.add_to_history(
-                crate::app::agent_status_feed::AgentStatusHistoryCell::new(entries),
+                agent_status_feed::AgentStatusHistoryCell::new(entries),
             );
         }
 

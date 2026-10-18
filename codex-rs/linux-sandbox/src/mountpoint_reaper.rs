@@ -2,7 +2,7 @@
 //!
 //! A read-only path missing from a writable root is masked by a mount, so a
 //! mountpoint must exist on the host while the sandbox runs. The wrapper removes
-//! it when the last registrant exits, but a SIGKILLed wrapper or a cgroup kill
+//! it when the last registrant exits, but a `SIGKILLed` wrapper or a cgroup kill
 //! skips that cleanup, and a leftover `.git` makes its parent a project root.
 //!
 //! - The wrapper creates each missing mountpoint itself, without following
@@ -494,7 +494,7 @@ pub(super) fn forge(target: &SyntheticMountTarget) -> Option<Mountpoint> {
 }
 
 /// Registers the bubblewrap child beside this wrapper, so the hold outlives a
-/// SIGKILLed wrapper for as long as the sandbox does.
+/// `SIGKILLed` wrapper for as long as the sandbox does.
 pub(super) fn enlist(registrations: &[SyntheticMountTargetRegistration], child: libc::pid_t) {
     if registrations.is_empty() {
         return;

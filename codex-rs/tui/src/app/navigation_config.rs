@@ -13,7 +13,7 @@ pub(super) struct ConfigRebuild {
 
 impl ConfigRebuild {
     pub(super) async fn run(self) -> Result<Box<(Config, LocalSettings)>> {
-        let config = match super::config_persistence::build_config_on_runtime_worker(
+        let config = match config_persistence::build_config_on_runtime_worker(
             self.builder,
             self.network,
             format!("Failed to rebuild config for cwd {}", self.cwd.display()),

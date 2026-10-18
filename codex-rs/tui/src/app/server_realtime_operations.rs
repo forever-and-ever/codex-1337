@@ -63,7 +63,7 @@ pub(super) async fn send(
         RealtimeOperation::Prepare { cwd, .. } => {
             let result = async {
                 let response: api::ThreadRealtimeListVoicesResponse = handle
-                    .request_typed(api::ClientRequest::ThreadRealtimeListVoices {
+                    .request_typed(ClientRequest::ThreadRealtimeListVoices {
                         request_id,
                         params: api::ThreadRealtimeListVoicesParams {},
                     })
@@ -73,7 +73,7 @@ pub(super) async fn send(
                 config
                     .as_ref()
                     .map(|config| {
-                        super::super::realtime_settings::configured_voice(
+                        realtime_settings::configured_voice(
                             &config.config,
                             response.voices.default_v1,
                         )
@@ -88,13 +88,13 @@ pub(super) async fn send(
         }
         RealtimeOperation::Start { params, .. } => {
             let _: api::ThreadRealtimeStartResponse = handle
-                .request_typed(api::ClientRequest::ThreadRealtimeStart { request_id, params })
+                .request_typed(ClientRequest::ThreadRealtimeStart { request_id, params })
                 .await?;
             Ok(OperationReceipt::RealtimeStarted)
         }
         RealtimeOperation::Speech { text, .. } => {
             let _: api::ThreadRealtimeAppendSpeechResponse = handle
-                .request_typed(api::ClientRequest::ThreadRealtimeAppendSpeech {
+                .request_typed(ClientRequest::ThreadRealtimeAppendSpeech {
                     request_id,
                     params: api::ThreadRealtimeAppendSpeechParams {
                         thread_id: thread_id.to_string(),
@@ -175,7 +175,7 @@ impl App {
         };
         match operation {
             RealtimeOperation::Speech { delivery_id, .. } => {
-                widget.restore_undelivered_realtime_speech(*delivery_id)
+                widget.restore_undelivered_realtime_speech(*delivery_id);
             }
             RealtimeOperation::Prepare { identity, .. }
             | RealtimeOperation::Start { identity, .. } => {
@@ -274,7 +274,7 @@ impl App {
                 }
             }
             RealtimeOperation::Prepare { identity, .. } => {
-                widget.reject_unsent_realtime_start(thread_id, identity.attempt_id, message)
+                widget.reject_unsent_realtime_start(thread_id, identity.attempt_id, message);
             }
             RealtimeOperation::Start { identity, .. }
                 if matches!(failure, SubmissionFailure::Rejected(_)) =>

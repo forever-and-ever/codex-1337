@@ -340,12 +340,8 @@ fn host_row(host: &OpenRouterHost) -> HostRow {
             (!quantizations.is_empty()).then_some(quantizations),
             Some(format!(
                 "{} in · {} out per M",
-                input
-                    .map(|price| price.to_string())
-                    .unwrap_or_else(|| "?".into()),
-                output
-                    .map(|price| price.to_string())
-                    .unwrap_or_else(|| "?".into())
+                input.map_or_else(|| "?".into(), |price| price.to_string()),
+                output.map_or_else(|| "?".into(), |price| price.to_string())
             )),
             uptime.map(|uptime| format!("{uptime:.1}% uptime")),
             (!tiers.is_empty()).then_some(tiers),
@@ -419,7 +415,7 @@ pub(super) fn status_lines(
             lines.push(Line::from(format!("  Key: {}", status.key.name)));
             match &status.state {
                 OpenRouterKeyState::Failed { error } => {
-                    lines.push(Line::from(format!("  Unavailable: {error}")))
+                    lines.push(Line::from(format!("  Unavailable: {error}")));
                 }
                 OpenRouterKeyState::Read {
                     label,
@@ -431,9 +427,7 @@ pub(super) fn status_lines(
                     lines.push(Line::from(format!("  Label: {label}")));
                     lines.push(Line::from(format!(
                         "  Balance: {}",
-                        balance
-                            .map(|amount| amount.to_string())
-                            .unwrap_or_else(|| "Unavailable".into())
+                        balance.map_or_else(|| "Unavailable".into(), |amount| amount.to_string())
                     )));
                     if let Some(limit) = limit {
                         lines.push(Line::from(format!(
@@ -457,9 +451,7 @@ pub(super) fn status_lines(
     }
     lines.push(Line::from(format!(
         "  This conversation: {}",
-        conversation_spend
-            .map(|amount| amount.to_string())
-            .unwrap_or_else(|| "Unknown".into())
+        conversation_spend.map_or_else(|| "Unknown".into(), |amount| amount.to_string())
     )));
     lines
 }

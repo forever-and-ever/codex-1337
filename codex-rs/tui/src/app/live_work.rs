@@ -415,7 +415,7 @@ impl App {
         let view = scope.view.selection_view();
         match action {
             ViewAction::PrimarySelection(text) | ViewAction::CopyOnSelect(text) => {
-                view.publish_primary(tui, &text)
+                view.publish_primary(tui, &text);
             }
             ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
                 let result = view.copy_selected_text(tui, &[], &text, true);
@@ -571,7 +571,7 @@ impl App {
                         preparation::request(
                             RequestPolicy::Interactive,
                             &handle,
-                            api::ClientRequest::ThreadBackgroundTerminalsTerminate {
+                            ClientRequest::ThreadBackgroundTerminalsTerminate {
                                 request_id: api::RequestId::String(format!("live-stop-{request}")),
                                 params: api::ThreadBackgroundTerminalsTerminateParams {
                                     thread_id: owner.to_string(),
@@ -633,7 +633,7 @@ async fn process_inventory(
         let response: api::ThreadBackgroundTerminalsListResponse = preparation::request(
             RequestPolicy::Interactive,
             handle,
-            api::ClientRequest::ThreadBackgroundTerminalsList {
+            ClientRequest::ThreadBackgroundTerminalsList {
                 request_id: api::RequestId::String(format!(
                     "live-processes-{request}-{}",
                     items.len()
@@ -671,7 +671,7 @@ mod tests {
     #[tokio::test]
     async fn process_replies_and_controls_follow_attachment_not_screen_position() {
         // A previous attachment can answer after switching away and back to the same thread.
-        let mut app = crate::app::test_support::make_test_app().await;
+        let mut app = test_support::make_test_app().await;
         let first = ThreadId::new();
         let second = ThreadId::new();
         app.active_thread_id = Some(first);
@@ -726,7 +726,7 @@ mod tests {
         assert!(!app.handle_live_work_input(&TuiEvent::Key(KeyCode::Char('x').into())));
         assert!(!app.live_work.scope.as_ref().unwrap().view.is_focused());
         assert!(app.transcript_cells.is_empty());
-        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+        let mut tui = tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(true).unwrap();
         let size = Size::new(80, 24);
         tui.terminal.resize(size).unwrap();

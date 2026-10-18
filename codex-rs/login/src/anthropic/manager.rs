@@ -92,6 +92,7 @@ impl AuthManager {
         })
     }
 
+    #[must_use]
     pub fn pin(&self, id: AccountId) -> Account {
         Account {
             manager: self.clone(),
@@ -101,6 +102,7 @@ impl AuthManager {
 }
 
 impl Account {
+    #[must_use]
     pub fn id(&self) -> &AccountId {
         &self.id
     }

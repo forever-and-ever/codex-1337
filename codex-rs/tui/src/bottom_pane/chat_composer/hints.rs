@@ -170,15 +170,13 @@ impl ChatComposer {
                         self.footer
                             .flash
                             .as_ref()
-                            .map(|flash| flash.line.width() as u16)
-                            .unwrap_or(0)
+                            .map_or(0, |flash| flash.line.width() as u16)
                     } else if let Some(items) = active_footer_hint_override {
                         footer_hint_items_width(items)
                     } else if status_line_active {
                         truncated_status_line
                             .as_ref()
-                            .map(|line| line.width() as u16)
-                            .unwrap_or(0)
+                            .map_or(0, |line| line.width() as u16)
                     } else {
                         footer_line_width(
                             &footer_props,
@@ -200,7 +198,7 @@ impl ChatComposer {
                     } else if status_line_active {
                         let full = self.mode_indicator_line(show_cycle_hint);
                         let compact = self.mode_indicator_line(/*show_cycle_hint*/ false);
-                        let full_width = full.as_ref().map(|l| l.width() as u16).unwrap_or(0);
+                        let full_width = full.as_ref().map_or(0, |l| l.width() as u16);
                         if can_show_left_with_context(hint_rect, left_width, full_width) {
                             full
                         } else {
@@ -209,7 +207,7 @@ impl ChatComposer {
                     } else {
                         Some(self.right_footer_line_with_context())
                     };
-                    let right_width = right_line.as_ref().map(|l| l.width() as u16).unwrap_or(0);
+                    let right_width = right_line.as_ref().map_or(0, |l| l.width() as u16);
                     if status_line_active
                         && let Some(max_left) = max_left_width_for_right(hint_rect, right_width)
                         && left_width > max_left
@@ -260,8 +258,7 @@ impl ChatComposer {
                     } else {
                         single_line_layout
                             .as_ref()
-                            .map(|(_, show_context)| *show_context)
-                            .unwrap_or(can_show_left_and_context)
+                            .map_or(can_show_left_and_context, |(_, show_context)| *show_context)
                     };
 
                     if let Some((summary_left, _)) = single_line_layout {

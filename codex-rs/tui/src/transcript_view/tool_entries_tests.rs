@@ -346,7 +346,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert_eq!(body.line.style.bg, style.bg);
         }
         for mode in [OutputMode::Raw, OutputMode::Fmt] {
-            let body = crate::transcript_view::FeedEntry::feed_body(
+            let body = FeedEntry::feed_body(
                 &replay,
                 u16::MAX,
                 &HashSet::from(["arrival-raw:arrival-provenance".into()]),
@@ -402,8 +402,8 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                 backgrounds.push(styles[0].1);
             }
             // A renderer's span-level background/reverse must not leak through Client provenance.
-            let mut decorated = vec![crate::terminal_hyperlinks::HyperlinkLine::from(
-                ratatui::text::Line::from(ratatui::text::Span::styled(
+            let mut decorated = vec![HyperlinkLine::from(
+                Line::from(ratatui::text::Span::styled(
                     "human-only annotation",
                     ratatui::style::Style::default()
                         .bg(ratatui::style::Color::Red)
@@ -626,7 +626,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             );
             assert!(tests::text(&folded).contains("Raw Context"));
             let thought = crate::history_cell::ThoughtCell::from_item(
-                codex_app_server_protocol::ThreadItem::Thought {
+                ThreadItem::Thought {
                     id: "thought-author".into(),
                     response_id: "response".into(),
                     completed_at_ms: 0,
@@ -1064,7 +1064,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
     let mut buffer = Buffer::empty(area);
     cells.push(Arc::new(PlainHistoryCell::new(vec!["After tools".into()])));
     view.render(area, &mut buffer, &cells);
-    let rendered = super::tests::text(&buffer).trim_end().to_owned();
+    let rendered = tests::text(&buffer).trim_end().to_owned();
     assert_eq!(rendered.matches("\n\n").count(), 2);
     insta::assert_snapshot!(rendered);
 

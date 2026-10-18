@@ -9,7 +9,7 @@ async fn root_name_claim_race_and_archive_lifecycle() -> anyhow::Result<()> {
     let home = scopeguard::guard(unique_temp_dir(), |home| {
         let _ = std::fs::remove_dir_all(home);
     });
-    let config = crate::SqliteConfig::new_for_testing(home.as_path().abs());
+    let config = SqliteConfig::new_for_testing(home.as_path().abs());
     let first = StateRuntime::init(config.clone(), "test-provider".to_string()).await?;
     let second = StateRuntime::init(config, "test-provider".to_string()).await?;
     first.import_legacy_thread_names(&[]).await?;

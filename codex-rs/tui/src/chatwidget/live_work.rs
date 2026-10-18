@@ -32,7 +32,7 @@ impl ChatWidget {
                 )
                 .into_owned();
                 let detail = history_cell::sanitize_user_text(
-                    format!("{} · {}", alarm.id, crate::bottom_pane::alarm_detail(alarm),).into(),
+                    format!("{} · {}", alarm.id, crate::bottom_pane::alarm_detail(alarm)).into(),
                 )
                 .into_owned();
                 Row {

@@ -128,11 +128,11 @@ impl Launch {
         // SAFETY: openpty initializes both descriptors on success; each acquires one owner.
         if unsafe {
             libc::openpty(
-                &mut master,
-                &mut slave,
+                &raw mut master,
+                &raw mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null(),
-                &size,
+                &raw const size,
             )
         } != 0
         {

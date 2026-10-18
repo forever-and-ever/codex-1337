@@ -197,8 +197,8 @@ impl TranscriptRegistry {
             self.tasks.spawn(async move {
                 loop {
                     tokio::select! {
-                        _ = shutdown.cancelled() => break,
-                        _ = cleanup_needed.notified() => {}
+                        () = shutdown.cancelled() => break,
+                        () = cleanup_needed.notified() => {}
                     }
                     loop {
                         let pending = {
@@ -220,18 +220,16 @@ impl TranscriptRegistry {
                             break;
                         }
                         tokio::select! {
-                            _ = shutdown.cancelled() => return,
-                            _ = cleanup_needed.notified() => {},
-                            _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
+                            () = shutdown.cancelled() => return,
+                            () = cleanup_needed.notified() => {},
+                            () = tokio::time::sleep(std::time::Duration::from_secs(1)) => {},
                         }
                     }
                 }
             });
         });
         let thread_id = session
-            .upgrade()
-            .map(|session| session.thread_id)
-            .unwrap_or_else(|| panic!("execution requires its owning session"));
+            .upgrade().map_or_else(|| panic!("execution requires its owning session"), |session| session.thread_id);
         let scope = Arc::new(ExecutionScope {
             owner: Mutex::new(CodeModeOwner {
                 thread_id,
@@ -318,8 +316,8 @@ impl TranscriptRegistry {
             // persistence/delivery must not extend it while the event reader stops.
             tokio::select! {
                 biased;
-                _ = draining_shutdown.cancelled() => {},
-                _ = admission => {},
+                () = draining_shutdown.cancelled() => {},
+                () = admission => {},
             }
             if let Some(registry) = draining.registry.upgrade() {
                 registry
@@ -416,7 +414,7 @@ impl TranscriptRegistry {
                 CaptureOrigin::Notification => {
                     *notifications = notifications.checked_sub(1).unwrap_or_else(|| {
                         panic!("notification capture requires its admitted lease")
-                    })
+                    });
                 }
             }
             if *returned && *notifications == 0 {
@@ -646,8 +644,8 @@ impl ExecutionScope {
         };
         tokio::select! {
             biased;
-            _ = self.shutdown.cancelled() => {},
-            _ = admission => {},
+            () = self.shutdown.cancelled() => {},
+            () = admission => {},
         }
     }
 }

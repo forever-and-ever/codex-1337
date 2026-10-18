@@ -133,7 +133,7 @@ impl Trial {
                     source, Some(32), Some(&test_cwd()), None, ListSpacing::AfterMultiline,
                 ),
                 HistoryRenderMode::Raw => crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-                    &crate::history_cell::raw_lines_from_source(source).into_iter().map(HyperlinkLine::new).collect::<Vec<_>>(),
+                    &history_cell::raw_lines_from_source(source).into_iter().map(HyperlinkLine::new).collect::<Vec<_>>(),
                     crate::wrapping::RtOptions::new(32),
                 ),
             };

@@ -54,7 +54,7 @@ impl ChatWidget {
                             thread_id,
                             account_id: account.id.clone(),
                             provider: AccountProvider::Openai,
-                        })
+                        });
                     })],
                     secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
                         key: key_hint::ctrl(KeyCode::Char('r')),
@@ -65,7 +65,7 @@ impl ChatWidget {
                                 provider: AccountProvider::Openai,
                                 account_id: rename_id.clone(),
                                 nickname: rename_name.clone(),
-                            })
+                            });
                         }),
                     }),
                     dismiss_on_select: true,
@@ -106,7 +106,7 @@ impl ChatWidget {
                         thread_id,
                         account_id: account.id.clone(),
                         provider: AccountProvider::ClaudeSubscription,
-                    })
+                    });
                 })],
                 secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
                     key: key_hint::ctrl(KeyCode::Char('r')),
@@ -117,7 +117,7 @@ impl ChatWidget {
                             provider: AccountProvider::ClaudeSubscription,
                             account_id: rename_id.clone(),
                             nickname: rename_name.clone(),
-                        })
+                        });
                     }),
                 }),
                 dismiss_on_select: true,
@@ -129,7 +129,7 @@ impl ChatWidget {
             name: "Add Claude account".to_owned(),
             description: Some("Sign in with your Claude subscription".to_owned()),
             actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::AddClaudeAccount { thread_id })
+                tx.send(AppEvent::AddClaudeAccount { thread_id });
             })],
             dismiss_on_select: true,
             ..Default::default()
@@ -185,7 +185,7 @@ impl ChatWidget {
                         provider,
                         account_id: account_id.clone(),
                         nickname,
-                    })
+                    });
                 }),
             )
             .allow_empty_submit(),
@@ -199,19 +199,19 @@ impl ChatWidget {
 
     pub(crate) fn show_claude_login_pending(&mut self, login_id: String) {
         self.bottom_pane
-            .show_selection_view(crate::bottom_pane::SelectionViewParams {
+            .show_selection_view(SelectionViewParams {
                 view_id: Some(CLAUDE_LOGIN_PENDING_VIEW),
                 title: Some("Sign in to Claude".to_owned()),
                 subtitle: Some(
                     "Complete sign-in in your browser. Existing conversations keep their accounts."
                         .to_owned(),
                 ),
-                items: vec![crate::bottom_pane::SelectionItem {
+                items: vec![SelectionItem {
                     name: "Cancel sign-in".to_owned(),
                     actions: vec![Box::new(move |tx| {
-                        tx.send(crate::app_event::AppEvent::CancelClaudeLogin {
+                        tx.send(AppEvent::CancelClaudeLogin {
                             login_id: login_id.clone(),
-                        })
+                        });
                     })],
                     dismiss_on_select: true,
                     ..Default::default()

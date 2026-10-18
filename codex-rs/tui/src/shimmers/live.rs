@@ -459,7 +459,7 @@ mod tests {
 
         frames.set_mode(PresentationMode::Normal);
         assert!(live.current(palette).is_some());
-        let before = Instant::now() - Duration::from_secs(20);
+        let before = Instant::now().checked_sub(Duration::from_secs(20)).unwrap();
         let Act::Running { stepped, .. } = &mut live.act else {
             panic!("the foreground started the shimmer");
         };

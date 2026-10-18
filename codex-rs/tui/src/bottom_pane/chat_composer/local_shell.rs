@@ -32,7 +32,7 @@ impl ChatComposer {
             let Some(lease) = self
                 .local_shell_admission
                 .as_ref()
-                .and_then(crate::local_shell::LocalShellAdmission::try_acquire)
+                .and_then(LocalShellAdmission::try_acquire)
             else {
                 self.show_footer_flash(
                     Line::from("Local shell occupied; draft unchanged · !! view/restore"),
@@ -45,8 +45,7 @@ impl ChatComposer {
         Some(
             match self.prepare_submission_text(/*record_history*/ false) {
                 Some((text, _)) => crate::local_shell::LocalShellRequest::parse(&text, lease)
-                    .map(InputResult::LocalShell)
-                    .unwrap_or(InputResult::None),
+                    .map_or(InputResult::None, InputResult::LocalShell),
                 None => InputResult::None,
             },
         )

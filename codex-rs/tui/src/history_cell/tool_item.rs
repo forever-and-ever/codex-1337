@@ -191,7 +191,7 @@ impl HistoryCell for ToolItemCell {
         &self,
         width: u16,
         reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &HashSet<String>,
         mode: super::output_provenance::OutputMode,
     ) -> Option<ActivityParts> {
         self.inner.output_parts(width, reserve, expanded, mode)

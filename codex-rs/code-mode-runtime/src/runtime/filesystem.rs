@@ -2,7 +2,7 @@
 
 use super::RuntimeState;
 
-const FACTORY: &str = r#"(file => Object.freeze({
+const FACTORY: &str = r"(file => Object.freeze({
     async readFile(path, options = {}) {
         if (typeof options === 'string') options = {encoding: options};
         const result = await file({...options, operation: 'read', path});
@@ -13,7 +13,7 @@ const FACTORY: &str = r#"(file => Object.freeze({
         else if (typeof data !== 'string') throw new TypeError('fs.writeFile data must be a string or Uint8Array');
         await file({...options, operation: 'write', path, data});
     }
-}))"#;
+}))";
 
 pub(super) fn helper<'s>(
     scope: &mut v8::PinScope<'s, '_>,

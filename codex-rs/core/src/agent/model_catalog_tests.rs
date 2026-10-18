@@ -164,7 +164,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
     .await;
     if parent_id == "claude" {
         session.services.model_client.commit_provider_account(
-            crate::agent::control::ProviderAccountSelection::ClaudeSubscription { id: account_id },
+            ProviderAccountSelection::ClaudeSubscription { id: account_id },
         );
     } else {
         let mut native_config = (*turn.config).clone();
@@ -438,7 +438,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         )
         .await;
     let retained = session.agent_models_manager(&config).await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&first, &retained));
+    assert!(Arc::ptr_eq(&first, &retained));
     activate(&alice);
     let rebound = session.agent_models_manager(&config).await.unwrap();
     rebound
@@ -447,7 +447,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
             config.http_client_factory(),
         )
         .await;
-    assert!(!std::sync::Arc::ptr_eq(&first, &rebound));
+    assert!(!Arc::ptr_eq(&first, &rebound));
     session
         .services
         .local_agent_runtime
@@ -455,7 +455,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         .select("openai", ProviderAccountSelection::Chatgpt { id: alice });
     activate(&bob);
     let bound = session.agent_models_manager(&config).await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&rebound, &bound));
+    assert!(Arc::ptr_eq(&rebound, &bound));
     // The failed Bob discovery did not run again during metadata lookup; /account selected Alice's actual
     // bearer and account header instead of reusing Bob or the ambient/default login.
     assert_eq!(server.received_requests().await.unwrap().len(), 2);

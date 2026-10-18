@@ -239,7 +239,7 @@ impl Output {
             *capture = Some(Capture {
                 id,
                 operations: Vec::new(),
-            })
+            });
         });
         let capture = CaptureGuard { shared };
         let result = f(self);
@@ -697,21 +697,21 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
             Job::Control(bytes) => terminal
                 .backend_mut()
                 .write_all(&bytes)
-                .and_then(|_| Write::flush(terminal.backend_mut())),
+                .and_then(|()| Write::flush(terminal.backend_mut())),
             Job::Frame(frame) => {
                 let now = Instant::now();
                 let mut phases = [(now, now); 3];
                 let result = terminal
                     .backend_mut()
                     .write_all(b"\x1b[?2026h")
-                    .and_then(|_| {
+                    .and_then(|()| {
                         for operation in frame.operations {
                             match operation {
                                 Operation::Bytes(bytes) => {
-                                    terminal.backend_mut().write_all(&bytes)?
+                                    terminal.backend_mut().write_all(&bytes)?;
                                 }
                                 Operation::Frame(snapshot) => {
-                                    phases = write_snapshot(&mut terminal, snapshot)?
+                                    phases = write_snapshot(&mut terminal, snapshot)?;
                                 }
                             }
                         }
@@ -721,7 +721,7 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
                 let ended = terminal
                     .backend_mut()
                     .write_all(b"\x1b[?2026l")
-                    .and_then(|_| Write::flush(terminal.backend_mut()));
+                    .and_then(|()| Write::flush(terminal.backend_mut()));
                 let ended_at = Instant::now();
                 phases[2].1 = ended_at;
                 if result.is_ok() && ended.is_ok() {
@@ -765,9 +765,9 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
     }
 }
 
-impl<B> super::Terminal<B>
+impl<B> Terminal<B>
 where
-    B: ratatui::backend::Backend<Error = io::Error> + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     pub(super) fn capture_output_frame(
         &mut self,
@@ -893,14 +893,14 @@ mod tests {
         let mut completions = completion_events().expect("writer completion stream");
         let view = RefCell::new(crate::transcript_view::TranscriptView::default());
         let submit = |text: &str, width: u16| -> io::Result<()> {
-            let mut buffer = Buffer::empty(ratatui::layout::Rect::new(0, 0, 3, 1));
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 1));
             stdout().sync_update(|_| {
                 view.borrow_mut().render(
-                    ratatui::layout::Rect::new(0, 0, width, 1),
+                    Rect::new(0, 0, width, 1),
                     &mut buffer,
                     &[],
                 );
-                buffer.set_string(0, 0, text, ratatui::style::Style::default());
+                buffer.set_string(0, 0, text, Style::default());
                 assert!(capture_frame(
                     &buffer,
                     false,

@@ -18,7 +18,7 @@ pub(crate) struct ProviderModelChoice {
 pub(crate) enum ProviderModelEvent {
     Open(ModelProviderOption),
     Loaded {
-        request_id: uuid::Uuid,
+        request_id: Uuid,
         provider: ModelProviderOption,
         result: Result<ModelListing, String>,
     },
@@ -45,7 +45,7 @@ impl App {
                 );
             }
             ProviderModelEvent::Open(provider) => {
-                let request_id = uuid::Uuid::new_v4();
+                let request_id = Uuid::new_v4();
                 self.chat_widget
                     .show_provider_models_loading(request_id, &provider);
                 let handle = server.request_handle();

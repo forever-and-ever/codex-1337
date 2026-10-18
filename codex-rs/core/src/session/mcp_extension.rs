@@ -262,7 +262,7 @@ impl Session {
             server_config,
         ));
         let selections = environments.all_selections();
-        let scope = crate::mcp::McpEnvironmentScope::Selected(&selections);
+        let scope = McpEnvironmentScope::Selected(&selections);
         projection.config.mcp_server_catalog =
             catalog.build_with_environment_authority(|id| scope.authority_for(id));
     }

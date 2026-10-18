@@ -39,7 +39,7 @@ fn policy_preserves_explicit_modes_and_terminal_ownership() {
 
 #[tokio::test]
 async fn pending_primary_paste_survives_release_but_not_other_input() {
-    let mut app = crate::app::test_support::make_test_app().await;
+    let mut app = test_support::make_test_app().await;
     for (kind, keep) in [
         (MouseEventKind::Up(MouseButton::Middle), true),
         (MouseEventKind::Moved, true),
@@ -58,7 +58,7 @@ async fn pending_primary_paste_survives_release_but_not_other_input() {
             kind,
             column: 0,
             row: 0,
-            modifiers: crossterm::event::KeyModifiers::NONE,
+            modifiers: KeyModifiers::NONE,
         }));
         assert_eq!(app.pending_mouse_paste.is_some(), keep);
     }

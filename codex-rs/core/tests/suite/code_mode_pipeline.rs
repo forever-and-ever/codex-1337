@@ -42,14 +42,14 @@ async fn response_stage_pipeline(language: &str, source: &str, success: bool) ->
             ev_custom_tool_call("produce", language, source),
             ev_custom_tool_call("independent", "bash", "printf 2 > increment"),
             ev_function_call("barrier-a", "fence", "{}"),
-            ev_custom_tool_call("consume", "exec", r#"
+            ev_custom_tool_call("consume", "exec", r"
 const a = Number(await fs.readFile('input', 'utf8'));
 const b = Number(await fs.readFile('increment', {encoding: 'utf8'}));
 await fs.writeFile('result', String(a + b));
 const result = await tools.exec_command({cmd: 'cat result'});
 if (result.output !== '42') throw new Error('pipeline corrupted');
 text(result.output);
-"#),
+"),
             ev_function_call("barrier-b", "fence", "{}"),
             ev_custom_tool_call("final", "python", "from pathlib import Path\nassert Path('result').read_text() == '42'\nPath('finished').write_text('done')"),
             ev_completed("pipeline"),
@@ -152,7 +152,7 @@ async fn filesystem_authority_and_transfer_bounds() -> Result<()> {
                     ev_custom_tool_call(
                         "filesystem",
                         "exec",
-                        r#"
+                        r"
 if (await fs.readFile('seed', 'utf8') !== 'private result') throw new Error('wrong executor');
 let denied = false;
 try { await fs.writeFile('seed', 'corrupted'); } catch (_) { denied = true; }
@@ -161,7 +161,7 @@ let bounded = false;
 try { await fs.readFile('oversize'); } catch (error) { bounded = String(error).includes('1 MiB'); }
 if (!bounded) throw new Error('read was unbounded or silently truncated');
 text('authority and bounds preserved');
-"#,
+",
                     ),
                     ev_function_call("barrier", "fence", "{}"),
                     ev_custom_tool_call("skipped", "exec", "text('must not execute');"),

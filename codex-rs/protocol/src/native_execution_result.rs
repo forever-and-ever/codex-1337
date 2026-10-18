@@ -31,6 +31,7 @@ pub enum SettledExecution {
 
 impl SettledExecution {
     /// Contradictory status must retain its complete structured representation.
+    #[must_use]
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
         let (header, body) = self.parts(metadata)?;
         Some(compose(header, body))
@@ -98,6 +99,7 @@ impl SettledExecution {
 
 impl NativeExecutionResult {
     /// Contradictory status must retain its complete structured representation.
+    #[must_use]
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
         Some(compose(self.header(metadata)?, &self.output))
     }

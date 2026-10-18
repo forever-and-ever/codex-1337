@@ -124,7 +124,7 @@ impl App {
         };
         let overview = self
             .chat_widget
-            .selected_index_for_active_view(agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+            .selected_index_for_active_view(AGENTS_OVERVIEW_VIEW_ID)
             .is_some();
         let kill_buffer = self.chat_widget.take_kill_buffer_snapshot();
         // Preparation can fail without replacing the UI; retain its local copy too.

@@ -34,7 +34,7 @@ async fn farm_draft_edits_survive_rejection_view_change_and_discard() {
     app.farm.state = FarmRequestState::Uncertain(retained.clone());
     app.chat_widget.insert_str(" with newer edits");
     let edited = app.chat_widget.composer_text_with_pending();
-    let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
+    let mut tui = tui::test_support::make_test_tui().expect("test tui");
     app.open_farm_recovery(root);
     assert_eq!(app.chat_widget.composer_text_with_pending(), edited);
     app.chat_widget.handle_key_event(KeyCode::Esc.into());
@@ -138,7 +138,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         mode: ThreadFarmMode::FullHistory,
         submission: submission.clone(),
     });
-    let mut tui = crate::tui::test_support::make_test_tui().expect("test tui");
+    let mut tui = tui::test_support::make_test_tui().expect("test tui");
     tui.set_owned_screen(/*owned*/ true).unwrap();
     let message = |text: &str| {
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {

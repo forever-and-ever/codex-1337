@@ -133,10 +133,12 @@ impl AnthropicRequest {
         })
     }
 
+    #[must_use]
     pub fn body(&self) -> &RawValue {
         &self.body
     }
 
+    #[must_use]
     pub fn tools(&self) -> &[AnthropicTool] {
         &self.tools
     }
