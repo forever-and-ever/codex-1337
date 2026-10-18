@@ -1,6 +1,19 @@
 //! Fork boundaries distinguish a copied unfinished turn from a real interruption.
 
-use super::*;
+use super::Arc;
+use super::CodexResult;
+use super::ForkHistory;
+use super::ForkPersistence;
+use super::InitialHistory;
+use super::InterruptedTurnHistoryMarker;
+use super::NewThread;
+use super::PreparedFork;
+use super::ResumedHistory;
+use super::StartThreadOptions;
+use super::ThreadManager;
+use super::append_interrupted_boundary;
+use super::snapshot_turn_state;
+use super::truncate_before_nth_user_message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForkSnapshot {
@@ -77,16 +90,15 @@ impl ThreadManager {
             history_base: prepared.history_base,
             inherited_item_count: prepared.model_context.len(),
         };
-        let result = self
-            .fork_thread_with_initial_history(
-                options,
-                ForkHistory {
-                    snapshot,
-                    initial_history: history,
-                    persistence: fork_persistence,
-                },
-            )
-            .await;
+        let result = Box::pin(self.fork_thread_with_initial_history(
+            options,
+            ForkHistory {
+                snapshot,
+                initial_history: history,
+                persistence: fork_persistence,
+            },
+        ))
+        .await;
         drop(prepared);
         result
     }

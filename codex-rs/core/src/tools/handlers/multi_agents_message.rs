@@ -11,10 +11,10 @@ pub(super) fn agent_message_parameters(
     mut properties: BTreeMap<String, JsonSchema>,
     required: Vec<String>,
 ) -> JsonSchema {
-    properties.insert("message".into(), JsonSchema::string(Some(
+    let _ = properties.insert("message".into(), JsonSchema::string(Some(
         "Task or message. Use plaintext_message instead for another provider or account; provide exactly one of these fields.".into(),
     )).with_encrypted());
-    properties.insert("plaintext_message".into(), JsonSchema::string(Some(
+    let _ = properties.insert("plaintext_message".into(), JsonSchema::string(Some(
         "Unencrypted task or message for cross-provider or cross-account delivery. For example: plaintext_message: \"Inspect the failing test\". Provide exactly one of message or plaintext_message.".into(),
     )));
     let mut parameters = JsonSchema::object(properties, Some(required), Some(false.into()));

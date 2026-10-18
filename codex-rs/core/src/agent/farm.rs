@@ -181,7 +181,7 @@ impl CodexThread {
         {
             return replay(&request_id, &payload_sha256, record);
         }
-        let prepared = async {
+        let prepared = Box::pin(async {
             let task = request
                 .input
                 .iter()
@@ -225,7 +225,7 @@ impl CodexThread {
             // captured under the checkpoint/settings boundary, never a whole-turn/tool lock.
             let (turn, fork_history) = {
                 let _boundary = thread_settings::acquire_persistence_lock(&self.session).await;
-                let turn = self.session.new_inject_items_context().await;
+                let turn = Box::pin(self.session.new_inject_items_context()).await;
                 self.flush_rollout()
                     .await
                     .map_err(|error| CodexErr::Fatal(format!("could not flush parent: {error}")))?;
@@ -311,7 +311,7 @@ impl CodexThread {
             } else {
                 format!("{CHILD_INSTRUCTIONS}\n\n{extra}")
             };
-            let prepared = prepare_agent_spawn_config_from_selection(
+            let prepared = Box::pin(prepare_agent_spawn_config_from_selection(
                 &self.session,
                 &turn,
                 &turn.initial_settings,
@@ -325,7 +325,7 @@ impl CodexThread {
                     service_tier: None,
                 },
                 selection,
-            )
+            ))
             .await
             .map_err(CodexErr::InvalidRequest)?;
             let mut config = prepared.config;
@@ -382,7 +382,7 @@ impl CodexThread {
                 task_preview: task,
                 turn,
             })
-        }
+        })
         .await;
         let spawn = match prepared {
             Ok(spawn) => spawn,

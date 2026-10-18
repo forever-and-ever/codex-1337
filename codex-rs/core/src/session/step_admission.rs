@@ -252,7 +252,7 @@ impl Session {
         let session = Arc::clone(self);
         let turn_context = Arc::clone(turn_context);
         // Tokenizing large or pathological text must not hold up the turn.
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             match tokio::task::spawn_blocking(move || seal(previous, received, admitted)).await {
                 Ok((turn_id, item)) => {
                     session
@@ -261,7 +261,7 @@ impl Session {
                 }
                 Err(error) => tracing::warn!(%error, "step admission measurement failed"),
             }
-        });
+        }));
     }
 
     /// Announces what arrived after the previous step's results as this request reads it.
@@ -447,7 +447,8 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                     })
                     .collect::<Option<Vec<_>>>()
                     .map_or(
-                        codex_protocol::step_admission::ArrivalSource::Unavailable, |blocks| codex_protocol::step_admission::ArrivalSource::Captured { blocks },
+                        codex_protocol::step_admission::ArrivalSource::Unavailable,
+                        |blocks| codex_protocol::step_admission::ArrivalSource::Captured { blocks },
                     ),
                 label: author.clone(),
             }),
@@ -456,10 +457,12 @@ fn admit(items: &[ResponseItem]) -> Admitted {
                     source_index,
                     kind: ArrivalKind::Injection,
                     label: "Additional tools".to_string(),
-                    source: serde_json::to_string(tools)
-                        .map_or(codex_protocol::step_admission::ArrivalSource::Unavailable, |text| {
-                            codex_protocol::step_admission::ArrivalSource::ToolDeclarations { text }
-                        }),
+                    source: serde_json::to_string(tools).map_or(
+                        codex_protocol::step_admission::ArrivalSource::Unavailable,
+                        |text| codex_protocol::step_admission::ArrivalSource::ToolDeclarations {
+                            text,
+                        },
+                    ),
                 });
             }
             ResponseItem::ConfigurationUpdate { .. } => admitted.arrivals.push(Incoming {

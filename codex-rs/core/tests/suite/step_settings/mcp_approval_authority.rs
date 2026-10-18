@@ -12,7 +12,7 @@ async fn mcp_write_approval_follows_the_issuing_turn_not_saved_thread_settings()
     core_test_support::skip_if_wine_exec!(Ok(()), "requires a Windows test_stdio_server binary");
 
     let server = start_mock_server().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
         let responses = mount_sse_sequence(
             &server,
             vec![
@@ -95,7 +95,7 @@ async fn mcp_write_approval_follows_the_issuing_turn_not_saved_thread_settings()
         )
         .await?;
         answer_paused_turn(&test.codex, &paused.turn_id).await?;
-        wait_for_event(&test.codex, |event| {
+        let _ = wait_for_event(&test.codex, |event| {
             matches!(event, EventMsg::TurnComplete(_))
         })
         .await;
@@ -119,6 +119,6 @@ async fn mcp_write_approval_follows_the_issuing_turn_not_saved_thread_settings()
             [None, None, Some("guardian".to_string()), None],
         );
         Ok(())
-    })
+    }))
     .await
 }

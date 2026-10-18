@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent::control::ProviderAccountSelection;
 use crate::session::TurnInput;
+use crate::session::UserInputMetadata;
 use crate::session::tests::bind_model_client_for_tests;
 use crate::session::tests::make_session_and_context_with_auth_config_home_and_rx;
 use crate::tasks::RegularTask;
@@ -91,7 +92,8 @@ impl ModelProvider for NativeBoundary {
             // capture_anthropic_auth has already run. Rotate A and commit B before
             // the first POST; its explicit 401 must recover the captured A only.
             if self.switch_once.swap(false, Ordering::SeqCst) {
-                self.store
+                let _ = self
+                    .store
                     .upsert(
                         self.account_a.clone(),
                         SubscriptionGrant::bearer_only("rotated-a".into())?,
@@ -173,12 +175,11 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             .respond_with(
                 ResponseTemplate::new(/*s*/ 200)
                     .insert_header("content-type", "text/event-stream")
-                    .set_body_string(
-                        frames
-                            .iter()
-                            .map(|frame| format!("data: {frame}\n\n"))
-                            .collect::<String>(),
-                    ),
+                    .set_body_string(frames.iter().fold(String::new(), |mut body, frame| {
+                        use std::fmt::Write as _;
+                        write!(&mut body, "data: {frame}\n\n").unwrap();
+                        body
+                    })),
             )
             .expect(/*r*/ 1)
             .mount(&server)
@@ -335,7 +336,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         )
         .await?;
     while let Some(event) = stream.next().await {
-        event?;
+        let _ = event?;
     }
     let requests = server.received_requests().await.unwrap();
     let observed = requests.iter().map(|request| {
@@ -349,7 +350,7 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
             .collect::<Vec<_>>();
         for message in body["messages"].as_array_mut().unwrap() {
             for block in message["content"].as_array_mut().unwrap() {
-                block.as_object_mut().unwrap().remove("cache_control");
+                let _ = block.as_object_mut().unwrap().remove("cache_control");
             }
         }
         json!({"bearer":request.headers["authorization"].to_str().unwrap(), "messages":body["messages"], "effort":body["output_config"]["effort"], "markers":markers})
@@ -442,14 +443,14 @@ async fn native_request_pins_recovery_then_switches_with_exact_custom_tool_repla
         "side replay emitted a protocol event"
     );
     server.verify().await;
-    native_regular_replay_profiles(
+    Box::pin(native_regular_replay_profiles(
         &server,
         &boundary,
         &model,
         &prompt.input,
         &runtime,
         home.path(),
-    )
+    ))
     .await?;
     Ok(())
 }
@@ -535,12 +536,11 @@ async fn native_regular_replay_profiles(
             .map(|frames| {
                 ResponseTemplate::new(200)
                     .insert_header("content-type", "text/event-stream")
-                    .set_body_string(
-                        frames
-                            .into_iter()
-                            .map(|frame| format!("data: {frame}\n\n"))
-                            .collect::<String>(),
-                    )
+                    .set_body_string(frames.into_iter().fold(String::new(), |mut body, frame| {
+                        use std::fmt::Write as _;
+                        write!(&mut body, "data: {frame}\n\n").unwrap();
+                        body
+                    }))
             })
             .collect::<Vec<_>>();
         let index = AtomicUsize::new(0);
@@ -575,7 +575,7 @@ async fn native_regular_replay_profiles(
         });
         let model_slug = model.slug.clone();
         let (mut session, mut turn, events) =
-            make_session_and_context_with_auth_config_home_and_rx(
+            Box::pin(make_session_and_context_with_auth_config_home_and_rx(
                 CodexAuth::Headers(AuthHeaders::new(http::HeaderMap::new())),
                 Vec::new(),
                 home,
@@ -588,7 +588,7 @@ async fn native_regular_replay_profiles(
                     let _ = config.features.disable(Feature::CodeMode);
                     let _ = config.features.disable(Feature::CodeModeHost);
                 },
-            )
+            ))
             .await;
         let mut client = test_model_client_with_thread_id(session.thread_id, SessionSource::Exec);
         Arc::get_mut(&mut client.state).unwrap().provider = provider.clone();
@@ -600,21 +600,20 @@ async fn native_regular_replay_profiles(
             .record_conversation_items(&turn, model, history)
             .await;
         while events.try_recv().is_ok() {}
-        session
-            .spawn_task(
-                Arc::clone(&turn),
-                vec![TurnInput::UserInput {
-                    metadata: Default::default(),
-                    client_id: None,
-                    content: vec![UserInput::Text {
-                        text: "continue native replay".into(),
-                        text_elements: Vec::new(),
-                    }],
+        Box::pin(session.spawn_task(
+            Arc::clone(&turn),
+            vec![TurnInput::UserInput {
+                metadata: UserInputMetadata::default(),
+                client_id: None,
+                content: vec![UserInput::Text {
+                    text: "continue native replay".into(),
+                    text_elements: Vec::new(),
                 }],
-                RegularTask::new(),
-            )
-            .await
-            .unwrap();
+            }],
+            RegularTask::new(),
+        ))
+        .await
+        .unwrap();
         let observed = tokio::time::timeout(Duration::from_secs(30), async {
             let mut observed = Vec::new();
             loop {

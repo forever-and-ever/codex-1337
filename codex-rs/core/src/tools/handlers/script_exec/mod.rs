@@ -122,15 +122,14 @@ impl ToolExecutor<ToolInvocation> for ScriptExecHandler {
             } else {
                 ExecCommandHandler::one_shot(self.options)
             };
-            handler
-                .handle_prepared(
-                    invocation,
-                    PreparedExec::Script {
-                        language: self.language,
-                        initial_wait,
-                    },
-                )
-                .await
+            Box::pin(handler.handle_prepared(
+                invocation,
+                PreparedExec::Script {
+                    language: self.language,
+                    initial_wait,
+                },
+            ))
+            .await
         })
     }
 }
@@ -144,7 +143,7 @@ impl CoreToolRuntime for ScriptExecHandler {
         let ToolPayload::Custom { input } = &invocation.payload else {
             return None;
         };
-        parser::parse(input).ok()?;
+        let _ = parser::parse(input).ok()?;
         Some(PreToolUsePayload {
             tool_name: invocation.tool_name.clone(),
             tool_input: serde_json::json!({ "command": self.language.review_command(input).ok()? }),

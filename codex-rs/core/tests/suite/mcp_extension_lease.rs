@@ -69,15 +69,13 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
         "env": {"MCP_TEST_SYNC_ENTER_FILE": enter_file},
     }))?;
     let first = Arc::new(CancellationToken::new());
-    fixture
-        .codex
-        .attach_mcp_extension(
-            "leased_mcp".into(),
-            config.clone(),
-            "Use the leased tool.".into(),
-            Arc::clone(&first),
-        )
-        .await?;
+    Box::pin(fixture.codex.attach_mcp_extension(
+        "leased_mcp".into(),
+        config.clone(),
+        "Use the leased tool.".into(),
+        Arc::clone(&first),
+    ))
+    .await?;
 
     // An ordinary MCP refresh must not strand a still-valid lease.
     assert_eq!(
@@ -87,26 +85,23 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
             .await,
         codex_core::ConfigRefreshOutcome::Published
     );
-    fixture
-        .codex
-        .call_mcp_tool(
-            "leased_mcp",
-            "echo",
-            Some(json!({"message": "after refresh"})),
-            /*meta*/ None,
-        )
-        .await?;
+    let _ = Box::pin(fixture.codex.call_mcp_tool(
+        "leased_mcp",
+        "echo",
+        Some(json!({"message": "after refresh"})),
+        /*meta*/ None,
+    ))
+    .await?;
 
     let thread = Arc::clone(&fixture.codex);
     let in_flight = tokio::spawn(async move {
-        thread
-            .call_mcp_tool(
-                "leased_mcp",
-                "sync",
-                Some(json!({"sleep_after_ms": 30_000})),
-                /*meta*/ None,
-            )
-            .await
+        Box::pin(thread.call_mcp_tool(
+            "leased_mcp",
+            "sync",
+            Some(json!({"sleep_after_ms": 30_000})),
+            /*meta*/ None,
+        ))
+        .await
     });
     timeout(Duration::from_secs(10), async {
         while !enter_file.exists() {
@@ -116,40 +111,37 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
     .await
     .context("MCP call never reached the server")?;
     fixture.codex.detach_mcp_extension(&first).await;
-    let error = match timeout(Duration::from_secs(5), in_flight).await?? {
-        Ok(_) => anyhow::bail!("revoked MCP call unexpectedly succeeded"),
-        Err(error) => error,
+    let Err(error) = timeout(Duration::from_secs(5), in_flight).await?? else {
+        anyhow::bail!("revoked MCP call unexpectedly succeeded")
     };
     anyhow::ensure!(
         error.to_string().contains("extension MCP lease revoked"),
         "unexpected call error: {error}"
     );
 
-    fixture
+    let _ = fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "continue".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&fixture.codex, |event| {
+    let _ = wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
     let _request = model_response.single_request();
 
     let replacement = Arc::new(CancellationToken::new());
-    timeout(Duration::from_secs(5), async {
+    Box::pin(timeout(Duration::from_secs(5), async {
         loop {
-            match fixture
-                .codex
-                .attach_mcp_extension(
-                    "leased_mcp".into(),
-                    config.clone(),
-                    "Use the leased tool.".into(),
-                    Arc::clone(&replacement),
-                )
-                .await
+            match Box::pin(fixture.codex.attach_mcp_extension(
+                "leased_mcp".into(),
+                config.clone(),
+                "Use the leased tool.".into(),
+                Arc::clone(&replacement),
+            ))
+            .await
             {
                 Ok(()) => break Ok(()),
                 Err(error) if error.to_string().contains("thread has an active turn") => {
@@ -158,18 +150,16 @@ async fn extension_revocation_cancels_in_flight_call_without_stopping_thread() -
                 Err(error) => break Err(error),
             }
         }
-    })
+    }))
     .await??;
     fixture.codex.detach_mcp_extension(&first).await;
-    fixture
-        .codex
-        .call_mcp_tool(
-            "leased_mcp",
-            "echo",
-            Some(json!({"message": "replacement"})),
-            /*meta*/ None,
-        )
-        .await?;
+    let _ = Box::pin(fixture.codex.call_mcp_tool(
+        "leased_mcp",
+        "echo",
+        Some(json!({"message": "replacement"})),
+        /*meta*/ None,
+    ))
+    .await?;
     fixture.codex.detach_mcp_extension(&replacement).await;
     Ok(())
 }
@@ -208,15 +198,13 @@ async fn resumed_history_deactivates_unowned_extension_instructions() -> Result<
         "required": true,
         "startup_timeout_sec": 10,
     }))?;
-    initial
-        .codex
-        .attach_mcp_extension(
-            "codex_tui".into(),
-            config,
-            "Distinctive connection-owned instruction.".into(),
-            cancellation,
-        )
-        .await?;
+    Box::pin(initial.codex.attach_mcp_extension(
+        "codex_tui".into(),
+        config,
+        "Distinctive connection-owned instruction.".into(),
+        cancellation,
+    ))
+    .await?;
     let active_response = responses::mount_sse_once(
         &server,
         responses::sse(vec![
@@ -300,35 +288,33 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
             .set_delay(Duration::from_secs(30)),
     )
     .await;
-    fixture
+    let _ = fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Keep this turn active".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&fixture.codex, |event| {
+    let _ = wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnStarted(_))
     })
     .await;
     let config: codex_config::McpServerConfig =
         serde_json::from_value(json!({ "command": stdio_server_bin()? }))?;
-    let error = fixture
-        .codex
-        .attach_mcp_extension(
-            "leased_mcp".into(),
-            config.clone(),
-            "Temporary instructions".into(),
-            Arc::new(CancellationToken::new()),
-        )
-        .await
-        .expect_err("active turn must reject attachment");
+    let error = Box::pin(fixture.codex.attach_mcp_extension(
+        "leased_mcp".into(),
+        config.clone(),
+        "Temporary instructions".into(),
+        Arc::new(CancellationToken::new()),
+    ))
+    .await
+    .expect_err("active turn must reject attachment");
     anyhow::ensure!(
         error.to_string().contains("thread has an active turn"),
         "unexpected attach error: {error}"
     );
-    fixture.codex.submit(Op::Interrupt).await?;
-    wait_for_event(&fixture.codex, |event| {
+    let _ = fixture.codex.submit(Op::Interrupt).await?;
+    let _ = wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnAborted(_))
     })
     .await;
@@ -338,25 +324,23 @@ async fn extension_attach_refuses_active_turn() -> Result<()> {
         responses::sse(vec![responses::ev_completed("late")]),
     )
     .await;
-    fixture
+    let _ = fixture
         .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Keep this turn active".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&fixture.codex, |event| {
+    let _ = wait_for_event(&fixture.codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
-    fixture
-        .codex
-        .attach_mcp_extension(
-            "leased_mcp".into(),
-            config,
-            "Temporary instructions".into(),
-            Arc::new(CancellationToken::new()),
-        )
-        .await?;
+    Box::pin(fixture.codex.attach_mcp_extension(
+        "leased_mcp".into(),
+        config,
+        "Temporary instructions".into(),
+        Arc::new(CancellationToken::new()),
+    ))
+    .await?;
     Ok(())
 }

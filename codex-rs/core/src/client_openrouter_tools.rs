@@ -233,8 +233,8 @@ impl Projection {
                 internal_chat_message_metadata_passthrough,
             };
         };
-        name = tool.identity.name.clone();
-        namespace = tool.identity.namespace.clone();
+        name.clone_from(&tool.identity.name);
+        namespace.clone_from(&tool.identity.namespace);
         if matches!(tool.input, Input::Freeform) {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -279,7 +279,7 @@ impl Projection {
             ResponseEvent::OutputItemAdded(item) => {
                 let item = self.item(item, true);
                 if let ResponseItem::CustomToolCall { id: Some(id), .. } = &item {
-                    self.freeform_items.insert(id.clone());
+                    let _ = self.freeform_items.insert(id.clone());
                 }
                 vec![ResponseEvent::OutputItemAdded(item)]
             }
@@ -305,7 +305,7 @@ impl Projection {
                     });
                 }
                 if let Some(id) = item.id() {
-                    self.freeform_items.remove(id);
+                    let _ = self.freeform_items.remove(id);
                 }
                 events.push(ResponseEvent::OutputItemDone(item));
                 events

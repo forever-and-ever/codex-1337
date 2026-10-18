@@ -79,8 +79,7 @@ impl Session {
             .await;
         crate::agent_communication::emit_agent_communication_receive(&submission_id);
         if self.input_queue.has_pending_mailbox_items().await {
-            self.maybe_start_turn_for_pending_work_with_sub_id(submission_id)
-                .await;
+            Box::pin(self.maybe_start_turn_for_pending_work_with_sub_id(submission_id)).await;
         }
     }
 
@@ -164,7 +163,7 @@ impl InputQueue {
                     || execution.release_generation != generation
                     || deadline <= Instant::now()
             }) {
-                self.release_mailbox_batch().await;
+                let _ = self.release_mailbox_batch().await;
                 return;
             }
             tokio::select! {
@@ -174,7 +173,7 @@ impl InputQueue {
                     if result.is_err() || execution.active < 2
                         || batch.is_some_and(|(_, generation)| execution.release_generation != generation)
                     {
-                        self.release_mailbox_batch().await;
+                        let _ = self.release_mailbox_batch().await;
                     }
                     // Also retry ordinary-mail admission when execution capacity is released.
                     return;

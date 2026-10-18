@@ -93,14 +93,16 @@ pub(super) async fn request(
         .min(MAX_STREAM_RETRIES);
     let mut retry_state = ResponsesStreamRetryState::default();
     loop {
-        sess.apply_pending_account().await.map_err(|error| {
-            Miss::Failed(
-                CodexErrorDetails::InvalidRequest(format!(
-                    "Cannot apply account selection: {error}"
-                ))
-                .into(),
-            )
-        })?;
+        Box::pin(sess.apply_pending_account())
+            .await
+            .map_err(|error| {
+                Miss::Failed(
+                    CodexErrorDetails::InvalidRequest(format!(
+                        "Cannot apply account selection: {error}"
+                    ))
+                    .into(),
+                )
+            })?;
         let exchange = async {
             let stream = client_session
                 .stream(

@@ -198,19 +198,19 @@ pub(crate) async fn approve_extension_tool(
                 if let Err(err) = result {
                     tracing::warn!(%err, "failed to persist native tool approval; remembering for this session");
                 } else {
-                    call.session.reload_user_config_layer().await;
+                    Box::pin(call.session.reload_user_config_layer()).await;
                 }
                 ReviewDecision::ApprovedForSession
             } else {
                 decision
             };
-            apply_mcp_tool_approval_decision(
+            Box::pin(apply_mcp_tool_approval_decision(
                 &call.session,
                 &call.turn,
                 &decision,
                 session_mcp_tool_approval_key(&invocation, Some(&metadata), policy.mode),
                 persistent_mcp_tool_approval_key(&invocation, Some(&metadata), policy.mode),
-            )
+            ))
             .await;
             Ok(())
         }

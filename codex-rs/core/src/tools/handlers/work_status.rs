@@ -62,7 +62,7 @@ impl ToolExecutor<ToolInvocation> for WorkStatusHandler {
             let update: Update = parse_arguments(arguments)?;
             let status = WorkStatus {
                 turn_id: invocation.turn.sub_id.clone(),
-                activity: summary(update.activity)?,
+                activity: summary(&update.activity)?,
                 emitted_at: Some(chrono::Utc::now().timestamp()),
             };
             invocation
@@ -83,7 +83,7 @@ impl CoreToolRuntime for WorkStatusHandler {
     }
 }
 
-fn summary(text: String) -> Result<String, FunctionCallError> {
+fn summary(text: &str) -> Result<String, FunctionCallError> {
     if text.chars().count() > WorkStatus::MAX_ACTIVITY_CHARS {
         return Err(FunctionCallError::RespondToModel(format!(
             "Keep each summary within {} characters.",

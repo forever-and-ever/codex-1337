@@ -100,6 +100,7 @@ pub trait PromptCacheObserver: Send + Sync + Debug {
 
 /// Installs one app-server-owned observer before the manager starts any threads.
 pub trait PromptCacheManager {
+    #[must_use]
     fn with_prompt_cache_observer(self, observer: Arc<dyn PromptCacheObserver>) -> Self;
 }
 
@@ -275,7 +276,7 @@ impl ModelClient {
         let consumer_dropped = CancellationToken::new();
         let dropped = consumer_dropped.clone();
         let (sender, rx_event) = tokio::sync::mpsc::channel(/*buffer*/ 16);
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let mut dispatch = Some(dispatch);
             loop {
                 let event = tokio::select! {
@@ -315,7 +316,7 @@ impl ModelClient {
                     break;
                 }
             }
-        });
+        }));
         ResponseStream {
             rx_event,
             interrupt,

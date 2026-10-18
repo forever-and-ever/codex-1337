@@ -82,7 +82,7 @@ impl Session {
                         anyhow::bail!("thread has an active turn");
                     }
                 }
-                self.refresh_mcp_if_dirty().await;
+                Box::pin(self.refresh_mcp_if_dirty()).await;
                 if self
                     .services
                     .mcp_runtime
@@ -114,9 +114,7 @@ impl Session {
                     cancellation: cancellation.clone(),
                     committed: false,
                 };
-                *self.mcp_extension_context_delta.lock().unwrap_or_else(|_| {
-                    panic!("MCP extension instruction delta poisoned")
-                }) =
+                *self.mcp_extension_context_delta.lock().map_err(|_| anyhow::anyhow!("MCP extension instruction delta poisoned"))? =
                     (!instruction_pending).then(|| format!(
                         "The connection-scoped MCP extension `{server_name}` is active again. Its previously supplied developer instructions apply while this lease remains active."
                     ));
@@ -124,7 +122,7 @@ impl Session {
                     .mcp_runtime
                     .set_server_lease(server_name.clone(), cancellation.clone());
                 self.mark_mcp_runtime_dirty();
-                self.refresh_mcp_if_dirty().await;
+                Box::pin(self.refresh_mcp_if_dirty()).await;
                 let ready = self.services
                     .mcp_runtime
                     .activate_server_lease(&server_name, &cancellation)
@@ -138,10 +136,11 @@ impl Session {
         }
     }
 
-    pub(crate) async fn detach_mcp_extension(
-        self: &Arc<Self>,
-        cancellation: &Arc<CancellationToken>,
-    ) {
+    #[expect(
+        clippy::panic,
+        reason = "Poisoned lease authority cannot safely revoke capabilities; this infallible teardown must fail closed"
+    )]
+    pub(crate) fn detach_mcp_extension(self: &Arc<Self>, cancellation: &Arc<CancellationToken>) {
         cancellation.cancel();
         let removed = {
             let mut lease = self
@@ -170,6 +169,10 @@ impl Session {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Poisoned instruction authority cannot safely choose active instructions; infallible history projection must fail closed"
+    )]
     pub(super) fn mcp_extension_instruction(&self, full_context: bool) -> Option<String> {
         let mut lease = self
             .mcp_extension
@@ -194,7 +197,7 @@ impl Session {
             return delta.take();
         }
         if full_context {
-            delta.take();
+            let _ = delta.take();
         }
         if !full_context && !lease.instruction_pending {
             return delta.take();
@@ -208,6 +211,10 @@ impl Session {
         ))
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Poisoned lease authority cannot safely expose capabilities; infallible MCP projection must fail closed"
+    )]
     pub(super) fn project_mcp_extension(
         &self,
         projection: &mut McpRuntimeProjection,

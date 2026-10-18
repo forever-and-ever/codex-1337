@@ -3,6 +3,10 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn apportion_measures_splits_and_releases() {
+    use AdmissionPrecision::Apportioned;
+    use AdmissionPrecision::Disturbed;
+    use AdmissionPrecision::Exact;
+
     // Token accounting may join blocks for its estimate; retained evidence must not.
     let original = vec!["first".to_owned(), "  second\n".to_owned()];
     let item: ResponseItem = serde_json::from_value(serde_json::json!({
@@ -43,9 +47,6 @@ fn apportion_measures_splits_and_releases() {
         arrival_placement(&[user(Some("earlier")), context(), user(None)], 1),
         None
     );
-    use AdmissionPrecision::Apportioned;
-    use AdmissionPrecision::Disturbed;
-    use AdmissionPrecision::Exact;
     let cases = [
         // A lone result owns the whole delta, whatever its local count.
         (1_200, vec![Some(700)], vec![1_200], 0, Exact),

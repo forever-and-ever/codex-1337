@@ -1188,7 +1188,7 @@ impl CodexThread {
         &self,
         cancellation: &Arc<tokio_util::sync::CancellationToken>,
     ) {
-        self.session.detach_mcp_extension(cancellation).await;
+        self.session.detach_mcp_extension(cancellation);
     }
 
     /// Refreshes this thread's Apps tools before returning their runtime state.

@@ -77,7 +77,7 @@ impl StreamItems {
     }
 
     pub(super) fn present(&mut self, id: ResponseItemId, item: TurnItem, streaming: bool) {
-        self.items.insert(
+        let _ = self.items.insert(
             id,
             if streaming {
                 StreamItem::Streaming(item)
@@ -93,7 +93,8 @@ impl StreamItems {
         call_id: String,
         consumer: Box<dyn ToolArgumentDiffConsumer>,
     ) {
-        self.items
+        let _ = self
+            .items
             .insert(id, StreamItem::Arguments { call_id, consumer });
     }
 
@@ -185,7 +186,7 @@ impl StreamItems {
             && plan.plan_item_state.started
             && !plan.plan_item_state.completed
         {
-            unfinished.insert(plan.plan_item_state.item_id);
+            let _ = unfinished.insert(plan.plan_item_state.item_id);
         }
         SamplingFailure {
             error,
