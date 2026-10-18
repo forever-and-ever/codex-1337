@@ -232,6 +232,7 @@ async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
     app.transcript_cells = ["first", "second"]
         .map(|message| {
             Arc::new(UserHistoryCell {
+                timestamp: None,
                 prompt_identity: Default::default(),
                 message: message.into(),
                 text_elements: Vec::new(),

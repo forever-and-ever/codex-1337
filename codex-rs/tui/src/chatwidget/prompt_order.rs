@@ -23,6 +23,7 @@ impl ChatWidget {
                 client_id: Some(client_id.to_owned()),
                 source_response_item_id: None,
             },
+            /*timestamp*/ None,
         );
     }
 
@@ -30,6 +31,7 @@ impl ChatWidget {
         &mut self,
         display: UserMessageDisplay,
         identity: UserPromptIdentity,
+        timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         self.transcript.last_status_copy_targets = None;
         self.last_rendered_user_message_display = Some(display.clone());
@@ -46,18 +48,24 @@ impl ChatWidget {
                 display.remote_image_urls,
             );
             cell.prompt_identity = identity;
+            cell.timestamp = timestamp;
             self.add_to_history(cell);
         }
     }
 
-    pub(super) fn bind_user_prompt(&self, identity: UserPromptIdentity) {
+    pub(super) fn bind_user_prompt(
+        &self,
+        identity: UserPromptIdentity,
+        timestamp: Option<history_cell::HistoryTimestamp>,
+    ) {
         if identity.client_id.is_some()
-            && identity.source_response_item_id.is_some()
+            && (identity.source_response_item_id.is_some() || timestamp.is_some())
             && let Some(thread_id) = self.thread_id
         {
             self.app_event_tx.send(AppEvent::BindUserPrompt {
                 thread_id,
                 identity,
+                timestamp,
             });
         }
     }

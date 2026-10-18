@@ -1190,6 +1190,7 @@ pub(crate) enum AppEvent {
     BindUserPrompt {
         thread_id: ThreadId,
         identity: crate::prompt_order::UserPromptIdentity,
+        timestamp: Option<crate::history_cell::HistoryTimestamp>,
     },
     CodeModeTranscript {
         thread_id: ThreadId,

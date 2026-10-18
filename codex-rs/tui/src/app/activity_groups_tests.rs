@@ -794,9 +794,11 @@ async fn assert_prompt_arrival_ordering() {
         while let Ok(event) = rx.try_recv() {
             match event {
                 AppEvent::InsertHistoryCell(cell) => app.insert_history_cell(tui, cell),
-                AppEvent::BindUserPrompt { identity, .. } => {
-                    app.bind_user_prompt_identity(tui, identity)
-                }
+                AppEvent::BindUserPrompt {
+                    identity,
+                    timestamp,
+                    ..
+                } => app.bind_user_prompt_identity(tui, identity, timestamp),
                 _ => {}
             }
         }
@@ -813,6 +815,13 @@ async fn assert_prompt_arrival_ordering() {
                 .and_then(|user| user.prompt_identity.client_id.clone())
         })
         .expect("optimistic prompt identity");
+    // Submission is not admission: the optimistic prompt has no invented clock.
+    assert!(
+        app.transcript_cells
+            .iter()
+            .all(|cell| cell.transcript_timestamp().is_none())
+    );
+    let receipt_time = 1_700_000_000_000;
     let user = |name: &str, client_id| ThreadItem::UserMessage {
         id: format!("ui-{name}"),
         client_id,
@@ -870,7 +879,8 @@ async fn assert_prompt_arrival_ordering() {
                 thread_id: thread.to_string(),
                 turn_id: "turn".into(),
                 item: item.clone(),
-                completed_at_ms: 0,
+                completed_at_ms: receipt_time
+                    + i64::try_from(index).expect("short receipt sequence") * 60_000,
             }),
             None,
         );
@@ -919,6 +929,20 @@ async fn assert_prompt_arrival_ordering() {
         "missing-source",
     ];
     assert_eq!(labels(&app.transcript_cells), expected);
+    assert_eq!(
+        app.transcript_cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::UserHistoryCell>()
+                    .map(HistoryCell::transcript_timestamp)
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            history_cell::HistoryTimestamp::from_millis(receipt_time),
+            history_cell::HistoryTimestamp::from_millis(receipt_time + 120_000),
+        ],
+    );
     assert_eq!(labels(&project(&app, &items)), expected);
     let retained = app.transcript_cells.clone();
     app.reconcile_prompt_order(&mut tui);

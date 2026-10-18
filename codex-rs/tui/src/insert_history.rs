@@ -901,6 +901,7 @@ mod tests {
 
         let url = "https://example.test/forwarded/threads/10930?page=1&queue=customer_support_unprocessed&forwardedScope=all";
         let cell = UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             spoken: false,
             message: url.to_string(),

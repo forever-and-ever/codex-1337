@@ -303,6 +303,7 @@ impl ChatWidget {
                     from_replay,
                     &turn_id,
                     source_response_item_id.as_ref(),
+                    timestamp,
                 );
             }
             ThreadItem::AgentMessage {

@@ -38,6 +38,7 @@ async fn prepare_eligible_recap(app: &mut App, thread_id: ThreadId) {
     app.active_thread_id = Some(thread_id);
     app.transcript_cells
         .push(Arc::new(crate::history_cell::UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             message: "Finish the recap implementation".to_string(),
             spoken: false,
@@ -142,6 +143,7 @@ stream_max_retries = 0
         )));
     app.transcript_cells
         .push(Arc::new(crate::history_cell::UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             message: "Keep follow-up work queued.".to_string(),
             spoken: false,
@@ -258,6 +260,7 @@ async fn manual_recap_works_when_auto_recap_disabled() -> Result<()> {
     app.active_thread_id = Some(thread_id);
     app.transcript_cells
         .push(Arc::new(crate::history_cell::UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             message: "Summarize this conversation".to_string(),
             spoken: false,
@@ -439,6 +442,7 @@ async fn recap_generation_uses_remote_workspace_cwd() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.transcript_cells
         .push(Arc::new(crate::history_cell::UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             message: "Finish the recap implementation".to_string(),
             spoken: false,

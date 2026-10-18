@@ -44,6 +44,22 @@ fn timestamp_gutter_survives_stream_finalization_and_reflow() {
         buffer
     };
     assert_eq!(render(streamed.as_ref()), render(&completed));
+    let mut prompt = crate::history_cell::new_user_prompt(
+        "A user prompt with enough words to wrap across the viewport.".into(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let raw_prompt = prompt.raw_lines();
+    prompt.timestamp = Some(timestamp);
+    let painted_prompt = render(&prompt);
+    assert_eq!(
+        (0..crate::transcript_geometry::CLOCK_COLUMNS)
+            .map(|column| painted_prompt[(column, 0)].symbol())
+            .collect::<String>(),
+        "  13:04 ",
+    );
+    assert_eq!(prompt.raw_lines(), raw_prompt);
     assert_eq!(
         completed.raw_lines(),
         AgentMarkdownCell::new(source.to_string(), Path::new("/tmp")).raw_lines()

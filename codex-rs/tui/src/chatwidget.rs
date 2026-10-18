@@ -1297,6 +1297,7 @@ impl ChatWidget {
         from_replay: bool,
         turn_id: &str,
         source_response_item_id: Option<&codex_protocol::ResponseItemId>,
+        timestamp: Option<history_cell::HistoryTimestamp>,
     ) {
         let identity = crate::prompt_order::UserPromptIdentity {
             client_id: client_id.map(str::to_string),
@@ -1317,6 +1318,7 @@ impl ChatWidget {
                 from_replay,
                 turn_id,
                 source_response_item_id,
+                timestamp,
             );
             return;
         }
@@ -1334,14 +1336,14 @@ impl ChatWidget {
                     mention_bindings: mention_bindings_from_user_inputs(items, &display.message),
                     pending_pastes: Vec::new(),
                 });
-            self.on_identified_user_message_display(display, identity);
+            self.on_identified_user_message_display(display, identity, timestamp);
             return;
         }
 
         // Servers may omit media from receipts, so prefer the submission identity.
         if client_id.is_some() && self.last_rendered_user_message_client_id.as_deref() == client_id
         {
-            self.bind_user_prompt(identity);
+            self.bind_user_prompt(identity, timestamp);
             return;
         }
 
@@ -1359,7 +1361,11 @@ impl ChatWidget {
                 self.refresh_pending_input_preview();
                 let pending_display =
                     user_message_display_for_history(pending.user_message, &pending.history_record);
-                self.on_identified_user_message_display(pending_display, identity.clone());
+                self.on_identified_user_message_display(
+                    pending_display,
+                    identity.clone(),
+                    timestamp,
+                );
                 // Later receipts carry the wire media, which may differ from the local attachment.
                 self.last_rendered_user_message_display = Some(display);
                 self.last_rendered_user_message_client_id = Some(pending.client_id);
@@ -1367,14 +1373,14 @@ impl ChatWidget {
                 tracing::warn!(
                     "pending steer matched receipt but queue was empty when rendering committed user message"
                 );
-                self.on_identified_user_message_display(display, identity.clone());
+                self.on_identified_user_message_display(display, identity.clone(), timestamp);
             }
         } else if !self.review.is_review_mode
             && self.last_rendered_user_message_display.as_ref() != Some(&display)
         {
-            self.on_identified_user_message_display(display, identity.clone());
+            self.on_identified_user_message_display(display, identity.clone(), timestamp);
         }
-        self.bind_user_prompt(identity);
+        self.bind_user_prompt(identity, timestamp);
         if let Some(client_id) = client_id
             && self.input_queue.queued_user_messages.iter().any(|message| {
                 matches!(&message.delivery, MessageDelivery::Unconfirmed(Some(id)) if id == client_id)
@@ -1386,7 +1392,11 @@ impl ChatWidget {
     }
 
     fn on_user_message_display(&mut self, display: UserMessageDisplay) {
-        self.on_identified_user_message_display(display, Default::default());
+        self.on_identified_user_message_display(
+            display,
+            Default::default(),
+            /*timestamp*/ None,
+        );
     }
 
     /// Exit the UI immediately without waiting for shutdown.

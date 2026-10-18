@@ -2505,6 +2505,7 @@ async fn reconnect_resumes_unsent_input_and_reconciles_confirmed_submissions() {
                         /*from_replay*/ false,
                         "turn-1",
                         None,
+                        /*timestamp*/ None,
                     );
                 }
             } else {
@@ -2646,6 +2647,7 @@ async fn image_submission_is_portable_for_new_turns_and_steers() {
                     /*from_replay*/ false,
                     "turn",
                     None,
+                    /*timestamp*/ None,
                 );
             }
             rendered.extend(drain_insert_history(&mut rx));
@@ -2661,6 +2663,7 @@ async fn image_submission_is_portable_for_new_turns_and_steers() {
                 /*from_replay*/ true,
                 "turn",
                 None,
+                /*timestamp*/ None,
             );
             let replayed = drain_insert_history(&mut rx);
             assert_eq!(replayed, rendered);
@@ -2774,6 +2777,7 @@ async fn image_preparation_failure_restores_full_input_without_submitting() {
                 /*from_replay*/ false,
                 "turn",
                 None,
+                /*timestamp*/ None,
             );
             chat.input_queue_frontend.suppress_queue_autosend = false;
             handle_turn_completed(&mut chat, "turn", /*duration_ms*/ None);

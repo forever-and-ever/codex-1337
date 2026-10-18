@@ -403,6 +403,7 @@ fn item_to_cells(
                 item.text_elements()
             };
             cells.push(Arc::new(UserHistoryCell {
+                timestamp: None,
                 spoken: false,
                 prompt_identity: crate::prompt_order::UserPromptIdentity {
                     client_id,

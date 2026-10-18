@@ -16,6 +16,7 @@ use std::borrow::Cow;
 #[derive(Debug, Clone)]
 pub(crate) struct UserHistoryCell {
     pub message: String,
+    pub(crate) timestamp: Option<HistoryTimestamp>,
     pub text_elements: Vec<TextElement>,
     pub local_image_paths: Vec<PathBuf>,
     pub remote_image_urls: Vec<String>,
@@ -178,6 +179,10 @@ impl UserHistoryCell {
 }
 
 impl HistoryCell for UserHistoryCell {
+    fn transcript_timestamp(&self) -> Option<HistoryTimestamp> {
+        self.timestamp
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         visible_lines(self.display_hyperlink_lines(width))
     }
@@ -766,6 +771,7 @@ pub(crate) fn new_user_prompt(
         local_image_paths,
         remote_image_urls,
         spoken: false,
+        timestamp: None,
         prompt_identity: Default::default(),
     }
 }

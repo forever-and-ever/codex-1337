@@ -53,6 +53,7 @@ fn overlapping_history_keeps_live_turn_state_and_newer_items() {
 
 fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
     Arc::new(UserHistoryCell {
+        timestamp: None,
         prompt_identity: Default::default(),
         spoken: false,
         message: message.to_string(),

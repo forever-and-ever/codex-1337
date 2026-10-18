@@ -478,9 +478,9 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
-            AppEvent::BindUserPrompt { thread_id, identity } => {
+            AppEvent::BindUserPrompt { thread_id, identity, timestamp } => {
                 if self.chat_widget.thread_id() == Some(thread_id) {
-                    self.bind_user_prompt_identity(tui, identity);
+                    self.bind_user_prompt_identity(tui, identity, timestamp);
                 }
             }
             AppEvent::CodeModeTranscript { thread_id, admission } => {

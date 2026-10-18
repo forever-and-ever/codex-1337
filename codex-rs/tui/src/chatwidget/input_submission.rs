@@ -511,6 +511,7 @@ impl ChatWidget {
                     client_id: Some(client_user_message_id.clone()),
                     source_response_item_id: None,
                 },
+                /*timestamp*/ None,
             );
         }
 

@@ -12,6 +12,7 @@ impl App {
         &mut self,
         tui: &mut tui::Tui,
         identity: UserPromptIdentity,
+        timestamp: Option<crate::history_cell::HistoryTimestamp>,
     ) {
         let Some(client_id) = identity.client_id.as_deref() else {
             return;
@@ -29,15 +30,20 @@ impl App {
         else {
             return;
         };
-        if user.prompt_identity == identity {
+        if user.prompt_identity == identity
+            && timestamp.is_none_or(|timestamp| user.timestamp == Some(timestamp))
+        {
             return;
         }
-        if user.prompt_identity.source_response_item_id.is_some() {
+        if user.prompt_identity != identity
+            && user.prompt_identity.source_response_item_id.is_some()
+        {
             tracing::warn!(client_id, "rejecting conflicting prompt source alias");
             return;
         }
         let mut user = user.clone();
         user.prompt_identity = identity;
+        user.timestamp = timestamp.or(user.timestamp);
         self.commit_transcript_splice(
             tui,
             TranscriptSplice::Revision {

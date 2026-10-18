@@ -1216,6 +1216,7 @@ async fn distinct_async_question_replies_with_identical_text_both_render() {
         }];
         chat.on_committed_user_message(
             &items, /*client_id*/ None, /*from_replay*/ false, "turn", None,
+            /*timestamp*/ None,
         );
     }
     let history = drain_insert_history(&mut rx);

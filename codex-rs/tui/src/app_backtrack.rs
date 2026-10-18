@@ -1129,6 +1129,7 @@ mod tests {
         assert!(!has_backtrack_target(&cells));
 
         cells.push(Arc::new(UserHistoryCell {
+            timestamp: None,
             prompt_identity: Default::default(),
             spoken: false,
             message: "hello".to_string(),
