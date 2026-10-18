@@ -1201,7 +1201,8 @@ pub struct ToolRegistryConfig {
     pub turn_metadata_includes_tool_info: bool,
 }
 
-const DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS: NonZeroU64 = NonZeroU64::new(3_600_000).expect("nonzero");
+const DEFAULT_CODE_MODE_MAX_YIELD_TIME_MS: NonZeroU64 =
+    NonZeroU64::new(3_600_000).expect("nonzero");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CodeModeConfig {

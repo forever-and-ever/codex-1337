@@ -29,6 +29,7 @@ pub(crate) enum TerminalSandboxSource {
     Executor,
 }
 
+#[derive(Clone)]
 pub(crate) struct TerminalPermissions {
     policy: TerminalPolicy,
     sandbox_source: TerminalSandboxSource,
@@ -39,7 +40,7 @@ pub(crate) struct TerminalPermissions {
 }
 
 /// Host-owned launch settings. Never serialize these into approval messages.
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct TerminalPolicy {
     sandbox: FileSystemSandboxContext,
     environment_network: Option<EnvironmentNetworkPolicy>,

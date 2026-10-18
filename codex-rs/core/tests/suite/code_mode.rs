@@ -4262,14 +4262,22 @@ const results = await Promise.all([
   }),
 ]);
 
-text(JSON.stringify([results[0].output.includes("code-alpha-ready"), results[1].output.includes("code-beta-ready")]));
+const receipts = await Promise.all(sessions.map(session => tools.write_stdin({
+  session_id: session.session_id,
+  yield_time_ms: 3600000,
+})));
+text(JSON.stringify([
+  results[0].output.includes("code-alpha-ready"),
+  results[1].output.includes("code-beta-ready"),
+  receipts.every(receipt => receipt.exit_code === 0 && receipt.session_id === undefined),
+]));
 "#,
     )
     .await?;
 
     let items = custom_tool_output_items(&second_mock.single_request(), "call-1");
     let result: Value = serde_json::from_str(text_item(&items, /*index*/ 1))?;
-    assert_eq!(result, serde_json::json!([true, true]));
+    assert_eq!(result, serde_json::json!([true, true, true]));
 
     // Process polling has its own invocation identity, even when both sessions share a cell.
     test.codex.flush_rollout().await?;

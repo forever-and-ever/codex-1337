@@ -22,7 +22,6 @@ use serde::Deserialize;
 use super::super::shell_spec::create_write_stdin_tool;
 use super::post_unified_exec_tool_use_payload;
 
-
 #[derive(Debug, Deserialize)]
 struct WriteStdinArgs {
     // The model is trained on `session_id`.

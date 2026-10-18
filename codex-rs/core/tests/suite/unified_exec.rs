@@ -2268,6 +2268,7 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
         let start_call_id = "uexec-cat-start";
         let send_call_id = "uexec-cat-send";
         let exit_call_id = "uexec-cat-exit";
+        let receipt_call_id = "uexec-cat-receipt";
 
         let start_args = serde_json::json!({
             "cmd": "/bin/cat",
@@ -2314,8 +2315,21 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
                 ev_completed("resp-3"),
             ]),
             sse(vec![
-                ev_assistant_message("msg-1", "all done"),
+                ev_response_created("resp-4"),
+                ev_function_call(
+                    receipt_call_id,
+                    "write_stdin",
+                    &serde_json::json!({
+                        "session_id": 1000,
+                        "yield_time_ms": 3_600_000,
+                    })
+                    .to_string(),
+                ),
                 ev_completed("resp-4"),
+            ]),
+            sse(vec![
+                ev_assistant_message("msg-1", "all done"),
+                ev_completed("resp-5"),
             ]),
         ];
         let request_log = mount_sse_sequence(&server, responses).await;
@@ -2415,6 +2429,12 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
             .exit_code
             .expect("expected exit_code after sending EOF");
         assert_eq!(exit_code, 0, "cat should exit cleanly after EOF");
+        let receipt = outputs
+            .get(receipt_call_id)
+            .expect("retained completion receipt");
+        assert_eq!(receipt.exit_code, Some(exit_code));
+        assert!(receipt.process_id.is_none());
+        assert!(receipt.output.contains("hello unified exec"));
 
         Ok(())
     })

@@ -448,40 +448,31 @@ fn terminate_process_on_network_denial(
 }
 
 impl UnifiedExecProcessManager {
+    #[expect(
+        clippy::expect_used,
+        reason = "process identities cannot wrap without aliasing an old terminal"
+    )]
     pub(crate) async fn allocate_process_id(&self) -> i32 {
-        loop {
-            let mut store = self.process_store.lock().await;
-
-            let process_id = if should_use_deterministic_process_ids() {
-                // test or deterministic mode
-                store
-                    .reserved_process_ids
-                    .iter()
-                    .copied()
-                    .max()
-                    .map(|m| std::cmp::max(m, 999) + 1)
-                    .unwrap_or(1000)
+        let mut store = self.process_store.lock().await;
+        let last = store.last_process_id.unwrap_or_else(|| {
+            if should_use_deterministic_process_ids() {
+                999
             } else {
-                // production mode → random
-                rand::rng().random_range(1_000..100_000)
-            };
-
-            if store.reserved_process_ids.contains(&process_id) {
-                continue;
+                rand::rng().random_range(999..100_000)
             }
-
-            store.reserved_process_ids.insert(process_id);
-            return process_id;
-        }
+        });
+        // An old session ID must never acquire a different terminal, even after receipt eviction.
+        let process_id = last
+            .checked_add(1)
+            .expect("unified exec process identity exhausted");
+        store.last_process_id = Some(process_id);
+        process_id
     }
 
     pub(crate) async fn release_process_id(&self, process_id: i32) {
         let removed = {
             let mut store = self.process_store.lock().await;
             let entry = store.processes.remove(&process_id);
-            if !should_use_deterministic_process_ids() {
-                store.reserved_process_ids.remove(&process_id);
-            }
             entry
         };
         if let Some(entry) = removed {
@@ -743,21 +734,20 @@ impl UnifiedExecProcessManager {
                         )
                         .await
                     {
+                        self.release_process_id(process_id).await;
                         return Err(fail_process_with_message(entry.process.as_ref(), message));
                     }
                     if !completion
                         .as_ref()
                         .is_some_and(|completion| completion.timed_out)
                     {
-                        process
-                            .check_for_sandbox_denial_with_text(&text)
-                            .await
-                            .map_err(|err| {
-                                err.with_output_collection_metadata(
-                                    original_token_count,
-                                    output_omitted_bytes,
-                                )
-                            })?;
+                        if let Err(err) = process.check_for_sandbox_denial_with_text(&text).await {
+                            self.release_process_id(process_id).await;
+                            return Err(err.with_output_collection_metadata(
+                                original_token_count,
+                                output_omitted_bytes,
+                            ));
+                        }
                     }
                     let metrics_sidecar = entry
                         .plugin_metrics_sidecar
@@ -826,7 +816,6 @@ impl UnifiedExecProcessManager {
             )
             .await;
 
-            self.release_process_id(request.process_id).await;
             process
                 .check_for_sandbox_denial_with_text(&text)
                 .await
@@ -858,6 +847,8 @@ impl UnifiedExecProcessManager {
             }),
         };
 
+        self.retain_completion(request.process_id, &process, context, &response)
+            .await;
         Ok(response)
     }
 
@@ -907,26 +898,35 @@ impl UnifiedExecProcessManager {
         // draining output buffer and process lifecycle.
         let locked_process = {
             let store = self.process_store.lock().await;
-            let entry = store
-                .processes
-                .get(&process_id)
-                .ok_or(UnifiedExecError::UnknownProcessId { process_id })?;
-            // Capture the original call even if this interaction is cancelled while queued.
-            if let Some(call_id) = trace_id(&entry.call_id) {
-                tracing::Span::current().record("original_exec_call_id", call_id);
-            }
-            Arc::clone(&entry.process)
+            store.processes.get(&process_id).and_then(|entry| {
+                entry
+                    .session
+                    .ptr_eq(&Arc::downgrade(&context.session))
+                    .then(|| {
+                        // Capture the original call even if this interaction is cancelled while queued.
+                        if let Some(call_id) = trace_id(&entry.call_id) {
+                            tracing::Span::current().record("original_exec_call_id", call_id);
+                        }
+                        Arc::clone(&entry.process)
+                    })
+            })
+        };
+        let Some(locked_process) = locked_process else {
+            return self.completed_poll(context, &request).await;
         };
         let _interaction_guard = locked_process.interaction_lock().lock_owned().await;
         // A queued write must observe strict review enabled while it was waiting.
         let strict_auto_review = context.step_context.turn.strict_auto_review_enabled();
         let approval = {
             let store = self.process_store.lock().await;
-            let entry = store
+            let Some(entry) = store
                 .processes
                 .get(&process_id)
                 .filter(|entry| Arc::ptr_eq(&entry.process, &locked_process))
-                .ok_or(UnifiedExecError::UnknownProcessId { process_id })?;
+            else {
+                drop(store);
+                return self.completed_poll(context, &request).await;
+            };
             entry.stdin_approval(context, request.input, strict_auto_review)?
         };
         if let Some((approval, approval_reason)) = approval {
@@ -1088,6 +1088,7 @@ impl UnifiedExecProcessManager {
                 if let Err(message) =
                     finish_network_approval_after_process_exit_for_entry(&entry).await
                 {
+                    self.release_process_id(request.process_id).await;
                     return Err(fail_process_with_message(entry.process.as_ref(), message));
                 }
                 (None, exit_code)
@@ -1134,6 +1135,8 @@ impl UnifiedExecProcessManager {
                 .await;
         }
 
+        self.retain_completion(request.process_id, &process, context, &response)
+            .await;
         Ok(response)
     }
 
@@ -1168,9 +1171,8 @@ impl UnifiedExecProcessManager {
                     process_id,
                 };
             }
-            let Some(entry) = store.remove(process_id) else {
-                return ProcessStatus::Unknown;
-            };
+            // Keep the identity pollable until the validated receipt replaces it.
+            let entry = entry.clone();
             ProcessStatus::Exited {
                 exit_code,
                 entry: Box::new(entry),
@@ -1781,7 +1783,7 @@ impl UnifiedExecProcessManager {
                 .map(|process| process.interaction_lock())
                 && let Ok(_interaction_guard) = interaction_lock.try_lock_owned()
             {
-                return store.remove(process_id);
+                return store.processes.remove(&process_id);
             }
             found_locked_exited_process |= candidate_has_exited
                 || candidate_process.is_some_and(|process| process.has_exited());
@@ -1828,7 +1830,7 @@ impl UnifiedExecProcessManager {
                 .drain()
                 .map(|(_, entry)| entry)
                 .collect();
-            processes.reserved_process_ids.clear();
+            processes.completions.clear();
             entries
         };
 
@@ -1894,7 +1896,7 @@ impl UnifiedExecProcessManager {
             if entry.initial_exec_command_active.load(Ordering::Acquire) {
                 return true;
             }
-            let Some(entry) = store.remove(process_id) else {
+            let Some(entry) = store.processes.remove(&process_id) else {
                 return false;
             };
             entry

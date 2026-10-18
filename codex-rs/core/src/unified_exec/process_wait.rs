@@ -16,7 +16,8 @@ pub(super) async fn observe(
         .lock()
         .await
         .processes
-        .get(&request.process_id)?
+        .get(&request.process_id)
+        .filter(|entry| entry.session.ptr_eq(&Arc::downgrade(&context.session)))?
         .call_id
         .clone();
     let service = &context.session.services.code_mode_service;
