@@ -34,7 +34,7 @@ async fn provider_picker_starts_a_new_conversation_and_does_not_reopen_after_esc
         .show_provider_models_loading(request_id, &provider);
     app.chat_widget.show_provider_models(
         request_id,
-        provider.clone(),
+        &provider,
         Ok(ModelListing {
             models: vec![model.clone()],
             providers: vec![provider.clone()],
@@ -50,8 +50,7 @@ async fn provider_picker_starts_a_new_conversation_and_does_not_reopen_after_esc
         std::iter::from_fn(|| events.try_recv().ok())
             .any(|event| matches!(event, AppEvent::OpenProviderReasoning { .. }))
     );
-    app.chat_widget
-        .show_provider_reasoning(provider.clone(), model.clone());
+    app.chat_widget.show_provider_reasoning(&provider, &model);
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     let choice = std::iter::from_fn(|| events.try_recv().ok())
@@ -75,7 +74,7 @@ async fn provider_picker_starts_a_new_conversation_and_does_not_reopen_after_esc
         .handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     app.chat_widget.show_provider_models(
         cancelled,
-        provider,
+        &provider,
         Ok(ModelListing {
             models: vec![model],
             providers: Vec::new(),

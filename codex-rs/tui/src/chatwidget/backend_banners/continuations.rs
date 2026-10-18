@@ -1,6 +1,8 @@
 //! Submission gating and accepted-state projection for deferred model settings.
 
-use super::*;
+use super::AutomaticModelSwitchState;
+use super::ChatWidget;
+use super::ReserveReturnModel;
 
 impl ChatWidget {
     pub(super) fn model_settings_block_submission(&self) -> bool {

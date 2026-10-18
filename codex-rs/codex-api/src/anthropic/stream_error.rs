@@ -15,22 +15,28 @@ impl AnthropicStreamProgress {
     pub(super) fn after(self, event: &ResponseEvent) -> Self {
         match (self, event) {
             (Self::CompletedItem, _) | (_, ResponseEvent::OutputItemDone(_)) => Self::CompletedItem,
-            (_, ResponseEvent::OutputItemAdded(_))
-            | (_, ResponseEvent::OutputTextDelta { .. })
-            | (_, ResponseEvent::ToolCallInputDelta { .. })
-            | (_, ResponseEvent::ReasoningSummaryDelta { .. })
-            | (_, ResponseEvent::ReasoningSummaryDone { .. })
-            | (_, ResponseEvent::ReasoningContentDelta { .. })
-            | (_, ResponseEvent::ReasoningSummaryPartAdded { .. }) => Self::PartialOutput,
-            (_, ResponseEvent::Created { .. })
-            | (_, ResponseEvent::SafetyBuffering(_))
-            | (_, ResponseEvent::ServerModel(_))
-            | (_, ResponseEvent::ModelVerifications(_))
-            | (_, ResponseEvent::TurnModerationMetadata(_))
-            | (_, ResponseEvent::ServerReasoningIncluded(_))
-            | (_, ResponseEvent::Completed { .. })
-            | (_, ResponseEvent::RateLimits(_))
-            | (_, ResponseEvent::ModelsEtag(_)) => self,
+            (
+                _,
+                ResponseEvent::OutputItemAdded(_)
+                | ResponseEvent::OutputTextDelta { .. }
+                | ResponseEvent::ToolCallInputDelta { .. }
+                | ResponseEvent::ReasoningSummaryDelta { .. }
+                | ResponseEvent::ReasoningSummaryDone { .. }
+                | ResponseEvent::ReasoningContentDelta { .. }
+                | ResponseEvent::ReasoningSummaryPartAdded { .. },
+            ) => Self::PartialOutput,
+            (
+                _,
+                ResponseEvent::Created { .. }
+                | ResponseEvent::SafetyBuffering(_)
+                | ResponseEvent::ServerModel(_)
+                | ResponseEvent::ModelVerifications(_)
+                | ResponseEvent::TurnModerationMetadata(_)
+                | ResponseEvent::ServerReasoningIncluded(_)
+                | ResponseEvent::Completed { .. }
+                | ResponseEvent::RateLimits(_)
+                | ResponseEvent::ModelsEtag(_),
+            ) => self,
         }
     }
 }

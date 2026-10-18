@@ -35,7 +35,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
     core_test_support::skip_if_sandbox!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
     let mut builder = test_codex()
         .with_code_mode_host_program("codex-code-mode-host-does-not-exist".into())
         .with_config(|config| {
@@ -109,7 +109,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         ],
     )
     .await;
-    test.codex
+    let _ = test.codex
         .start_or_steer_turn(
             TurnInputRequest::user_input(vec![UserInput::Text {
                 text: "Run the raw source directly".to_string(),
@@ -131,7 +131,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         match wait_for_event(&test.codex, |_| true).await {
             EventMsg::ItemCompleted(event) => {
                 if let codex_protocol::items::TurnItem::ToolInput(input) = event.item {
-                    captured.insert(input.call_id.clone(), input);
+                    let _ = captured.insert(input.call_id.clone(), input);
                 }
             }
             EventMsg::ExecApprovalRequest(approval) => {
@@ -139,7 +139,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
                 assert_eq!(approval.command, expected_command);
                 assert!(approval.proposed_execpolicy_amendment.is_none());
                 approvals += 1;
-                test.codex
+                let _ = test.codex
                     .submit(Op::ExecApproval {
                         id: approval.effective_approval_id(),
                         turn_id: Some(approval.turn_id),
@@ -221,6 +221,6 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         "quote=' double=\" slash=\\ Unicode=λ\nscript-cwd\n"
     );
     Ok(())
-    })
+    }))
     .await
 }

@@ -5,6 +5,10 @@ use codex_protocol::ContextRole;
 use codex_protocol::ThreadId;
 use codex_state::StateRuntime;
 
+#[expect(
+    clippy::ref_option,
+    reason = "ClearableField is the canonical unchanged/clear/set patch; borrowing preserves that shared metadata representation"
+)]
 pub(super) async fn apply_context_role(
     state: &StateRuntime,
     thread_id: ThreadId,

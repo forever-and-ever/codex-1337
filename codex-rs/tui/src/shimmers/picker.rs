@@ -68,18 +68,18 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
         current.unwrap_or_default(),
         palette,
     )));
-    let pane = |preview: &Arc<Mutex<Preview>>| PreviewPane {
+    let pane = |preview: &Arc<Mutex<Preview>>, frames| PreviewPane {
         preview: Arc::clone(preview),
-        frames: frames.clone(),
+        frames,
         motion,
     };
     let follow = Arc::clone(&preview);
     SelectionViewParams {
         subtitle: Some("Move to preview; Enter swaps the live rows.".to_owned()),
-        side_content: Box::new(pane(&preview)),
+        side_content: Box::new(pane(&preview, frames.clone())),
         side_content_width: SideContentWidth::Half,
         side_content_min_width: PREVIEW_WIDTH,
-        stacked_side_content: Some(Box::new(pane(&preview))),
+        stacked_side_content: Some(Box::new(pane(&preview, frames))),
         preserve_side_content_bg: true,
         on_selection_changed: Some(Box::new(move |recipe, _: &AppEventSender| {
             follow
@@ -167,6 +167,10 @@ impl Renderable for PreviewPane {
 }
 
 /// Steps `engine` through the script's `tick`th tick, counting from one.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Preview ticks become approximate animation seconds, not semantic time or token accounting."
+)]
 pub(super) fn feed(engine: &mut Engine, script: &Script, tick: u64) {
     let t = tick as f64 * TICK;
     let (spell, _, tokens) = script.at(t);
@@ -176,6 +180,12 @@ pub(super) fn feed(engine: &mut Engine, script: &Script, tick: u64) {
 
 /// Draws the live rows as codex-tui lays them out, with the script `tick` ticks in: a running tool
 /// and its output on the first two rows of `area`, the status row on the fourth.
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Preview time is a nonnegative visual clock; the displayed timer deliberately uses whole seconds modulo 480."
+)]
 pub(super) fn stage_rows(
     engine: &mut Engine,
     script: &Script,
@@ -196,9 +206,9 @@ pub(super) fn stage_rows(
         "Command".bold(),
         " cargo test -p codex-tui --lib".into(),
     ]);
-    buf.set_line(area.x, area.y, &tool, area.width);
+    let _ = buf.set_line(area.x, area.y, &tool, area.width);
     let output = Line::from("    Compiling codex-tui v0.0.0".dim());
-    buf.set_line(area.x, area.y + 1, &output, area.width);
+    let _ = buf.set_line(area.x, area.y + 1, &output, area.width);
     let (mut lead, backdrop) = engine.status(
         header, timer, palette, /*mark*/ true, /*letters*/ true,
     );
@@ -207,8 +217,8 @@ pub(super) fn stage_rows(
         format!("({} • ⌃c to interrupt)", fmt_elapsed_compact(timer)).dim(),
     ]);
     let y = area.y + 3;
-    buf.set_line(area.x, y, &Line::from(lead), area.width);
+    let _ = buf.set_line(area.x, y, &Line::from(lead), area.width);
     for (x, bg) in (area.x..area.right()).zip(&backdrop) {
-        buf[(x, y)].set_bg(color(*bg));
+        let _ = buf[(x, y)].set_bg(color(*bg));
     }
 }

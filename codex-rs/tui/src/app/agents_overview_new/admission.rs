@@ -1,6 +1,10 @@
 //! Navigation admission waits for outstanding configuration requests.
 
-use super::*;
+use super::AbsolutePathBuf;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::turn_submissions;
 
 impl App {
     pub(super) fn admit_overview_session(
@@ -10,10 +14,10 @@ impl App {
     ) -> std::ops::ControlFlow<(), Option<AbsolutePathBuf>> {
         if !self.server_operations.is_empty() {
             let source = self.current_displayed_thread_id();
-            self.request_server_prepared(
+            let _ = self.request_server_prepared(
                 app_server,
-                super::super::turn_submissions::ui_requests::UiRequestScope::Connection,
-                super::super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+                turn_submissions::ui_requests::UiRequestScope::Connection,
+                turn_submissions::ui_requests::UiRequestKind::ReadOnly,
                 "Waiting to start a session",
                 move |app, _| {
                     let current = app.current_displayed_thread_id() == source;

@@ -30,7 +30,7 @@ mod scope;
 
 pub(crate) fn execute(
     cwd: &Path,
-    expected_scope: Option<String>,
+    expected_scope: Option<&str>,
     action: JiraAction,
 ) -> Result<ThreadJiraResponse, String> {
     let _lease = MUTATIONS.lock().map_err(|_| "Issue storage lock failed")?;
@@ -38,13 +38,13 @@ pub(crate) fn execute(
     if expected_scope.is_none() && !matches!(action, JiraAction::List { cursor: None, .. }) {
         return Err("Open the issue list before reading or changing issues".into());
     }
-    let scope = scope::Scope::open(cwd, &state, expected_scope.as_deref())?;
+    let scope = scope::Scope::open(cwd, &state, expected_scope)?;
     let result = match action {
         JiraAction::List {
             cursor,
             limit,
             recursive,
-        } => scope.list(cursor, limit, recursive)?,
+        } => scope.list(cursor.as_deref(), limit, recursive)?,
         action => {
             let project = match &action {
                 JiraAction::Read { key } | JiraAction::Save { key, .. } => key.project.as_ref(),
@@ -72,7 +72,7 @@ fn durable_state_dir() -> Option<PathBuf> {
     }
 }
 
-/// Parity boundary with Jira-at-home ProjectLayout::bind. Git administrative paths
+/// Parity boundary with Jira-at-home `ProjectLayout::bind`. Git administrative paths
 /// may legitimately leave the checkout; issue storage paths may never follow links.
 fn project_identity(cwd: &Path) -> std::io::Result<PathBuf> {
     let canonical = cwd.canonicalize()?;
@@ -259,7 +259,7 @@ impl Store {
             .remove(&name)
             .ok_or_else(|| format!("Issue {name} no longer exists"))?;
         let mut bytes = Vec::new();
-        fs::File::open(location.path)
+        let _ = fs::File::open(location.path)
             .map_err(|error| error.to_string())?
             .take((MAX_BODY_BYTES + 1) as u64)
             .read_to_end(&mut bytes)
@@ -354,14 +354,14 @@ impl Store {
                     self.guard(previous)?;
                 }
                 if same_key {
-                    staged
+                    let _ = staged
                         .persist(&destination)
                         .map_err(|error| error.to_string())?;
                 } else {
                     if self.catalog()?.contains_key(&name) {
                         return Err(format!("Issue {name} already exists; choose another slug"));
                     }
-                    staged
+                    let _ = staged
                         .persist_noclobber(&destination)
                         .map_err(|error| error.to_string())?;
                     if let Some(previous) = previous {

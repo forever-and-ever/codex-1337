@@ -1,13 +1,23 @@
 //! Owned snapshots cross the UI preparation boundary.
 
-use super::*;
+use super::Arc;
+use super::ChatWidget;
+use super::ExecCell;
+use super::HistoryCell;
+use super::HyperlinkLine;
+use super::Line;
+use super::McpToolCallCell;
+use super::PlainHistoryCell;
+use super::WebSearchCell;
+use super::history_cell;
+use super::realtime_split_flap;
 
 // Release compatibility until a new upstream active-cell type gains a clone seam.
 struct RenderedLiveSnapshot {
     compact: Vec<HyperlinkLine>,
     transcript: Vec<HyperlinkLine>,
     raw: Vec<Line<'static>>,
-    timestamp: Option<crate::history_cell::HistoryTimestamp>,
+    timestamp: Option<history_cell::HistoryTimestamp>,
     tool: bool,
     continuation: bool,
 }
@@ -31,7 +41,7 @@ impl HistoryCell for RenderedLiveSnapshot {
     fn raw_lines(&self) -> Vec<Line<'static>> {
         self.raw.clone()
     }
-    fn transcript_timestamp(&self) -> Option<crate::history_cell::HistoryTimestamp> {
+    fn transcript_timestamp(&self) -> Option<history_cell::HistoryTimestamp> {
         self.timestamp
     }
     fn is_tool_entry(&self) -> bool {
@@ -59,21 +69,21 @@ impl LiveSnapshot for dyn HistoryCell {
             history_cell::StreamingAgentTailCell,
             history_cell::StreamingPlanTailCell,
             history_cell::ThreadRecapLoadingCell,
-            history_cell::WebSearchCell,
-            history_cell::McpToolCallCell,
+            WebSearchCell,
+            McpToolCallCell,
             history_cell::McpInventoryLoadingCell,
             history_cell::ComputerActivityCell,
-            history_cell::PlainHistoryCell,
+            PlainHistoryCell,
             history_cell::UserHistoryCell,
             history_cell::AgentMarkdownCell,
             history_cell::AgentMessageCell,
             history_cell::CodeModeCell,
             history_cell::SessionHeaderHistoryCell,
-            crate::exec_cell::ExecCell,
+            ExecCell,
         );
         if let Some(cell) = self
             .as_any()
-            .downcast_ref::<super::realtime_split_flap::SplitFlapTranscriptCell>()
+            .downcast_ref::<realtime_split_flap::SplitFlapTranscriptCell>()
         {
             return Box::new(cell.snapshot(width));
         }
@@ -85,11 +95,10 @@ impl LiveSnapshot for dyn HistoryCell {
             "live transcript cell has no owned snapshot: {:?}",
             self.type_id()
         );
-        static WARN: std::sync::Once = std::sync::Once::new();
         WARN.call_once(|| {
             tracing::warn!(
                 "unknown live transcript cell: rendering an inline compatibility snapshot"
-            )
+            );
         });
         Box::new(RenderedLiveSnapshot {
             compact: self.compact_hyperlink_lines(width),
@@ -128,3 +137,5 @@ impl ChatWidget {
         }
     }
 }
+
+static WARN: std::sync::Once = std::sync::Once::new();

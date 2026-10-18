@@ -187,7 +187,7 @@ pub(crate) async fn run_native_compaction(
         let Some(input) = input else {
             continue;
         };
-        let checkpoint = match attempt(
+        let checkpoint = match Box::pin(attempt(
             sess,
             step_context,
             client_session,
@@ -196,7 +196,7 @@ pub(crate) async fn run_native_compaction(
             base_instructions.clone(),
             rung,
             input,
-        )
+        ))
         .await
         {
             Ok(checkpoint) => checkpoint,
@@ -284,14 +284,14 @@ async fn attempt(
         .compaction_responses_metadata(turn_context.as_ref(), compaction_metadata)
         .await;
     responses_metadata.tool_namespaces_info = tool_router.tool_namespaces_info().cloned();
-    let output = request(
+    let output = Box::pin(request(
         sess,
         step_context,
         client_session,
         &prompt,
         &responses_metadata,
         compaction_trace,
-    )
+    ))
     .await;
     let (item, response_id, token_usage) = output?;
     Ok(Checkpoint {

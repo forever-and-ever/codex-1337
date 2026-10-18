@@ -32,10 +32,10 @@ impl FailedTurnCell {
             });
         let body = new_error_event(error.message.clone());
         Self {
-            body,
             turn_id,
             error,
             completed_at,
+            body,
             clock,
         }
     }

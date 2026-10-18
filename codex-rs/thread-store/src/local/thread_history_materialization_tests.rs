@@ -233,6 +233,7 @@ async fn split_homes_support_backfill_listing_and_paginated_history() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "user-1".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -327,6 +328,7 @@ async fn paginated_live_append_materializes_turn_items_and_state() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "user-1".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1124,6 +1126,7 @@ async fn named_fork_boundaries_reject_invisible_and_noncanonical_turns() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "review-message".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1618,6 +1621,7 @@ async fn subagent_prefix_advances_projection_without_materializing_history() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "parent-user".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1634,6 +1638,7 @@ async fn subagent_prefix_advances_projection_without_materializing_history() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "child-user".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1705,6 +1710,7 @@ async fn projection_preserves_exact_lifecycle_timestamps() {
                 item: TurnItem::UserMessage(UserMessageItem {
                     id: format!("user-{index}"),
                     client_id: None,
+                    source_response_item_id: None,
                     content: Vec::new(),
                 }),
                 started_at_ms: *started_at_ms,
@@ -1753,6 +1759,7 @@ async fn unexpected_duplicate_item_completion_does_not_poison_projection() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "user-1".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1783,6 +1790,7 @@ async fn unexpected_duplicate_item_completion_does_not_poison_projection() {
                 TurnItem::UserMessage(UserMessageItem {
                     id: "user-1".to_string(),
                     client_id: Some("updated".to_string()),
+                    source_response_item_id: None,
                     content: Vec::new(),
                 }),
             )],
@@ -1809,6 +1817,7 @@ WHERE thread_id = ? AND turn_id = ? AND item_id = ?
         ThreadItem::UserMessage {
             id: "user-1".to_string(),
             client_id: Some("updated".to_string()),
+            source_response_item_id: None,
             content: Vec::new(),
         }
     );
@@ -1842,6 +1851,7 @@ async fn terminal_turn_does_not_change_after_later_records() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "late-user".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -1946,6 +1956,7 @@ async fn summary_items_use_final_answers_and_ignore_nonterminal_messages() {
                     TurnItem::UserMessage(UserMessageItem {
                         id: "user-1".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -2013,6 +2024,7 @@ WHERE thread_id = ? AND turn_id = ?
                     TurnItem::UserMessage(UserMessageItem {
                         id: "user-2".to_string(),
                         client_id: None,
+                        source_response_item_id: None,
                         content: Vec::new(),
                     }),
                 ),
@@ -2260,6 +2272,7 @@ WHERE thread_id = ?
                 TurnItem::UserMessage(UserMessageItem {
                     id: "user-1".to_string(),
                     client_id: None,
+                    source_response_item_id: None,
                     content: Vec::new(),
                 }),
             )],

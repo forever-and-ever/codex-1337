@@ -5,6 +5,7 @@ use codex_app_server_protocol::AlarmSummary;
 use codex_state::AlarmTrigger;
 use codex_state::ThreadAlarm;
 use codex_state::ThreadAlarmState;
+use std::fmt::Write as _;
 
 pub(super) fn summary(alarm: &ThreadAlarm) -> Option<AlarmSummary> {
     let condition = match &alarm.state {
@@ -31,9 +32,10 @@ pub(super) fn summary(alarm: &ThreadAlarm) -> Option<AlarmSummary> {
 }
 
 pub(super) fn time(at: i64) -> String {
-    DateTime::from_timestamp_millis(at)
-        .map(|at| at.with_timezone(&Local).to_rfc3339())
-        .unwrap_or_else(|| at.to_string())
+    DateTime::from_timestamp_millis(at).map_or_else(
+        || at.to_string(),
+        |at| at.with_timezone(&Local).to_rfc3339(),
+    )
 }
 
 pub(super) fn condition(condition: &AlarmCondition) -> String {
@@ -47,10 +49,10 @@ pub(super) fn condition(condition: &AlarmCondition) -> String {
         } => {
             let mut text = format!("session {session_id} (`{command}`) exits");
             if let Some(pattern) = pattern {
-                text.push_str(&format!(" or prints /{pattern}/"));
+                let _ = write!(text, " or prints /{pattern}/");
             }
             if let Some(deadline) = deadline {
-                text.push_str(&format!(", or deadline {}", time(*deadline)));
+                let _ = write!(text, ", or deadline {}", time(*deadline));
             }
             text
         }

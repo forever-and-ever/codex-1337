@@ -1,6 +1,10 @@
 //! Deferred persistence and completion of model defaults.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::ConfigEdit;
+use super::Result;
+use super::WriteStatus;
 
 impl App {
     pub(in crate::app) fn queue_model_defaults<A>(
@@ -20,7 +24,7 @@ impl App {
     {
         use super::super::turn_submissions::ui_requests::UiRequestKind;
         use super::super::turn_submissions::ui_requests::UiRequestScope;
-        self.request_server(
+        let _ = self.request_server(
                 server,
                 UiRequestScope::Connection,
                 UiRequestKind::Mutation,

@@ -1,12 +1,26 @@
 //! Connection-owned, thread-scoped MCP overlay RPCs.
 
-use super::*;
+use super::Arc;
+use super::CancellationToken;
+use super::CodexThread;
+use super::ConnectionId;
+use super::HashMap;
+use super::JSONRPCErrorError;
+use super::McpServerTransportConfig;
+use super::Mutex;
+use super::Result;
+use super::ThreadId;
+use super::ThreadRequestProcessor;
+use super::Uuid;
+use super::invalid_params;
+use super::invalid_request;
 use crate::subscription_lifetimes::SubscriptionLifetimes;
 use codex_app_server_protocol::ThreadExtensionAttachParams;
 use codex_app_server_protocol::ThreadExtensionAttachResponse;
 use codex_app_server_protocol::ThreadExtensionDetachParams;
 use codex_app_server_protocol::ThreadExtensionDetachResponse;
 use codex_config::McpServerConfig;
+use std::time::Duration;
 
 const MAX_EXTENSION_INSTRUCTIONS_BYTES: usize = 8 * 1024;
 
@@ -41,18 +55,18 @@ impl Drop for PendingConnectionAttach {
         let lease_id = self.lease_id.clone();
         let cancellation = Arc::clone(&self.cancellation);
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
+            drop(runtime.spawn(async move {
                 {
                     let mut leases = leases.lock().await;
                     if leases
                         .get(&thread_id)
                         .is_some_and(|lease| lease.lease_id == lease_id)
                     {
-                        leases.remove(&thread_id);
+                        let _ = leases.remove(&thread_id);
                     }
                 }
                 thread.detach_mcp_extension(&cancellation).await;
-            });
+            }));
         }
     }
 }
@@ -116,7 +130,7 @@ impl ThreadRequestProcessor {
                     .get(&thread_id)
                     .is_some_and(|lease| lease.cancellation.is_cancelled())
                 {
-                    leases.remove(&thread_id);
+                    let _ = leases.remove(&thread_id);
                 }
                 if let Some(existing) = leases.get(&thread_id) {
                     if existing.owner == owner
@@ -136,7 +150,7 @@ impl ThreadRequestProcessor {
                 }
                 let lease_id = Uuid::now_v7().to_string();
                 let cancellation = Arc::new(CancellationToken::new());
-                leases.insert(
+                let _ = leases.insert(
                     thread_id,
                     ExtensionLease {
                         owner,
@@ -158,14 +172,13 @@ impl ThreadRequestProcessor {
                 cancellation: Arc::clone(&cancellation),
                 committed: false,
             };
-            if let Err(error) = thread
-                .attach_mcp_extension(
-                    server_name,
-                    config,
-                    developer_instructions,
-                    cancellation.clone(),
-                )
-                .await
+            if let Err(error) = Box::pin(thread.attach_mcp_extension(
+                server_name,
+                config,
+                developer_instructions,
+                cancellation.clone(),
+            ))
+            .await
             {
                 return Err(invalid_request(error.to_string()));
             }
@@ -190,7 +203,7 @@ impl ThreadRequestProcessor {
             pending.committed = true;
             Ok(ThreadExtensionAttachResponse { lease_id })
         };
-        tokio::time::timeout(std::time::Duration::from_secs(120), operation)
+        tokio::time::timeout(Duration::from_secs(120), Box::pin(operation))
             .await
             .map_err(|_| invalid_request("extension MCP server did not become ready"))?
     }

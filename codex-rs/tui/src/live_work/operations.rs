@@ -125,7 +125,7 @@ impl Operations {
         Self {
             stage: Stage::Unbound,
             active_turn: None,
-            closed_turns: Default::default(),
+            closed_turns: VecDeque::default(),
             capacity,
             items: BTreeMap::new(),
             executions: BTreeMap::new(),
@@ -148,7 +148,7 @@ impl Operations {
             self.closed_turns.push_back(turn.to_owned());
         }
         while self.closed_turns.len() > self.capacity {
-            self.closed_turns.pop_front();
+            let _ = self.closed_turns.pop_front();
         }
     }
 
@@ -190,7 +190,7 @@ impl Operations {
         retired.sort_unstable();
         let excess = retired.len().saturating_sub(self.capacity);
         for (_, id) in retired.into_iter().take(excess) {
-            self.executions.remove(&id);
+            let _ = self.executions.remove(&id);
         }
     }
 
@@ -336,7 +336,8 @@ impl Operations {
             }
             ServerNotification::StreamItemsDiscarded(n) => {
                 for id in &n.item_ids {
-                    self.items
+                    let _ = self
+                        .items
                         .insert(id.clone(), Revision::Terminal(Instant::now()));
                 }
             }
@@ -389,7 +390,7 @@ impl Operations {
     fn call(&mut self, custody: Custody, id: String, name: String, source: Source) {
         match self.items.entry(id) {
             Entry::Vacant(slot) => {
-                slot.insert(Revision::Pending {
+                let _ = slot.insert(Revision::Pending {
                     custody,
                     source,
                     work: Pending::Call(name),
@@ -473,7 +474,7 @@ impl Operations {
             return;
         }
         if execution.owner.cell_id.is_none() {
-            execution.owner.cell_id = owner.cell_id.clone();
+            execution.owner.cell_id.clone_from(&owner.cell_id);
         }
         if let ThreadItem::CodeMode(fact) = item {
             if fact.exec_call_id != owner.exec_call_id
@@ -493,7 +494,8 @@ impl Operations {
             match &fact.event {
                 CodeModeEvent::ToolCall { call_id } => {
                     if finished {
-                        self.items
+                        let _ = self
+                            .items
                             .insert(call_id.clone(), Revision::Terminal(Instant::now()));
                     } else {
                         self.call(custody, call_id.clone(), "Tool call".to_owned(), source);
@@ -510,7 +512,8 @@ impl Operations {
             // The typed execution supersedes the provider call, without deleting its capture.
             finish_call(&mut self.items, &owner.exec_call_id);
         } else if execution.finished() && pending(item, started) == Some(true) {
-            self.items
+            let _ = self
+                .items
                 .insert(item.id().to_owned(), Revision::Terminal(Instant::now()));
         } else {
             self.item(
@@ -661,7 +664,7 @@ fn admit(
     match items.entry(key) {
         Entry::Occupied(mut slot) => Revision::admit(slot.get_mut(), work, source, custody),
         Entry::Vacant(slot) => {
-            slot.insert(work.map_or_else(
+            let _ = slot.insert(work.map_or_else(
                 || Revision::Terminal(Instant::now()),
                 |work| Revision::Pending {
                     custody,
@@ -678,20 +681,20 @@ fn trim_revisions<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, capacity: u
         .iter()
         .filter_map(|(key, revision)| match revision {
             Revision::Terminal(at) => Some((*at, key.clone())),
-            _ => None,
+            Revision::Pending { .. } => None,
         })
         .collect::<Vec<_>>();
     retired.sort_unstable();
     let excess = retired.len().saturating_sub(capacity);
     for (_, key) in retired.into_iter().take(excess) {
-        items.remove(&key);
+        let _ = items.remove(&key);
     }
 }
 
 fn finish_call<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, key: &K) {
     match items.entry(key.clone()) {
         Entry::Vacant(slot) => {
-            slot.insert(Revision::Terminal(Instant::now()));
+            let _ = slot.insert(Revision::Terminal(Instant::now()));
         }
         Entry::Occupied(mut slot) => {
             if matches!(
@@ -701,7 +704,7 @@ fn finish_call<K: Ord + Clone>(items: &mut BTreeMap<K, Revision>, key: &K) {
                     ..
                 }
             ) {
-                slot.insert(Revision::Terminal(Instant::now()));
+                let _ = slot.insert(Revision::Terminal(Instant::now()));
             }
         }
     }

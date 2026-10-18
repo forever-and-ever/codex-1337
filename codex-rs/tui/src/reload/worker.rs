@@ -48,9 +48,10 @@ pub(crate) fn suspend_host() -> io::Result<()> {
     control::suspend(&worker.directory, worker.generation)
 }
 
+#[must_use]
 pub fn should_host() -> bool {
     use std::io::IsTerminal;
-    !is_direct_worker() && std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    !is_direct_worker() && io::stdin().is_terminal() && io::stdout().is_terminal()
 }
 
 fn is_direct_worker() -> bool {
@@ -58,8 +59,11 @@ fn is_direct_worker() -> bool {
     std::env::var("CODEX_UI_PARENT")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
-        // SAFETY: getppid has no arguments or memory preconditions.
-        .is_some_and(|parent| parent == unsafe { libc::getppid() } as u32)
+        .is_some_and(|parent| {
+            parent
+                == rustix::process::getppid()
+                    .map_or(0, |pid| pid.as_raw_nonzero().get().unsigned_abs())
+        })
 }
 
 pub async fn initialize(cli: &mut Cli) -> io::Result<()> {
@@ -131,8 +135,8 @@ pub(crate) fn adopts_legacy_handoff(pid: u32) -> bool {
     // A one-time exec upgrade becomes the host, so its first worker inherits
     // that handoff. Later generations use their checkpoint, never stale CLI input.
     WORKER.get().is_some_and(|worker| worker.generation == 1)
-        // SAFETY: getppid has no arguments or memory preconditions.
-        && pid == unsafe { libc::getppid() } as u32
+        && pid
+            == rustix::process::getppid().map_or(0, |pid| pid.as_raw_nonzero().get().unsigned_abs())
 }
 
 pub(crate) fn is_activating() -> bool {

@@ -28,7 +28,7 @@ fn old_local_daemon_directory_change_error_suggests_update() -> Result<()> {
         &target,
     )
     .expect("unsupported daemon must block directory changes");
-    let cell = crate::history_cell::new_error_event(message.to_string());
+    let cell = history_cell::new_error_event(message.to_string());
     insta::assert_snapshot!(
         lines_to_single_string(&cell.display_lines(/*width*/ 120)),
         @"■ The local Codex service cannot check background terminals. Run `codex app-server daemon update`, then restart Codex."

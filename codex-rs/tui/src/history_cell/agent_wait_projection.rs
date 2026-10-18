@@ -20,12 +20,12 @@ struct WaitMembers {
 
 fn eligible(cell: &Cell, calls: &mut HashSet<String>) {
     if let Some(wait) = AgentToolHistoryCell::wait_for(cell.as_ref()) {
-        calls.insert(wait.id.clone());
+        let _ = calls.insert(wait.id.clone());
     } else if let Some(output) = cell.as_any().downcast_ref::<ToolOutputCell>() {
         if output.is_agent_wait()
             && let Some(call) = output.outer_call_id()
         {
-            calls.insert(call.to_owned());
+            let _ = calls.insert(call.to_owned());
         }
     } else if let Some(group) = cell.as_any().downcast_ref::<ToolOutputGroup>() {
         for member in &group.members {

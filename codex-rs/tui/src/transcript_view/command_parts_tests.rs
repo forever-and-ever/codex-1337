@@ -16,6 +16,8 @@ use codex_protocol::tool_input::ToolInputPayload;
 use codex_shell_command::parse_command::parse_command;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 #[test]
@@ -43,16 +45,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         "train",
         Action::Toggle(Port::Input, Panel::Visible(OutputMode::Fmt)),
     );
-    view.sync_live_activity(&[], cell.activity_ids());
+    let _ = view.sync_live_activity(&[], cell.activity_ids());
     assert!(
         view.sync_live_invocation_tail(80, None, &cell, vec!["live auxiliary".into()])
             .is_some()
     );
     let live = tests::text(&tests::render(&mut view, &[], 80, 26));
     assert!(live.contains("live auxiliary"));
-    view.sync_live_tail(80, None, |_| None);
+    let _ = view.sync_live_tail(80, None, |_| None);
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(cell.clone())];
-    let assert_title_color = |buffer: &ratatui::buffer::Buffer, title: &str, active| {
+    let assert_title_color = |buffer: &Buffer, title: &str, active| {
         let text = tests::text(buffer);
         let (row, line) = text
             .lines()
@@ -65,7 +67,10 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         } else {
             crate::render::header::style()
         };
-        assert_eq!(Some(buffer[(column as u16, row as u16)].fg), expected.fg);
+        assert_eq!(
+            Some(buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].fg),
+            expected.fg
+        );
     };
     let mut snapshots = Vec::new();
     let mut render =
@@ -90,7 +95,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     let retained_calls = crate::history_cell::invocation::collect(cells[0].as_ref());
     let retained_prepared = view.invocations.prepared(
         &retained_calls[0],
-        super::invocation::PreparationSource::Retained(&cells[0]),
+        invocation::PreparationSource::Retained(&cells[0]),
     );
     assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
     // Another call arriving must not evict an unchanged, already-open source pane.
@@ -104,12 +109,12 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &retained_prepared,
         &view.invocations.prepared(
             &retained_calls[0],
-            super::invocation::PreparationSource::Retained(&cells[0]),
+            invocation::PreparationSource::Retained(&cells[0]),
         )
     ));
     for _ in 0..3 {
         view.cache.clear();
-        tests::render(&mut view, &cells, 80, 26);
+        let _ = tests::render(&mut view, &cells, 80, 26);
     }
     assert_eq!(retained_prepared.work(), [1, 1, 0, 0]);
     assert_title_color(
@@ -130,7 +135,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     };
     let select = |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], action| {
         assert!(view.focus_fold(cells, 0, target(action)));
-        view.handle_key(KeyCode::Enter.into(), cells);
+        let _ = view.handle_key(KeyCode::Enter.into(), cells);
     };
     select(
         &mut view,
@@ -145,7 +150,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             Panel::Visible(OutputMode::Fmt),
         )))
         .unwrap();
-    cell.complete_call(
+    let _ = cell.complete_call(
         "train",
         CommandOutput::new(0, "combined output".into()),
         Duration::ZERO,
@@ -297,13 +302,13 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         action: Action::Toggle(Port::Input, Panel::Visible(OutputMode::Raw)),
     };
     assert!(view.focus_fold(&batch, 1, input_b));
-    view.handle_key(KeyCode::Enter.into(), &batch);
-    render(&mut view, &batch, 104, "one child input");
+    let _ = view.handle_key(KeyCode::Enter.into(), &batch);
+    let _ = render(&mut view, &batch, 104, "one child input");
     assert!(tests::text(&tests::render(&mut view, &batch, 104, 26)).contains("print('beta')"));
     for _ in 0..2 {
         assert!(view.focus_fold(&batch, 0, outer.clone()));
-        view.handle_key(KeyCode::Enter.into(), &batch);
-        render(&mut view, &batch, 104, "outer fold");
+        let _ = view.handle_key(KeyCode::Enter.into(), &batch);
+        let _ = render(&mut view, &batch, 104, "outer fold");
     }
     assert!(tests::text(&tests::render(&mut view, &batch, 104, 26)).contains("print('beta')"));
     let singleton = vec![Arc::clone(&batch[1])];
@@ -412,7 +417,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 ),
             },
         ));
-        tests::render(&mut view, &code, 104, 26);
+        let _ = tests::render(&mut view, &code, 104, 26);
         let first = view.current_layout(&code, 0).unwrap();
         assert!(first.text().contains("Read src/main.rs"));
         assert!(!first.text().contains("fs.readFile"));
@@ -451,7 +456,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         });
         if admitted {
             code[0] = reduce(mcp_input.clone());
-            tests::render(&mut view, &code, 104, 26);
+            let _ = tests::render(&mut view, &code, 104, 26);
             let awaiting_native = view.current_layout(&code, 0).unwrap();
             assert!(!awaiting_native.text().contains("mcp__depot"));
             assert!(!awaiting_native.text().contains(r#""file""#));
@@ -491,7 +496,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             prompt: Some("Inspect source".into()),
             model: None,
             reasoning_effort: None,
-            agents_states: Default::default(),
+            agents_states: HashMap::default(),
             wait_completion: None,
         });
         code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
@@ -529,11 +534,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 .unwrap();
             let column = line.find(label).unwrap();
             assert_eq!(
-                buffer[(column as u16, row as u16)].fg,
+                buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].fg,
                 ratatui::style::Color::Cyan
             );
             assert_eq!(
-                buffer[(column as u16, row as u16)].bg,
+                buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].bg,
                 ratatui::style::Color::Reset
             );
         }
@@ -578,19 +583,19 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             namespace: None,
             output: FunctionCallOutputBody::Text("plain result, not code".into()),
         });
-        tests::render(&mut view, &code, 104, 26);
+        let _ = tests::render(&mut view, &code, 104, 26);
         let output = FoldTarget::Invocation {
             call_id: "code".into(),
             action: Action::Toggle(Port::Output, Panel::Visible(OutputMode::Raw)),
         };
         assert!(view.focus_fold(&code, 0, output));
-        view.handle_key(KeyCode::Enter.into(), &code);
+        let _ = view.handle_key(KeyCode::Enter.into(), &code);
         let raw = FoldTarget::Invocation {
             call_id: "code".into(),
             action: Action::Format(Port::Input, OutputMode::Raw),
         };
         assert!(view.focus_fold(&code, 0, raw.clone()));
-        view.handle_key(KeyCode::Enter.into(), &code);
+        let _ = view.handle_key(KeyCode::Enter.into(), &code);
         let buffer = tests::render(&mut view, &code, 104, 26);
         let shown = tests::text(&buffer);
         let (source_row, source_line) = shown
@@ -601,8 +606,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let source_column = source_line.find("const answer").unwrap();
         assert_eq!(source_column, header_column + 2);
         assert_ne!(
-            buffer[(source_column as u16, source_row as u16)].fg,
-            buffer[((source_column + 15) as u16, source_row as u16)].fg
+            buffer[(
+                u16::try_from(source_column).unwrap(),
+                u16::try_from(source_row).unwrap()
+            )]
+                .fg,
+            buffer[(
+                u16::try_from(source_column + 15).unwrap(),
+                u16::try_from(source_row).unwrap()
+            )]
+                .fg
         );
         assert!(
             view.current_layout(&code, 0)
@@ -617,8 +630,8 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .unwrap();
         for width in [104, 40, 80] {
             assert!(view.focus_fold(&code, 0, outer.clone()));
-            view.handle_key(KeyCode::Enter.into(), &code);
-            tests::render(&mut view, &code, width, 26);
+            let _ = view.handle_key(KeyCode::Enter.into(), &code);
+            let _ = tests::render(&mut view, &code, width, 26);
             let collapsed = view.current_layout(&code, 0).unwrap();
             assert!(!collapsed.text().contains(script), "{:?}", collapsed.text());
             assert_eq!(collapsed.row_count(), 1);
@@ -635,9 +648,9 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             assert!(view.toggle_disclosure_at(
                 &code,
                 columns.start + view.area.x,
-                screen_row as u16 + view.area.y
+                u16::try_from(screen_row).unwrap() + view.area.y
             ));
-            tests::render(&mut view, &code, width, 26);
+            let _ = tests::render(&mut view, &code, width, 26);
             let opened = view.current_layout(&code, 0).unwrap();
             assert!(opened.text().contains(script));
             assert!(opened.text().contains("plain result, not code"));
@@ -653,12 +666,12 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         }
         // Inventory navigation must reveal calls even inside a manually folded feed entry.
         assert!(view.focus_fold(&code, 0, outer.clone()));
-        view.handle_key(KeyCode::Enter.into(), &code);
-        tests::render(&mut view, &code, 104, 26);
+        let _ = view.handle_key(KeyCode::Enter.into(), &code);
+        let _ = tests::render(&mut view, &code, 104, 26);
         let collapsed = view.current_layout(&code, 0).unwrap();
         assert!(!collapsed.text().contains(script), "{:?}", collapsed.text());
         assert!(view.reveal_call(&code, "read-child"));
-        tests::render(&mut view, &code, 104, 26);
+        let _ = tests::render(&mut view, &code, 104, 26);
         assert!(
             view.current_layout(&code, 0)
                 .unwrap()
@@ -666,7 +679,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 .contains(script)
         );
         assert!(view.reveal_call(&code, "code"));
-        tests::render(&mut view, &code, 104, 26);
+        let _ = tests::render(&mut view, &code, 104, 26);
         assert!(
             view.current_layout(&code, 0)
                 .unwrap()
@@ -675,7 +688,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         );
         if !admitted {
             assert!(view.focus_fold(&code, 0, outer));
-            view.handle_key(KeyCode::Enter.into(), &code);
+            let _ = view.handle_key(KeyCode::Enter.into(), &code);
             view.record_step_admission(admission());
             for width in [40, 80] {
                 let buffer = tests::render(&mut view, &code, width, 26);
@@ -685,8 +698,8 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 assert_eq!(collapsed.row_count(), 1);
             }
             // Late billing rekeys the same disclosure, including its keyboard focus.
-            view.handle_key(KeyCode::Enter.into(), &code);
-            tests::render(&mut view, &code, 80, 26);
+            let _ = view.handle_key(KeyCode::Enter.into(), &code);
+            let _ = tests::render(&mut view, &code, 80, 26);
             let opened = view.current_layout(&code, 0).unwrap();
             assert!(opened.text().contains(script));
             assert!(opened.text().contains("plain result, not code"));
@@ -720,11 +733,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &view
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         true,
         80,
         false,
-        &Default::default(),
+        &HashSet::default(),
     );
     assert_eq!(
         python
@@ -739,7 +752,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &view
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         80,
         true,
         80,
@@ -767,11 +780,11 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 &call,
                 &view
                     .invocations
-                    .prepared(&call, super::invocation::PreparationSource::Uncached),
+                    .prepared(&call, invocation::PreparationSource::Uncached),
                 true,
                 width,
                 full,
-                &Default::default(),
+                &HashSet::default(),
             )
             .lines
             .into_iter()
@@ -831,7 +844,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &call,
         &opaque
             .invocations
-            .prepared(&call, super::invocation::PreparationSource::Uncached),
+            .prepared(&call, invocation::PreparationSource::Uncached),
         80,
         true,
         80,
@@ -886,7 +899,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         payload: ToolInputPayload::Text("echo sample".into()),
     });
     let key = |revision, tick| {
-        Some(crate::chatwidget::ActiveCellTranscriptKey {
+        Some(ActiveCellTranscriptKey {
             cacheable: true,
             revision,
             is_stream_continuation: false,
@@ -902,7 +915,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     }
     let prepared = reuse
         .invocations
-        .prepared(&call, super::invocation::PreparationSource::Live(11));
+        .prepared(&call, invocation::PreparationSource::Live(11));
     assert_eq!(prepared.work(), [1, 1, 0, 0]);
     reuse
         .invocations
@@ -911,15 +924,15 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         .invocations
         .apply("source", Action::Format(Port::Output, OutputMode::Raw));
     for tick in 4..8 {
-        reuse.sync_live_invocation_tail(80, key(11, tick), &output, vec![]);
+        let _ = reuse.sync_live_invocation_tail(80, key(11, tick), &output, vec![]);
     }
     assert_eq!(prepared.work(), [1, 1, 1, 1]);
     let live = reuse.live.as_ref().unwrap().text();
     assert!(live.contains("echo sample"));
     assert!(live.contains("plain result, not Python"));
-    reuse.sync_live_invocation_tail(40, key(11, 8), &output, vec![]);
+    let _ = reuse.sync_live_invocation_tail(40, key(11, 8), &output, vec![]);
     assert_eq!(prepared.work(), [2, 1, 1, 2]);
-    reuse.sync_live_invocation_tail(80, key(11, 9), &output, vec![]);
+    let _ = reuse.sync_live_invocation_tail(80, key(11, 9), &output, vec![]);
     assert_eq!(prepared.work(), [2, 1, 1, 2]);
     let updated = ToolOutputCell::from_output(
         "source-updated",
@@ -929,7 +942,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         &FunctionCallOutputBody::Text("updated result".into()),
     )
     .unwrap();
-    reuse.sync_live_invocation_tail(80, key(12, 10), &updated, vec![]);
+    let _ = reuse.sync_live_invocation_tail(80, key(12, 10), &updated, vec![]);
     assert!(
         reuse
             .live
@@ -939,10 +952,9 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .contains("updated result")
     );
     let updated_call = crate::history_cell::invocation::collect(&updated).remove(0);
-    let changed = reuse.invocations.prepared(
-        &updated_call,
-        super::invocation::PreparationSource::Live(12),
-    );
+    let changed = reuse
+        .invocations
+        .prepared(&updated_call, invocation::PreparationSource::Live(12));
     assert!(!std::rc::Rc::ptr_eq(&prepared, &changed));
     assert_eq!(changed.work(), [1, 1, 1, 1]);
     reuse.record_tool_input(ToolInput {
@@ -951,14 +963,13 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         name: ToolName::plain("bash"),
         payload: ToolInputPayload::Text("echo changed".into()),
     });
-    reuse.sync_live_invocation_tail(80, key(12, 11), &updated, vec![]);
+    let _ = reuse.sync_live_invocation_tail(80, key(12, 11), &updated, vec![]);
     assert!(reuse.live.as_ref().unwrap().text().contains("echo changed"));
     assert!(!std::rc::Rc::ptr_eq(
         &changed,
-        &reuse.invocations.prepared(
-            &updated_call,
-            super::invocation::PreparationSource::Live(12),
-        )
+        &reuse
+            .invocations
+            .prepared(&updated_call, invocation::PreparationSource::Live(12),)
     ));
     // A final delimiter remains copyable without becoming an extra painted row.
     for source in ["print(42)\n", "print(42)\n\n"] {
@@ -969,7 +980,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             payload: ToolInputPayload::Text(source.into()),
         };
         let lines = call.raw_input(Some(&input)).unwrap();
-        let layout = super::text::TextLayout::new(lines, 80);
+        let layout = TextLayout::new(lines, 80);
         assert_eq!(layout.text(), source);
         assert_eq!(layout.row_count(), source.lines().count());
         let narrow = layout.rewrap(6);

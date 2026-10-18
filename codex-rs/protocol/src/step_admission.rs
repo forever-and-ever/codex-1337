@@ -8,6 +8,11 @@
 //!
 //! The next request announces each arrival as it reads it; the step's seal bills it by id.
 
+#![expect(
+    unused_qualifications,
+    reason = "A derive-generated variant field reference has no qualified source segments and rustc suggests an empty removal span"
+)]
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;

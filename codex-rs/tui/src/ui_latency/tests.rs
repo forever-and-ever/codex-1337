@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Write;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -86,14 +87,13 @@ async fn independent_dump_survives_blocked_and_suspended_dispatcher() {
             report.identity.start_ticks
         ));
     let mut slow = std::os::unix::net::UnixStream::connect(&path).expect("slow client");
-    use std::io::Write;
     slow.write_all(b"U").expect("partial command");
-    query(pid, false)
+    let _ = query(pid, false)
         .await
         .expect("deadline releases slow client");
     let mut malformed = std::os::unix::net::UnixStream::connect(&path).expect("malformed client");
     malformed.write_all(b"NOTVALID").expect("bad command");
-    query(pid, false)
+    let _ = query(pid, false)
         .await
         .expect("malformed client does not kill listener");
     drop(endpoint);
@@ -159,7 +159,7 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
             .scope(RefCell::new(Writer::new(Arc::clone(&shared))), async {
                 let input = crate::tui::TuiEvent::Paste(String::new());
                 let old = input_consumed(&input).expect("consumed input");
-                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                let _ = shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
                 input_handled(old);
                 drop(enter(Stage::FramePaint));
                 drop(enter(Stage::TerminalFlush));
@@ -221,7 +221,9 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
                 let phases = [(flush_end, flush_end); 3];
                 frame_completed(submitted, phases, flush_end);
                 let completed = shared.committed.read().expect("delayed completion");
-                let completed_at = flush_end.duration_since(shared.origin).as_nanos() as u64;
+                let completed_at =
+                    u64::try_from(flush_end.duration_since(shared.origin).as_nanos())
+                        .expect("test duration fits u64 nanoseconds");
                 assert_eq!(completed[1], completed_at);
                 assert_eq!(
                     WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),
@@ -230,7 +232,7 @@ fn publication_reset_race_is_bounded_and_never_accepts_torn_records() {
                 assert!(WRITER.with(|writer| writer.borrow().ready_input.is_some()));
                 drop(enter(Stage::FramePaint));
                 let stale = frame_submitted();
-                shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
+                let _ = shared.requested_epoch.fetch_add(1, Ordering::Relaxed);
                 frame_completed(stale, phases, flush_end);
                 assert_eq!(
                     WRITER.with(|writer| writer.borrow().stats[Stage::ReactionLatency as usize][1]),

@@ -113,12 +113,12 @@ impl AnthropicRequest {
     const MAX_BODY_BYTES: usize = 32_000_000;
 
     pub(crate) fn from_body(
-        body: Value,
+        body: &Value,
         tools: Arc<[AnthropicTool]>,
         required_betas: Arc<[&'static str]>,
     ) -> Result<Self, ApiError> {
         let body =
-            serde_json::value::to_raw_value(&body).map_err(|err| ApiError::InvalidRequest {
+            serde_json::value::to_raw_value(body).map_err(|err| ApiError::InvalidRequest {
                 message: format!("failed to encode Anthropic request: {err}"),
             })?;
         if body.get().len() > Self::MAX_BODY_BYTES {
@@ -133,10 +133,12 @@ impl AnthropicRequest {
         })
     }
 
+    #[must_use]
     pub fn body(&self) -> &RawValue {
         &self.body
     }
 
+    #[must_use]
     pub fn tools(&self) -> &[AnthropicTool] {
         &self.tools
     }

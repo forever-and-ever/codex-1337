@@ -1,8 +1,15 @@
 //! Local asynchronous work returns through the same typed UI reply as server requests.
 
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Result;
 use super::turn_submissions::ui_requests::UiReply;
-use super::*;
+#[cfg(test)]
+use crate::tui;
 use std::future::Future;
+#[cfg(test)]
+use std::time::Duration;
 
 impl App {
     pub(in crate::app) fn request_local<T, F, A>(&self, label: &'static str, future: F, apply: A)
@@ -13,7 +20,7 @@ impl App {
     {
         let events = self.app_event_tx.clone();
         let epoch = self.server_operations.epoch();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let value = future.await;
             events.send(AppEvent::LocalUiReply(UiReply::from_apply(
                 move |app, server| {
@@ -27,7 +34,7 @@ impl App {
                     apply(app, server, value)
                 },
             )));
-        });
+        }));
     }
 }
 
@@ -42,7 +49,7 @@ impl App {
             while !self.server_operations.is_empty() {
                 tokio::select! {
                     completion = self.server_operations.control_rx.recv() => {
-                        Box::pin(self.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
+                        let _ = Box::pin(self.handle_server_completion(tui, server, completion.expect("server completion"))).await?;
                     }
                     completion = self.thread_delivery.completion_rx.recv() => {
                         Box::pin(self.handle_local_thread_completion(server, completion.expect("thread completion"))).await?;

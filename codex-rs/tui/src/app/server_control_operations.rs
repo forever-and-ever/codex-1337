@@ -1,6 +1,19 @@
 //! Urgent control bypasses admission barriers without abandoning request ownership.
 
-use super::*;
+use super::Arc;
+use super::ClientRequest;
+use super::ExitReason;
+use super::Mutex;
+use super::OperationReceipt;
+use super::Result;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::TurnStatus;
+use super::TypedRequestError;
+use super::Uuid;
+use super::active_turn_interrupt_race;
+use super::detach;
+use super::event_dispatch;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -42,7 +55,7 @@ pub(super) async fn send(
     let (turn_id, exit) = match control {
         ControlOperation::RealtimeStop { .. } => {
             let _: api::ThreadRealtimeStopResponse = handle
-                .request_typed(api::ClientRequest::ThreadRealtimeStop {
+                .request_typed(ClientRequest::ThreadRealtimeStop {
                     request_id: api::RequestId::String(format!("tui-operation-{id}-voice-stop")),
                     params: api::ThreadRealtimeStopParams {
                         thread_id: thread_id.to_string(),
@@ -53,7 +66,7 @@ pub(super) async fn send(
         }
         ControlOperation::DetachAndExit { plan, .. } => {
             let receipt = match tokio::time::timeout(
-                super::super::event_dispatch::SHUTDOWN_FIRST_EXIT_TIMEOUT,
+                event_dispatch::SHUTDOWN_FIRST_EXIT_TIMEOUT,
                 detach::send(handle, id, &plan),
             )
             .await
@@ -66,71 +79,65 @@ pub(super) async fn send(
         ControlOperation::Interrupt { turn_id } => (Some(turn_id), false),
         ControlOperation::InterruptActive { paginated_history } => {
             let cached = store.lock().await.active_turn_id().map(str::to_owned);
-            let turn_id = match cached {
-                Some(turn_id) => Some(turn_id),
-                None => {
-                    let thread: api::ThreadReadResponse = handle
+            let turn_id = if let Some(turn_id) = cached {
+                Some(turn_id)
+            } else {
+                let thread: api::ThreadReadResponse = handle
+                    .thread_read(
+                        api::RequestId::String(format!("tui-operation-{id}-read")),
+                        api::ThreadReadParams {
+                            thread_id: thread_id.to_string(),
+                            include_turns: false,
+                        },
+                    )
+                    .await?;
+                let history = if thread.thread.history_mode == api::ThreadHistoryMode::Paginated
+                    && paginated_history
+                {
+                    None
+                } else {
+                    match handle
                         .thread_read(
-                            api::RequestId::String(format!("tui-operation-{id}-read")),
+                            api::RequestId::String(format!("tui-operation-{id}-history")),
                             api::ThreadReadParams {
                                 thread_id: thread_id.to_string(),
-                                include_turns: false,
+                                include_turns: true,
                             },
                         )
-                        .await?;
-                    let history = if thread.thread.history_mode == api::ThreadHistoryMode::Paginated
-                        && paginated_history
+                        .await
                     {
-                        None
-                    } else {
-                        match handle
-                            .thread_read(
-                                api::RequestId::String(format!("tui-operation-{id}-history")),
-                                api::ThreadReadParams {
-                                    thread_id: thread_id.to_string(),
-                                    include_turns: true,
-                                },
-                            )
-                            .await
+                        Ok(history) => Some(history.thread.turns),
+                        // Legacy negotiation can coexist with a migrated paginated rollout.
+                        Err(TypedRequestError::Server { ref source, .. })
+                            if source.message
+                                == "paginated threads do not support thread/read(includeTurns=true)" =>
                         {
-                            Ok(history) => Some(history.thread.turns),
-                            // Legacy negotiation can coexist with a migrated paginated rollout.
-                            Err(TypedRequestError::Server { ref source, .. })
-                                if source.message
-                                    == "paginated threads do not support thread/read(includeTurns=true)" =>
-                            {
-                                None
-                            }
-                            Err(error) => return Err(error),
+                            None
                         }
-                    };
-                    let turns = match history {
-                        Some(turns) => turns,
-                        None => {
-                            let page: api::ThreadTurnsListResponse = handle
-                                .request_typed(api::ClientRequest::ThreadTurnsList {
-                                    request_id: api::RequestId::String(format!(
-                                        "tui-operation-{id}-turns"
-                                    )),
-                                    params: api::ThreadTurnsListParams {
-                                        thread_id: thread_id.to_string(),
-                                        cursor: None,
-                                        limit: Some(
-                                            crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
-                                        ),
-                                        sort_direction: Some(api::SortDirection::Desc),
-                                        items_view: Some(api::TurnItemsView::NotLoaded),
-                                    },
-                                })
-                                .await?;
-                            page.data
-                        }
-                    };
+                        Err(error) => return Err(error),
+                    }
+                };
+                let turns = if let Some(turns) = history {
                     turns
-                        .into_iter()
-                        .find(|turn| turn.status == TurnStatus::InProgress)
-                        .map(|turn| turn.id)
-                }
+                } else {
+                    let page: api::ThreadTurnsListResponse = handle
+                        .request_typed(ClientRequest::ThreadTurnsList {
+                            request_id: api::RequestId::String(format!("tui-operation-{id}-turns")),
+                            params: api::ThreadTurnsListParams {
+                                thread_id: thread_id.to_string(),
+                                cursor: None,
+                                limit: Some(crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT),
+                                sort_direction: Some(api::SortDirection::Desc),
+                                items_view: Some(api::TurnItemsView::NotLoaded),
+                            },
+                        })
+                        .await?;
+                    page.data
+                };
+                turns
+                    .into_iter()
+                    .find(|turn| turn.status == TurnStatus::InProgress)
+                    .map(|turn| turn.id)
             };
             store.lock().await.pending_interrupt_turn_id = turn_id.clone();
             (turn_id, false)

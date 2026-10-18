@@ -2,7 +2,16 @@
 
 use super::super::turn_submissions::ui_requests::UiRequestKind;
 use super::super::turn_submissions::ui_requests::UiRequestScope;
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::Arc;
+use super::Duration;
+use super::RequestId;
+use super::ServerNotification;
+use super::ThreadId;
+use super::ThreadReadParams;
+use super::TypedRequestError;
+use super::read_mcp_subagent_parent_thread_id;
 use crate::app_event::AppEvent;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::ThreadStatus;
@@ -15,14 +24,30 @@ impl App {
         notification: ServerNotification,
     ) {
         let epoch = self.server_operations.epoch();
-        self.request_server(
-                server, UiRequestScope::Connection, UiRequestKind::ReadOnly, "Verifying MCP notification owner",
-                move |handle| async move { Ok(read_mcp_subagent_parent_thread_id(handle, thread_id).await) },
+        let _ =
+            self.request_server(
+                server,
+                UiRequestScope::Connection,
+                UiRequestKind::ReadOnly,
+                "Verifying MCP notification owner",
+                move |handle| async move {
+                    Ok(read_mcp_subagent_parent_thread_id(handle, thread_id).await)
+                },
                 move |app, _, result| {
-                    if let Ok(Some(parent_thread_id)) = result && app.is_family_thread(parent_thread_id) {
-                        app.app_event_tx.send(AppEvent::VerifiedServerNotification(Box::new(VerifiedServerNotification {
-                            epoch, notification, verification: Verification::Mcp { thread_id, parent_thread_id },
-                        })));
+                    if let Ok(Some(parent_thread_id)) = result
+                        && app.is_family_thread(parent_thread_id)
+                    {
+                        app.app_event_tx
+                            .send(AppEvent::VerifiedServerNotification(Box::new(
+                                VerifiedServerNotification {
+                                    epoch,
+                                    notification,
+                                    verification: Verification::Mcp {
+                                        thread_id,
+                                        parent_thread_id,
+                                    },
+                                },
+                            )));
                     }
                     Ok(())
                 },
@@ -37,7 +62,7 @@ impl App {
     ) {
         let epoch = self.server_operations.epoch();
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -70,10 +95,7 @@ impl App {
                                 return Ok(Closure::Closed);
                             }
                             Err(TypedRequestError::Server { source, .. })
-                                if source.code == -32603 && attempt == 0 =>
-                            {
-                                continue;
-                            }
+                                if source.code == -32603 && attempt == 0 => {}
                             Err(error) => return Err(error),
                         }
                     }

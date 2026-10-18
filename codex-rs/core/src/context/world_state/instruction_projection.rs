@@ -27,7 +27,7 @@ impl WorldStateSnapshot {
         for (id, revision) in revisions.iter().chain(&fresh) {
             if let Some(text) = &revision.current {
                 let key = (text.role().to_string(), text.kind.0.clone());
-                kinds
+                let _ = kinds
                     .entry(key)
                     .and_modify(|owner: &mut Option<String>| {
                         if owner.as_ref() != Some(id) {
@@ -35,12 +35,12 @@ impl WorldStateSnapshot {
                         }
                     })
                     .or_insert_with(|| Some(id.clone()));
-                owners.insert(text.fingerprint().0, id.clone());
+                let _ = owners.insert(text.fingerprint().0, id.clone());
             }
         }
         for (id, revision) in &revisions {
             for hash in &revision.lineage {
-                owners.insert(hash.0.clone(), id.clone());
+                let _ = owners.insert(hash.0.clone(), id.clone());
             }
         }
         for (id, revision) in &mut revisions {
@@ -48,9 +48,9 @@ impl WorldStateSnapshot {
         }
         // A newly configured section has no historical amendment lineage yet.
         for (id, revision) in fresh {
-            revisions
+            let _ = revisions
                 .entry(id)
-                .and_modify(|old| old.current = revision.current.clone())
+                .and_modify(|old| old.current.clone_from(&revision.current))
                 .or_insert(revision);
         }
         let mut emitted = BTreeSet::new();
@@ -68,10 +68,10 @@ impl WorldStateSnapshot {
             };
             // Partial positional annotations are not proof of instruction ownership.
             if content.is_empty()
-                || !metadata
+                || metadata
                     .content_item_kinds
                     .as_ref()
-                    .is_some_and(|kinds| kinds.len() == content.len())
+                    .is_none_or(|kinds| kinds.len() != content.len())
             {
                 result.push(envelope);
                 continue;
@@ -93,7 +93,7 @@ impl WorldStateSnapshot {
                         assert_eq!(role, text.role(), "instruction amendment changed authority");
                         materialized
                             .push(AnnotatedContent::input_text(&text.text, text.kind.clone()));
-                        emitted.insert(id.to_string());
+                        let _ = emitted.insert(id.to_string());
                     }
                     changed = true;
                     continue;
@@ -163,7 +163,7 @@ impl WorldStateSnapshot {
                 )
             })
             .count();
-        result.splice(insertion..insertion, additions);
+        let _ = result.splice(insertion..insertion, additions);
         result
     }
 }

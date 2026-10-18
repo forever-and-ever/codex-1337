@@ -54,12 +54,15 @@ pub struct Credentials {
 }
 
 impl Credentials {
+    #[must_use]
     pub fn account_id(&self) -> &AccountId {
         &self.account_id
     }
+    #[must_use]
     pub fn access_token(&self) -> &str {
         &self.grant.access_token
     }
+    #[must_use]
     pub fn expires_at(&self) -> Option<i64> {
         self.grant.expires_at
     }

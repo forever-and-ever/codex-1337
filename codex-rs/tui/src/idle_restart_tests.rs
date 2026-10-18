@@ -37,11 +37,11 @@ async fn quiet_interval_and_installed_generation_gate_replacement() -> anyhow::R
     assert!(restart.tick().now_or_never().is_none());
     // A long-running turn becoming idle still earns a full five-minute interval.
     restart.set_ready(/*ready*/ true);
-    tokio::time::advance(IDLE - Duration::from_secs(/*secs*/ 1)).await;
+    tokio::time::advance(IDLE.checked_sub(Duration::from_secs(/*secs*/ 1)).unwrap()).await;
     assert!(restart.tick().now_or_never().is_none());
     // Fresh user activity restarts the entire quiet interval.
     restart.postpone();
-    tokio::time::advance(IDLE - Duration::from_secs(/*secs*/ 1)).await;
+    tokio::time::advance(IDLE.checked_sub(Duration::from_secs(/*secs*/ 1)).unwrap()).await;
     assert!(restart.tick().now_or_never().is_none());
     tokio::time::advance(Duration::from_secs(/*secs*/ 1)).await;
     assert_eq!(restart.tick().now_or_never(), Some(()));
@@ -133,11 +133,11 @@ fn reexec_keeps_pid_and_resumes_once_without_replaying_launch_input() -> anyhow:
     let root = tempfile::tempdir()?;
     for mode in ["replace", "foreign"] {
         let mut command = Command::new(std::env::current_exe()?);
-        command.args(["--exact", "idle_restart::tests::reexec_keeps_pid_and_resumes_once_without_replaying_launch_input", "--nocapture"])
+        let _ = command.args(["--exact", "idle_restart::tests::reexec_keeps_pid_and_resumes_once_without_replaying_launch_input", "--nocapture"])
             .current_dir(root.path()).env(CHILD, mode).env_remove(HANDOFF_ENV)
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         if mode == "foreign" {
-            command.env(
+            let _ = command.env(
                 HANDOFF_ENV,
                 serde_json::to_string(&Handoff {
                     pid: std::process::id(),

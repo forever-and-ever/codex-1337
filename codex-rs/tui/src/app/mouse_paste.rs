@@ -2,7 +2,11 @@
 //! Existing selection handlers run first. Only a draw may deliver a read, so real input
 //! invalidates pending paste before completion and is never replaced by clipboard text.
 
-use super::*;
+use super::App;
+use super::Arc;
+use super::ThreadId;
+use super::TuiEvent;
+use super::tui;
 use crate::clipboard_copy::SelectionTarget;
 use crate::tui::VscodeDetection;
 use codex_config::types::RightClickPaste;
@@ -17,6 +21,10 @@ pub(super) struct PendingPaste {
     _request: Arc<()>,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "These are independent host capabilities and environment observations, not mutually exclusive states."
+)]
 pub(super) struct PasteEnvironment {
     pub(super) primary: bool,
     pub(super) platform_default: bool,
@@ -138,7 +146,7 @@ impl App {
             return event;
         }
         let Some(pending) = self.pending_mouse_paste.as_ref() else {
-            tui.clipboard.take_text_result();
+            let _ = tui.clipboard.take_text_result();
             return event;
         };
         let Some((thread, draft)) = self.mouse_paste_target(tui, pending.source) else {

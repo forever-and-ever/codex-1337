@@ -34,9 +34,10 @@ fn pending_approval_survives_transcript_eviction() {
 async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() -> Result<()> {
     // The former detached Full sender was not yet reserving a slot when a newer direct send
     // could take it. Keep the receiver locally taken, and interleave widget/history effects.
-    let (mut app, mut effects, _operations) = make_test_app_with_channels().await;
+    let (mut app, mut effects, _operations) = Box::pin(make_test_app_with_channels()).await;
     let thread_id = ThreadId::new();
-    app.thread_event_channels
+    let _ = app
+        .thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     app.activate_thread_channel(thread_id).await;
     app.chat_widget.handle_thread_session(test_thread_session(
@@ -86,15 +87,16 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
     );
     assert_eq!(app.thread_delivery.completion_rx.len(), 1);
 
-    let (mut server, _requests, proxy) = session_lifecycle_requests::start_recording_app_server(
-        &app.config,
-        /*blocked_thread_list*/ None,
-        /*failed_thread_name*/ None,
-    )
-    .await?;
-    let mut tui = crate::tui::test_support::make_test_tui()?;
+    let (mut server, _requests, proxy) =
+        Box::pin(session_lifecycle_requests::start_recording_app_server(
+            &app.config,
+            /*blocked_thread_list*/ None,
+            /*failed_thread_name*/ None,
+        ))
+        .await?;
+    let mut tui = tui::test_support::make_test_tui()?;
     while let Ok(effect) = effects.try_recv() {
-        app.handle_event(&mut tui, &mut server, effect).await?;
+        let _ = Box::pin(app.handle_event(&mut tui, &mut server, effect)).await?;
     }
     assert!(app.transcript_cells.iter().any(|cell| {
         lines_to_single_string(&cell.display_lines(/*width*/ 80))
@@ -132,9 +134,10 @@ async fn bounded_thread_admission_preserves_fifo_with_pending_history_effects() 
 
 #[tokio::test]
 async fn pending_approval_detach_uses_existing_replay_without_a_dormant_send() -> Result<()> {
-    let mut app = make_test_app().await;
+    let mut app = Box::pin(make_test_app()).await;
     let thread_id = ThreadId::new();
-    app.thread_event_channels
+    let _ = app
+        .thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     app.activate_thread_channel(thread_id).await;
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
@@ -161,16 +164,17 @@ async fn pending_approval_detach_uses_existing_replay_without_a_dormant_send() -
 #[tokio::test]
 async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replacement() -> Result<()>
 {
-    let (mut app, mut effects, _operations) = make_test_app_with_channels().await;
+    let (mut app, mut effects, _operations) = Box::pin(make_test_app_with_channels()).await;
     let thread_id = ThreadId::new();
-    app.thread_event_channels
+    let _ = app
+        .thread_event_channels
         .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
     set_test_initial_prompt(&mut app, "held startup draft".to_string());
     let request = exec_approval_request(thread_id, "turn-1", "call-1", /*approval_id*/ None);
     let batch = HistoryLookupResponse::Batch {
         cursor: codex_message_history::HistoryBatchCursor::new(/*end_offset*/ 1),
         log_id: 1,
-        entries: vec![crate::app_event::HistoryBatchEntryResponse {
+        entries: vec![HistoryBatchEntryResponse {
             offset: 0,
             entry: Some("retained batch".to_string()),
         }],
@@ -201,7 +205,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
     );
 
     let mut receiver = app.active_thread_rx.take().expect("active receiver");
-    receiver.try_recv()?;
+    let _ = receiver.try_recv()?;
     app.retry_pending_thread_delivery().await;
     let ThreadBufferedEvent::Request(actual) = receiver.try_recv()? else {
         panic!("buffered approval")
@@ -264,7 +268,7 @@ async fn initial_replay_is_incremental_and_pending_batch_survives_detach_replace
     assert!(app.thread_delivery.is_blocked());
     let replacement = ThreadEventChannel::new(/*capacity*/ 1);
     replacement.store.lock().await.active = true;
-    app.thread_event_channels.insert(thread_id, replacement);
+    let _ = app.thread_event_channels.insert(thread_id, replacement);
     app.retry_pending_thread_delivery().await;
     assert!(!app.thread_delivery.is_blocked());
     assert!(

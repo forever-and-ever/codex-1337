@@ -1,5 +1,7 @@
 //! Exercise the real CLI host, worker replacement, and recovery screen over a PTY.
 
+const THREAD: &str = "00000000-0000-0000-0000-000000000001";
+
 use super::focus_palette::PtyCodex;
 use super::focus_palette::socket_home;
 use super::focus_palette::write_test_config;
@@ -29,8 +31,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
     let seen = Arc::clone(&methods);
     let mut servers = tokio::task::JoinSet::new();
     let cwd = root.clone();
-    const THREAD: &str = "00000000-0000-0000-0000-000000000001";
-    servers.spawn(async move {
+    let _ = servers.spawn(async move {
         let mut connections = tokio::task::JoinSet::new();
         let mut connection = 0;
         loop {
@@ -39,7 +40,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
             let methods = Arc::clone(&seen);
             let mut gate = gate.clone();
             let cwd = cwd.clone();
-            connections.spawn(async move {
+            let _ = connections.spawn(async move {
                 let mut ws = tokio_tungstenite::accept_async(stream).await?;
                 let thread = json!({
                     "id": THREAD, "sessionId": THREAD, "preview": "", "ephemeral": false,
@@ -100,7 +101,7 @@ async fn live_reload_retains_steering_and_times_out_without_replaying_input() ->
                 Ok::<_, anyhow::Error>(())
             });
         }
-        #[allow(unreachable_code)]
+        #[expect(unreachable_code, reason = "JoinSet task requires an explicit Result output after its perpetual accept loop")]
         Ok::<_, anyhow::Error>(())
     });
     let endpoint = format!("unix://{}", socket.display());

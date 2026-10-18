@@ -137,10 +137,10 @@ impl ResponsesItemIdentity {
                 }
                 item.set_id(Some(id.clone()));
                 if added {
-                    self.open.insert(id, kind);
+                    let _ = self.open.insert(id, kind);
                     ResponseEvent::OutputItemAdded(item)
                 } else {
-                    self.open.remove(&id);
+                    let _ = self.open.remove(&id);
                     ResponseEvent::OutputItemDone(item)
                 }
             }

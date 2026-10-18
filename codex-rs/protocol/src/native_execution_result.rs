@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Write as _;
 
 /// The structured result of native `exec_command` and `write_stdin` calls.
 #[derive(Debug, Deserialize, Serialize)]
@@ -31,6 +32,7 @@ pub enum SettledExecution {
 
 impl SettledExecution {
     /// Contradictory status must retain its complete structured representation.
+    #[must_use]
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
         let (header, body) = self.parts(metadata)?;
         Some(compose(header, body))
@@ -49,7 +51,7 @@ impl SettledExecution {
             let call = call?;
             let ordinal = index + 1;
             if call.is_quiet(metadata) {
-                empty_start.get_or_insert(ordinal);
+                let _ = empty_start.get_or_insert(ordinal);
                 empty_end = ordinal;
                 continue;
             }
@@ -60,7 +62,7 @@ impl SettledExecution {
             if !output.is_empty() && !output.ends_with('\n') {
                 output.push('\n');
             }
-            output.push_str(&format!("[{ordinal}]"));
+            let _ = write!(output, "[{ordinal}]");
             if !header.is_empty() {
                 output.push(' ');
                 output.push_str(&header);
@@ -98,6 +100,7 @@ impl SettledExecution {
 
 impl NativeExecutionResult {
     /// Contradictory status must retain its complete structured representation.
+    #[must_use]
     pub fn render(&self, metadata: ExecutionOutputMetadata) -> Option<String> {
         Some(compose(self.header(metadata)?, &self.output))
     }
@@ -145,9 +148,9 @@ fn append_empty_span(output: &mut String, start: usize, end: usize) {
         output.push('\n');
     }
     if start == end {
-        output.push_str(&format!("[{start}] Completed"));
+        let _ = write!(output, "[{start}] Completed");
     } else {
-        output.push_str(&format!("[{start}–{end}] Completed"));
+        let _ = write!(output, "[{start}–{end}] Completed");
     }
 }
 

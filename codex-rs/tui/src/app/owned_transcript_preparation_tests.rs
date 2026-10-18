@@ -3,11 +3,11 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-pub(super) async fn out_of_order_streams(
+pub(super) fn out_of_order_streams(
     app: &mut App,
     tui: &mut tui::Tui,
     area: Rect,
-    retained: Arc<dyn HistoryCell>,
+    retained: &Arc<dyn HistoryCell>,
 ) -> Result<()> {
     // Two finalizations may complete out of order after unrelated output arrived.
     let thread_id = ThreadId::new();

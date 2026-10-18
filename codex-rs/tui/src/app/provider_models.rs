@@ -1,6 +1,14 @@
 //! Switching provider starts a new conversation; the current history is never reinterpreted.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Duration;
+use super::ModelPreset;
+use super::Result;
+use super::Uuid;
+use super::tui;
 use crate::model_catalog::ModelListing;
 use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
@@ -18,7 +26,7 @@ pub(crate) struct ProviderModelChoice {
 pub(crate) enum ProviderModelEvent {
     Open(ModelProviderOption),
     Loaded {
-        request_id: uuid::Uuid,
+        request_id: Uuid,
         provider: ModelProviderOption,
         result: Result<ModelListing, String>,
     },
@@ -45,12 +53,12 @@ impl App {
                 );
             }
             ProviderModelEvent::Open(provider) => {
-                let request_id = uuid::Uuid::new_v4();
+                let request_id = Uuid::new_v4();
                 self.chat_widget
                     .show_provider_models_loading(request_id, &provider);
                 let handle = server.request_handle();
                 let events = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(/*secs*/ 20), async {
                         let response = handle
                             .request_typed::<ModelListResponse>(ClientRequest::ModelList {
@@ -88,7 +96,7 @@ impl App {
                         provider,
                         result,
                     }));
-                });
+                }));
             }
             ProviderModelEvent::Loaded {
                 request_id,
@@ -96,11 +104,11 @@ impl App {
                 result,
             } => {
                 self.chat_widget
-                    .show_provider_models(request_id, provider, result);
+                    .show_provider_models(request_id, &provider, result);
             }
             ProviderModelEvent::Start(choice) => {
                 if self.chat_widget.session_draft.is_some() {
-                    self.select_draft_provider(server, *choice).await;
+                    self.select_draft_provider(server, *choice);
                     return;
                 }
                 self.start_fresh_session_with_provider(

@@ -1,5 +1,14 @@
 //! A sounded alarm is immutable transcript output, not a user message.
-use super::*;
+use super::HistoryCell;
+use super::HistoryTimestamp;
+use super::Line;
+use super::OutputMode;
+use super::RtOptions;
+use super::Stylize;
+use super::activity_parts;
+use super::adaptive_wrap_lines;
+use super::prefix_lines;
+use super::sanitize_user_text;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::alarm_output_lines;
 use codex_app_server_protocol::alarm_sounding::AlarmCause;
@@ -145,9 +154,9 @@ impl crate::transcript_view::FeedEntry for AlarmSoundingCell {
         &self,
         width: u16,
         _expanded: &std::collections::HashSet<String>,
-        _mode: super::output_provenance::OutputMode,
-    ) -> super::activity_parts::ActivityParts {
-        super::activity_parts::ActivityParts {
+        _mode: OutputMode,
+    ) -> activity_parts::ActivityParts {
+        activity_parts::ActivityParts {
             lines: adaptive_wrap_lines(self.full_body(), RtOptions::new(usize::from(width)))
                 .into_iter()
                 .map(Into::into)

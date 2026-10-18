@@ -95,10 +95,11 @@ pub(in crate::request_processors) fn catalog_for_list(
 ) -> Result<Option<Arc<crate::model_catalog::ModelCatalog>>, JSONRPCErrorError> {
     match config.model_provider.adapter {
         ModelProviderAdapter::OpenRouter => {
+            let catalog = catalog(&config)?;
             Ok(Some(Arc::new(crate::model_catalog::ModelCatalog::new(
                 config_manager,
-                config.clone(),
-                catalog(&config)?,
+                config,
+                catalog,
             ))))
         }
         ModelProviderAdapter::ClaudeSubscription | ModelProviderAdapter::OpenaiCompatible => {
@@ -187,7 +188,7 @@ fn filter_value(filter: &EndpointFilter) -> toml_edit::Item {
         .iter()
         .map(EndpointSlug::as_str)
         .collect::<toml_edit::Array>();
-    table.insert(field, array.into());
+    let _ = table.insert(field, array.into());
     toml_edit::Item::Value(table.into())
 }
 
@@ -298,23 +299,22 @@ impl TurnRequestProcessor {
                     })
                     .map(|cached| cached.state.clone())
             };
-            let state = match cached {
-                Some(state) => state,
-                None => {
-                    let state = fetch_state(&client, &key.path)
-                        .await
-                        .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
-                    self.openrouter_key_cache.0.lock().await.insert(
-                        key.name.clone(),
-                        CachedKeyStatus {
-                            path: key.path.clone(),
-                            base_url: url.to_owned(),
-                            at: Instant::now(),
-                            state: state.clone(),
-                        },
-                    );
-                    state
-                }
+            let state = if let Some(state) = cached {
+                state
+            } else {
+                let state = fetch_state(&client, &key.path)
+                    .await
+                    .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
+                let _ = self.openrouter_key_cache.0.lock().await.insert(
+                    key.name.clone(),
+                    CachedKeyStatus {
+                        path: key.path.clone(),
+                        base_url: url.to_owned(),
+                        at: Instant::now(),
+                        state: state.clone(),
+                    },
+                );
+                state
             };
             statuses.push(OpenRouterKeyStatus { key, state });
         }
@@ -347,7 +347,7 @@ impl TurnRequestProcessor {
         let bearer = read_key_file(params.path.as_path())
             .await
             .map_err(|error| invalid_request(error.to_string()))?;
-        client(&config)?
+        let _ = client(&config)?
             .key(&bearer)
             .await
             .map_err(|error| invalid_request(error.to_string()))?;
@@ -369,11 +369,12 @@ impl TurnRequestProcessor {
             edits.push(default_key(&params.name));
             preferences.default_key = Some(params.name.clone());
         }
-        preferences
+        let _ = preferences
             .key_files
             .insert(params.name.clone(), params.path);
         apply(&config, edits).await?;
-        self.openrouter_key_cache
+        let _ = self
+            .openrouter_key_cache
             .0
             .lock()
             .await
@@ -404,7 +405,8 @@ impl TurnRequestProcessor {
             });
         }
         apply(&config, edits).await?;
-        self.openrouter_key_cache
+        let _ = self
+            .openrouter_key_cache
             .0
             .lock()
             .await
@@ -596,21 +598,20 @@ impl TurnRequestProcessor {
             .await
             .map_err(|_| internal_error("Cannot lock OpenRouter preferences"))?;
         let preferences = preferences(config).await?;
-        key(&preferences, &name)?;
+        let _ = key(&preferences, &name)?;
         let is_openrouter = matches!(
             thread.config_snapshot().await.model_provider_adapter,
             ModelProviderAdapter::OpenRouter
         );
         if is_openrouter {
-            thread
-                .select_openrouter_key(&name)
+            Box::pin(thread.select_openrouter_key(&name))
                 .await
                 .map_err(|error| invalid_request(error.to_string()))?;
         }
         let default_saved = apply(config, [default_key(&name)])
             .await
             .map_err(|error| {
-                tracing::warn!(code = error.code, "Cannot save default OpenRouter key")
+                tracing::warn!(code = error.code, "Cannot save default OpenRouter key");
             })
             .is_ok();
         Ok(Some(

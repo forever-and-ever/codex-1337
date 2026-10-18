@@ -29,4 +29,4 @@ impl InitialWait {
 }
 
 /// Outlives every cell and turn; collection still ends the moment the process exits.
-const EXIT_HORIZON: Duration = Duration::from_secs(365 * 24 * 60 * 60);
+const EXIT_HORIZON: Duration = Duration::from_hours(8760);

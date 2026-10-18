@@ -43,7 +43,7 @@ pub struct LoginCancelHandle(watch::Sender<bool>);
 
 impl LoginCancelHandle {
     pub fn cancel(&self) {
-        self.0.send_replace(/*value*/ true);
+        let _ = self.0.send_replace(/*value*/ true);
     }
 }
 
@@ -115,7 +115,7 @@ impl LoginAttempt {
             tokio::select! {
                 biased;
                 _ = callback_cancelled.wait_for(|cancelled| *cancelled) => Err(cancel_error()),
-                _ = tokio::time::sleep_until(deadline) => Err(timeout_error()),
+                () = tokio::time::sleep_until(deadline) => Err(timeout_error()),
                 result = callback::receive(listener, &callback_state) => result,
             }
         });
@@ -134,10 +134,12 @@ impl LoginAttempt {
         })
     }
 
+    #[must_use]
     pub fn authorization_url(&self) -> &str {
         &self.authorization_url
     }
 
+    #[must_use]
     pub fn cancel_handle(&self) -> LoginCancelHandle {
         self.cancel.clone()
     }
@@ -149,7 +151,7 @@ impl LoginAttempt {
         let result = tokio::select! {
             biased;
             _ = cancelled.wait_for(|cancelled| *cancelled) => Err(cancel_error()),
-            _ = tokio::time::sleep_until(self.deadline) => Err(timeout_error()),
+            () = tokio::time::sleep_until(self.deadline) => Err(timeout_error()),
             result = self.authorize() => result,
         };
         if let Some(callback) = self.callback.take() {
@@ -173,7 +175,7 @@ impl LoginAttempt {
             .ok_or_else(|| io::Error::other("Anthropic callback already consumed"))?
             .await
             .map_err(|_| io::Error::other("Anthropic callback task failed"));
-        self.callback.take();
+        let _ = self.callback.take();
         let code = code??;
         let tokens: Tokens = OAuthClient::new(
             &self.http,

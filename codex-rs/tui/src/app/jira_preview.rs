@@ -58,7 +58,9 @@ impl JiraPreview {
             .into_iter()
             .map(|line| Line::from(line.into_owned()).bold())
             .collect();
-        let heading_height = headings.len().min(area.height as usize) as u16;
+        let heading_height = u16::try_from(headings.len())
+            .unwrap_or(u16::MAX)
+            .min(area.height);
         Paragraph::new(headings).render(
             Rect {
                 height: heading_height,
@@ -106,14 +108,9 @@ impl JiraPreview {
         self.scroll = self
             .scroll
             .min(lines.len().saturating_sub(body.height as usize));
-        for (row, line) in lines
-            .iter()
-            .skip(self.scroll)
-            .take(body.height as usize)
-            .enumerate()
-        {
+        for (row, line) in (0..body.height).zip(lines.iter().skip(self.scroll)) {
             Paragraph::new(line.clone()).render(
-                Rect::new(body.x, body.y + row as u16, body.width, /*height*/ 1),
+                Rect::new(body.x, body.y + row, body.width, /*height*/ 1),
                 buf,
             );
         }

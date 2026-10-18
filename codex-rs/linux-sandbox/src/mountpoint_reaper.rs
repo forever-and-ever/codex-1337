@@ -2,7 +2,7 @@
 //!
 //! A read-only path missing from a writable root is masked by a mount, so a
 //! mountpoint must exist on the host while the sandbox runs. The wrapper removes
-//! it when the last registrant exits, but a SIGKILLed wrapper or a cgroup kill
+//! it when the last registrant exits, but a `SIGKILLed` wrapper or a cgroup kill
 //! skips that cleanup, and a leftover `.git` makes its parent a project root.
 //!
 //! - The wrapper creates each missing mountpoint itself, without following
@@ -34,7 +34,6 @@ use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::os::fd::AsFd;
-use std::os::fd::AsRawFd;
 use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
@@ -91,10 +90,15 @@ pub(super) fn runtime_directory() -> std::io::Result<PathBuf> {
         }
         let created = tempfile::Builder::new()
             .prefix("codex-sandbox-runtime-")
-            .tempdir()?
-            .keep();
+            .tempdir()?;
+        // SAFETY: the callback has the C ABI, takes no arguments, cannot unwind, and only accesses a process-lifetime static.
+        if unsafe { libc::atexit(remove_directory) } != 0 {
+            return Err(std::io::Error::other(
+                "cannot register sandbox runtime directory cleanup",
+            ));
+        }
+        let created = created.keep();
         *directory = Some(created.clone());
-        unsafe { libc::atexit(remove_directory) };
         Ok(created)
     }
     #[cfg(not(test))]
@@ -306,8 +310,8 @@ fn parse_mountpoint(record: &[u8]) -> Option<Mountpoint> {
 
 /// This process's marker: the upstream stake line, extended with its
 /// incarnation and the mountpoint it registered.
-pub(super) fn marker(stake_line: &[u8], mountpoint: Option<Mountpoint>) -> Vec<u8> {
-    encode(stake_line, Incarnation::of("self"), mountpoint.as_ref())
+pub(super) fn marker(stake_line: &[u8], mountpoint: Option<&Mountpoint>) -> Vec<u8> {
+    encode(stake_line, Incarnation::of("self"), mountpoint)
 }
 
 fn encode(
@@ -431,7 +435,7 @@ pub(super) fn sweep_unregistered() {
     else {
         return;
     };
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+    if rustix::fs::flock(&lock, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_ok() {
         sweep(&registry);
     }
 }
@@ -494,7 +498,11 @@ pub(super) fn forge(target: &SyntheticMountTarget) -> Option<Mountpoint> {
 }
 
 /// Registers the bubblewrap child beside this wrapper, so the hold outlives a
-/// SIGKILLed wrapper for as long as the sandbox does.
+/// `SIGKILLed` wrapper for as long as the sandbox does.
+#[expect(
+    clippy::panic,
+    reason = "Child registration must fail closed to prevent reaping a live mountpoint; the upstream post-spawn hook has no Result channel"
+)]
 pub(super) fn enlist(registrations: &[SyntheticMountTargetRegistration], child: libc::pid_t) {
     if registrations.is_empty() {
         return;

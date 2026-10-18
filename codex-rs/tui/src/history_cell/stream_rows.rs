@@ -3,7 +3,17 @@
 //! Emission transfers Arc slices, never walks rows. Prefix sums address their
 //! concatenation; styling/materialization belongs to the existing layout worker.
 
-use super::*;
+use super::ActivityDisclosure;
+use super::AgentMessageCell;
+use super::HistoryCell;
+use super::HistoryRenderMode;
+use super::HistoryTimestamp;
+use super::HyperlinkLine;
+use super::Line;
+use super::Stylize;
+use super::new_proposed_plan_stream;
+use super::prefix_proposed_plan_lines;
+use super::proposed_plan_style;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -87,7 +97,7 @@ impl StreamRowsCell {
             RowProjection::Agent { first, timestamp } => {
                 let mut cell = AgentMessageCell::new_hyperlink_lines(rows.materialize(), first);
                 cell.timestamp = timestamp;
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell)
             }
             RowProjection::Plan { first, top, bottom } => {
@@ -95,7 +105,7 @@ impl StreamRowsCell {
                     render_plan_rows(rows.materialize(), first, top, bottom),
                     !first,
                 );
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell)
             }
         }

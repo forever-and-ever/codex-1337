@@ -14,6 +14,10 @@ use codex_utils_cli::SharedCliOptions;
 use std::path::PathBuf;
 
 // TELOS(explicit-command-verbs): a missing or unknown verb cannot start a task.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent command-line switches are orthogonal and clap populates their boolean parser fields"
+)]
 #[derive(Parser, Debug)]
 #[command(version)]
 pub struct Cli {
@@ -31,7 +35,7 @@ pub struct Cli {
     #[arg(long = "thread-source", value_name = "SOURCE", global = true)]
     pub thread_source: Option<ThreadSource>,
 
-    /// Request an experimental Cyber access program for this turn (OpenAI provider only).
+    /// Request an experimental Cyber access program for this turn (`OpenAI` provider only).
     /// Omit to use server defaults. Not supported with review; fork requires a prompt.
     #[arg(long, value_enum, value_name = "PROGRAM", global = true)]
     pub cyber_access_program: Option<CyberAccessProgramCliArg>,
@@ -44,7 +48,7 @@ pub struct Cli {
     #[arg(long = "ephemeral", global = true, default_value_t = false)]
     pub ephemeral: bool,
 
-    /// Do not load CODEX_HOME/config.toml; auth still uses CODEX_HOME.
+    /// Do not load `CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`.
     #[arg(long = "ignore-user-config", global = true, default_value_t = false)]
     pub ignore_user_config: bool,
 
@@ -153,7 +157,9 @@ fn exec_shared_id(id: &str) -> &'static str {
         "bypass_hook_trust" => "exec_bypass_hook_trust",
         "cwd" => "exec_cwd",
         "add_dir" => "exec_add_dir",
-        _ => panic!("shared CLI argument has no exec parser scope: {id}"),
+        _ => unreachable!(
+            "shared CLI schema contains an argument without an exec parser scope: {id}"
+        ),
     }
 }
 

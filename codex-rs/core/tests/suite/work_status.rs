@@ -60,14 +60,15 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
         )
         .await,
     );
-    test.codex
+    let _ = test
+        .codex
         .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
             text: "Implement and release the status display.".into(),
             text_elements: Vec::new(),
         }]))
         .await?;
     let mut snapshots = Vec::new();
-    wait_for_event(&test.codex, |event| {
+    let _ = wait_for_event(&test.codex, |event| {
         if let EventMsg::WorkStatusUpdated(status) = event {
             snapshots.push(status.clone());
         }
@@ -145,13 +146,13 @@ async fn work_status_replaces_activity_without_entering_history() -> Result<()> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -> Result<()> {
     let server = responses::start_mock_server().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(|config| {
         config.features.enable(Feature::CodeModeOnly).unwrap();
         config.features.enable(Feature::MultiAgentV2).unwrap();
     });
     let test = builder.build_with_auto_env(&server).await?;
-    responses::mount_sse_once(
+    let _ = responses::mount_sse_once(
         &server,
         responses::sse(vec![
             responses::ev_custom_tool_call(
@@ -200,7 +201,7 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
             .inputs_of_type("custom_tool_call_output")
             .is_empty()
     );
-    responses::mount_sse_once(
+    let _ = responses::mount_sse_once(
         &server,
         responses::sse(vec![
             responses::ev_custom_tool_call(
@@ -231,7 +232,7 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
     };
     let mut statuses = Vec::new();
     let mut nested_activity = Vec::new();
-    wait_for_event(&test.codex, |event| {
+    let _ = wait_for_event(&test.codex, |event| {
         if let EventMsg::WorkStatusUpdated(status) = event {
             statuses.push((status.turn_id.clone(), status.activity.clone()));
         }
@@ -249,7 +250,7 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
         nested_activity,
         vec![(child_id, SubAgentActivityKind::Interacted)]
     );
-    tokio::time::timeout(Duration::from_secs(10), async {
+    let _ = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Some(request) = delivered.requests().into_iter().find(|request| {
                 request
@@ -264,6 +265,6 @@ async fn exec_batches_work_status_and_agent_delivery_after_full_history_fork() -
     })
     .await?;
     Ok(())
-    })
+    }))
     .await
 }

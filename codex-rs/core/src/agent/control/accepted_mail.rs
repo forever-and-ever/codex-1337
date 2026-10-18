@@ -264,9 +264,7 @@ impl LocalAgentRuntime {
             }
         }
         let config = root_thread.session.get_config().await;
-        control
-            .ensure_v2_agent_loaded((*config).clone(), recipient, None)
-            .await?;
+        Box::pin(control.ensure_v2_agent_loaded((*config).clone(), recipient, None)).await?;
         let thread = manager.get_thread(recipient).await?;
         thread.session.recover_accepted_agent_mail().await?;
         Ok(())

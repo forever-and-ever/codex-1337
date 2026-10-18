@@ -79,6 +79,7 @@ pub struct NetworkPolicyRequestArgs {
 }
 
 impl NetworkPolicyRequest {
+    #[must_use]
     pub fn new(args: NetworkPolicyRequestArgs) -> Self {
         let NetworkPolicyRequestArgs {
             protocol,

@@ -8,7 +8,7 @@
 //! plain prose: a directly following setext underline (===/---), and a late pipe that makes
 //! the current line table-eligible. A pipe freezes that line until its structure is known.
 //! Canonical replacement resolves both, rather than delaying every paragraph until a blank line.
-//! Safe complete words on an unterminated prose line wrap with the final renderer's FirstFit:
+//! Safe complete words on an unterminated prose line wrap with the final renderer's `FirstFit`:
 //! completed rows never roll; only the last row grows. Source parsing and unresolved-block
 //! rendering run on the worker, never in the delta handler or paint path.
 //!
@@ -37,7 +37,7 @@ use std::time::Instant;
 
 pub(super) enum Rows {
     Inline(Vec<HyperlinkLine>),
-    Shared(crate::history_cell::SharedRows),
+    Shared(history_cell::SharedRows),
 }
 impl Rows {
     pub(super) fn is_empty(&self) -> bool {
@@ -80,7 +80,7 @@ impl Command {
     fn apply(self, core: &mut StreamCore) {
         match self {
             Self::Delta(delta) => {
-                core.push_delta(&delta);
+                let _ = core.push_delta(&delta);
             }
             Self::Width(width) => core.set_width(width),
             Self::Mode(mode) => core.set_render_mode(mode),
@@ -110,7 +110,7 @@ enum Work {
 pub(crate) struct Background {
     work: Work,
     commands: Vec<Command>,
-    lines: VecDeque<crate::history_cell::RowChunk>,
+    lines: VecDeque<history_cell::RowChunk>,
     queued: usize,
     tail: Vec<HyperlinkLine>,
     lane: Lane,
@@ -141,7 +141,7 @@ impl Background {
             let mut core = StreamCore::new(width, &cwd, mode, context);
             core.render.list_spacing = spacing;
             STREAMS.with(|streams| {
-                streams
+                let _ = streams
                     .borrow_mut()
                     .insert(id, (core, super::immutable_rows::Publication::default()));
             });
@@ -185,7 +185,7 @@ impl Background {
                 }
                 self.queued += lines.rows.len();
                 if !lines.rows.is_empty() {
-                    self.lines.push_back(crate::history_cell::RowChunk {
+                    self.lines.push_back(history_cell::RowChunk {
                         range: 0..lines.rows.len(),
                         rows: lines.rows,
                     });
@@ -223,7 +223,7 @@ impl Background {
                     core.emitted_stable_len = 0;
                     core.enqueued_stable_len = 0;
                     core.state.clear_queue();
-                    core.sync_stable_queue();
+                    let _ = core.sync_stable_queue();
                 }
                 let (rows, tail) = publication.prepare(core);
                 let count = rows.len();
@@ -247,7 +247,7 @@ impl Background {
         self.work = Work::Running(task);
     }
     fn push(&mut self, command: Command) {
-        self.oldest.get_or_insert_with(Instant::now);
+        let _ = self.oldest.get_or_insert_with(Instant::now);
         self.commands.push(command);
         self.poll();
     }
@@ -255,9 +255,9 @@ impl Background {
         clippy::expect_used,
         reason = "A chunk selected from the exclusively borrowed queue remains at its front until removed."
     )]
-    fn drain(&mut self, max: usize) -> crate::history_cell::SharedRows {
+    fn drain(&mut self, max: usize) -> history_cell::SharedRows {
         self.poll();
-        let mut rows = crate::history_cell::SharedRows::default();
+        let mut rows = history_cell::SharedRows::default();
         while rows.len() < max {
             let Some(chunk) = self.lines.front_mut() else {
                 break;
@@ -266,7 +266,7 @@ impl Background {
             if count == chunk.range.len() {
                 rows.push(self.lines.pop_front().expect("front chunk"));
             } else {
-                rows.push(crate::history_cell::RowChunk {
+                rows.push(history_cell::RowChunk {
                     rows: Arc::clone(&chunk.rows),
                     range: chunk.range.start..chunk.range.start + count,
                 });
@@ -298,7 +298,7 @@ impl Background {
         let lines = std::mem::take(&mut self.lines);
         let lane = self.lane.clone();
         let id = self.id;
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let ready = match work {
                 Work::Running(task) => Some(task.wait().await),
                 _ => None,
@@ -317,7 +317,7 @@ impl Background {
                     finish(core.state.collector.finalize_and_take_source());
                 });
             });
-        });
+        }));
     }
 }
 impl Drop for Background {
@@ -329,7 +329,7 @@ impl Drop for Background {
         let id = self.id;
         let lane = self.lane.clone();
         let lines = std::mem::take(&mut self.lines);
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let ready = match work {
                 Work::Running(task) => Some(task.wait().await),
                 _ => None,
@@ -338,10 +338,10 @@ impl Drop for Background {
                 drop(ready);
                 drop(lines);
                 STREAMS.with(|streams| {
-                    streams.borrow_mut().remove(&id);
+                    let _ = streams.borrow_mut().remove(&id);
                 });
             });
-        });
+        }));
     }
 }
 
@@ -366,7 +366,7 @@ impl Core {
                     }
                     background.queued += ready.rows.len();
                     if !ready.rows.is_empty() {
-                        background.lines.push_back(crate::history_cell::RowChunk {
+                        background.lines.push_back(history_cell::RowChunk {
                             range: 0..ready.rows.len(),
                             rows: ready.rows,
                         });
@@ -386,20 +386,20 @@ impl Core {
 
     pub(super) fn wrap_rows(
         &self,
-        rows: crate::history_cell::SharedRows,
-        projection: crate::history_cell::RowProjection,
+        rows: history_cell::SharedRows,
+        projection: history_cell::RowProjection,
         item_id: Option<String>,
         reserved: usize,
-    ) -> Box<dyn crate::history_cell::HistoryCell> {
+    ) -> Box<dyn HistoryCell> {
         let Self::Background(core) = self else {
             unreachable!("shared rows belong to prepared streams");
         };
-        Box::new(crate::history_cell::StreamRowsCell {
+        Box::new(history_cell::StreamRowsCell {
             mode: core.mode,
             width: core.width,
             reserved,
             item_id,
-            content: crate::history_cell::StreamRowContent::Shared { rows, projection },
+            content: history_cell::StreamRowContent::Shared { rows, projection },
         })
     }
 
@@ -417,6 +417,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Stream spacing is construction-only configuration; prepared streams cannot be reconstructed in place."
+    )]
     pub(super) fn set_list_spacing(&mut self, spacing: ListSpacing) {
         match self {
             Self::Inline(core) => core.render.list_spacing = spacing,
@@ -534,6 +538,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Prepared streams must transfer completion through their keyed finalization owner, never the synchronous inline API."
+    )]
     pub(super) fn finalize_remaining(&mut self) -> (Vec<HyperlinkLine>, String) {
         match self {
             Self::Inline(core) => core.finalize_remaining(),
@@ -543,6 +551,10 @@ impl Core {
         }
     }
 
+    #[expect(
+        clippy::panic,
+        reason = "Prepared streams transfer their parser on finalization and cannot be reset through the synchronous inline API."
+    )]
     pub(super) fn reset(&mut self) {
         match self {
             Self::Inline(core) => core.reset(),
@@ -602,7 +614,7 @@ impl super::StreamController {
             Rows::Inline(lines) => {
                 let mut cell = history_cell::AgentMessageCell::new_hyperlink_lines(lines, first);
                 cell.timestamp = self.timestamp;
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell)
             }
             Rows::Shared(rows) => self.core.wrap_rows(
@@ -636,7 +648,7 @@ impl super::PlanStreamController {
             Rows::Inline(lines) => {
                 let out = self.render_display_lines(lines, include_bottom_padding);
                 let mut cell = history_cell::new_proposed_plan_stream(out, !first);
-                cell.item_id = self.item_id.clone();
+                cell.item_id.clone_from(&self.item_id);
                 Box::new(cell) as Box<dyn HistoryCell>
             }
             Rows::Shared(rows) => self.core.wrap_rows(

@@ -3,7 +3,6 @@
 
 use std::ffi::OsString;
 use std::io;
-use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
 use std::os::unix::process::CommandExt;
@@ -51,7 +50,7 @@ impl Reaper {
         let receiver = Arc::new(std::sync::Mutex::new(receiver));
         for _ in 0..WORKER_LIMIT {
             let receiver = Arc::clone(&receiver);
-            std::thread::Builder::new()
+            let _ = std::thread::Builder::new()
                 .name("ui-reaper".into())
                 .spawn(move || {
                     loop {
@@ -83,7 +82,7 @@ impl Slot {
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::Release);
+        let _ = self.0.fetch_sub(1, Ordering::Release);
     }
 }
 
@@ -102,7 +101,7 @@ impl Launch {
                 .spawn()?;
             let expected = format!("{}\n", super::retained::PROTOCOL);
             let mut bytes = vec![0; expected.len()];
-            child
+            let _ = child
                 .stdout
                 .take()
                 .ok_or_else(|| io::Error::other("Missing UI probe output pipe"))?
@@ -128,11 +127,11 @@ impl Launch {
         // SAFETY: openpty initializes both descriptors on success; each acquires one owner.
         if unsafe {
             libc::openpty(
-                &mut master,
-                &mut slave,
+                &raw mut master,
+                &raw mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null(),
-                &size,
+                &raw const size,
             )
         } != 0
         {
@@ -140,17 +139,15 @@ impl Launch {
         }
         // SAFETY: these are distinct, newly allocated descriptors from openpty.
         let master = unsafe { OwnedFd::from_raw_fd(master) };
+        // SAFETY: openpty returned a distinct descriptor whose custody is transferred here.
         let slave = unsafe { OwnedFd::from_raw_fd(slave) };
         for fd in [&master, &slave] {
-            // SAFETY: fcntl operates on a live descriptor, with no borrowed pointer.
-            if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } == -1 {
-                return Err(io::Error::last_os_error());
-            }
+            rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
         }
-        set_nonblocking(master.as_raw_fd())?;
+        set_nonblocking(&master)?;
         let terminal = AsyncFd::new(master)?;
         let mut command = Command::new(&executable);
-        command
+        let _ = command
             .args(self.args)
             .env("CODEX_UI_HOST", self.directory)
             .env("CODEX_UI_GENERATION", self.generation.to_string())
@@ -160,7 +157,7 @@ impl Launch {
             .stderr(Stdio::from(slave));
         // SAFETY: only async-signal-safe syscalls execute between fork and exec.
         unsafe {
-            command.pre_exec(|| {
+            let _ = command.pre_exec(|| {
                 if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY, 0) == -1 {
                     return Err(io::Error::last_os_error());
                 }
@@ -179,13 +176,15 @@ impl Launch {
 
 impl Worker {
     pub(super) fn resize(&self, size: (u16, u16)) -> io::Result<()> {
-        let size = dimensions(size);
-        // SAFETY: the descriptor and winsize pointer remain live for the ioctl.
-        if unsafe { libc::ioctl(self.terminal.get_ref().as_raw_fd(), libc::TIOCSWINSZ, &size) }
-            == -1
-        {
-            return Err(io::Error::last_os_error());
-        }
+        rustix::termios::tcsetwinsize(
+            self.terminal.get_ref(),
+            rustix::termios::Winsize {
+                ws_col: size.0,
+                ws_row: size.1,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )?;
         Ok(())
     }
 
@@ -206,10 +205,8 @@ impl Drop for Worker {
                 return;
             }
             // Each worker has its own session/process group. Never signal another terminal.
-            // SAFETY: kill takes an integer process-group ID and signal, no pointers.
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
+            let pid = rustix::process::Pid::from_child(&child);
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
             if let Err(
                 std::sync::mpsc::TrySendError::Full(job)
                 | std::sync::mpsc::TrySendError::Disconnected(job),
@@ -232,33 +229,18 @@ fn dimensions((columns, rows): (u16, u16)) -> libc::winsize {
     }
 }
 
-pub(super) fn set_nonblocking(fd: i32) -> io::Result<i32> {
-    // SAFETY: fcntl only reads/updates flags on the caller's live descriptor.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(flags)
+pub(super) fn set_nonblocking(fd: &OwnedFd) -> io::Result<()> {
+    let flags = rustix::fs::fcntl_getfl(fd)?;
+    rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?;
+    Ok(())
 }
 
-pub(super) fn read(fd: i32, bytes: &mut [u8]) -> io::Result<usize> {
-    // SAFETY: the destination is writable for exactly bytes.len() bytes.
-    let count = unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
-    if count < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(count as usize)
-    }
+pub(super) fn read(fd: &OwnedFd, bytes: &mut [u8]) -> io::Result<usize> {
+    Ok(rustix::io::read(fd, bytes)?)
 }
 
-pub(super) fn write(fd: i32, bytes: &[u8]) -> io::Result<usize> {
-    // SAFETY: the source is readable for exactly bytes.len() bytes.
-    let count = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
-    if count < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(count as usize)
-    }
+pub(super) fn write(fd: &OwnedFd, bytes: &[u8]) -> io::Result<usize> {
+    Ok(rustix::io::write(fd, bytes)?)
 }
 
 #[cfg(test)]

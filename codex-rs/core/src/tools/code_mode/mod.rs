@@ -210,7 +210,7 @@ impl CodeModeService {
         call: String,
         queue: std::sync::Weak<tokio::sync::Mutex<crate::state::TurnState>>,
     ) -> NotificationLease {
-        self.transcript.notification(owner, call, queue)
+        self.transcript.notification(&owner, call, queue)
     }
 
     pub(crate) async fn wait(

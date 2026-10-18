@@ -31,9 +31,9 @@ impl Disclosure {
         if tool.exposure == ToolExposure::Deferred
             || (tool_mode == ToolMode::CodeModeOnly
                 && (tool.runtime.mcp_server_name().is_some()
-                    || (!tool.runtime.is_third_party_tool()
-                        && !(tool_name.is_default_namespace()
-                            && BOOTSTRAP.contains(&tool_name.name.as_str())))))
+                    || !(tool.runtime.is_third_party_tool()
+                        || tool_name.is_default_namespace()
+                            && BOOTSTRAP.contains(&tool_name.name.as_str()))))
         {
             Self::Glossed
         } else {

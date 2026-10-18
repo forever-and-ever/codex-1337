@@ -39,7 +39,7 @@ pub(crate) async fn shutdown_signal() -> io::Result<ShutdownSignal> {
         let mut term = signal(SignalKind::terminate())?;
         let mut hangup = signal(SignalKind::hangup())?;
         tokio::select! {
-            ctrl_c_result = tokio::signal::ctrl_c() => ctrl_c_result.map(|_| ShutdownSignal::Forceable),
+            ctrl_c_result = tokio::signal::ctrl_c() => ctrl_c_result.map(|()| ShutdownSignal::Forceable),
             _ = term.recv() => Ok(ShutdownSignal::Forceable),
             _ = hangup.recv() => Ok(ShutdownSignal::WhenIdle),
         }

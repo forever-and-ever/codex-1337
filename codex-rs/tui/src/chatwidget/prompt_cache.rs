@@ -1,5 +1,8 @@
 //! The /warm toggle and the prompt-cache state behind the composer's glyphs.
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::Duration;
+use super::format_tokens_compact;
 use crate::bottom_pane::PromptCacheGlyphs;
 use codex_app_server_protocol::PromptCacheEstimate;
 use codex_app_server_protocol::PromptCacheWarming;
@@ -20,7 +23,10 @@ impl ChatWidget {
         });
     }
 
-    pub(super) fn on_prompt_cache_updated(&mut self, update: ThreadPromptCacheUpdatedNotification) {
+    pub(super) fn on_prompt_cache_updated(
+        &mut self,
+        update: &ThreadPromptCacheUpdatedNotification,
+    ) {
         self.prompt_cache = PromptCacheGlyphs {
             estimate: update.estimate,
             warming: update.warming,
@@ -35,8 +41,8 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    pub(super) fn on_prompt_cache_missed(&mut self, missed: ThreadPromptCacheMissedNotification) {
-        let tokens = crate::status::format_tokens_compact(missed.rewritten_tokens);
+    pub(super) fn on_prompt_cache_missed(&mut self, missed: &ThreadPromptCacheMissedNotification) {
+        let tokens = format_tokens_compact(missed.rewritten_tokens);
         self.add_warning_message(if missed.while_warming {
             format!("Cache missed while warming: rewrote {tokens} tokens. Warming stopped.")
         } else {

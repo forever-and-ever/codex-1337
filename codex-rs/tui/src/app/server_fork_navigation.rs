@@ -1,6 +1,43 @@
 //! Ordinary forks and explicitly authorized safety retries share acquisition custody.
 
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AbortOnDropHandle;
+use super::App;
+use super::AppCommand;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AppServerStartedThread;
+use super::Arc;
+use super::ChatWidget;
+use super::CleanupContinuation;
+use super::ClientRequest;
+use super::Config;
+use super::DetachScope;
+use super::DraftDisposition;
+use super::Duration;
+use super::FutureExt;
+use super::LaneState;
+use super::LocalDraftRecovery;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::OperationOrigin;
+use super::PendingNavigation;
+use super::PermissionAuthority;
+use super::Result;
+use super::SelectionAfter;
+use super::ServerCompletion;
+use super::SideThreadState;
+use super::ThreadId;
+use super::ThreadItem;
+use super::UserMessage;
+use super::UserTurnReplay;
+use super::detach;
+use super::navigation_config;
+use super::session_lifecycle;
+use super::side;
+use super::tui;
+use super::ui_requests;
 use crate::app::safety_buffering::safety_retry_fork_point;
 use crate::app::thread_name::ThreadNameRequest;
 use crate::app_server_session::ForkGoalContinuation;
@@ -52,7 +89,7 @@ enum ForkPurpose {
     },
     Safety(Box<SafetyContinuation>),
     Side {
-        prompt: Option<crate::chatwidget::UserMessage>,
+        prompt: Option<UserMessage>,
     },
 }
 
@@ -111,7 +148,7 @@ impl ForkStage {
 }
 
 enum ForkEffect {
-    Refresh(Box<super::navigation_config::ConfigRebuild>),
+    Refresh(Box<navigation_config::ConfigRebuild>),
     Begin,
     Interrupt {
         thread_id: ThreadId,
@@ -148,8 +185,8 @@ impl App {
         &mut self,
         app_server: &AppServerSession,
         parent_thread_id: ThreadId,
-        mut user_message: Option<crate::chatwidget::UserMessage>,
-    ) -> Result<AppRunControl> {
+        mut user_message: Option<UserMessage>,
+    ) -> AppRunControl {
         if self
             .side_threads
             .values()
@@ -158,20 +195,20 @@ impl App {
             self.restore_side_user_message(user_message.take());
             self.sync_side_thread_ui();
             self.chat_widget
-                .add_error_message(crate::app::side::SIDE_ALREADY_OPEN_MESSAGE.into());
-            return Ok(AppRunControl::Continue);
+                .add_error_message(side::SIDE_ALREADY_OPEN_MESSAGE.into());
+            return AppRunControl::Continue;
         }
         self.session_telemetry
             .counter("codex.thread.side", 1, &[("source", "slash_command")]);
         self.enqueue_side_fork(app_server, parent_thread_id, user_message);
-        Ok(AppRunControl::Continue)
+        AppRunControl::Continue
     }
 
     pub(in crate::app) fn enqueue_side_fork(
         &mut self,
         server: &AppServerSession,
         thread_id: ThreadId,
-        prompt: Option<crate::chatwidget::UserMessage>,
+        prompt: Option<UserMessage>,
     ) {
         let input = ForkInput {
             origin: OperationOrigin::Thread {
@@ -191,7 +228,7 @@ impl App {
         self.chat_widget.fork_in_progress = true;
     }
 
-    pub(in crate::app) async fn enqueue_ordinary_fork(
+    pub(in crate::app) fn enqueue_ordinary_fork(
         &mut self,
         server: &AppServerSession,
         name: Option<String>,
@@ -213,10 +250,10 @@ impl App {
             from_agents_overview,
             source_turn_running: self.chat_widget.is_agent_turn_running(),
         };
-        self.request_server_prepared(
+        let _ = self.request_server_prepared(
             server,
-            super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
-            super::turn_submissions::ui_requests::UiRequestKind::ReadOnly,
+            ui_requests::UiRequestScope::Thread(thread_id),
+            ui_requests::UiRequestKind::ReadOnly,
             "Preparing fork settings",
             move |app, _| {
                 let current = app.current_displayed_thread_id() == Some(thread_id)
@@ -332,41 +369,49 @@ impl App {
             operation.generation,
         );
         operation.state = LaneState::Running(AbortOnDropHandle::new(tokio::spawn(async move {
-            let outcome = std::panic::AssertUnwindSafe(async {
-                match effect {
-                    ForkEffect::Begin => ForkOutcome::Begin,
-                    ForkEffect::Refresh(plan) => ForkOutcome::Refreshed(plan.run().await),
-                    ForkEffect::Interrupt { thread_id, turn_id } => ForkOutcome::Interrupted(
-                        preparation::request::<api::TurnInterruptResponse>(
-                            RequestPolicy::Interactive,
-                            &handle,
-                            api::ClientRequest::TurnInterrupt {
-                                request_id: api::RequestId::String(format!(
-                                    "tui-safety-interrupt-{id}"
-                                )),
-                                params: api::TurnInterruptParams {
-                                    thread_id: thread_id.to_string(),
-                                    turn_id,
+            let outcome = Box::pin(
+                std::panic::AssertUnwindSafe(async {
+                    match effect {
+                        ForkEffect::Begin => ForkOutcome::Begin,
+                        ForkEffect::Refresh(plan) => ForkOutcome::Refreshed(plan.run().await),
+                        ForkEffect::Interrupt { thread_id, turn_id } => ForkOutcome::Interrupted(
+                            preparation::request::<api::TurnInterruptResponse>(
+                                RequestPolicy::Interactive,
+                                &handle,
+                                ClientRequest::TurnInterrupt {
+                                    request_id: api::RequestId::String(format!(
+                                        "tui-safety-interrupt-{id}"
+                                    )),
+                                    params: api::TurnInterruptParams {
+                                        thread_id: thread_id.to_string(),
+                                        turn_id,
+                                    },
                                 },
+                            )
+                            .await
+                            .map(|_| ()),
+                        ),
+                        ForkEffect::History(plan) => {
+                            ForkOutcome::History(Box::new(plan.run().await))
+                        }
+                        ForkEffect::Acquire(plan) => {
+                            ForkOutcome::Acquired(Box::new(Box::pin(plan.run()).await))
+                        }
+                        ForkEffect::Detach(plan) => ForkOutcome::Detached(
+                            match tokio::time::timeout(
+                                ACK_TIMEOUT,
+                                detach::send(&handle, id, &plan),
+                            )
+                            .await
+                            {
+                                Ok(results) => detach::DetachReceipt::Complete(results),
+                                Err(_) => detach::DetachReceipt::BudgetExpired,
                             },
-                        )
-                        .await
-                        .map(|_| ()),
-                    ),
-                    ForkEffect::History(plan) => ForkOutcome::History(Box::new(plan.run().await)),
-                    ForkEffect::Acquire(plan) => ForkOutcome::Acquired(Box::new(plan.run().await)),
-                    ForkEffect::Detach(plan) => ForkOutcome::Detached(match tokio::time::timeout(
-                        ACK_TIMEOUT,
-                        detach::send(&handle, id, &plan),
-                    )
-                    .await
-                    {
-                        Ok(results) => detach::DetachReceipt::Complete(results),
-                        Err(_) => detach::DetachReceipt::BudgetExpired,
-                    }),
-                }
-            })
-            .catch_unwind()
+                        ),
+                    }
+                })
+                .catch_unwind(),
+            )
             .await
             .unwrap_or(ForkOutcome::Terminated);
             let _ = completions.send(ServerCompletion::Navigation(Box::new(
@@ -527,19 +572,20 @@ impl App {
         );
         for thread_id in retained {
             if !self.side_threads.contains_key(&thread_id) {
-                self.agents_overview
+                let _ = self
+                    .agents_overview
                     .dispatched_requests
                     .entry(thread_id)
                     .or_default();
                 if let Some(channel) = self.thread_event_channels.get(&thread_id)
                     && let Some(input) = channel.store.lock().await.input_state.clone()
                 {
-                    self.agents_overview.input_states.insert(thread_id, input);
+                    let _ = self.agents_overview.input_states.insert(thread_id, input);
                 }
             }
         }
         if let Some(input) = self.chat_widget.capture_thread_input_state() {
-            self.agents_overview.input_states.insert(source, input);
+            let _ = self.agents_overview.input_states.insert(source, input);
         }
     }
 
@@ -618,11 +664,13 @@ impl App {
                     ready.started.turns,
                 );
             }
-            self.side_threads
-                .insert(target, crate::app::side::SideThreadState::new(parent));
+            let _ = self
+                .side_threads
+                .insert(target, SideThreadState::new(parent));
             self.upsert_agent_picker_thread(target, None, None, false);
             if let Some(profile) = ready.context.input.permissions.selection() {
-                self.agents_overview
+                let _ = self
+                    .agents_overview
                     .selected_permission_profiles
                     .insert(target, profile.profile_id.clone());
             }
@@ -663,7 +711,8 @@ impl App {
             ForkPurpose::Ordinary { .. } | ForkPurpose::Side { .. } => None,
         };
         if let Some(profile) = ready.context.input.permissions.selection() {
-            self.agents_overview
+            let _ = self
+                .agents_overview
                 .selected_permission_profiles
                 .insert(target, profile.profile_id.clone());
         }
@@ -674,7 +723,7 @@ impl App {
             .replace_chat_widget_with_app_server_thread(
                 tui,
                 ready.started,
-                crate::app::session_lifecycle::ThreadAttachPresentation::SessionLineage,
+                session_lifecycle::ThreadAttachPresentation::SessionLineage,
                 None,
             )
             .await;
@@ -713,7 +762,7 @@ impl App {
                 self.chat_widget
                     .add_info_message("Fork created. You can continue here.".into(), None);
                 if (from_locked_thread || from_agents_overview)
-                    && tui.presentation_mode() != crate::tui::PresentationMode::Frozen
+                    && tui.presentation_mode() != tui::PresentationMode::Frozen
                 {
                     if let Err(error) = tui.discard_pending_input_before_interactive_screen() {
                         tracing::warn!(%error, "failed to discard input after forking");
@@ -860,13 +909,10 @@ impl App {
                         let uncertain = result
                             .as_ref()
                             .is_err_and(|error| !matches!(error, TypedRequestError::Server { .. }));
-                        let error =
-                            result
-                                .err()
-                                .map(|error| error.to_string())
-                                .unwrap_or_else(|| {
-                                    "Retry canceled after stopping the original attempt.".into()
-                                });
+                        let error = result.err().map_or_else(
+                            || "Retry canceled after stopping the original attempt.".into(),
+                            |error| error.to_string(),
+                        );
                         self.fork_failure(&mut context.input, error, matching);
                         if uncertain && same_epoch {
                             let source = context.input.thread_id();
@@ -899,7 +945,7 @@ impl App {
                         .into_iter()
                         .flat_map(|turn| &turn.items)
                         .filter_map(|item| match item {
-                            api::ThreadItem::UserMessage { content, .. } => Some(content),
+                            ThreadItem::UserMessage { content, .. } => Some(content),
                             _ => None,
                         })
                         .skip(1)
@@ -911,14 +957,14 @@ impl App {
                             .chain(content.iter().cloned())
                         }),
                 );
-                if !self.fork_authority_matches(&context.input).await {
+                if self.fork_authority_matches(&context.input).await {
+                    self.acquire_fork_navigation(server, operation, context);
+                } else {
                     self.fork_failure(
                         &mut context.input,
                         "Retry canceled because its source task changed.",
                         true,
                     );
-                } else {
-                    self.acquire_fork_navigation(server, operation, context);
                 }
             }
             (ForkStage::Acquiring(mut context), ForkOutcome::Acquired(prepared)) => {
@@ -976,12 +1022,10 @@ impl App {
                         if !name_conflict {
                             self.fork_failure(
                                 &mut context.input,
-                                result
-                                    .err()
-                                    .map(|error| error.to_string())
-                                    .unwrap_or_else(|| {
-                                        "Fork canceled because its source task changed.".into()
-                                    }),
+                                result.err().map_or_else(
+                                    || "Fork canceled because its source task changed.".into(),
+                                    |error| error.to_string(),
+                                ),
                                 matching,
                             );
                         }
@@ -996,13 +1040,13 @@ impl App {
                                     Vec::new(),
                                     CleanupContinuation::Done,
                                     false,
-                                )
+                                );
                             }
                             SubscriptionCustody::Uncertain(target) if same_epoch => {
-                                self.retain_navigation_uncertainty(operation, vec![target], false)
+                                self.retain_navigation_uncertainty(operation, vec![target], false);
                             }
                             SubscriptionCustody::NewThreadUncertain if same_epoch => {
-                                self.retain_navigation_uncertainty(operation, Vec::new(), false)
+                                self.retain_navigation_uncertainty(operation, Vec::new(), false);
                             }
                             _ => {}
                         }
@@ -1036,7 +1080,7 @@ impl App {
                     && fences.is_empty()
                     && self.fork_authority_matches(&ready.context.input).await
                 {
-                    self.commit_fork_navigation(tui, server, operation, handle, *ready)
+                    Box::pin(self.commit_fork_navigation(tui, server, operation, handle, *ready))
                         .await?;
                 } else {
                     self.fork_failure(&mut ready.context.input, "Fork was not installed. Confirmed source detachments remain detached; drafts are retained. Reopen the source to continue. Close and reopen this TUI to resynchronize unknown detachments; no request was retried.", matching);
@@ -1074,7 +1118,7 @@ impl App {
                         false,
                     ),
                     _ if resource && same_epoch => {
-                        self.retain_navigation_uncertainty(operation, vec![source], false)
+                        self.retain_navigation_uncertainty(operation, vec![source], false);
                     }
                     _ => {}
                 }

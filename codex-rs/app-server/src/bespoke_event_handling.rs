@@ -2105,7 +2105,8 @@ async fn on_command_execution_request_approval_response(
         }
     };
 
-    crate::command_lifecycle::note_decision(&thread_state, &item_id, &completion_status).await;
+    crate::command_lifecycle::note_decision(&thread_state, &item_id, completion_status.as_ref())
+        .await;
 
     let suppress_subcommand_completion_item = {
         // For regular shell/unified_exec approvals, approval_id is null.

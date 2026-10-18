@@ -2,7 +2,18 @@
 
 use super::super::turn_submissions::ui_requests::UiRequestKind;
 use super::super::turn_submissions::ui_requests::UiRequestScope;
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::GOAL_USAGE;
+use super::ThreadGoalSetMode;
+use super::ThreadGoalStatus;
+use super::ThreadId;
+use super::cleanup_materialized_goal_files;
+use super::goal_files;
+use super::goal_status_label;
+use super::goal_usage_summary;
+use super::should_confirm_before_replacing_goal;
+use super::thread_goal_error_message;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
@@ -45,6 +56,10 @@ async fn clear_goal(
         .await
 }
 
+#[expect(
+    clippy::option_option,
+    reason = "The RPC boundary distinguishes an omitted budget, null to clear it, and a numeric budget."
+)]
 async fn set_goal(
     handle: AppServerRequestHandle,
     thread_id: ThreadId,
@@ -74,12 +89,12 @@ fn goal_request_error(
 }
 
 impl App {
-    pub(super) async fn open_thread_goal_menu_continuation(
+    pub(super) fn open_thread_goal_menu_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -103,7 +118,7 @@ impl App {
         );
     }
 
-    pub(super) async fn maybe_prompt_resume_paused_goal_after_resume_continuation(
+    pub(super) fn maybe_prompt_resume_paused_goal_after_resume_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -111,7 +126,7 @@ impl App {
         if self.chat_widget.has_misalignment_policy_violation() {
             return;
         }
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -134,7 +149,7 @@ impl App {
                         }
                     }
                     Err(error) => {
-                        tracing::warn!("failed to read thread goal after resume: {}", error)
+                        tracing::warn!("failed to read thread goal after resume: {}", error);
                     }
                 }
                 Ok(())
@@ -142,7 +157,7 @@ impl App {
         );
     }
 
-    pub(super) async fn open_thread_goal_editor_continuation(
+    pub(super) fn open_thread_goal_editor_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: Option<ThreadId>,
@@ -153,7 +168,7 @@ impl App {
         };
         let codex_home = app_server.codex_home_path(&self.config.codex_home);
         let fs = app_server.file_system();
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::ReadOnly,
@@ -196,7 +211,7 @@ impl App {
         );
     }
 
-    pub(super) async fn set_thread_goal_draft_continuation(
+    pub(super) fn set_thread_goal_draft_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -204,7 +219,7 @@ impl App {
         mode: ThreadGoalSetMode,
     ) {
         if matches!(mode, ThreadGoalSetMode::ConfirmIfExists) {
-            self.request_server(
+            let _ = self.request_server(
                 app_server,
                 UiRequestScope::DisplayedThread(thread_id),
                 UiRequestKind::ReadOnly,
@@ -214,7 +229,7 @@ impl App {
                     match result {
                         Ok(response) => match response.goal.as_ref() {
                             Some(goal) if should_confirm_before_replacing_goal(goal) => {
-                                app.show_replace_thread_goal_confirmation(thread_id, draft)
+                                app.show_replace_thread_goal_confirmation(thread_id, draft);
                             }
                             existing => app.enqueue_goal_draft(
                                 server,
@@ -249,7 +264,7 @@ impl App {
         let codex_home = server.codex_home_path(&self.config.codex_home);
         let fs = server.file_system();
         let replacing_goal = matches!(mode, ThreadGoalSetMode::ReplaceExisting);
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,
@@ -263,7 +278,7 @@ impl App {
                     };
                 let result = async {
                     if replacing_goal {
-                        clear_goal(handle.clone(), thread_id).await?;
+                        let _ = clear_goal(handle.clone(), thread_id).await?;
                     }
                     let (status, token_budget) = match mode {
                         ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::ReplaceExisting => {
@@ -290,7 +305,7 @@ impl App {
                             format!("Goal {}", goal_status_label(response.goal.status)),
                             Some(goal_usage_summary(&response.goal)),
                         );
-                        app.chat_widget.maybe_send_next_queued_input();
+                        let _ = app.chat_widget.maybe_send_next_queued_input();
                     }
                     Ok(Err(error)) => app.chat_widget.add_error_message(error),
                     Err(error) => app.chat_widget.add_error_message(goal_request_error(
@@ -303,13 +318,13 @@ impl App {
         );
     }
 
-    pub(super) async fn set_thread_goal_status_continuation(
+    pub(super) fn set_thread_goal_status_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
         status: ThreadGoalStatus,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,
@@ -330,12 +345,12 @@ impl App {
         );
     }
 
-    pub(super) async fn clear_thread_goal_continuation(
+    pub(super) fn clear_thread_goal_continuation(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             app_server,
             UiRequestScope::DisplayedThread(thread_id),
             UiRequestKind::Mutation,

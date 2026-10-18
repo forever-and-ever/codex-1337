@@ -66,6 +66,13 @@ impl Shimmer for Forge {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        reason = "Clock buckets and nonnegative heat deliberately select integer noise/shade samples; header coordinates are approximate visual scalars and allocated-slice indices fit i64."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = stage.t;
         let flicker = (t / 0.064).floor() as i64;

@@ -1,6 +1,10 @@
 //! Account requests select a conversation or fresh-root scope without retargeting the global login.
 
-use super::*;
+use super::AccountRequestProcessor;
+use super::Arc;
+use super::JSONRPCErrorError;
+use super::Result;
+use super::invalid_request;
 use codex_app_server_protocol::NewThreadAccountParams;
 use codex_core::config::ConfigOverrides;
 use codex_login::anthropic::AccountId;

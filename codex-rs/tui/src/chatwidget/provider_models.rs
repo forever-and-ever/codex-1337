@@ -1,6 +1,10 @@
 //! Provider selection is explicitly a new conversation, not an in-place model switch.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::ModelPreset;
+use super::SelectionItem;
+use super::SelectionViewParams;
 use crate::app::ProviderModelChoice;
 use crate::app::ProviderModelEvent;
 use crate::model_catalog::ModelListing;
@@ -61,7 +65,7 @@ impl ChatWidget {
     pub(crate) fn show_provider_models(
         &mut self,
         request_id: uuid::Uuid,
-        provider: ModelProviderOption,
+        provider: &ModelProviderOption,
         result: Result<ModelListing, String>,
     ) {
         if !self.model_popup_request_is_current(request_id) {
@@ -101,7 +105,7 @@ impl ChatWidget {
                 ..Default::default()
             });
         }
-        self.bottom_pane.replace_selection_view_if_present(
+        let _ = self.bottom_pane.replace_selection_view_if_present(
             PROVIDER_MODELS_VIEW,
             SelectionViewParams {
                 view_id: Some(PROVIDER_MODELS_VIEW),
@@ -114,8 +118,8 @@ impl ChatWidget {
 
     pub(crate) fn show_provider_reasoning(
         &mut self,
-        provider: ModelProviderOption,
-        model: ModelPreset,
+        provider: &ModelProviderOption,
+        model: &ModelPreset,
     ) {
         let mut efforts: Vec<_> = model
             .supported_reasoning_efforts

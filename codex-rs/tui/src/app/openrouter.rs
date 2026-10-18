@@ -1,4 +1,10 @@
-use super::*;
+use super::AbsolutePathBuf;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Duration;
+use super::Uuid;
 use crate::openrouter::Event;
 use crate::openrouter::Reply;
 use crate::openrouter::Request;
@@ -37,7 +43,7 @@ impl App {
             },
             Event::KeyNameSubmitted { thread_id, input } => match input.parse() {
                 Ok(name) => {
-                    self.handle_openrouter_event(server, Event::KeyPathPrompt { thread_id, name })
+                    self.handle_openrouter_event(server, Event::KeyPathPrompt { thread_id, name });
                 }
                 Err(error) => self.chat_widget.openrouter_key_name_prompt(
                     thread_id,
@@ -53,7 +59,7 @@ impl App {
                 thread_id,
                 name,
                 input,
-            } => match codex_utils_absolute_path::AbsolutePathBuf::try_from(input.as_str()) {
+            } => match AbsolutePathBuf::try_from(input.as_str()) {
                 Ok(path) => self.handle_openrouter_event(
                     server,
                     Event::Request(Request::AddKey {
@@ -75,11 +81,11 @@ impl App {
             },
             Event::AddModel { menu } => {
                 self.chat_widget
-                    .openrouter_model_prompt(menu, String::new(), None)
+                    .openrouter_model_prompt(menu, String::new(), None);
             }
             Event::KeyNamePrompt { thread_id } => {
                 self.chat_widget
-                    .openrouter_key_name_prompt(thread_id, String::new(), None)
+                    .openrouter_key_name_prompt(thread_id, String::new(), None);
             }
             Event::KeyPathPrompt { thread_id, name } => self
                 .chat_widget
@@ -88,7 +94,7 @@ impl App {
                 .chat_widget
                 .openrouter_remove_key_confirm(thread_id, name),
             Event::Request(request) => {
-                let id = uuid::Uuid::new_v4();
+                let id = Uuid::new_v4();
                 let thread_id = self.current_displayed_thread_id();
                 if !self.chat_widget.start_openrouter_request(id, &request) {
                     return;
@@ -96,7 +102,7 @@ impl App {
                 let handle = server.request_handle();
                 let request_id = server.next_request_id();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(30), async {
                         match &request {
                             Request::Models { .. } => {
@@ -142,7 +148,7 @@ impl App {
                                 ))
                             }
                             Request::Forget { slug, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterModelForgetResponse>(
                                         ClientRequest::OpenRouterModelForget {
                                             request_id,
@@ -168,7 +174,7 @@ impl App {
                                 Ok(Reply::Endpoints(response))
                             }
                             Request::Route { slug, filter, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterModelRouteResponse>(
                                         ClientRequest::OpenRouterModelRoute {
                                             request_id,
@@ -182,7 +188,7 @@ impl App {
                                 Ok(Reply::Done)
                             }
                             Request::AddKey { name, path, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterKeyAddResponse>(
                                         ClientRequest::OpenRouterKeyAdd {
                                             request_id,
@@ -196,7 +202,7 @@ impl App {
                                 Ok(Reply::Done)
                             }
                             Request::RemoveKey { name, .. } => {
-                                handle
+                                let _ = handle
                                     .request_typed::<OpenRouterKeyRemoveResponse>(
                                         ClientRequest::OpenRouterKeyRemove {
                                             request_id,
@@ -224,7 +230,7 @@ impl App {
                         request,
                         result,
                     }));
-                });
+                }));
             }
             Event::Finished {
                 id,
@@ -239,7 +245,7 @@ impl App {
                 match (request, result) {
                     (Request::Models { menu, selected }, Ok(Reply::Models(listing))) => self
                         .chat_widget
-                        .show_openrouter_models(menu, listing, selected, None),
+                        .show_openrouter_models(menu, listing, selected.as_ref(), None),
                     (Request::Endpoints { menu, slug }, Ok(Reply::Endpoints(response))) => self
                         .chat_widget
                         .show_openrouter_endpoints(menu, slug, response),
@@ -275,11 +281,12 @@ impl App {
                         Ok(Reply::Done),
                     ) => {
                         self.open_account_picker(server, thread_id);
-                        self.chat_widget
+                        let _ = self
+                            .chat_widget
                             .refresh_openrouter_status(StatusRefresh::Now);
                     }
                     (request, Err(error)) => {
-                        self.chat_widget.show_openrouter_failure(request, error)
+                        self.chat_widget.show_openrouter_failure(request, error);
                     }
                     (_, Ok(_)) => self
                         .chat_widget
@@ -295,7 +302,7 @@ impl App {
                 let request_id = server.next_request_id();
                 let status_request_id = server.next_request_id();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = tokio::time::timeout(Duration::from_secs(30), async {
                         let accounts = handle
                             .request_typed::<ThreadAccountListResponse>(
@@ -355,7 +362,7 @@ impl App {
                         mode,
                         result,
                     }));
-                });
+                }));
             }
             Event::StatusLoaded {
                 thread_id,
@@ -365,7 +372,7 @@ impl App {
             } => {
                 if self.current_displayed_thread_id() == Some(thread_id) {
                     self.chat_widget
-                        .finish_openrouter_status(thread_id, id, mode, result);
+                        .finish_openrouter_status(thread_id, id, mode, &result);
                 }
             }
         }

@@ -45,7 +45,7 @@ pub const DEFAULT_IN_PROCESS_CHANNEL_CAPACITY: usize = codex_app_server_transpor
 /// Even on the in-process path, successful responses still travel back through
 /// the same JSON-RPC result envelope used by socket/stdio transports because
 /// `MessageProcessor` continues to produce that shape internally.
-pub type RequestResult = std::result::Result<JsonRpcResult, JSONRPCErrorError>;
+pub type RequestResult = Result<JsonRpcResult, JSONRPCErrorError>;
 
 /// Event emitted from the app-server to the in-process client.
 ///
@@ -61,6 +61,10 @@ pub enum InProcessServerEvent {
     Lagged { skipped: usize },
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent startup policy and advertised protocol capabilities are orthogonal, not exclusive states"
+)]
 #[derive(Clone)]
 pub struct InProcessClientStartArgs {
     /// Resolved argv0 dispatch paths used by command execution internals.
@@ -107,6 +111,7 @@ pub struct InProcessClientStartArgs {
 
 impl InProcessClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
+    #[must_use]
     pub fn initialize_params(&self) -> InitializeParams {
         let capabilities = InitializeCapabilities {
             explicit_gateway_oauth: false,
@@ -168,7 +173,7 @@ static RUNTIME: OnceLock<EmbeddedStart> = OnceLock::new();
 
 /// Installs this process's app-server runtime; the first installation stands.
 pub fn install(start: EmbeddedStart) {
-    RUNTIME.get_or_init(|| start);
+    let _ = RUNTIME.get_or_init(|| start);
 }
 
 /// Starts the installed app-server runtime.

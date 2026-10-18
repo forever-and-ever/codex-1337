@@ -198,7 +198,7 @@ pub(crate) async fn execute(
     let mut phase = Phase::Running;
     let outcome = loop {
         tokio::select! {
-            _ = cancellation.cancelled(), if matches!(phase, Phase::Running) => {
+            () = cancellation.cancelled(), if matches!(phase, Phase::Running) => {
                 session.request_terminate();
                 phase = Phase::Stopping(Instant::now() + EXIT_GRACE);
             }
@@ -220,7 +220,7 @@ pub(crate) async fn execute(
                 });
                 phase = Phase::Draining { outcome, deadline: Instant::now() + EXIT_GRACE };
             }
-            _ = wait_deadline(phase.deadline()) => {
+            () = wait_deadline(phase.deadline()) => {
                 match phase {
                     Phase::Stopping(_) => {
                         phase = Phase::Stalled;

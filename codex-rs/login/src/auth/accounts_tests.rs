@@ -95,8 +95,8 @@ async fn conversation_selectors_do_not_follow_global_login_or_each_other() -> an
     let second = first.for_account(&alice_id).await?;
     first.select_account(&bob_id).await?;
     backend.save(&account("alice", /*revision*/ 1))?;
-    first.reload().await;
-    second.reload().await;
+    let _ = first.reload().await;
+    let _ = second.reload().await;
     assert_eq!(
         first.auth_cached().unwrap().get_account_id().as_deref(),
         Some("bob")
@@ -124,10 +124,10 @@ async fn conversation_selectors_do_not_follow_global_login_or_each_other() -> an
     );
     std::fs::remove_dir(&auth_file)?;
     std::fs::rename(&preserved, &auth_file)?;
-    second.logout().await?;
+    let _ = second.logout().await?;
     assert!(second.auth().await.is_none());
     let missing = root.for_account(&alice_id).await?;
-    missing.reload().await;
+    let _ = missing.reload().await;
     assert_eq!(missing.selected_account_id(), Some(alice_id));
     assert!(missing.auth_cached().is_none());
     assert!(!missing.logout_with_revoke().await?);

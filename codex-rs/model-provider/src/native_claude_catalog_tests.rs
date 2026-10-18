@@ -6,7 +6,7 @@ use serde_json::json;
 async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache() {
     let haiku = json!({
         "id": "claude-haiku-4-5-20251001", "display_name": "Claude Haiku 4.5",
-        "max_input_tokens": 200000, "max_tokens": 64000,
+        "max_input_tokens": 200_000, "max_tokens": 64000,
         "capabilities": {
             "thinking": {"supported":true,"types":{"enabled":{"supported":true}}},
             "structured_outputs":{"supported":true}, "image_input":{"supported":true},
@@ -16,7 +16,7 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
     });
     let sonnet = json!({
         "id":"claude-sonnet-5-5", "display_name":"Claude Sonnet 5.5",
-        "max_input_tokens":1000000, "max_tokens":128000,
+        "max_input_tokens":1_000_000, "max_tokens":128_000,
         "capabilities": {
             "thinking":{"supported":true,"types":{"adaptive":{"supported":true}}},
             "effort":{"supported":true,"low":{"supported":true},"medium":{"supported":true},
@@ -69,7 +69,7 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
         vec![
             (
                 "claude-haiku-4-5-20251001",
-                Some(200000),
+                Some(200_000),
                 AnthropicModelCapabilities {
                     thinking: AnthropicThinkingMode::Manual,
                     max_output_tokens: NonZeroU32::new(/*n*/ 64000).unwrap(),
@@ -87,10 +87,10 @@ async fn paginated_native_catalog_preserves_capabilities_through_canonical_cache
             ),
             (
                 "claude-sonnet-5-5",
-                Some(1000000),
+                Some(1_000_000),
                 AnthropicModelCapabilities {
                     thinking: AnthropicThinkingMode::Adaptive,
-                    max_output_tokens: NonZeroU32::new(/*n*/ 128000).unwrap(),
+                    max_output_tokens: NonZeroU32::new(/*n*/ 128_000).unwrap(),
                     supported_efforts: vec![
                         ReasoningEffort::Low,
                         ReasoningEffort::Medium,

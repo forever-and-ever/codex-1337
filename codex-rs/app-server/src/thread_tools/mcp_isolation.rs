@@ -1,7 +1,7 @@
 //! Keep unrelated MCP registrations callable without sharing the native namespace.
 //! Transport enablement and managed admission remain configuration-owned.
 //! Historical registrations have no authentic frontend ownership marker (CLI
-//! overrides share SessionFlags provenance). Retire them only through explicit
+//! overrides share `SessionFlags` provenance). Retire them only through explicit
 //! transport disablement, with native user policy configured independently.
 
 use codex_core::config::Config;

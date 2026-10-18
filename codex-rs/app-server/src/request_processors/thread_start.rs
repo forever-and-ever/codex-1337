@@ -92,7 +92,7 @@ impl ThreadStartOrigin for FrontendStart {
     }
 
     async fn register_client(&self, context: &ListenerTaskContext, thread_id: ThreadId) {
-        context
+        let _ = context
             .thread_state_manager
             .try_add_connection_to_thread(thread_id, self.request_id.connection_id)
             .await;

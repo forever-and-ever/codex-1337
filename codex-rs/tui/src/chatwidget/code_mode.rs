@@ -1,5 +1,16 @@
 //! Scoped admission observes native process bookkeeping without rendering a second lifecycle.
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::CollabAgentTool;
+use super::CollabAgentToolCallStatus;
+use super::ExecCommandSource;
+use super::ReplayKind;
+use super::ServerNotification;
+use super::StatusDetailsCapitalization;
+use super::TerminalTitleStatusKind;
+use super::ThreadItem;
+use super::is_unified_exec_source;
+use super::multi_agents;
 use crate::code_mode_transcript::Admission;
 use crate::code_mode_transcript::Source;
 
@@ -77,7 +88,7 @@ impl ChatWidget {
                         .set_interrupt_hint_visible(/*visible*/ true);
                     self.status_state.terminal_title_status_kind =
                         TerminalTitleStatusKind::WaitingForBackgroundTerminal;
-                    self.set_status(
+                    let _ = self.set_status(
                         "Waiting for background terminal".into(),
                         command,
                         StatusDetailsCapitalization::Preserve,
@@ -117,11 +128,12 @@ impl ChatWidget {
             } => {
                 if *status == CollabAgentToolCallStatus::InProgress {
                     if let Some(summary) = multi_agents::spawn_request_summary(item.native_item()) {
-                        self.pending_collab_spawn_requests
+                        let _ = self
+                            .pending_collab_spawn_requests
                             .insert(id.clone(), summary);
                     }
                 } else {
-                    self.pending_collab_spawn_requests.remove(id);
+                    let _ = self.pending_collab_spawn_requests.remove(id);
                 }
             }
             _ => {}

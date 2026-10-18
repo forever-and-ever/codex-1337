@@ -1,6 +1,27 @@
 //! Immutable submission previews and lossless draft recovery. RPC ordering belongs to App.
 
-use super::*;
+use super::AppCommand;
+use super::AppEvent;
+use super::ChatWidget;
+use super::InputQueueState;
+use super::KeyBindingListExt;
+use super::KeyCode;
+use super::KeyEvent;
+use super::KeyEventKind;
+use super::KeyModifiers;
+use super::LocalImageAttachment;
+use super::MessageDelivery;
+use super::PendingSteer;
+use super::QueuedUserMessage;
+use super::ThreadComposerState;
+use super::ThreadInputState;
+use super::UserInput;
+use super::UserMessage;
+use super::UserMessageSource;
+use super::input_queue;
+use super::mention_bindings_from_user_inputs;
+use super::merge_user_messages;
+use super::user_message_for_restore;
 use crate::app::turn_submissions::DraftDisposition;
 use crate::app::turn_submissions::DraftOrigin;
 use crate::app::turn_submissions::SubmissionDraft;
@@ -24,7 +45,7 @@ impl ChatWidget {
             }
             self.input_queue.recovered_queue &= self.input_queue.has_queued_follow_up_messages();
         }
-        self.bottom_pane.handle_restricted_key(
+        let _ = self.bottom_pane.handle_restricted_key(
             KeyEvent::new(KeyCode::Null, KeyModifiers::NONE),
             crate::bottom_pane::RestrictedInputMode::Disconnected,
         );
@@ -207,7 +228,7 @@ impl ChatWidget {
 
     pub(crate) fn submission_draft_from_inputs(
         client_id: String,
-        input: &[codex_app_server_protocol::UserInput],
+        input: &[UserInput],
         source: UserMessageSource,
     ) -> SubmissionDraft {
         let mut display = Self::user_message_display_from_inputs(input);
@@ -216,7 +237,7 @@ impl ChatWidget {
             display.message = input
                 .iter()
                 .filter_map(|item| {
-                    if let codex_app_server_protocol::UserInput::Text { text, .. } = item {
+                    if let UserInput::Text { text, .. } = item {
                         Some(text.as_str())
                     } else {
                         None
@@ -296,7 +317,7 @@ impl ChatWidget {
         {
             CancellationEffect::Edit(message) => self.restore_submission_messages(vec![message]),
             CancellationEffect::AlreadySent => {
-                self.add_info_message("Pending steer has already been sent.".into(), None)
+                self.add_info_message("Pending steer has already been sent.".into(), None);
             }
             CancellationEffect::Unchanged | CancellationEffect::Removed => {}
         }
@@ -373,7 +394,7 @@ impl InputQueueState {
             .replacement()
             .is_some_and(|replacement| replacement.appended.client_id == draft.client_id)
         {
-            self.pending_steer.finish_replacement(replaced);
+            let _ = self.pending_steer.finish_replacement(replaced);
         } else if !replaced
             && let DraftOrigin::Append { previous, appended } = &draft.origin
             && self.pending_steer.client_id() == Some(previous.client_id.as_str())

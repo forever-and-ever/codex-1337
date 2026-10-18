@@ -1,11 +1,15 @@
 //! Deferred Daybreak persistence and accepted preference projection.
 
-use super::*;
+use super::App;
+use super::AppServerSession;
+use super::Arc;
+use super::ThreadId;
+use super::Uuid;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_protocol::RequestId;
 
 impl App {
-    pub(super) async fn persist_daybreak_selection_continuation(
+    pub(super) fn persist_daybreak_selection_continuation(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -29,7 +33,7 @@ impl App {
             .get(&thread_id)
             .map(|channel| Arc::clone(&channel.store));
         let read_store = store.clone();
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::ReadOnly,
@@ -37,7 +41,7 @@ impl App {
             move |handle| async move {
                 let response: ThreadReadResponse = handle
                     .thread_read(
-                        RequestId::String(format!("tui-daybreak-read-{}", uuid::Uuid::new_v4())),
+                        RequestId::String(format!("tui-daybreak-read-{}", Uuid::new_v4())),
                         ThreadReadParams {
                             thread_id: thread_id.to_string(),
                             include_turns: false,
@@ -59,7 +63,7 @@ impl App {
                     )),
                     Ok(true) => app.commit_daybreak_selection(server, thread_id, enabled, cwd),
                     Ok(false) => {
-                        app.request_server(
+                        let _ = app.request_server(
                             server,
                             UiRequestScope::Thread(thread_id),
                             UiRequestKind::Mutation,
@@ -69,7 +73,7 @@ impl App {
                                     .thread_metadata_update(
                                         RequestId::String(format!(
                                             "tui-daybreak-save-{}",
-                                            uuid::Uuid::new_v4()
+                                            Uuid::new_v4()
                                         )),
                                         ThreadMetadataUpdateParams {
                                             thread_id: thread_id.to_string(),
@@ -143,7 +147,7 @@ impl App {
                         "Failed to save the default Daybreak preference: {error}"
                     ));
                 } else {
-                    app.request_server(
+                    let _ = app.request_server(
                         server,
                         UiRequestScope::Connection,
                         UiRequestKind::ReadOnly,
@@ -160,7 +164,7 @@ impl App {
                                             .additional
                                             .get("daybreak")
                                             .and_then(serde_json::Value::as_bool)
-                                            .unwrap_or(false)
+                                            .unwrap_or(false);
                                     }
                                 }
                                 Err(error) => app.chat_widget.add_error_message(format!(

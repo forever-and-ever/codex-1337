@@ -458,7 +458,7 @@ async fn queued_startup_requests_block_terminal_input_after_draft_handoff() -> R
         assert!(app.startup_protected_input_boundary);
         assert_eq!(app.chat_widget.composer_text_with_pending(), "draft");
         let tui = crate::tui::test_support::make_test_tui()?;
-        app.request_modal_frame(tui.frame_requester());
+        app.request_modal_frame(&tui.frame_requester());
         assert!(app.startup_pending_protected_request);
         assert!(!ui_schedule::input_admitted(
             &app, false, false, false, false

@@ -23,6 +23,7 @@ impl ContextRole {
         Ok(Self(text.to_owned()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

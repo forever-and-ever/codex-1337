@@ -11,6 +11,7 @@ pub struct PostToolUsePayload {
 }
 
 impl PostToolUsePayload {
+    #[must_use]
     pub fn new(
         tool_name: &ToolName,
         tool_use_id: &str,

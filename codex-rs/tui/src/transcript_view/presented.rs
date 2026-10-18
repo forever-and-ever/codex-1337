@@ -1,6 +1,20 @@
 //! Layout readiness admits paint; terminal completion admits its routing geometry.
 
-use super::*;
+use super::Anchor;
+use super::Arc;
+use super::Buffer;
+use super::Clear;
+use super::EntryKey;
+use super::HistoryCell;
+use super::HyperlinkLine;
+use super::Position;
+use super::Rect;
+use super::TranscriptView;
+use super::ViewAction;
+use super::VisibleRow;
+use super::Widget;
+use super::input;
+use super::prompt_header;
 use crate::custom_terminal::output;
 use crate::custom_terminal::output::FrameId;
 
@@ -179,6 +193,10 @@ impl TranscriptView {
         result
     }
 
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."
+    )]
     pub(crate) fn scroll(&mut self, cells: &[Arc<dyn HistoryCell>], rows: isize) {
         if self.cache.frames.is_none() {
             self.scroll_prepared(cells, rows);
@@ -188,29 +206,26 @@ impl TranscriptView {
             return;
         }
         let previous = self.position;
-        let scroll = match self.deferred_scroll.take() {
-            Some(mut scroll) => {
-                scroll.rows = scroll.rows.saturating_add(rows);
-                scroll
-            }
-            None => {
-                let Some(first) = self.visible.first() else {
-                    return;
-                };
-                let offset = first.layout.position_at(first.row, 0);
-                Scroll {
-                    origin: Position::Reading(Anchor {
-                        key: first.key,
-                        index: first.index,
-                        offset,
-                        row_bias: first.layout.row_for_offset(offset) as isize - first.row as isize,
-                    }),
-                    rows,
-                    cells: self
-                        .snapshot_cells()
-                        .or_else(|| self.presented_cells.clone())
-                        .unwrap_or_else(|| Arc::from(cells)),
-                }
+        let scroll = if let Some(mut scroll) = self.deferred_scroll.take() {
+            scroll.rows = scroll.rows.saturating_add(rows);
+            scroll
+        } else {
+            let Some(first) = self.visible.first() else {
+                return;
+            };
+            let offset = first.layout.position_at(first.row, 0);
+            Scroll {
+                origin: Position::Reading(Anchor {
+                    key: first.key,
+                    index: first.index,
+                    offset,
+                    row_bias: first.layout.row_for_offset(offset) as isize - first.row as isize,
+                }),
+                rows,
+                cells: self
+                    .snapshot_cells()
+                    .or_else(|| self.presented_cells.clone())
+                    .unwrap_or_else(|| Arc::from(cells)),
             }
         };
         self.position = scroll.origin;
@@ -238,17 +253,14 @@ impl TranscriptView {
             self.scroll(cells, 0);
         }
         if let Some(key) = self.deferred_focus.take() {
-            self.handle_key(key, cells);
+            let _ = self.handle_key(key, cells);
         }
         self.resume_fold_navigation();
         let inflight = self
             .inflight_cells
             .take()
             .filter(|(width, _)| *width == area.width);
-        let preparing_cells = inflight
-            .as_ref()
-            .map(|(_, cells)| cells.as_ref())
-            .unwrap_or(cells);
+        let preparing_cells = inflight.as_ref().map_or(cells, |(_, cells)| cells.as_ref());
         let mut prepared = Buffer::empty(area);
         self.render_prepared(area, &mut prepared, preparing_cells);
         if !self.cache.waiting && !self.live_preparation.is_pending() {
@@ -328,10 +340,10 @@ impl TranscriptView {
         };
         let last = self.visible.last().expect("visible has a first row").index;
         for index in first.saturating_sub(2)..first {
-            self.current_layout(cells, index);
+            let _ = self.current_layout(cells, index);
         }
         for index in last + 1..=(last + 2).min(cells.len().saturating_sub(1)) {
-            self.current_layout(cells, index);
+            let _ = self.current_layout(cells, index);
         }
     }
 }
@@ -355,7 +367,7 @@ impl TranscriptView {
             if let Some(layout) = self.cache.rewrap(&layout, width, false)
                 && let Some(snapshot) = self.snapshot_mut()
             {
-                snapshot.pinned.insert(key, layout);
+                let _ = snapshot.pinned.insert(key, layout);
             }
         }
         if let Some(live) = live

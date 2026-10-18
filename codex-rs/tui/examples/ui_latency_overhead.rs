@@ -12,20 +12,27 @@ static ALLOCATIONS: AtomicU64 = AtomicU64::new(0);
 // The counter measures allocations, not timing-path synchronization overhead.
 unsafe impl GlobalAlloc for Counted {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        let _ = ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: GlobalAlloc's caller supplies the valid layout unchanged to System.
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: this allocator delegates every allocation to System with the same layout.
         unsafe { System.dealloc(ptr, layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        let _ = ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: GlobalAlloc's caller provides a live System allocation and valid new size.
         unsafe { System.realloc(ptr, layout, size) }
     }
 }
 #[global_allocator]
 static ALLOCATOR: Counted = Counted;
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Per-boundary timing is an approximate floating-point measurement, not an exact nanosecond count"
+)]
 fn main() -> anyhow::Result<()> {
     anyhow::ensure!(
         std::env::var_os("SLURM_JOB_ID").is_some(),

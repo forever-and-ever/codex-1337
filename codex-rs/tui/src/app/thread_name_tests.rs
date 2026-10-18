@@ -8,7 +8,8 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
-    let (mut app, mut rx, _op_rx) = crate::app::tests::make_test_app_with_channels().await;
+    let (mut app, mut rx, _op_rx) =
+        Box::pin(crate::app::tests::make_test_app_with_channels()).await;
     let owner = ThreadId::from_u128(/*value*/ 1).to_string();
     let request = ThreadNameRequest::Rename {
         thread_id: ThreadId::from_u128(/*value*/ 2),
@@ -39,7 +40,7 @@ async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
         "thread_name_conflict",
         render_bottom_popup(&app.chat_widget, /*width*/ 78)
     );
-    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
     assert!(!app.chat_widget.has_active_view());
     assert!(
         !std::iter::from_fn(|| rx.try_recv().ok())
@@ -47,9 +48,9 @@ async fn name_conflict_cancels_by_default_and_confirms_concrete_owners() {
     );
 
     assert!(app.confirm_thread_name_conflict(&error, request.clone()));
-    app.chat_widget.handle_key_event(KeyCode::Char('2').into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Char('2').into());
     assert!(app.chat_widget.has_active_view());
-    app.chat_widget.handle_key_event(KeyCode::Enter.into());
+    let _ = app.chat_widget.handle_key_event(KeyCode::Enter.into());
     let confirmations = std::iter::from_fn(|| rx.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::ConfirmedThreadName {

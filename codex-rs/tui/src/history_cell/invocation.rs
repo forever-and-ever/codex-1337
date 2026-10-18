@@ -5,6 +5,7 @@ use super::HistoryCell;
 use super::ToolItemCell;
 use super::ToolOutputCell;
 use super::ToolOutputGroup;
+use super::activity_parts::ActivityParts;
 use super::output_provenance::ContextAuthor;
 use super::output_provenance::OutputMode;
 use super::output_provenance::OutputProvenance;
@@ -77,12 +78,12 @@ pub(crate) struct ActivityIndicator {
 
 #[derive(Clone, Default)]
 pub(crate) struct InvocationInput {
-    pub(crate) parts: super::activity_parts::ActivityParts,
+    pub(crate) parts: ActivityParts,
     pub(crate) indicators: Vec<ActivityIndicator>,
 }
 
-impl From<super::activity_parts::ActivityParts> for InvocationInput {
-    fn from(parts: super::activity_parts::ActivityParts) -> Self {
+impl From<ActivityParts> for InvocationInput {
+    fn from(parts: ActivityParts) -> Self {
         Self {
             parts,
             indicators: Vec::new(),
@@ -95,7 +96,7 @@ impl InvocationInput {
         clippy::expect_used,
         reason = "A started activity with the static reduced-motion bullet always has a visible marker."
     )]
-    pub(crate) fn paint(&self) -> super::activity_parts::ActivityParts {
+    pub(crate) fn paint(&self) -> ActivityParts {
         let mut parts = self.parts.clone();
         for indicator in &self.indicators {
             let Some(line) = parts.lines.get_mut(indicator.line) else {
@@ -134,17 +135,17 @@ fn combine_inputs(parts: impl IntoIterator<Item = InvocationInput>) -> Invocatio
     InvocationInput { parts, indicators }
 }
 
-fn read_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+fn read_input(input: &ToolInput) -> Option<ActivityParts> {
     let read = codex_shell_command::read_intent::ReadIntent::from_tool_input(input)?;
-    let mut lines = vec![crate::exec_cell::rows::read_summary(read.label(&read.path)).into()];
+    let mut lines = vec![crate::exec_cell::rows::read_summary(&read.label(&read.path)).into()];
     mark_lines(&mut lines, OutputProvenance::Formatted);
-    Some(super::activity_parts::ActivityParts {
+    Some(ActivityParts {
         lines,
         ..Default::default()
     })
 }
 
-fn write_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+fn write_input(input: &ToolInput) -> Option<ActivityParts> {
     if !input.name.is_default_namespace() || input.name.name != "fs" {
         return None;
     }
@@ -156,7 +157,7 @@ fn write_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts
     if path.is_empty() {
         return None;
     }
-    Some(super::activity_parts::ActivityParts {
+    Some(ActivityParts {
         lines: captured_lines(
             &format!("Write {path}"),
             ContextAuthor::Environment,
@@ -166,7 +167,7 @@ fn write_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts
     })
 }
 
-fn command_input(input: &ToolInput) -> Option<super::activity_parts::ActivityParts> {
+fn command_input(input: &ToolInput) -> Option<ActivityParts> {
     if !input.name.is_default_namespace() {
         return None;
     }
@@ -179,13 +180,13 @@ fn command_input(input: &ToolInput) -> Option<super::activity_parts::ActivityPar
         _ => return None,
     };
     mark_lines(&mut lines, OutputProvenance::Formatted);
-    Some(super::activity_parts::ActivityParts {
+    Some(ActivityParts {
         lines,
         ..Default::default()
     })
 }
 
-fn argument_input(input: Option<&ToolInput>) -> Option<super::activity_parts::ActivityParts> {
+fn argument_input(input: Option<&ToolInput>) -> Option<ActivityParts> {
     let input = input?;
     if let Some(parts) = read_input(input)
         .or_else(|| write_input(input))
@@ -196,17 +197,15 @@ fn argument_input(input: Option<&ToolInput>) -> Option<super::activity_parts::Ac
     let codex_protocol::tool_input::ToolInputPayload::Json(source) = &input.payload else {
         return None;
     };
-    super::output_provenance::format_json(source).ok()??;
-    Some(super::activity_parts::ActivityParts {
+    let _ = super::output_provenance::format_json(source).ok()??;
+    Some(ActivityParts {
         lines: captured_lines(source, ContextAuthor::Environment, OutputMode::Fmt),
         ..Default::default()
     })
 }
 
-fn combine_parts(
-    parts: impl IntoIterator<Item = super::activity_parts::ActivityParts>,
-) -> super::activity_parts::ActivityParts {
-    let mut combined = super::activity_parts::ActivityParts::default();
+fn combine_parts(parts: impl IntoIterator<Item = ActivityParts>) -> ActivityParts {
+    let mut combined = ActivityParts::default();
     for mut part in parts {
         for control in &mut part.controls {
             control.line += combined.lines.len();
@@ -222,7 +221,7 @@ fn edit_projection(
     width: u16,
     expanded: &std::collections::HashSet<String>,
     full: bool,
-) -> super::activity_parts::ActivityParts {
+) -> ActivityParts {
     let any = cell.as_any();
     if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
         return edit_projection(wrapper.inner.as_ref(), width, expanded, full);
@@ -274,7 +273,7 @@ fn input_projection(cell: &dyn HistoryCell, width: u16) -> Option<InvocationInpu
     if let Some(input) = any.downcast_ref::<super::ToolInputCell>() {
         if input.0.name.is_default_namespace() && input.0.name.name == "update_work_status" {
             // Activity owns this call's presentation outside the script.
-            return Some(Default::default());
+            return Some(InvocationInput::default());
         }
         return read_input(&input.0)
             .or_else(|| write_input(&input.0))
@@ -296,7 +295,7 @@ fn input_projection(cell: &dyn HistoryCell, width: u16) -> Option<InvocationInpu
     }
     // Edits have their own structural projection, independent of the source ports.
     if any.is::<super::PatchHistoryCell>() {
-        return Some(Default::default());
+        return Some(InvocationInput::default());
     }
     let lines = if let Some(exec) = any.downcast_ref::<ExecCell>() {
         exec.iter_calls()
@@ -317,7 +316,7 @@ fn input_projection(cell: &dyn HistoryCell, width: u16) -> Option<InvocationInpu
         return None;
     };
     Some(
-        super::activity_parts::ActivityParts {
+        ActivityParts {
             lines,
             ..Default::default()
         }
@@ -445,10 +444,10 @@ impl Invocation<'_> {
         match &self.source {
             Source::Code(block) => match block.status().map(|(status, _)| status) {
                 Some(codex_protocol::code_mode::CodeModeStatus::Failed) => {
-                    title.push_span(" · failed".red())
+                    title.push_span(" · failed".red());
                 }
                 Some(codex_protocol::code_mode::CodeModeStatus::Interrupted) => {
-                    title.push_span(" · interrupted".red())
+                    title.push_span(" · interrupted".red());
                 }
                 None if block.is_active() => title.push_span(" · running".dim()),
                 _ => {}
@@ -458,10 +457,10 @@ impl Invocation<'_> {
                 Some(output) => match output.outcome {
                     crate::exec_cell::CommandOutcome::Exited(0) => {}
                     crate::exec_cell::CommandOutcome::Exited(code) => {
-                        title.push_span(format!(" · failed ({code})").red())
+                        title.push_span(format!(" · failed ({code})").red());
                     }
                     crate::exec_cell::CommandOutcome::Declined => {
-                        title.push_span(" · declined".red())
+                        title.push_span(" · declined".red());
                     }
                 },
                 _ => {}
@@ -498,7 +497,7 @@ impl Invocation<'_> {
                     title.push_span(" · running".dim());
                 }
             }
-            _ => {}
+            Source::Output => {}
         }
         if !self.outputs.is_empty()
             && self
@@ -606,10 +605,10 @@ impl Invocation<'_> {
             Source::Command(call) => {
                 let script = input
                     .filter(|input| input.name.is_default_namespace() && input.name.name == "bash")
-                    .map(|input| input.payload.text().to_owned())
-                    .unwrap_or_else(|| {
-                        crate::exec_command::strip_bash_lc_and_escape(&call.command)
-                    });
+                    .map_or_else(
+                        || crate::exec_command::strip_bash_lc_and_escape(&call.command),
+                        |input| input.payload.text().to_owned(),
+                    );
                 let lines = match crate::exec_cell::rows::formatted_input(&script) {
                     Some(lines) => lines,
                     None if input.is_none() => {
@@ -620,7 +619,7 @@ impl Invocation<'_> {
                             OutputMode::Fmt,
                         ));
                         return Some(
-                            super::activity_parts::ActivityParts {
+                            ActivityParts {
                                 lines,
                                 ..Default::default()
                             }
@@ -629,7 +628,7 @@ impl Invocation<'_> {
                     }
                     None => return None,
                 };
-                super::activity_parts::ActivityParts {
+                ActivityParts {
                     lines,
                     ..Default::default()
                 }
@@ -668,7 +667,7 @@ impl Invocation<'_> {
         width: u16,
         expanded: &std::collections::HashSet<String>,
         full: bool,
-    ) -> super::activity_parts::ActivityParts {
+    ) -> ActivityParts {
         let mut parts = match &self.source {
             Source::Code(block) => edit_projection(*block, width, expanded, full),
             Source::Cells(cells) => combine_parts(
@@ -676,7 +675,7 @@ impl Invocation<'_> {
                     .iter()
                     .map(|cell| edit_projection(*cell, width, expanded, full)),
             ),
-            Source::Command(_) | Source::Output => Default::default(),
+            Source::Command(_) | Source::Output => ActivityParts::default(),
         };
         mark_lines(&mut parts.lines, OutputProvenance::Client);
         parts
@@ -747,22 +746,26 @@ impl Invocation<'_> {
         for output in &self.outputs {
             match output.captured_output() {
                 FunctionCallOutputBody::Text(text) => {
-                    lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                    lines.extend(captured_lines(text, ContextAuthor::Environment, mode));
                 }
                 FunctionCallOutputBody::ContentItems(items) => {
                     for item in items {
                         match item {
                             FunctionCallOutputContentItem::InputText { text } => {
-                                lines.extend(captured_lines(text, ContextAuthor::Environment, mode))
+                                lines.extend(captured_lines(
+                                    text,
+                                    ContextAuthor::Environment,
+                                    mode,
+                                ));
                             }
                             FunctionCallOutputContentItem::InputImage { .. } => {
-                                lines.push(client_notice("Image attachment"))
+                                lines.push(client_notice("Image attachment"));
                             }
                             FunctionCallOutputContentItem::InputAudio { .. } => {
-                                lines.push(client_notice("Audio attachment"))
+                                lines.push(client_notice("Audio attachment"));
                             }
                             FunctionCallOutputContentItem::EncryptedContent { .. } => {
-                                lines.push(client_notice("Encrypted content"))
+                                lines.push(client_notice("Encrypted content"));
                             }
                         }
                     }

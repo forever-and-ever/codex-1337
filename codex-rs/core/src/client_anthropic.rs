@@ -38,6 +38,7 @@ use http::StatusCode;
 use std::sync::Arc;
 
 impl ModelClient {
+    #[must_use]
     pub fn with_anthropic_prompt_cache(mut self, policy: AnthropicPromptCache) -> Self {
         self.anthropic_prompt_cache = policy;
         self
@@ -57,9 +58,7 @@ impl ModelClient {
             ));
         }
         Ok(self.with_provider_account(Some(Arc::new(
-            ProviderAccountSelection::ClaudeSubscription {
-                id: account.to_string(),
-            },
+            ProviderAccountSelection::ClaudeSubscription { id: account.into() },
         ))))
     }
 
@@ -263,16 +262,14 @@ impl ModelClientSession {
                     return Ok(self.client.observe_prompt_cache_stream(stream, dispatch));
                 }
                 Err(
-                    error @ ApiError::Transport(TransportError::Http {
+                    error @ (ApiError::Transport(TransportError::Http {
+                        status: StatusCode::UNAUTHORIZED,
+                        ..
+                    })
+                    | ApiError::Api {
                         status: StatusCode::UNAUTHORIZED,
                         ..
                     }),
-                )
-                | Err(
-                    error @ ApiError::Api {
-                        status: StatusCode::UNAUTHORIZED,
-                        ..
-                    },
                 ) if !recovered => {
                     attempt.record_failed(&error, /*upstream_request_id*/ None, &[]);
                     captured = captured.refresh_after_rejection().await?;

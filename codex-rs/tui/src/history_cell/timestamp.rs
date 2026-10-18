@@ -28,10 +28,7 @@ impl HistoryTimestamp {
 }
 
 pub(crate) fn agent_prefix(first: bool) -> Span<'static> {
-    match first {
-        true => "• ".dim(),
-        false => "  ".into(),
-    }
+    if first { "• ".dim() } else { "  ".into() }
 }
 
 #[cfg(test)]

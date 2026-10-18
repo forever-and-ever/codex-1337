@@ -1,6 +1,22 @@
 //! Connection-owned voice preference reads and acknowledged-write confirmation.
 
-use super::*;
+use super::App;
+use super::AppServerRequestHandle;
+use super::ClientRequest;
+use super::ConfigBatchWriteParams;
+use super::ConfigWriteResponse;
+use super::ConnectionMutation;
+use super::OperationReceipt;
+use super::PathBuf;
+use super::PendingSubmission;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionRequest;
+use super::TypedRequestError;
+use super::Uuid;
+use super::WriteStatus;
+use super::config_persistence;
+use super::realtime_settings;
 use codex_app_server_protocol as api;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
@@ -17,7 +33,7 @@ pub(in crate::app) enum VoicePreferenceOperation {
     Confirm {
         cwd: PathBuf,
         voice: RealtimeVoice,
-        write: Box<api::ConfigWriteResponse>,
+        write: Box<ConfigWriteResponse>,
     },
 }
 
@@ -30,7 +46,7 @@ impl VoicePreferenceOperation {
 #[derive(Debug)]
 pub(in crate::app) enum VoicePreferenceReceipt {
     Choices(Result<(RealtimeVoicesList, Option<RealtimeVoice>), String>),
-    Saved(api::ConfigWriteResponse),
+    Saved(ConfigWriteResponse),
     Confirmed(Result<Option<RealtimeVoice>, String>),
 }
 
@@ -40,7 +56,7 @@ async fn list_voices(
 ) -> Result<RealtimeVoicesList, String> {
     handle
         .request_typed::<api::ThreadRealtimeListVoicesResponse>(
-            api::ClientRequest::ThreadRealtimeListVoices {
+            ClientRequest::ThreadRealtimeListVoices {
                 request_id: api::RequestId::String(format!("tui-voice-list-{id}")),
                 params: api::ThreadRealtimeListVoicesParams {},
             },
@@ -67,10 +83,7 @@ pub(super) async fn send(
                 let selected = config
                     .as_ref()
                     .map(|config| {
-                        super::super::realtime_settings::configured_voice(
-                            &config.config,
-                            voices.default_v1,
-                        )
+                        realtime_settings::configured_voice(&config.config, voices.default_v1)
                     })
                     .transpose()
                     .map(Option::flatten)
@@ -82,9 +95,9 @@ pub(super) async fn send(
         }
         VoicePreferenceOperation::Save { voice, .. } => {
             let response = handle
-                .request_typed::<api::ConfigWriteResponse>(api::ClientRequest::ConfigBatchWrite {
+                .request_typed::<ConfigWriteResponse>(ClientRequest::ConfigBatchWrite {
                     request_id: api::RequestId::String(format!("tui-voice-save-{id}")),
-                    params: api::ConfigBatchWriteParams {
+                    params: ConfigBatchWriteParams {
                         edits: vec![crate::config_update::replace_config_value(
                             "realtime.voice",
                             serde_json::json!(voice),
@@ -102,8 +115,8 @@ pub(super) async fn send(
                 let voices = list_voices(&handle, id).await.map_err(|error| format!("Voice preference was saved, but the effective voice could not be confirmed: {error}"))?;
                 let config = crate::config_update::read_effective_config_if_supported(handle, &cwd).await.map_err(|error| format!("Voice preference was saved, but effective settings could not be read: {error}"))?;
                 match config {
-                    Some(config) => super::super::realtime_settings::configured_voice(&config.config, voices.default_v1).map_err(|error| format!("Voice preference was saved, but effective settings could not be read: {error}")),
-                    None if write.status == api::WriteStatus::OkOverridden => Err("Voice preference was saved, but effective settings could not be read: the saved voice is overridden, but this server cannot read effective settings".into()),
+                    Some(config) => realtime_settings::configured_voice(&config.config, voices.default_v1).map_err(|error| format!("Voice preference was saved, but effective settings could not be read: {error}")),
+                    None if write.status == WriteStatus::OkOverridden => Err("Voice preference was saved, but effective settings could not be read: the saved voice is overridden, but this server cannot read effective settings".into()),
                     None => Ok(Some(voice)),
                 }
             }.await;
@@ -115,9 +128,8 @@ pub(super) async fn send(
 
 impl App {
     pub(super) fn continue_voice_preference(
-        &mut self,
         active: &mut PendingSubmission,
-        write: &api::ConfigWriteResponse,
+        write: &ConfigWriteResponse,
     ) -> bool {
         let SubmissionRequest::Operation(operation) = &mut active.request else {
             return false;
@@ -148,7 +160,7 @@ impl App {
             {
                 match result {
                     Ok((voices, selected)) => {
-                        self.chat_widget.open_realtime_voices(selected, voices)
+                        self.chat_widget.open_realtime_voices(selected, voices);
                     }
                     Err(error) => self.chat_widget.add_error_message(error),
                 }
@@ -165,7 +177,7 @@ impl App {
                     } else {
                         self.chat_widget.add_error_message(format!(
                             "Voice preference was saved but not applied: {}",
-                            super::super::config_persistence::overridden_write_message(write)
+                            config_persistence::overridden_write_message(write)
                         ));
                     }
                 }
@@ -185,7 +197,7 @@ impl App {
                 Ok(_) => self.chat_widget.add_error_message(format!(
                     "Voice preference was saved but not applied for {}: {}",
                     cwd.display(),
-                    super::super::config_persistence::overridden_write_message(write)
+                    config_persistence::overridden_write_message(write)
                 )),
                 Err(error) => self
                     .chat_widget

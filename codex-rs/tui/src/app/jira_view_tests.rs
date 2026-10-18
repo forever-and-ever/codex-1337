@@ -35,7 +35,7 @@ fn jira_browser_surface_snapshot() {
             2 => browser.form = Some(JiraForm::new(Some(issue.clone()))),
             3 => {
                 browser.error =
-                    Some("Issue bug/slow-input already exists; choose another slug".into())
+                    Some("Issue bug/slow-input already exists; choose another slug".into());
             }
             4 => {
                 let mut child = issue.clone();
@@ -50,9 +50,9 @@ fn jira_browser_surface_snapshot() {
             }
             _ => {}
         }
-        terminal
+        let _ = terminal
             .draw(|frame| {
-                browser.render(frame.area(), frame.buffer_mut());
+                let _ = browser.render(frame.area(), frame.buffer_mut());
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -73,7 +73,7 @@ fn jira_browser_surface_snapshot() {
     // never index outside the buffer, even before the next full-size frame.
     for height in 0..18 {
         let area = Rect::new(/*x*/ 0, /*y*/ 0, /*width*/ 80, height);
-        browser.render(area, &mut Buffer::empty(area));
+        let _ = browser.render(area, &mut Buffer::empty(area));
     }
 }
 
@@ -101,7 +101,7 @@ fn jira_preview_tracks_hover_and_ignores_stale_reads() {
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 110, /*height*/ 22,
     );
-    browser.render(area, &mut Buffer::empty(area));
+    let _ = browser.render(area, &mut Buffer::empty(area));
     let row = browser.targets.rows[1].0;
     let hover = MouseEvent {
         kind: MouseEventKind::Moved,
@@ -159,6 +159,6 @@ fn jira_preview_tracks_hover_and_ignores_stale_reads() {
     let tiny = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 18, /*height*/ 8,
     );
-    browser.render(tiny, &mut Buffer::empty(tiny));
+    let _ = browser.render(tiny, &mut Buffer::empty(tiny));
     assert!(!browser.mouse_input(hover));
 }

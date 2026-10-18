@@ -82,10 +82,10 @@ impl Default for ModelGate {
     }
 }
 
-async fn retired_frontend_transport(State(gate): State<Arc<ModelGate>>) -> axum::http::StatusCode {
-    gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
+async fn retired_frontend_transport(State(gate): State<Arc<ModelGate>>) -> http::StatusCode {
+    let _ = gate.legacy_connections.fetch_add(1, Ordering::SeqCst);
     gate.changed.notify_one();
-    axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    http::StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn frontend_transport_config(endpoint: &str) -> Value {
@@ -148,7 +148,7 @@ async fn persist_destination(
                 JSONRPCMessage::Response(response)
                     if response.id == codex_app_server_protocol::RequestId::Integer(id) =>
                 {
-                    started = true
+                    started = true;
                 }
                 JSONRPCMessage::Notification(notification)
                     if notification.method == "turn/completed"
@@ -157,7 +157,7 @@ async fn persist_destination(
                             .as_ref()
                             .is_some_and(|params| params["threadId"] == thread_id) =>
                 {
-                    completed = true
+                    completed = true;
                 }
                 JSONRPCMessage::Error(error) => {
                     anyhow::bail!("destination setup failed: {error:?}")
@@ -255,7 +255,7 @@ approval_mode = "approve"
     let (mut process, address) = spawn_websocket_server(home.path()).await?;
     let mut frontend = connect_websocket(address).await?;
     send_initialize_request(&mut frontend, /*id*/ 1, "sole-frontend").await?;
-    read_response_for_id(&mut frontend, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 1).await?;
     // Old listener registrations have no authentic ownership marker. Retire
     // transport explicitly; the native section independently owns user policy.
     // The live trap distinguishes retirement from tolerating a dead port.
@@ -277,7 +277,7 @@ approval_mode = "approve"
         Some(json!({"threadId": caller, "name": "Dispatch & receive"})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 3).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 3).await?;
     send_request(
         &mut frontend,
         "thread/start",
@@ -300,7 +300,7 @@ approval_mode = "approve"
         Some(json!({"threadId": destination})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 5).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 5).await?;
     wait_for_loaded_threads(&mut frontend, /*first_id*/ 100, &[&caller]).await?;
 
     let stale = start_thread(&mut frontend, /*id*/ 7).await?;
@@ -312,7 +312,7 @@ approval_mode = "approve"
         Some(json!({"threadId": stale})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 8).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 8).await?;
     wait_for_loaded_threads(&mut frontend, /*first_id*/ 200, &[&caller]).await?;
     let stale_updated_at = age_destination(home.path(), &stale).await?;
     gate.calls.lock().await.clear();
@@ -348,7 +348,7 @@ approval_mode = "approve"
         Some(json!({"threadId": caller, "input": [{"type": "text", "text": "coordinate"}]})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 6).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 6).await?;
     timeout(TIMEOUT, gate.entered.notified()).await?;
     frontend.close(/*msg*/ None).await?;
     drop(frontend);
@@ -413,7 +413,7 @@ approval_mode = "approve"
     // A replacement frontend merely observes the authoritative runtime/index.
     let mut replacement = connect_websocket(address).await?;
     send_initialize_request(&mut replacement, /*id*/ 1, "replacement-frontend").await?;
-    read_response_for_id(&mut replacement, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut replacement, /*id*/ 1).await?;
     send_request(
         &mut replacement,
         "thread/loaded/list",
@@ -464,7 +464,7 @@ approval_mode = "approve"
         })?),
     )
     .await?;
-    read_response_for_id(&mut replacement, /*id*/ 2).await?;
+    let _ = read_response_for_id(&mut replacement, /*id*/ 2).await?;
     send_request(
         &mut replacement,
         "thread/read",
@@ -515,7 +515,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
     let (mut process, address) = spawn_websocket_server(home.path()).await?;
     let mut frontend = connect_websocket(address).await?;
     send_initialize_request(&mut frontend, /*id*/ 1, "approval-origin").await?;
-    read_response_for_id(&mut frontend, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 1).await?;
     let caller = start_thread(&mut frontend, /*id*/ 2).await?;
     let destination = start_thread(&mut frontend, /*id*/ 3).await?;
     gate.first.store(true, Ordering::SeqCst);
@@ -535,7 +535,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
         Some(json!({"threadId": caller, "input": [{"type": "text", "text": "coordinate"}]})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 4).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 4).await?;
     timeout(TIMEOUT, gate.entered.notified()).await?;
     frontend.close(None).await?;
     drop(frontend);
@@ -557,7 +557,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
                 break;
             }
             JSONRPCMessage::Request(request) if request.method == "item/tool/requestUserInput" => {
-                pending_approval = Some(request)
+                pending_approval = Some(request);
             }
             JSONRPCMessage::Error(error) => anyhow::bail!("initialize failed: {error:?}"),
             _ => {}
@@ -582,12 +582,12 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
                 JSONRPCMessage::Response(response)
                     if response.id == codex_app_server_protocol::RequestId::Integer(2) =>
                 {
-                    resumed = true
+                    resumed = true;
                 }
                 JSONRPCMessage::Request(request)
                     if request.method == "item/tool/requestUserInput" =>
                 {
-                    approval = Some(request)
+                    approval = Some(request);
                 }
                 JSONRPCMessage::Error(error) => anyhow::bail!("resume failed: {error:?}"),
                 _ => {}
@@ -612,7 +612,7 @@ async fn headless_approval_waits_for_consent_and_replays_to_a_replacement_fronte
         Some(json!({"threadId": destination, "excludeTurns": true})),
     )
     .await?;
-    read_response_for_id(&mut replacement, /*id*/ 3)
+    let _ = read_response_for_id(&mut replacement, /*id*/ 3)
         .await
         .context("open persisted destination before granting consent")?;
     let aged = age_destination(home.path(), &destination).await?;

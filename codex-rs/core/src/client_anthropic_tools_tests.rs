@@ -9,6 +9,7 @@ use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
 use pretty_assertions::assert_eq;
 use serde_json::json;
+use std::collections::BTreeMap;
 
 #[test]
 fn aliases_preserve_dispatch_identity_across_collisions_and_catalogue_order() {
@@ -27,7 +28,7 @@ fn aliases_preserve_dispatch_identity_across_collisions_and_catalogue_order() {
         codex_code_mode::presentation::ToolDialect::Anthropic,
         &[],
         &[codex_code_mode::UndeclaredTool(nested)],
-        &Default::default(),
+        &BTreeMap::default(),
         600_000,
         true,
         codex_code_mode::MediaHelpers {

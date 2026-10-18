@@ -1,4 +1,20 @@
-use super::*;
+use super::ACK_TIMEOUT;
+use super::AbortOnDropHandle;
+use super::App;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::FutureExt;
+use super::LaneState;
+use super::NavigationCompletion;
+use super::NavigationIntent;
+use super::NavigationReceipt;
+use super::PendingNavigation;
+use super::Result;
+use super::ServerCompletion;
+use super::ThreadId;
+use super::Uuid;
+use super::detach;
+use super::selection;
 use codex_app_server_client::AppServerRequestHandle;
 
 pub(super) enum CleanupContinuation {
@@ -70,10 +86,10 @@ impl App {
                     })?
                     .map_err(|error| error.to_string())?;
                 if archive {
-                    tokio::time::timeout(
+                    let _ = tokio::time::timeout(
                         ACK_TIMEOUT,
                         handle.request_typed::<codex_app_server_protocol::ThreadArchiveResponse>(
-                            codex_app_server_protocol::ClientRequest::ThreadArchive {
+                            ClientRequest::ThreadArchive {
                                 request_id: codex_app_server_protocol::RequestId::String(format!(
                                     "tui-cleanup-archive-{id}"
                                 )),

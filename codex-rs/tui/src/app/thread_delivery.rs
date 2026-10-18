@@ -1,7 +1,21 @@
 //! Loop-owned admission for thread events. Workers report their one operation result through a
 //! bounded ingress; they never reserve a slot in the visible thread's receiver themselves.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Arc;
+use super::FeedbackCategory;
+use super::HistoryLookupResponse;
+use super::Mutex;
+use super::Result;
+use super::ThreadBufferedEvent;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::TrySendError;
+use super::Uuid;
+use super::mpsc;
+use super::turn_submissions;
 use codex_app_server_protocol::RequestId as AppServerRequestId;
 use codex_app_server_protocol::UserVerificationProof;
 
@@ -11,9 +25,9 @@ const LOCAL_COMPLETION_CAPACITY: usize = 64;
 pub(super) enum LocalThreadCompletion {
     Submission {
         thread_id: ThreadId,
-        id: uuid::Uuid,
+        id: Uuid,
         epoch: u64,
-        outcome: Box<super::turn_submissions::SubmissionOutcome>,
+        outcome: Box<turn_submissions::SubmissionOutcome>,
     },
     HistoryLookup {
         thread_id: ThreadId,
@@ -29,7 +43,7 @@ pub(super) enum LocalThreadCompletion {
         thread_id: ThreadId,
         server_name: String,
         request_id: AppServerRequestId,
-        attempt_id: uuid::Uuid,
+        attempt_id: Uuid,
         result: Result<UserVerificationProof, String>,
     },
 }

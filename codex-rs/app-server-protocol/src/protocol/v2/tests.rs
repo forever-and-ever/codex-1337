@@ -3458,7 +3458,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         let persisted = serde_json::to_value(&wait).unwrap();
         let parsed = serde_json::from_value::<TurnItem>(persisted.clone()).unwrap();
         assert_eq!(serde_json::to_value(parsed).unwrap(), persisted);
-        crate::protocol::agent_wait_history::assert_wait_history_retains_completion(wait.clone());
+        crate::protocol::agent_wait_history::assert_wait_history_retains_completion(&wait);
         let wire = serde_json::to_value(ThreadItem::from(wait)).unwrap();
         assert_eq!(
             wire["waitCompletion"],

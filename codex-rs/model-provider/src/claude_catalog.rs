@@ -10,7 +10,7 @@ use codex_protocol::protocol::MultiAgentVersion;
 const REQUEST_USER_INPUT_ASYNC: &str = "request_user_input_async";
 
 // The bundled role texts describe GPT's channels; Claude reads agent messages as user text.
-const ROOT_AGENT_ROLE: &str = r#"You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
+const ROOT_AGENT_ROLE: &str = r"You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
 At the start of your turn, you are the active agent.
 You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents.
@@ -28,8 +28,8 @@ Sender: <author>
 Payload:
 <payload text>
 ```
-"#;
-const SUBAGENT_ROLE: &str = r#"You are an agent in a team of agents collaborating to complete a task.
+";
+const SUBAGENT_ROLE: &str = r"You are an agent in a team of agents collaborating to complete a task.
 
 You can spawn sub-agents to handle subtasks, and those sub-agents can spawn their own sub-agents. All agents in the team, including the agents that you can assign tasks to, are equally intelligent and capable, and have access to the same set of tools.
 
@@ -47,7 +47,7 @@ Payload:
 <payload text>
 ```
 The task name of a message sent to you is your own identity.
-"#;
+";
 
 pub(crate) fn normalize(models: Vec<ModelInfo>) -> Vec<ModelInfo> {
     models

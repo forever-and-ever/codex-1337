@@ -32,22 +32,23 @@ async fn history_reads_omit_items_this_build_cannot_read() -> Result<()> {
         .with_codex_home(codex_home.path())
         .build()
         .await?;
-    mcp.initialize_with_capabilities(
-        ClientInfo {
-            name: "test-client".to_string(),
-            title: None,
-            version: "0.1.0".to_string(),
-        },
-        Some(InitializeCapabilities {
-            explicit_gateway_oauth: false,
-            experimental_api: true,
-            request_attestation: false,
-            opt_out_notification_methods: None,
-            mcp_server_openai_form_elicitation: false,
-            extensions: None,
-        }),
-    )
-    .await?;
+    let _ = mcp
+        .initialize_with_capabilities(
+            ClientInfo {
+                name: "test-client".to_string(),
+                title: None,
+                version: "0.1.0".to_string(),
+            },
+            Some(InitializeCapabilities {
+                explicit_gateway_oauth: false,
+                experimental_api: true,
+                request_attestation: false,
+                opt_out_notification_methods: None,
+                mcp_server_openai_form_elicitation: false,
+                extensions: None,
+            }),
+        )
+        .await?;
     let ThreadStartResponse { thread, .. } = mcp
         .start_thread(ThreadStartParams {
             history_mode: Some(ThreadHistoryMode::Paginated),
@@ -73,7 +74,7 @@ async fn history_reads_omit_items_this_build_cannot_read() -> Result<()> {
     let pool = sqlite
         .open_read_write_pool(&sqlite.thread_history_db_path())
         .await?;
-    sqlx::query(
+    let _ = sqlx::query(
         "INSERT INTO thread_items \
          (thread_id, turn_id, item_id, rollout_ordinal, updated_at_ordinal, created_at_ms, \
           item_type, item_json) \

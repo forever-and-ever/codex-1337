@@ -1,5 +1,7 @@
 //! Sender attribution is captured at send time and retained with the tool output.
 
+use std::fmt::Write as _;
+
 pub const MAX_SENDER_NAME_CHARS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +15,7 @@ pub struct DelegatedMessage {
 impl DelegatedMessage {
     /// Recognizes attribution only on named coordination outputs, including the
     /// persisted desktop namespace. Arbitrary tools cannot claim this envelope.
+    #[must_use]
     pub fn from_tool_output(
         name: &str,
         namespace: Option<&str>,
@@ -25,6 +28,7 @@ impl DelegatedMessage {
         }
         Self::parse(output.to_text().as_deref()?)
     }
+    #[must_use]
     pub fn new(source: &crate::Thread, input: String) -> Self {
         Self {
             source_thread_id: source.id.clone(),
@@ -41,27 +45,31 @@ impl DelegatedMessage {
         }
     }
 
+    #[must_use]
     pub fn encode(&self) -> String {
         let mut output = format!(
             "<codex_delegation>\n  <source_thread_id>{}</source_thread_id>",
             escape(&self.source_thread_id)
         );
         if let Some(name) = &self.source_thread_name {
-            output.push_str(&format!(
+            let _ = write!(
+                output,
                 "\n  <source_thread_name>{}</source_thread_name>",
                 escape(name)
-            ));
+            );
         }
         if let Some(sent_at) = self.sent_at {
-            output.push_str(&format!("\n  <sent_at>{sent_at}</sent_at>"));
+            let _ = write!(output, "\n  <sent_at>{sent_at}</sent_at>");
         }
-        output.push_str(&format!(
+        let _ = write!(
+            output,
             "\n  <input>{}</input>\n</codex_delegation>",
             escape(&self.input)
-        ));
+        );
         output
     }
 
+    #[must_use]
     pub fn parse(text: &str) -> Option<Self> {
         let rest = text.strip_prefix("<codex_delegation>\n  <source_thread_id>")?;
         let (id, mut rest) = rest.split_once("</source_thread_id>")?;

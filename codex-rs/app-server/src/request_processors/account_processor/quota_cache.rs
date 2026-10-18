@@ -129,7 +129,7 @@ impl QuotaCache {
                         failure
                             .retry_after
                             .map_or(backoff, |retry| retry.remaining_delay().max(backoff))
-                            .min(Duration::from_secs(/*secs*/ 86400))
+                            .min(Duration::from_hours(/*secs*/ 24))
                     }
                 };
                 let now = Instant::now();

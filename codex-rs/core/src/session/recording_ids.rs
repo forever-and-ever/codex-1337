@@ -17,10 +17,12 @@ impl Session {
             .await
             .as_ref()
             .and_then(|turn| turn.task.as_ref())
-            .map(|task| task.turn_context.sub_id.clone())
-            .unwrap_or_else(|| {
-                let id = self.next_fork_recording_id();
-                format!("inject-{id}")
-            })
+            .map_or_else(
+                || {
+                    let id = self.next_fork_recording_id();
+                    format!("inject-{id}")
+                },
+                |task| task.turn_context.sub_id.clone(),
+            )
     }
 }

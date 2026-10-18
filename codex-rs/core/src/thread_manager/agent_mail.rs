@@ -11,11 +11,13 @@ impl ThreadManager {
         recipient: ThreadId,
     ) -> Result<()> {
         let thread = self.state.get_thread(root).await?;
-        thread
-            .session
-            .services
-            .local_agent_runtime
-            .recover_accepted_agent_mail(root, recipient)
-            .await
+        Box::pin(
+            thread
+                .session
+                .services
+                .local_agent_runtime
+                .recover_accepted_agent_mail(root, recipient),
+        )
+        .await
     }
 }

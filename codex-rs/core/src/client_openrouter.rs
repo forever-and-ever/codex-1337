@@ -252,10 +252,10 @@ pub(super) fn project_stream(
     let (tx, rx_event) = mpsc::channel(super::RESPONSE_STREAM_CHANNEL_CAPACITY);
     let upstream_request_id = stream.upstream_request_id.take();
     let interrupt = stream.interrupt.take();
-    tokio::spawn(async move {
+    drop(tokio::spawn(async move {
         loop {
             let event = tokio::select! {
-                _ = tx.closed() => return,
+                () = tx.closed() => return,
                 event = stream.rx_event.recv() => event,
             };
             let Some(event) = event else {
@@ -289,7 +289,7 @@ pub(super) fn project_stream(
                 }
             }
         }
-    });
+    }));
     ApiResponseStream {
         rx_event,
         upstream_request_id,

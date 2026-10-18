@@ -96,8 +96,8 @@ pub(super) struct Encoder<'a> {
     pending: Vec<(String, CallKind)>,
     /// Content recorded while the open batch awaited results. Canonical history is
     /// chronological, and hosts record goal updates and delegation receipts the moment they
-    /// are accepted, even during a long tool call. A tool_result must directly answer its
-    /// tool_use, so this content follows the completed batch, where the model could first
+    /// are accepted, even during a long tool call. A `tool_result` must directly answer its
+    /// `tool_use`, so this content follows the completed batch, where the model could first
     /// have observed it.
     deferred: Vec<Message>,
 }
@@ -163,7 +163,7 @@ impl<'a> Encoder<'a> {
                         "Anthropic assistant interrupts incomplete tool result batch",
                     ));
                 }
-                self.calls.insert(id.clone());
+                let _ = self.calls.insert(id.clone());
                 self.pending.push((id, kind));
                 self.append(ASSISTANT, vec![tool_use]);
             }
@@ -191,7 +191,7 @@ impl<'a> Encoder<'a> {
                     (ResultKind::Function, CallKind::Function)
                     | (ResultKind::Custom, CallKind::Custom) => {}
                 }
-                self.pending.remove(index);
+                let _ = self.pending.remove(index);
                 self.append(USER, vec![result]);
                 if self.pending.is_empty() {
                     for Message { role, content } in std::mem::take(&mut self.deferred) {

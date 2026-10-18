@@ -59,12 +59,16 @@ pub(crate) async fn run(command: &Command) -> anyhow::Result<()> {
                 }
             }
         }
-        Action::Dump { pid, json } => display(ui_latency::query(pid, false).await?, json)?,
-        Action::Reset { pid, json } => display(ui_latency::query(pid, true).await?, json)?,
+        Action::Dump { pid, json } => display(&ui_latency::query(pid, false).await?, json)?,
+        Action::Reset { pid, json } => display(&ui_latency::query(pid, true).await?, json)?,
     }
     Ok(())
 }
-fn display(report: Report, json: bool) -> anyhow::Result<()> {
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Display-only nanosecond telemetry is intentionally rendered as approximate floating-point milliseconds"
+)]
+fn display(report: &Report, json: bool) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
         return Ok(());

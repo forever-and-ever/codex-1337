@@ -1,17 +1,21 @@
 //! UI event continuations for persistence, export, and prompt-revert receipts.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Arc;
+use super::HistoryCell;
+use super::ThreadId;
+use super::tui;
+use super::turn_submissions;
 
 impl App {
     pub(super) async fn dispatch_submission_event(
         &mut self,
         app_server: &mut AppServerSession,
-        event: super::super::turn_submissions::SubmissionEvent,
+        event: turn_submissions::SubmissionEvent,
     ) {
-        let retired = matches!(
-            &event,
-            super::super::turn_submissions::SubmissionEvent::Retire
-        );
+        let retired = matches!(&event, turn_submissions::SubmissionEvent::Retire);
         self.handle_submission_event(app_server, event).await;
         if retired {
             self.sync_frontend_requests();
@@ -31,14 +35,14 @@ impl App {
         tui: &mut tui::Tui,
         app_server: &AppServerSession,
         thread_id: ThreadId,
-        selected_cell: Arc<dyn HistoryCell>,
+        selected_cell: &Arc<dyn HistoryCell>,
     ) {
         self.pending_thread_switch_resets -= 1;
         if self.chat_widget.thread_id() == Some(thread_id) {
             if let Some(index) = self
                 .transcript_cells
                 .iter()
-                .position(|cell| Arc::ptr_eq(cell, &selected_cell))
+                .position(|cell| Arc::ptr_eq(cell, selected_cell))
             {
                 self.transcript_cells.truncate(index);
                 self.code_mode_transcript.retain(&self.transcript_cells);
@@ -99,7 +103,7 @@ impl App {
         service_tier: Option<String>,
     ) {
         self.refresh_status_line();
-        self.config.service_tier = service_tier.clone();
+        self.config.service_tier.clone_from(&service_tier);
         self.sync_active_thread_service_tier_to_cached_session()
             .await;
         let edits =
@@ -159,15 +163,15 @@ impl App {
     pub(super) fn persist_conversation_model_selection(
         &mut self,
         app_server: &AppServerSession,
-        model: String,
-        effort: codex_protocol::openai_models::ReasoningEffort,
-        default_effort: Option<codex_protocol::openai_models::ReasoningEffort>,
+        model: &str,
+        effort: &codex_protocol::openai_models::ReasoningEffort,
+        default_effort: Option<&codex_protocol::openai_models::ReasoningEffort>,
     ) {
         let message = format!("Model changed to {model} {effort} for this conversation");
-        if let Some(default_effort) = default_effort.as_ref() {
+        if let Some(default_effort) = default_effort {
             let edits = crate::config_update::build_model_selection_edits(
                 &self.chat_widget.config_ref().model_provider_id,
-                model.as_str(),
+                model,
                 Some(default_effort),
             );
             self.queue_model_defaults(

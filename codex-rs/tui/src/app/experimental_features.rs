@@ -32,7 +32,6 @@ impl App {
             ));
         }
         self.enable_feature_for_new_threads_continuation(tui, app_server, label, edits)
-            .await
     }
 
     pub(super) fn fetch_experimental_features(

@@ -49,6 +49,12 @@ impl Shimmer for Supernova {
         }
     }
 
+    #[expect(
+        clippy::cast_possible_wrap,
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "Star = tokens / 360 fits i64; visual noise deliberately uses clock buckets and header coordinates are approximate scalars."
+    )]
     fn status(&self, stage: &Stage, row: &mut Row) {
         let t = stage.t;
         let life = stage.tokens % LIFE;

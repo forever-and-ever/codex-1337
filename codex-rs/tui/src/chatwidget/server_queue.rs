@@ -1,6 +1,12 @@
 //! Incoming follow-ups share pending-input presentation and edit/cancel keys.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::KeyBindingListExt;
+use super::KeyEvent;
+use super::KeyEventKind;
+use super::UserInput;
+use super::history_cell;
 use crate::app::QueueEvent;
 use crate::app_command::PendingSteerCancelAction;
 use codex_app_server_protocol::QueuedSubmission;
@@ -23,7 +29,7 @@ pub(crate) fn queued_message_text(item: &QueuedSubmission) -> Option<String> {
     item.input
         .iter()
         .map(|input| match input {
-            codex_app_server_protocol::UserInput::Text { text, .. } => Some(text.clone()),
+            UserInput::Text { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()

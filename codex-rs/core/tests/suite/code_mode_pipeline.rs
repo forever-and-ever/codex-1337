@@ -1,4 +1,6 @@
 use anyhow::Result;
+use codex_exec_server::ReadFileOptions;
+use codex_exec_server::WriteFileOptions;
 use codex_features::Feature;
 use core_test_support::mock_server;
 use core_test_support::responses;
@@ -31,7 +33,7 @@ async fn response_stage_pipeline(language: &str, source: &str, success: bool) ->
     skip_if_no_network!(Ok(()));
     core_test_support::skip_if_sandbox!(Ok(()));
     let server = responses::start_mock_server().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
     let mut builder = test_codex().with_config(|config| {
         let _ = config.features.enable(Feature::CodeModeOnly);
     });
@@ -42,14 +44,14 @@ async fn response_stage_pipeline(language: &str, source: &str, success: bool) ->
             ev_custom_tool_call("produce", language, source),
             ev_custom_tool_call("independent", "bash", "printf 2 > increment"),
             ev_function_call("barrier-a", "fence", "{}"),
-            ev_custom_tool_call("consume", "exec", r#"
+            ev_custom_tool_call("consume", "exec", r"
 const a = Number(await fs.readFile('input', 'utf8'));
 const b = Number(await fs.readFile('increment', {encoding: 'utf8'}));
 await fs.writeFile('result', String(a + b));
 const result = await tools.exec_command({cmd: 'cat result'});
 if (result.output !== '42') throw new Error('pipeline corrupted');
 text(result.output);
-"#),
+"),
             ev_function_call("barrier-b", "fence", "{}"),
             ev_custom_tool_call("final", "python", "from pathlib import Path\nassert Path('result').read_text() == '42'\nPath('finished').write_text('done')"),
             ev_completed("pipeline"),
@@ -75,7 +77,7 @@ text(result.output);
             test.fs()
                 .read_file(
                     &test.workspace_path_uri("finished")?,
-                    Default::default(),
+                    ReadFileOptions::default(),
                     /*sandbox*/ None
                 )
                 .await?,
@@ -100,7 +102,7 @@ text(result.output);
             test.fs()
                 .read_file(
                     &test.workspace_path_uri("finished")?,
-                    Default::default(),
+                    ReadFileOptions::default(),
                     /*sandbox*/ None
                 )
                 .await
@@ -110,7 +112,7 @@ text(result.output);
             test.fs()
                 .read_file(
                     &test.workspace_path_uri("result")?,
-                    Default::default(),
+                    ReadFileOptions::default(),
                     /*sandbox*/ None
                 )
                 .await
@@ -118,7 +120,7 @@ text(result.output);
         );
     }
     Ok(())
-    })
+    }))
     .await
 }
 
@@ -127,7 +129,7 @@ async fn filesystem_authority_and_transfer_bounds() -> Result<()> {
     skip_if_no_network!(Ok(()));
     core_test_support::skip_if_sandbox!(Ok(()));
     let server = responses::start_mock_server().await;
-    mock_server::run(&[&server], async {
+    Box::pin(mock_server::run(&[&server], async {
         let mut builder = test_codex().with_config(|config| {
             let _ = config.features.enable(Feature::CodeModeOnly);
         });
@@ -140,7 +142,7 @@ async fn filesystem_authority_and_transfer_bounds() -> Result<()> {
                 .write_file(
                     &test.workspace_path_uri(name)?,
                     bytes,
-                    Default::default(),
+                    WriteFileOptions::default(),
                     /*sandbox*/ None,
                 )
                 .await?;
@@ -152,7 +154,7 @@ async fn filesystem_authority_and_transfer_bounds() -> Result<()> {
                     ev_custom_tool_call(
                         "filesystem",
                         "exec",
-                        r#"
+                        r"
 if (await fs.readFile('seed', 'utf8') !== 'private result') throw new Error('wrong executor');
 let denied = false;
 try { await fs.writeFile('seed', 'corrupted'); } catch (_) { denied = true; }
@@ -161,7 +163,7 @@ let bounded = false;
 try { await fs.readFile('oversize'); } catch (error) { bounded = String(error).includes('1 MiB'); }
 if (!bounded) throw new Error('read was unbounded or silently truncated');
 text('authority and bounds preserved');
-"#,
+",
                     ),
                     ev_function_call("barrier", "fence", "{}"),
                     ev_custom_tool_call("skipped", "exec", "text('must not execute');"),
@@ -174,7 +176,8 @@ text('authority and bounds preserved');
             ],
         )
         .await;
-        test.codex
+        let _ = test
+            .codex
             .start_or_steer_turn(
                 codex_core::TurnInputRequest::user_input(vec![
                     codex_protocol::user_input::UserInput::Text {
@@ -194,7 +197,7 @@ text('authority and bounds preserved');
             )
             .await?;
         let mut filesystem_inputs = Vec::new();
-        core_test_support::wait_for_event(&test.codex, |event| {
+        let _ = core_test_support::wait_for_event(&test.codex, |event| {
             if let codex_protocol::protocol::EventMsg::CodeModeOwned(owned) = event
                 && let codex_protocol::protocol::EventMsg::ItemCompleted(completed) =
                     owned.payload().as_ref()
@@ -250,13 +253,13 @@ text('authority and bounds preserved');
             test.fs()
                 .read_file(
                     &test.workspace_path_uri("seed")?,
-                    Default::default(),
+                    ReadFileOptions::default(),
                     /*sandbox*/ None
                 )
                 .await?,
             b"private result"
         );
         Ok(())
-    })
+    }))
     .await
 }

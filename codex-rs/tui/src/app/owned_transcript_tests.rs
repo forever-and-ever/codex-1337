@@ -226,7 +226,7 @@ async fn list_spacing_completion_preserves_the_scrolled_reader() -> Result<()> {
     app.transcript_view
         .render(area, &mut after, &app.transcript_cells);
     assert_eq!(after, before);
-    preparation::out_of_order_streams(&mut app, &mut tui, area, retained).await?;
+    preparation::out_of_order_streams(&mut app, &mut tui, area, &retained)?;
     Ok(())
 }
 

@@ -2,7 +2,22 @@
 //! Requests are scoped to an attachment and generation; late replies cannot
 //! populate another conversation. Opening this view never loads an agent.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Duration;
+use super::HashMap;
+use super::HashSet;
+use super::Instant;
+use super::KeyEvent;
+use super::KeyEventKind;
+use super::Rect;
+use super::Result;
+use super::ThreadId;
+use super::TuiEvent;
+use super::history_cell;
+use super::tui;
 use crate::app_server_session::session_preparation::RequestPolicy;
 use crate::app_server_session::session_preparation::{self as preparation};
 use crate::live_work::Action;
@@ -11,6 +26,7 @@ use crate::live_work::Interaction;
 use crate::live_work::Key;
 use crate::live_work::LiveWorkView;
 use crate::live_work::Row;
+use crate::transcript_view::ViewAction;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
 use crossterm::event::MouseEventKind;
@@ -411,11 +427,11 @@ impl App {
         let Some(action) = scope.view.selection_event(event) else {
             return false;
         };
-        use crate::transcript_view::ViewAction;
+
         let view = scope.view.selection_view();
         match action {
             ViewAction::PrimarySelection(text) | ViewAction::CopyOnSelect(text) => {
-                view.publish_primary(tui, &text)
+                view.publish_primary(tui, &text);
             }
             ViewAction::Copy(text) | ViewAction::CopyAndFollow(text) => {
                 let result = view.copy_selected_text(tui, &[], &text, true);
@@ -506,14 +522,14 @@ impl App {
                 ) { return; }
                 let handle = server.request_handle();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result = process_inventory(&handle, thread, request).await;
                     tx.send(AppEvent::LiveWork(Event::Refreshed {
                         thread,
                         request,
                         result,
                     }));
-                });
+                }));
             }
             Event::Refreshed {
                 thread,
@@ -562,16 +578,16 @@ impl App {
                     return;
                 }
                 let request = Uuid::new_v4();
-                scope.stopping.insert(key, request);
+                let _ = scope.stopping.insert(key, request);
                 let thread = scope.thread;
                 let handle = server.request_handle();
                 let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
+                drop(tokio::spawn(async move {
                     let result: Result<api::ThreadBackgroundTerminalsTerminateResponse, _> =
                         preparation::request(
                             RequestPolicy::Interactive,
                             &handle,
-                            api::ClientRequest::ThreadBackgroundTerminalsTerminate {
+                            ClientRequest::ThreadBackgroundTerminalsTerminate {
                                 request_id: api::RequestId::String(format!("live-stop-{request}")),
                                 params: api::ThreadBackgroundTerminalsTerminateParams {
                                     thread_id: owner.to_string(),
@@ -587,7 +603,7 @@ impl App {
                         request,
                         result: result.map(|_| ()).map_err(|error| error.to_string()),
                     }));
-                });
+                }));
             }
             Event::Stopped {
                 thread,
@@ -609,7 +625,7 @@ impl App {
                     return;
                 }
                 if let Err(error) = result {
-                    scope.stopping.remove(&key);
+                    let _ = scope.stopping.remove(&key);
                     self.chat_widget
                         .add_error_message(format!("Could not stop process: {error}"));
                 }
@@ -633,7 +649,7 @@ async fn process_inventory(
         let response: api::ThreadBackgroundTerminalsListResponse = preparation::request(
             RequestPolicy::Interactive,
             handle,
-            api::ClientRequest::ThreadBackgroundTerminalsList {
+            ClientRequest::ThreadBackgroundTerminalsList {
                 request_id: api::RequestId::String(format!(
                     "live-processes-{request}-{}",
                     items.len()
@@ -649,7 +665,7 @@ async fn process_inventory(
         .await
         .map_err(|error| error.to_string())?;
         for item in &response.data {
-            ThreadId::from_string(&item.thread_id)
+            let _ = ThreadId::from_string(&item.thread_id)
                 .map_err(|error| format!("Invalid process owner: {error}"))?;
         }
         items.extend(response.data);
@@ -667,11 +683,14 @@ async fn process_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::test_support;
+    use crossterm::event::KeyCode;
+    use ratatui::layout::Size;
 
     #[tokio::test]
     async fn process_replies_and_controls_follow_attachment_not_screen_position() {
         // A previous attachment can answer after switching away and back to the same thread.
-        let mut app = crate::app::test_support::make_test_app().await;
+        let mut app = Box::pin(test_support::make_test_app()).await;
         let first = ThreadId::new();
         let second = ThreadId::new();
         app.active_thread_id = Some(first);
@@ -712,9 +731,9 @@ mod tests {
         app.prepare_live_work();
         let scope = app.live_work.scope.as_mut().unwrap();
         scope.view.focus_group(Group::Processes);
-        scope.view.handle_key(KeyCode::Down.into());
-        scope.view.handle_key(KeyCode::Right.into());
-        scope.view.handle_key(KeyCode::Down.into());
+        let _ = scope.view.handle_key(KeyCode::Down.into());
+        let _ = scope.view.handle_key(KeyCode::Right.into());
+        let _ = scope.view.handle_key(KeyCode::Down.into());
         assert_eq!(
             scope.view.handle_key(KeyCode::Enter.into()),
             Interaction::Action(Action::TerminateProcess {
@@ -726,11 +745,11 @@ mod tests {
         assert!(!app.handle_live_work_input(&TuiEvent::Key(KeyCode::Char('x').into())));
         assert!(!app.live_work.scope.as_ref().unwrap().view.is_focused());
         assert!(app.transcript_cells.is_empty());
-        let mut tui = crate::tui::test_support::make_test_tui().unwrap();
+        let mut tui = tui::test_support::make_test_tui().unwrap();
         tui.set_owned_screen(true).unwrap();
         let size = Size::new(80, 24);
         tui.terminal.resize(size).unwrap();
-        app.render_owned_transcript(&mut tui, size).unwrap();
+        let _ = app.render_owned_transcript(&mut tui, size).unwrap();
         let buffer = crate::custom_terminal::test_support::last_rendered_buffer(&tui.terminal);
         let lines = buffer
             .content()

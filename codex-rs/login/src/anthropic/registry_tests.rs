@@ -196,7 +196,7 @@ async fn failed_refresh_is_account_local_and_native_login_supersedes_its_grant()
     let renewed = handle.refresh_after_rejection(&captured).await.unwrap();
     assert_eq!(renewed.account_id(), &a);
     assert_eq!(renewed.access_token(), "a-new");
-    store
+    let _ = store
         .upsert(
             info("account-a"),
             grant("a-login", "a-login-refresh", Utc::now().timestamp() + 3600),

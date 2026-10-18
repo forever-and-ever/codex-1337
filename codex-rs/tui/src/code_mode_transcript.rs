@@ -255,7 +255,7 @@ impl Reducers {
             return Err(AdmissionFault::ConflictingHydration);
         }
         if retained.cell_id.is_none() {
-            retained.cell_id = owner.cell_id.clone();
+            retained.cell_id.clone_from(&owner.cell_id);
         }
         block.hydrate(incoming);
         Ok(Arc::new(CodeModeCell::Scoped(block.clone())))
@@ -477,7 +477,7 @@ impl ScopedCodeMode {
             insert_code_mode_fact(&mut self.facts, fact.clone());
         }
         let newer = std::mem::take(&mut self.children);
-        self.children = older.children.clone();
+        self.children.clone_from(&older.children);
         for (id, cells) in newer {
             if let Some((_, rows)) = self.children.iter_mut().find(|(old, _)| *old == id) {
                 *rows = cells;
@@ -487,7 +487,8 @@ impl ScopedCodeMode {
         }
         self.refresh_children();
         for (id, revision) in &older.revisions {
-            self.revisions
+            let _ = self
+                .revisions
                 .entry(id.clone())
                 .or_insert_with(|| revision.clone());
         }
@@ -569,13 +570,13 @@ impl ScopedCodeMode {
                     } = &mut item
                 {
                     if prompt.is_none() {
-                        *prompt = old_prompt.clone();
+                        prompt.clone_from(old_prompt);
                     }
                     if model.is_none() {
-                        *model = old_model.clone();
+                        model.clone_from(old_model);
                     }
                     if reasoning_effort.is_none() {
-                        *reasoning_effort = old_effort.clone();
+                        reasoning_effort.clone_from(old_effort);
                     }
                 }
                 let pending = matches!(
@@ -602,7 +603,7 @@ impl ScopedCodeMode {
                 }) {
                     return Ok(());
                 }
-                self.revisions.insert(
+                let _ = self.revisions.insert(
                     id.clone(),
                     if pending {
                         ChildRevision::Pending {

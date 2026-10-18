@@ -1,6 +1,18 @@
 //! Subscription detachment is not runtime shutdown. A plan retains each local store it owns.
 
-use super::*;
+use super::App;
+use super::Arc;
+use super::ClientRequest;
+use super::DraftDisposition;
+use super::Duration;
+use super::Mutex;
+use super::Result;
+use super::ThreadEventAttachment;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::TypedRequestError;
+use super::Uuid;
+use super::active_turn_interrupt_race;
 use crate::app_server_session::typed_requests::SessionRpc;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol as api;
@@ -59,7 +71,7 @@ pub(super) async fn unsubscribe(
     thread_id: ThreadId,
 ) -> Result<(), TypedRequestError> {
     handle
-        .request_typed::<api::ThreadUnsubscribeResponse>(api::ClientRequest::ThreadUnsubscribe {
+        .request_typed::<api::ThreadUnsubscribeResponse>(ClientRequest::ThreadUnsubscribe {
             request_id: api::RequestId::String(format!(
                 "tui-operation-{id}-{thread_id}-unsubscribe"
             )),
@@ -79,7 +91,7 @@ pub(super) async fn send(
     if let Some(thread_id) = plan.voice {
         // Audio helper resources have already been retired locally. Stop is best effort, bounded.
         let stop = handle.request_typed::<api::ThreadRealtimeStopResponse>(
-            api::ClientRequest::ThreadRealtimeStop {
+            ClientRequest::ThreadRealtimeStop {
                 request_id: api::RequestId::String(format!("tui-operation-{id}-voice-stop")),
                 params: api::ThreadRealtimeStopParams {
                     thread_id: thread_id.to_string(),
@@ -152,7 +164,7 @@ impl App {
                     voice,
                 };
             }
-        };
+        }
         let mut targets = Vec::new();
         // Side conversations stop before unsubscribing; ordinary conversations keep running.
         for thread_id in self.side_threads.keys().copied().collect::<Vec<_>>() {
@@ -228,7 +240,7 @@ impl App {
             }
             match (&target.kind, result.result) {
                 (DetachKind::Side { .. }, Ok(())) => {
-                    self.abandoned_side_threads.insert(target.thread_id);
+                    let _ = self.abandoned_side_threads.insert(target.thread_id);
                     let drafts = self
                         .take_unsent_thread_operations(target.thread_id, &target.store)
                         .await;
@@ -258,7 +270,7 @@ impl App {
                         .expect("matching detach target checked")
                         .mark_replay_only();
                     self.abort_thread_event_listener(thread_id);
-                    self.pending_server_profiles.remove(&thread_id);
+                    let _ = self.pending_server_profiles.remove(&thread_id);
                     self.pause_detached_thread_input(target).await;
                     self.restore_submission_drafts(
                         thread_id,

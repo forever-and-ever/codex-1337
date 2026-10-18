@@ -1,4 +1,15 @@
-use super::*;
+use super::AgentControlInit;
+use super::Arc;
+use super::AuthManager;
+use super::CodexErr;
+use super::CodexResult;
+use super::Config;
+use super::EventMsg;
+use super::InitialHistory;
+use super::RolloutItem;
+use super::ThreadId;
+use super::ThreadManager;
+use super::ThreadManagerState;
 use crate::agent::control::ProviderAccountSelection;
 use crate::agent::control::ProviderAccountSelections;
 use codex_model_provider_info::ModelProviderAdapter;
@@ -87,7 +98,7 @@ impl ThreadManagerState {
                 .read()
                 .await
                 .get(&parent)
-                .map(|thread| {
+                .map_or(AccountInheritance::None, |thread| {
                     if thread.session.provider_id == config.model_provider_id {
                         AccountInheritance::SameProvider(
                             thread.session.services.auth_manager.clone(),
@@ -97,7 +108,6 @@ impl ThreadManagerState {
                         AccountInheritance::OtherProvider
                     }
                 })
-                .unwrap_or(AccountInheritance::None)
         } else {
             AccountInheritance::None
         };

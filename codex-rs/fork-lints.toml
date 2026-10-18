@@ -1,0 +1,60 @@
+# House lint policy for fork-owned Rust files, the files whose paths the merged upstream release tag
+# lacks. scripts/check_fork_lints.py executes it. Upstream files keep upstream's [workspace.lints].
+# Tables follow Cargo's [lints] schema. House exceptions inherit their rationale from the
+# rust-bootstrap template; fork exceptions state their reason beside them.
+
+[lints.rust]
+warnings = "deny"
+elided_lifetimes_in_paths = "deny"
+unexpected_cfgs = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+unused_results = "deny"
+
+# Fork: Cargo hands every package dependency to each bin, example and test crate, so the lint misfires
+# on fork targets inside upstream packages.
+unused_crate_dependencies = "allow"
+
+# House policy: Unicode identifier appearance is not a human-legibility gate.
+confusable_idents = "allow"
+mixed_script_confusables = "allow"
+uncommon_codepoints = "allow"
+
+[lints.clippy]
+all = { level = "deny", priority = -2 }
+pedantic = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -3 }
+
+# House policy: line and parameter counts are not complexity measures.
+too_many_arguments = "allow"
+too_many_lines = "allow"
+
+# House policy: lexical appearance is not structural correctness.
+disallowed_names = "allow"
+enum_variant_names = "allow"
+similar_names = "allow"
+struct_field_names = "allow"
+upper_case_acronyms = "allow"
+
+# House policy: source linting cannot adjudicate transitive convergence.
+multiple_crate_versions = "allow"
+
+# House policy: internal code needs no API documentation.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+
+# Fork: pty, descriptor and peer-credential FFI needs unsafe, so each block carries its proof instead
+# of a blanket unsafe_code ban.
+undocumented_unsafe_blocks = "deny"
+
+dbg_macro = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+allow_attributes_without_reason = "deny"
+
+# No workspace crate is published, so crates.io metadata has no reader.
+cargo_common_metadata = "allow"

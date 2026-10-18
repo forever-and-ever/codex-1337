@@ -19,7 +19,7 @@ use serde::Serialize;
 
 #[derive(Debug, Args)]
 pub struct QuotaCommand {
-    /// Use the common five-hour/weekly JSON contract. Omit for legacy OpenAI weekly JSON.
+    /// Use the common five-hour/weekly JSON contract. Omit for legacy `OpenAI` weekly JSON.
     #[arg(long, value_enum)]
     provider: Option<QuotaProvider>,
     /// Saved account nickname, email or ID; otherwise read all accounts of this provider.

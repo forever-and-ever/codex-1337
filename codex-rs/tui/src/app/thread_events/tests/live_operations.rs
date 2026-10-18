@@ -11,21 +11,19 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
 
     fn event(thread: ThreadId, turn: &str, item: ThreadItem, started: bool) -> ServerNotification {
         if started {
-            ServerNotification::ItemStarted(codex_app_server_protocol::ItemStartedNotification {
+            ServerNotification::ItemStarted(ItemStartedNotification {
                 thread_id: thread.to_string(),
                 turn_id: turn.to_owned(),
                 item,
                 started_at_ms: 1,
             })
         } else {
-            ServerNotification::ItemCompleted(
-                codex_app_server_protocol::ItemCompletedNotification {
-                    thread_id: thread.to_string(),
-                    turn_id: turn.to_owned(),
-                    item,
-                    completed_at_ms: 2,
-                },
-            )
+            ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: thread.to_string(),
+                turn_id: turn.to_owned(),
+                item,
+                completed_at_ms: 2,
+            })
         }
     }
     fn dynamic(id: &str, status: &str) -> ThreadItem {
@@ -196,7 +194,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
             row.summary.to_string()
                 == format!(
                     "Waiting for ({})",
-                    crate::history_cell::code_mode_owner_label(&target)
+                    history_cell::code_mode_owner_label(&target)
                 )
         })
         .unwrap();
@@ -208,10 +206,7 @@ fn thread_event_store_restores_active_turn_from_snapshot_turns() {
 
     assert_eq!(
         execution.summary.to_string(),
-        format!(
-            "Running ({})",
-            crate::history_cell::code_mode_owner_label(&owner)
-        )
+        format!("Running ({})", history_cell::code_mode_owner_label(&owner))
     );
     store.push_notification(event(
         thread_id,

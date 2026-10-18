@@ -33,7 +33,7 @@ impl Renderable for RuledSections<'_> {
             .filter(|height| *height > 0);
         let mut total = 0u16;
         for height in heights {
-            total = total.saturating_add(height + 1);
+            total = total.saturating_add(height.saturating_add(1));
         }
         total
     }
@@ -58,8 +58,9 @@ impl Renderable for RuledSections<'_> {
             let height = section.desired_height(area.width);
             // Later sections contain navigation. Give each a row before spending the remaining
             // height on wrapped metadata; omit a section rather than draw adjacent empty rules.
-            let reserve = ((sections.len() - index - 1) * 2) as u16;
-            if area.bottom().saturating_sub(y) <= reserve + 1 {
+            let reserve =
+                u16::try_from((sections.len() - index - 1).saturating_mul(2)).unwrap_or(u16::MAX);
+            if area.bottom().saturating_sub(y) <= reserve.saturating_add(1) {
                 continue;
             }
             HorizontalRule.render(

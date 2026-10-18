@@ -1,4 +1,8 @@
-use super::*;
+use super::App;
+use super::Arc;
+use super::HistoryCell;
+use super::Overlay;
+use super::tui;
 use std::ops::Range;
 
 pub(super) enum TranscriptSplice {
@@ -32,7 +36,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.regroup_cell_members(range.clone(), std::slice::from_ref(&cell));
                 }
-                self.transcript_cells.splice(range, [cell]);
+                let _ = self.transcript_cells.splice(range, [cell]);
             }
             TranscriptSplice::Members {
                 range,
@@ -60,7 +64,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.regroup_cell_members(range.clone(), &cells);
                 }
-                self.transcript_cells.splice(range, cells);
+                let _ = self.transcript_cells.splice(range, cells);
             }
             TranscriptSplice::AbsorbTail {
                 previous_revision,
@@ -74,7 +78,7 @@ impl App {
                 if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
                     overlay.absorb_tail_into_live(previous_revision, hydrated_revision);
                 }
-                self.transcript_cells.pop();
+                let _ = self.transcript_cells.pop();
                 self.native_history.retain(&self.transcript_cells);
             }
         }

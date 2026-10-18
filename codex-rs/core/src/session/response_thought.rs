@@ -52,7 +52,7 @@ impl ThoughtAccumulator {
             None if reported.is_some_and(|count| count > 0) => ResponseThought::default(),
             None => return None,
         };
-        thought.turn_id = turn_id.to_owned();
+        turn_id.clone_into(&mut thought.turn_id);
         thought.completed_at_ms = crate::turn_timing::now_unix_timestamp_ms();
         Some(thought)
     }

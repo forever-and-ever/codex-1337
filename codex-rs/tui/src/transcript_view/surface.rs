@@ -1,6 +1,11 @@
 //! Source-backed text outside history shares transcript selection, snapshots and clipboard rules.
 
-use super::*;
+use super::Arc;
+use super::Buffer;
+use super::HyperlinkLine;
+use super::Rect;
+use super::TextLayout;
+use super::TranscriptView;
 
 impl TranscriptView {
     pub(crate) fn render_surface(

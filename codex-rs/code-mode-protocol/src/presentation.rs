@@ -20,6 +20,7 @@ pub enum ProviderPredicate {
 }
 
 impl ProviderPredicate {
+    #[must_use]
     pub fn matches(self, dialect: ToolDialect) -> bool {
         match self {
             Self::For(provider) => dialect == provider,

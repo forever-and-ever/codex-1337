@@ -1,9 +1,27 @@
 //! Name claims are serialized with archive, unarchive, and fork; SQLite is the race arbiter.
-use super::*;
+use super::HashSet;
+use super::JSONRPCErrorError;
+use super::PersistContext;
+use super::Result;
+use super::ServerNotification;
+use super::StoreReadThreadParams;
+use super::StoreThreadMetadataPatch;
+use super::ThreadArchiveParams;
+use super::ThreadArchivedNotification;
+use super::ThreadId;
+use super::ThreadNameUpdatedNotification;
+use super::ThreadRequestProcessor;
+use super::ThreadSetNameParams;
+use super::ThreadSetNameResponse;
+use super::core_thread_write_error;
+use super::internal_error;
+use super::invalid_request;
+use super::thread_store_mutation_error;
 use codex_app_server_protocol::ThreadNameConflict;
 use codex_app_server_protocol::ThreadNameConflictError;
 use codex_app_server_protocol::ThreadNameMode;
 use codex_protocol::protocol::SessionSource;
+use codex_state::ThreadMetadata;
 use codex_utils_path_uri::LegacyAppPathString;
 
 impl ThreadRequestProcessor {
@@ -118,7 +136,7 @@ impl ThreadRequestProcessor {
         &self,
         name: &str,
         claimant: Option<ThreadId>,
-    ) -> Result<Vec<codex_state::ThreadMetadata>, JSONRPCErrorError> {
+    ) -> Result<Vec<ThreadMetadata>, JSONRPCErrorError> {
         self.thread_store
             .ensure_thread_name_claims()
             .await
@@ -153,11 +171,7 @@ impl ThreadRequestProcessor {
             .collect())
     }
 
-    async fn name_conflict(
-        &self,
-        name: &str,
-        owners: Vec<codex_state::ThreadMetadata>,
-    ) -> JSONRPCErrorError {
+    async fn name_conflict(&self, name: &str, owners: Vec<ThreadMetadata>) -> JSONRPCErrorError {
         let mut conflicts = Vec::with_capacity(owners.len());
         for owner in owners {
             conflicts.push(ThreadNameConflict {
@@ -192,7 +206,7 @@ impl ThreadRequestProcessor {
         name: &str,
         claimant: Option<ThreadId>,
         confirmed_ids: Option<&[String]>,
-    ) -> Result<Vec<codex_state::ThreadMetadata>, JSONRPCErrorError> {
+    ) -> Result<Vec<ThreadMetadata>, JSONRPCErrorError> {
         let owners = self.name_owners(name, claimant).await?;
         if owners.is_empty() {
             return Ok(Vec::new());

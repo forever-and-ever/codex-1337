@@ -11,7 +11,7 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn account_routes_do_not_leak_into_catalog_or_admit_openai_fallbacks() {
-    let speak_claude = |model: &mut codex_protocol::openai_models::ModelInfo| {
+    let speak_claude = |model: &mut ModelInfo| {
         if !model
             .experimental_supported_tools
             .iter()

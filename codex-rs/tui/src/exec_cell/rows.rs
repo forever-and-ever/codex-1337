@@ -47,7 +47,7 @@ impl CommandRows {
                 let source = script[segment.source.clone()].trim();
                 let summary = match summarize_shell_segment(source) {
                     ParsedCommand::Read { name, .. } => Some(read_summary(
-                        ReadIntent::parse(source).map_or(name.clone(), |read| read.label(&name)),
+                        &ReadIntent::parse(source).map_or(name.clone(), |read| read.label(&name)),
                     )),
                     ParsedCommand::ListFiles { path, .. } => {
                         Some(vec!["List ".cyan(), path.unwrap_or_else(|| ".".into()).into()].into())
@@ -83,7 +83,7 @@ impl ExecCall {
     }
 }
 
-pub(crate) fn read_summary(label: String) -> Line<'static> {
+pub(crate) fn read_summary(label: &str) -> Line<'static> {
     let label = label.chars().fold(String::new(), |mut shown, ch| {
         if ch.is_control() {
             shown.extend(ch.escape_default());

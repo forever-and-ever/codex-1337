@@ -121,7 +121,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
             .chain(std::iter::once(model.clone()))
             .collect(),
     };
-    let (session, turn, _rx) = make_session_and_context_with_auth_config_home_and_rx(
+    let (session, turn, _rx) = Box::pin(make_session_and_context_with_auth_config_home_and_rx(
         CodexAuth::from_api_key("test-key"),
         Vec::new(),
         home.path(),
@@ -160,18 +160,18 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
                 .enable(Feature::ApiKeyModelDiscovery)
                 .unwrap();
         },
-    )
+    ))
     .await;
     if parent_id == "claude" {
         session.services.model_client.commit_provider_account(
-            crate::agent::control::ProviderAccountSelection::ClaudeSubscription { id: account_id },
+            ProviderAccountSelection::ClaudeSubscription { id: account_id },
         );
     } else {
         let mut native_config = (*turn.config).clone();
         native_config.model_provider_id = "claude".into();
         native_config.model_provider = provider("claude");
         native_config.model_catalog = None;
-        session.agent_models_manager(&native_config).await.unwrap();
+        let _ = session.agent_models_manager(&native_config).await.unwrap();
         let manager = create_model_provider_with_anthropic_account(
             native_config.model_provider,
             Some(Arc::clone(&session.services.auth_manager)),
@@ -204,7 +204,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         assert!(advertised.iter().any(|model| model.model == selector));
     }
     for requested in [child_model.to_owned(), format!("{child_id}/{child_model}")] {
-        let prepared = prepare_agent_spawn_config(
+        let prepared = Box::pin(prepare_agent_spawn_config(
             &session,
             &step,
             SpawnConfigOptions {
@@ -216,7 +216,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
                 reasoning_effort: None,
                 service_tier: None,
             },
-        )
+        ))
         .await
         .unwrap();
         // Defaults must follow the child's provider, not the parent's resolved
@@ -254,7 +254,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
         );
         {
             let fork_mode = SpawnAgentForkMode::FullHistory;
-            let error = prepare_agent_spawn_config(
+            let error = Box::pin(prepare_agent_spawn_config(
                 &session,
                 &step,
                 SpawnConfigOptions {
@@ -266,7 +266,7 @@ async fn fresh_child_routes_model_and_provider_but_history_forks_stay_locked(
                     reasoning_effort: None,
                     service_tier: None,
                 },
-            )
+            ))
             .await
             .err()
             .expect("cross-provider history replay must fail");
@@ -354,7 +354,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
             .mount(&server)
             .await;
     }
-    let (mut session, turn) = make_session_and_context().await;
+    let (mut session, turn) = Box::pin(make_session_and_context()).await;
     session.provider_id = "claude".into();
     session.services.auth_manager = root.for_account(&alice).await.unwrap();
     let mut config = (*turn.config).clone();
@@ -431,23 +431,23 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         (Some(bob.clone()), Some(alice.clone()))
     );
     let first = session.agent_models_manager(&config).await.unwrap();
-    first
+    let _ = first
         .list_models(
             RefreshStrategy::OnlineIfUncached,
             config.http_client_factory(),
         )
         .await;
     let retained = session.agent_models_manager(&config).await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&first, &retained));
+    assert!(Arc::ptr_eq(&first, &retained));
     activate(&alice);
     let rebound = session.agent_models_manager(&config).await.unwrap();
-    rebound
+    let _ = rebound
         .list_models(
             RefreshStrategy::OnlineIfUncached,
             config.http_client_factory(),
         )
         .await;
-    assert!(!std::sync::Arc::ptr_eq(&first, &rebound));
+    assert!(!Arc::ptr_eq(&first, &rebound));
     session
         .services
         .local_agent_runtime
@@ -455,7 +455,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
         .select("openai", ProviderAccountSelection::Chatgpt { id: alice });
     activate(&bob);
     let bound = session.agent_models_manager(&config).await.unwrap();
-    assert!(std::sync::Arc::ptr_eq(&rebound, &bound));
+    assert!(Arc::ptr_eq(&rebound, &bound));
     // The failed Bob discovery did not run again during metadata lookup; /account selected Alice's actual
     // bearer and account header instead of reusing Bob or the ambient/default login.
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
@@ -494,7 +494,7 @@ async fn claude_parent_secondary_catalog_rebinds_chatgpt_accounts_and_recovers()
 
 #[test]
 fn selectors_respect_provider_prefixes_before_openrouter_slugs() {
-    let manager = codex_model_provider::create_model_provider(Default::default(), None)
+    let manager = codex_model_provider::create_model_provider(ModelProviderInfo::default(), None)
         .models_manager_without_cache(None);
     let base: ModelPreset = codex_models_manager::bundled_models_response()
         .unwrap()

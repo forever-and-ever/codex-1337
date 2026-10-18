@@ -13,6 +13,7 @@ pub enum JiraCategory {
 }
 
 impl JiraCategory {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Bug => "bug",

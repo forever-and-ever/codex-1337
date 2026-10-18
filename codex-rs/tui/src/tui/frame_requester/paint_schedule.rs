@@ -1,10 +1,18 @@
 //! Content cadence is independent of completed-frame paint admission.
 
-use super::*;
+use super::Duration;
+use super::FrameKind;
+use super::FrameRequest;
+use super::FrameScheduler;
+use super::Instant;
+use super::Ordering;
+use super::PresentationMode;
+use super::REDUCED_CONTENT_INTERVAL;
+use super::scheduling_now;
 
 impl FrameScheduler {
     pub(super) async fn run_prepared(mut self) {
-        const ONE_YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
+        const ONE_YEAR: Duration = Duration::from_hours(8760);
         let mut deadlines: [Option<Instant>; 3] = [None; 3];
         loop {
             let target = deadlines
@@ -26,9 +34,8 @@ impl FrameScheduler {
                     // Do not send a draw immediately here. By continuing the loop,
                     // we recompute the sleep target so the draw fires once via the
                     // sleep branch, coalescing multiple requests into a single draw.
-                    continue;
                 }
-                _ = &mut deadline => {
+                () = &mut deadline => {
                     // The timer can be ready alongside queued requests. Drain a bounded
                     // burst before emitting, rather than painting after the first request
                     // and then again for the rest of the same burst.

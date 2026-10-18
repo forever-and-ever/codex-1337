@@ -1,4 +1,4 @@
-//! Routes borrowed ChatGPT approval reviews without permitting hidden parent-provider billing.
+//! Routes borrowed `ChatGPT` approval reviews without permitting hidden parent-provider billing.
 
 use super::GuardianReviewContext;
 use crate::agent::child_config::switch_agent_provider;
@@ -62,7 +62,8 @@ impl ReviewerRouteQuarantine {
             QuarantineCause::Ineligible => Duration::from_secs(/*secs*/ 3600),
             QuarantineCause::Unavailable => Duration::from_secs(/*secs*/ 600),
         };
-        self.accounts
+        let _ = self
+            .accounts
             .lock()
             .await
             .insert(account_id.to_owned(), Instant::now() + duration);
@@ -80,32 +81,35 @@ impl ReviewerRoute {
         if !config.model_providers.contains_key(OPENAI_PROVIDER_ID) {
             return fallback;
         }
-        tokio::time::timeout(Duration::from_secs(/*secs*/ 5), async {
-            let (candidate, auth, manager) =
-                crate::chatgpt_delegate::borrow_chatgpt(session, config)
+        Box::pin(tokio::time::timeout(
+            Duration::from_secs(/*secs*/ 5),
+            async {
+                let (candidate, auth, manager) =
+                    Box::pin(crate::chatgpt_delegate::borrow_chatgpt(session, config))
+                        .await
+                        .ok()?;
+                let account_id = auth.selected_account_id()?;
+                if session
+                    .services
+                    .local_agent_runtime
+                    .reviewer_route_quarantine
+                    .contains(&account_id)
                     .await
-                    .ok()?;
-            let account_id = auth.selected_account_id()?;
-            if session
-                .services
-                .local_agent_runtime
-                .reviewer_route_quarantine
-                .contains(&account_id)
-                .await
-            {
-                return None;
-            }
-            let models = manager
-                .list_models(
-                    RefreshStrategy::OnlineIfUncached,
-                    candidate.http_client_factory(),
-                )
-                .await;
-            models
-                .iter()
-                .any(|model| model.model == DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL)
-                .then_some(Self::ChatgptAutoReview { account_id })
-        })
+                {
+                    return None;
+                }
+                let models = manager
+                    .list_models(
+                        RefreshStrategy::OnlineIfUncached,
+                        candidate.http_client_factory(),
+                    )
+                    .await;
+                models
+                    .iter()
+                    .any(|model| model.model == DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL)
+                    .then_some(Self::ChatgptAutoReview { account_id })
+            },
+        ))
         .await
         .ok()
         .flatten()
@@ -233,12 +237,12 @@ pub(super) async fn run_review_attempt<Run, Attempt>(
 )
 where
     Run: FnMut(ReviewerRoute) -> Attempt,
-    Attempt: std::future::Future<
-            Output = (
-                GuardianReviewOutcome,
-                codex_analytics::GuardianReviewAnalyticsResult,
-            ),
-        >,
+    Attempt: Future<
+        Output = (
+            GuardianReviewOutcome,
+            codex_analytics::GuardianReviewAnalyticsResult,
+        ),
+    >,
 {
     let mut route = route_state.lock().await.clone();
     let mut result = run(route.clone()).await;

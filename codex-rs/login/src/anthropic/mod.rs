@@ -1,4 +1,4 @@
-//! Subscription identities and account-local credentials, independent of OpenAI authentication.
+//! Subscription identities and account-local credentials, independent of `OpenAI` authentication.
 
 mod callback;
 mod identity;

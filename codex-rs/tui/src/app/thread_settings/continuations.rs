@@ -1,6 +1,12 @@
 //! Deferred settings updates and model-selection generations.
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::PermissionProfileSelection;
+use super::ThreadId;
+use super::ThreadSettingsUpdateParams;
+use super::thread_settings_update_has_changes;
 use crate::app_server_session::typed_requests::SessionRpc;
 
 impl App {
@@ -28,7 +34,7 @@ impl App {
             return false;
         }
         let generation = self.model_selection_generation;
-        self.request_server(
+        let _ = self.request_server(
             server,
             super::super::turn_submissions::ui_requests::UiRequestScope::Thread(thread_id),
             super::super::turn_submissions::ui_requests::UiRequestKind::Mutation,
@@ -50,13 +56,14 @@ impl App {
                 if changes_permissions {
                     match result {
                         Ok(true) => {
-                            app.agents_overview
+                            let _ = app
+                                .agents_overview
                                 .requested_permission_profiles
                                 .remove(&thread_id);
                         }
                         Ok(false)
                         | Err(super::super::turn_submissions::SubmissionFailure::Rejected(_)) => {
-                            app.pending_server_profiles.remove(&thread_id);
+                            let _ = app.pending_server_profiles.remove(&thread_id);
                         }
                         _ => {}
                     }
@@ -117,7 +124,7 @@ impl App {
             });
         // Reserve the selection before its confirming notification can arrive.
         if accepted && let (Some(thread_id), Some(selection)) = (thread_id, pending_cyber_profile) {
-            self.pending_server_profiles.insert(thread_id, selection);
+            let _ = self.pending_server_profiles.insert(thread_id, selection);
         }
     }
 

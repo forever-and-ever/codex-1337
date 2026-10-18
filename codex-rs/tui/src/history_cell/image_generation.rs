@@ -28,8 +28,7 @@ pub(super) fn new_image_generation_call(
     let mut lines: Vec<Line<'static>> = vec![heading, vec!["  └ ".dim(), detail.dim()].into()];
     if let Some(saved_path) = saved_path {
         let saved_path = Url::from_file_path(saved_path.as_path())
-            .map(|url| url.to_string())
-            .unwrap_or_else(|_| saved_path.display().to_string());
+            .map_or_else(|()| saved_path.display().to_string(), |url| url.to_string());
         lines.push(vec!["  └ ".dim(), "Saved to: ".dim(), saved_path.into()].into());
     }
 

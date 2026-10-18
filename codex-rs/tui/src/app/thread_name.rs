@@ -1,4 +1,11 @@
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::Line;
+use super::Stylize;
+use super::ThreadId;
+use super::tui;
+use super::turn_submissions;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::render::renderable::Renderable;
@@ -35,7 +42,7 @@ impl Renderable for NameConflictHeader {
     }
 
     fn desired_height(&self, width: u16) -> u16 {
-        word_wrap_lines(&self.0, usize::from(width)).len() as u16
+        u16::try_from(word_wrap_lines(&self.0, usize::from(width)).len()).unwrap_or(u16::MAX)
     }
 }
 
@@ -131,7 +138,7 @@ impl App {
         });
     }
 
-    pub(super) async fn rename_thread(
+    pub(super) fn rename_thread(
         &mut self,
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
@@ -141,26 +148,26 @@ impl App {
         self.enqueue_server_operation(
             app_server,
             thread_id,
-            super::turn_submissions::ServerOperation::Mutation(
-                super::turn_submissions::ThreadMutation::Rename(ThreadSetNameParams {
+            turn_submissions::ServerOperation::Mutation(turn_submissions::ThreadMutation::Rename(
+                ThreadSetNameParams {
                     thread_id: thread_id.to_string(),
                     name,
                     naming_mode: Some(ThreadNameMode::Explicit),
                     conflict_thread_ids: (!conflict_thread_ids.is_empty())
                         .then_some(conflict_thread_ids),
-                }),
-            ),
+                },
+            )),
         );
     }
 
-    pub(super) async fn fork_current_thread(
+    pub(super) fn fork_current_thread(
         &mut self,
         tui: &mut tui::Tui,
         app_server: &mut AppServerSession,
         name: Option<String>,
         conflict_thread_ids: Vec<String>,
         from_agents_overview: bool,
-    ) -> Result<()> {
+    ) {
         let from_locked_thread = self.chat_widget.is_external_writer_view();
         let source = if from_agents_overview {
             "agents_overview_shortcut"
@@ -177,17 +184,15 @@ impl App {
             self.chat_widget.add_error_message(
                 "A thread must contain at least one turn before it can be forked.".to_string(),
             );
-            return Ok(());
+            return;
         };
         if self.pending_server_profiles.contains_key(&thread_id) {
             self.chat_widget
                 .add_error_message("Wait for permissions to update before forking.".into());
-            return Ok(());
+            return;
         }
 
-        self.enqueue_ordinary_fork(app_server, name, conflict_thread_ids, from_agents_overview)
-            .await;
+        self.enqueue_ordinary_fork(app_server, name, conflict_thread_ids, from_agents_overview);
         tui.frame_requester().schedule_frame();
-        Ok(())
     }
 }

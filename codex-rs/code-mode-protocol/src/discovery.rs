@@ -38,6 +38,7 @@ pub struct EnabledToolMetadata {
 }
 
 impl EnabledToolMetadata {
+    #[must_use]
     pub fn describe_output(&self) -> String {
         let Some(output) = self.output_schema.as_deref() else {
             return format!("{}: no declared output schema", self.global_name);
@@ -53,6 +54,7 @@ impl EnabledToolMetadata {
         }
     }
 
+    #[must_use]
     pub fn describe_schema(&self) -> String {
         serde_json::json!({"input": self.input_schema, "output": self.output_schema}).to_string()
     }
@@ -77,7 +79,7 @@ pub(crate) fn compact_tool_summary(purpose: &str) -> String {
                 match summary.rfind(' ') {
                     Some(boundary) => summary.truncate(boundary),
                     None => {
-                        summary.pop();
+                        let _ = summary.pop();
                     }
                 }
             }

@@ -2,7 +2,19 @@
 //! explicit discard clears only the unchanged draft, and a restore fills only a composer
 //! that newer input does not occupy; later edits are never overwritten.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::PathBuf;
+use super::SelectionItem;
+use super::SelectionViewParams;
+use super::ShellEscapePolicy;
+use super::SlashCommand;
+use super::ThreadComposerState;
+use super::ThreadInputState;
+use super::UserInput;
+use super::UserMessageHistoryRecord;
+use super::UserMessageSource;
+use super::app_server_text_elements;
 use codex_app_server_protocol::ThreadFarmMode;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -220,7 +232,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::ReconcileFarm {
                         request_id: reconcile_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()
@@ -234,7 +246,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::DiscardFarm {
                         request_id: request_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()
@@ -247,7 +259,7 @@ impl ChatWidget {
                 actions: vec![Box::new(move |tx| {
                     tx.send(AppEvent::RestoreFarmDraft {
                         request_id: restore_id.clone(),
-                    })
+                    });
                 })],
                 dismiss_on_select: true,
                 ..Default::default()

@@ -1,6 +1,32 @@
 //! Handle-based history effects produce cache observations; the live session alone installs them.
 
-use super::*;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Config;
+use super::HISTORY_ITEM_PAGE_LIMIT;
+use super::HashSet;
+use super::HistoryHydrationScope;
+use super::HistoryLoadBudget;
+use super::INITIAL_HISTORY_TURN_LIMIT;
+use super::LocalSettings;
+use super::Result;
+use super::SortDirection;
+use super::Thread;
+use super::ThreadHistoryMode;
+use super::ThreadHistoryPagination;
+use super::ThreadId;
+use super::ThreadItem;
+use super::ThreadItemsListResponse;
+use super::ThreadTurnsListParams;
+use super::ThreadTurnsListResponse;
+use super::Turn;
+use super::TurnItemsView;
+use super::WrapErr;
+use super::advancing_cursor;
+use super::eyre;
+use super::merge_turn_page;
+use super::rendered_history_rows;
+use super::thread_items_page_params;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
@@ -20,13 +46,13 @@ impl AppServerSession {
         match update {
             HistoryPaginationUpdate::Untracked => {}
             HistoryPaginationUpdate::Summary(thread_id) => {
-                self.history_pagination.remove(&thread_id);
+                let _ = self.history_pagination.remove(&thread_id);
             }
             HistoryPaginationUpdate::Legacy(thread_id) => {
-                self.history_pagination.entry(thread_id).or_default();
+                let _ = self.history_pagination.entry(thread_id).or_default();
             }
             HistoryPaginationUpdate::Paginated { thread_id, state } => {
-                self.history_pagination.insert(thread_id, state);
+                let _ = self.history_pagination.insert(thread_id, state);
             }
         }
     }
@@ -113,11 +139,13 @@ pub(super) async fn merge_thread_item_page(
             };
             // Fetch only the remaining item-backed turns so metadata does not run ahead
             // of this page. Empty turns between them may require another bounded request.
-            let limit = missing_turn_ids.len().min(HISTORY_ITEM_PAGE_LIMIT as usize) as u32;
+            let limit = u32::try_from(missing_turn_ids.len())
+                .unwrap_or(u32::MAX)
+                .min(HISTORY_ITEM_PAGE_LIMIT);
             let page =
                 thread_turns_page(policy, handle, thread_id, Some(cursor.clone()), limit).await?;
             for turn in merge_turn_page(&cursor, page, state, turns) {
-                missing_turn_ids.remove(&turn.id);
+                let _ = missing_turn_ids.remove(&turn.id);
             }
         }
         if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
@@ -210,7 +238,7 @@ pub(in crate::app_server_session) async fn prepare_initial_thread_history(
     turn_cursor: Option<String>,
     item_cursor: Option<String>,
     config: Option<&Config>,
-    local_settings: Option<&crate::local_settings::LocalSettings>,
+    local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
 ) -> (Result<()>, HistoryPaginationUpdate) {
     prepare_history_with_progress(
@@ -234,7 +262,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
     turn_cursor: Option<String>,
     item_cursor: Option<String>,
     config: Option<&Config>,
-    local_settings: Option<&crate::local_settings::LocalSettings>,
+    local_settings: Option<&LocalSettings>,
     scope: HistoryHydrationScope<'_>,
     progress: &(dyn Fn() + Send + Sync),
 ) -> (Result<()>, HistoryPaginationUpdate) {
@@ -341,7 +369,7 @@ pub(in crate::app_server_session) async fn prepare_history_with_progress(
                 )
                 .await?;
                 progress();
-                merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
+                let _ = merge_turn_page(&cursor, page, &mut state, &mut thread.turns);
             }
         }
         Ok(())

@@ -72,12 +72,14 @@ impl AccountIdentity {
         })
     }
 
+    #[must_use]
     pub fn id(&self) -> AccountId {
         let mut hash = Sha256::new();
         hash.update(self.account_uuid.as_bytes());
         AccountId(format!("{:x}", hash.finalize()))
     }
 
+    #[must_use]
     pub fn account_uuid(&self) -> &str {
         &self.account_uuid
     }

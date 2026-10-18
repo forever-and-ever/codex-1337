@@ -14,7 +14,26 @@ use crossterm::event::KeyModifiers;
 use crossterm::event::MouseEventKind;
 use tokio_stream::Stream;
 
-use super::*;
+use super::App;
+use super::AppEvent;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AppServerTarget;
+use super::CODEX_CLI_VERSION;
+use super::ExitMode;
+use super::ExitReason;
+use super::Path;
+use super::RateLimitRefreshOrigin;
+use super::Result;
+use super::Size;
+use super::THREAD_EVENT_CHANNEL_CAPACITY;
+use super::ThreadBufferedEvent;
+use super::TuiEvent;
+use super::history_cell;
+use super::mpsc;
+use super::reconnect;
+use super::select;
+use super::tui;
 
 pub(in crate::app) const INPUT_BATCH: usize = 64;
 const EVENT_BATCH: usize = 64;
@@ -97,7 +116,7 @@ impl UiSchedule {
                 if matches!(&event, TuiEvent::Mouse(mouse) if mouse.kind == MouseEventKind::Moved)
                     && matches!(self.input.back(), Some((_, TuiEvent::Mouse(mouse))) if mouse.kind == MouseEventKind::Moved)
                 {
-                    self.input.pop_back();
+                    let _ = self.input.pop_back();
                 }
                 self.input.push_back((stamp, event));
             }
@@ -161,7 +180,7 @@ impl UiSchedule {
                     .any(|(_, event)| matches!(event, TuiEvent::Key(_) | TuiEvent::Paste(_)))
             {
                 // Ctrl+C first clears typeahead; it must not leapfrog it into an interrupt.
-                self.input.drain(..=index);
+                let _ = self.input.drain(..=index);
                 return None;
             }
             self.input.remove(index)
@@ -265,7 +284,7 @@ impl App {
     pub(crate) fn defer_input_frame(
         tui: &mut tui::Tui,
         event: &TuiEvent,
-        screen_size: ratatui::layout::Size,
+        screen_size: Size,
     ) -> bool {
         if matches!(event, TuiEvent::Draw) {
             let requester = tui.frame_requester();
@@ -297,6 +316,10 @@ pub(in crate::app) fn is_interactive(event: &TuiEvent) -> bool {
         || matches!(event, TuiEvent::Mouse(mouse) if mouse.kind != MouseEventKind::Moved)
 }
 
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "Admission combines independent queue, draft, configuration, and header observations."
+)]
 pub(in crate::app) fn input_admitted(
     app: &App,
     has_pending_app_events: bool,
@@ -319,7 +342,7 @@ pub(in crate::app) fn input_admitted(
 }
 
 impl App {
-    pub(in crate::app) fn request_modal_frame(&mut self, requester: tui::FrameRequester) {
+    pub(in crate::app) fn request_modal_frame(&mut self, requester: &tui::FrameRequester) {
         if self.startup_protected_input_boundary && self.chat_widget.has_active_modal() {
             self.startup_pending_protected_request = true;
         }
@@ -391,8 +414,8 @@ pub(super) async fn drive(
     let mut waiting_for_initial_session_header = true;
     let exit_reason_result = 'ui: loop {
         schedule.drain_ready(tui_events).await;
-        for _ in 0..ui_schedule::INPUT_BATCH {
-            let admitted = ui_schedule::input_admitted(
+        for _ in 0..INPUT_BATCH {
+            let admitted = input_admitted(
                 app,
                 !app_event_rx.is_empty(),
                 pending_startup_draft.is_some(),
@@ -406,7 +429,7 @@ pub(super) async fn drive(
             if !matches!(event, TuiEvent::FocusLost) {
                 idle_restart.postpone();
             }
-            let interactive = ui_schedule::is_interactive(&event);
+            let interactive = is_interactive(&event);
             let result = app
                 .apply_scheduled_input(
                     tui,
@@ -472,7 +495,7 @@ pub(super) async fn drive(
         if app.overlay.is_none() {
             if !tui.is_owned_screen() && tui.is_alt_screen_active() {
                 app.close_transcript_overlay(tui);
-            } else if let Err(err) = tui.set_overlay_input(crate::tui::OverlayInput::Default) {
+            } else if let Err(err) = tui.set_overlay_input(tui::OverlayInput::Default) {
                 break Err(err.into());
             }
         }
@@ -536,12 +559,12 @@ pub(super) async fn drive(
                 crate::reload::worker::ready().await?;
                 app.chat_widget
                     .set_queue_autosend_suppressed(/*suppressed*/ false);
-                app.chat_widget.maybe_send_next_queued_input();
+                let _ = app.chat_widget.maybe_send_next_queued_input();
                 ui_host_ready = true;
             }
         }
         idle_restart.set_ready(pending_startup_draft.is_none() && app.ready_for_idle_restart());
-        let block_terminal_input_for_pending_startup_events = !ui_schedule::input_admitted(
+        let block_terminal_input_for_pending_startup_events = !input_admitted(
             app,
             has_pending_app_events,
             pending_startup_draft.is_some(),
@@ -607,7 +630,7 @@ pub(super) async fn drive(
                     tui.set_desktop_attention(state);
                 } else {
                     *desktop_attention = None;
-                    tui.set_desktop_attention(Default::default());
+                    tui.set_desktop_attention(tui::DesktopAttention::default());
                 }
                 app.apply_presentation_transition(tui, previous)?;
                 AppRunControl::Continue
@@ -633,7 +656,7 @@ pub(super) async fn drive(
                             waiting_for_initial_session_header = false;
                         }
                         if !had_active_modal && app.chat_widget.has_active_modal() {
-                            app.request_modal_frame(tui.frame_requester());
+                            app.request_modal_frame(&tui.frame_requester());
                         }
                         AppRunControl::Continue
                     }
@@ -672,7 +695,7 @@ pub(super) async fn drive(
             Some(completion) = app.server_operations.control_rx.recv() => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ServerCompletion);
-                match app.handle_server_completion(tui, app_server, completion).await {
+                match Box::pin(app.handle_server_completion(tui, app_server, completion)).await {
                     Ok(control) => control,
                     Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
                     Err(err) => break Err(err),
@@ -699,13 +722,10 @@ pub(super) async fn drive(
                 && (matches!(app.app_server_target, AppServerTarget::Embedded) || !has_pending_app_events) => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::ServerEvent);
-                match app_server_event {
-                    Some(event) => app.handle_app_server_event(app_server, event).await,
-                    None => {
-                        listen_for_app_server_events = false;
-                        app.begin_reconnect();
-                        tracing::warn!("app-server event stream closed");
-                    }
+                if let Some(event) = app_server_event { app.handle_app_server_event(app_server, event).await } else {
+                    listen_for_app_server_events = false;
+                    let _ = app.begin_reconnect();
+                    tracing::warn!("app-server event stream closed");
                 }
                 AppRunControl::Continue
             }
@@ -750,7 +770,7 @@ pub(super) async fn drive(
                     }
                     None => std::future::pending().await,
                 }
-            }, if tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+            }, if tui.presentation_mode() == tui::PresentationMode::Normal => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
                 app.chat_widget.refresh_goal_status_indicator_for_time_tick();
@@ -761,12 +781,12 @@ pub(super) async fn drive(
             () = async {
                 match app.commit_animation.as_mut() {
                     Some(interval) => {
-                        interval.tick().await;
+                        let _ = interval.tick().await;
                     }
                     None => std::future::pending().await,
                 }
             }, if !has_pending_app_events
-                && tui.presentation_mode() == crate::tui::PresentationMode::Normal => {
+                && tui.presentation_mode() == tui::PresentationMode::Normal => {
                 drop(select_stage);
                 let _handler_stage = enter(Stage::Timer);
                 crate::session_log::log_commit_tick();
@@ -794,7 +814,7 @@ pub(super) async fn drive(
                 break Err(err);
             }
             if !had_active_modal && app.chat_widget.has_active_modal() {
-                app.request_modal_frame(tui.frame_requester());
+                app.request_modal_frame(&tui.frame_requester());
             }
         }
         match control {

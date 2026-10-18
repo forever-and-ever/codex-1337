@@ -34,7 +34,7 @@ impl Trial {
             prepared,
             ..
         } = self;
-        background.push(delta);
+        let _ = background.push(delta);
         background.core.settle().await;
         let (cell, idle) = background.on_commit_tick_batch(usize::MAX);
         assert!(idle);
@@ -79,12 +79,12 @@ impl Trial {
         );
         assert!(background.on_commit_tick_batch(usize::MAX).0.is_none());
         let emphasis = "\n**open emphasis\n";
-        background.push(emphasis);
+        let _ = background.push(emphasis);
         background.core.settle().await;
         let (held, _) = background.on_commit_tick_batch(usize::MAX);
         assert!(held.is_none(), "open emphasis cannot become immutable rows");
         let closed = "closed**\n\n";
-        background.push(closed);
+        let _ = background.push(closed);
         background.core.settle().await;
         let (released, _) = background.on_commit_tick_batch(usize::MAX);
         let released = released.expect("closed emphasis streams without waiting for finalization");
@@ -93,7 +93,7 @@ impl Trial {
             "rewrap already emitted the first-row header"
         );
         let reference = "[unresolved][id]\n\nfollowing block\n";
-        background.push(reference);
+        let _ = background.push(reference);
         background.core.settle().await;
         let (held, _) = background.on_commit_tick_batch(usize::MAX);
         assert!(
@@ -101,7 +101,7 @@ impl Trial {
             "an unresolved reference holds subsequent blocks too"
         );
         let definition = "\n[id]: https://example.com\n\n";
-        background.push(definition);
+        let _ = background.push(definition);
         background.core.settle().await;
         assert!(background.on_commit_tick_batch(usize::MAX).0.is_some());
         let ui = std::thread::current().id();
@@ -133,7 +133,7 @@ impl Trial {
                     source, Some(32), Some(&test_cwd()), None, ListSpacing::AfterMultiline,
                 ),
                 HistoryRenderMode::Raw => crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-                    &crate::history_cell::raw_lines_from_source(source).into_iter().map(HyperlinkLine::new).collect::<Vec<_>>(),
+                    &history_cell::raw_lines_from_source(source).into_iter().map(HyperlinkLine::new).collect::<Vec<_>>(),
                     crate::wrapping::RtOptions::new(32),
                 ),
             };
@@ -142,7 +142,7 @@ impl Trial {
             let mut arrived = String::new();
             for word in paragraph.split_inclusive(' ') {
                 arrived.push_str(word);
-                words.push(word);
+                let _ = words.push(word);
                 words.core.settle().await;
                 immutable.extend(words.core.tick_batch(usize::MAX));
                 let tail = words.current_tail_lines();
@@ -178,7 +178,7 @@ impl Trial {
                 immutable.len() >= 3,
                 "unterminated long lines stream before finalization"
             );
-            words.push("\n");
+            let _ = words.push("\n");
             words.core.settle().await;
             immutable.extend(words.core.tick_batch(usize::MAX));
             assert_eq!(immutable.len(), canonical.len());
@@ -208,7 +208,7 @@ impl Trial {
         let mut chunks =
             stream_controller(Some(32)).with_background(crate::tui::FrameRequester::test_dummy());
         for word in chunk_source.split_inclusive(' ') {
-            chunks.push(word);
+            let _ = chunks.push(word);
             chunks.core.settle().await;
         }
         let (cell, _) = chunks.on_commit_tick_batch(usize::MAX);
@@ -227,7 +227,7 @@ impl Trial {
             None,
             ListSpacing::AfterMultiline,
         );
-        expected.pop();
+        let _ = expected.pop();
         assert!(rows.len() > 3);
         assert_eq!(
             hyperlink_lines_to_plain_strings(&rows.materialize()),
@@ -244,7 +244,7 @@ impl Trial {
                 .with_rewraps(std::sync::Arc::new(move |rows, _, _| {
                     tx.send(rows).unwrap();
                 }));
-            revised.push(prefix);
+            let _ = revised.push(prefix);
             revised.core.settle().await;
             assert!(!revised.core.tick_batch(usize::MAX).is_empty());
             revised.set_width(Some(24));
@@ -264,7 +264,7 @@ impl Trial {
             );
             if let Some(suffix) = suffix.strip_prefix('|') {
                 let held = revised.current_tail_lines();
-                revised.push("|");
+                let _ = revised.push("|");
                 revised.core.settle().await;
                 assert!(revised.core.tick_batch(usize::MAX).is_empty());
                 assert_eq!(
@@ -272,9 +272,9 @@ impl Trial {
                     held,
                     "late pipe freezes the line"
                 );
-                revised.push(suffix);
+                let _ = revised.push(suffix);
             } else {
-                revised.push(suffix);
+                let _ = revised.push(suffix);
             }
             revised.core.settle().await;
             let replacement = rx.recv().await.unwrap();

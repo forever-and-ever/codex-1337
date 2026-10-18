@@ -1,9 +1,16 @@
 //! Owned history reads for cancellable frontend continuations.
 
+use super::AppServerRequestHandle;
+use super::AppServerSession;
+use super::Config;
+use super::HistoryHydrationScope;
+use super::LocalSettings;
+use super::Result;
+use super::Thread;
+use super::ThreadId;
 use super::history::preparation::HistoryPaginationUpdate;
 use super::history::preparation::{self};
 use super::session_preparation::RequestPolicy;
-use super::*;
 
 pub(crate) struct HistoryObservation(HistoryPaginationUpdate);
 
@@ -19,7 +26,7 @@ impl HistoryObservation {
 }
 
 pub(crate) async fn load(
-    handle: &codex_app_server_client::AppServerRequestHandle,
+    handle: &AppServerRequestHandle,
     thread_id: ThreadId,
     through: Option<&str>,
     tracking: Option<(&Config, &LocalSettings)>,
@@ -57,9 +64,6 @@ pub(crate) async fn load(
     }
 }
 
-pub(crate) async fn legacy(
-    handle: &codex_app_server_client::AppServerRequestHandle,
-    thread_id: ThreadId,
-) -> Result<Thread> {
+pub(crate) async fn legacy(handle: &AppServerRequestHandle, thread_id: ThreadId) -> Result<Thread> {
     preparation::read_thread(RequestPolicy::Interactive, handle, thread_id, true).await
 }

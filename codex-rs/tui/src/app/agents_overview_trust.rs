@@ -1,6 +1,16 @@
 //! Interactive dashboard consent joins the connection owner; the existing pump owns its draft.
 
-use super::*;
+use super::App;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::AppServerTarget;
+use super::Config;
+use super::ExitReason;
+use super::PathBuf;
+use super::Result;
+use super::StartupDraftPump;
+use super::Uuid;
+use super::tui;
 use crate::config_update::read_remote_project_trust;
 use crate::hooks_rpc::HookTrustUpdate;
 use crate::hooks_rpc::write_hook_trusts_typed;
@@ -122,19 +132,27 @@ impl App {
     ) -> Option<DashboardConfigOutcome> {
         let (mut preparation, mut plan) = match stage {
             DashboardTrustStage::ConfirmedHooks(preparation) => {
-                return self
-                    .finish_dashboard_session_config(tui, server, preparation, draft)
-                    .await
-                    .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
+                return Box::pin(self.finish_dashboard_session_config(
+                    tui,
+                    server,
+                    preparation,
+                    draft,
+                ))
+                .await
+                .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
             }
             DashboardTrustStage::Directory { preparation, plan } => (preparation, plan),
             DashboardTrustStage::Initial(preparation) => {
                 let cwd = if self.app_server_target.uses_remote_workspace() {
                     let Some(cwd) = server.remote_cwd_override() else {
-                        return self
-                            .finish_dashboard_session_config(tui, server, preparation, draft)
-                            .await
-                            .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
+                        return Box::pin(self.finish_dashboard_session_config(
+                            tui,
+                            server,
+                            preparation,
+                            draft,
+                        ))
+                        .await
+                        .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd));
                     };
                     cwd
                 } else {
@@ -159,18 +177,21 @@ impl App {
         };
         while let Some(cwd) = plan.next_cwd() {
             let lookup = read_remote_project_trust(server.request_handle(), &cwd, plan.host());
-            let project =
-                match StartupDraftPump::run_with_optional_draft(Some(&mut *draft), tui, lookup)
-                    .await
-                {
-                    Ok(project) => project,
-                    Err(error) => {
-                        self.add_agents_overview_error(format!(
-                            "Unable to check folder trust: {error}"
-                        ));
-                        return None;
-                    }
-                };
+            let project = match Box::pin(StartupDraftPump::run_with_optional_draft(
+                Some(&mut *draft),
+                tui,
+                lookup,
+            ))
+            .await
+            {
+                Ok(project) => project,
+                Err(error) => {
+                    self.add_agents_overview_error(format!(
+                        "Unable to check folder trust: {error}"
+                    ));
+                    return None;
+                }
+            };
             let project = match plan.accept_project(project) {
                 Ok(Some(project)) => project,
                 Ok(None) => continue,
@@ -242,20 +263,19 @@ impl App {
                 server.request_handle(),
                 preparation.config.cwd.to_path_buf(),
             );
-            let hooks =
-                match StartupDraftPump::run_with_optional_draft(Some(&mut *draft), tui, async {
-                    Ok::<_, std::io::Error>(load.await)
-                })
-                .await
-                {
-                    Ok(hooks) => hooks,
-                    Err(error) => {
-                        self.add_agents_overview_error(format!(
-                            "Unable to load folder hooks: {error}"
-                        ));
-                        return None;
-                    }
-                };
+            let hooks = match Box::pin(StartupDraftPump::run_with_optional_draft(
+                Some(&mut *draft),
+                tui,
+                async { Ok::<_, std::io::Error>(load.await) },
+            ))
+            .await
+            {
+                Ok(hooks) => hooks,
+                Err(error) => {
+                    self.add_agents_overview_error(format!("Unable to load folder hooks: {error}"));
+                    return None;
+                }
+            };
             if let Err(error) = draft.flush_pending_events(tui).await {
                 self.add_agents_overview_error(format!("Unable to retain the draft: {error}"));
                 return None;
@@ -282,7 +302,7 @@ impl App {
                 }
             }
         }
-        self.finish_dashboard_session_config(tui, server, preparation, draft)
+        Box::pin(self.finish_dashboard_session_config(tui, server, preparation, draft))
             .await
             .map(|(config, cwd)| DashboardConfigOutcome::Ready(config, cwd))
     }
@@ -304,12 +324,16 @@ impl App {
             return Ok(AppRunControl::Continue);
         };
         let previous = self.current_displayed_thread_id();
-        let outcome = self
-            .prepare_pumped_dashboard_trust(tui, server, consent.confirmed(), &mut draft)
-            .await;
+        let outcome = Box::pin(self.prepare_pumped_dashboard_trust(
+            tui,
+            server,
+            consent.confirmed(),
+            &mut draft,
+        ))
+        .await;
         let result = match outcome {
             Some(DashboardConfigOutcome::Ready(config, cwd)) => {
-                self.start_dashboard_with_config(tui, server, config, cwd, &mut draft)
+                Box::pin(self.start_dashboard_with_config(tui, server, config, cwd, &mut draft))
                     .await
             }
             Some(DashboardConfigOutcome::Pending(consent)) => {

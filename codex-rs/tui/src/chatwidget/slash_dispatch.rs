@@ -1027,8 +1027,8 @@ impl ChatWidget {
             SlashCommand::Goal if !trimmed.is_empty() => {
                 // TELOS(explicit-command-verbs): unknown verbs never become objectives.
                 self.dispatch_goal_command(
-                    args,
-                    text_elements,
+                    &args,
+                    &text_elements,
                     pending_pastes,
                     local_images,
                     remote_image_urls,

@@ -32,7 +32,7 @@ impl Session {
             .and_then(|turn| turn.task.as_ref())
             .map(|task| task.turn_context.capture_current_model_info())
         {
-            normalize_agent_service_tier(
+            let _ = normalize_agent_service_tier(
                 requested,
                 &model,
                 self.features.enabled(Feature::FastMode),
@@ -49,7 +49,9 @@ impl Session {
             })?;
             // Ordinary thread-settings clearing means explicit default; this operation restores
             // inheritance. Keep that distinction in the existing optional persisted selection.
-            Arc::make_mut(&mut configuration.step_settings).service_tier = selected.clone();
+            Arc::make_mut(&mut configuration.step_settings)
+                .service_tier
+                .clone_from(&selected);
             self.services
                 .local_agent_runtime
                 .control(self.session_id())

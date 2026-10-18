@@ -1,6 +1,29 @@
 //! Await submission acknowledgements off the App loop, without holding a thread-store lock.
 
-use super::*;
+use super::ActiveTurnSteerRace;
+use super::Arc;
+use super::ClientRequest;
+use super::Duration;
+use super::Mutex;
+use super::OperationOrigin;
+use super::ReplacementContinuation;
+use super::Result;
+use super::ServerOperation;
+use super::SubmissionFailure;
+use super::SubmissionOutcome;
+use super::SubmissionReceipt;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadMutation;
+use super::TurnObservation;
+use super::TypedRequestError;
+use super::Uuid;
+use super::WorkerCommand;
+use super::WorkerRequest;
+use super::active_turn_not_steerable_turn_error;
+use super::active_turn_steer_race;
+use super::misalignment_policy;
+use super::requests;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_protocol::RequestId as AppServerRequestId;
 use codex_app_server_protocol::TurnStartResponse;
@@ -16,7 +39,7 @@ use codex_app_server_protocol::TurnSteerResponse;
 pub(crate) const ACK_TIMEOUT: Duration = Duration::from_secs(/*secs*/ 30);
 
 fn request_id() -> AppServerRequestId {
-    AppServerRequestId::String(format!("submit-{}", uuid::Uuid::new_v4()))
+    AppServerRequestId::String(format!("submit-{}", Uuid::new_v4()))
 }
 
 pub(super) async fn send(
@@ -27,7 +50,7 @@ pub(super) async fn send(
     if let WorkerRequest::Operation { id, operation } = request {
         let result = if matches!(
             &*operation,
-            ServerOperation::Mutation(requests::ThreadMutation::ServerShell(_))
+            ServerOperation::Mutation(ThreadMutation::ServerShell(_))
         ) {
             requests::send(handle, id, *operation, origin)
                 .await
@@ -69,7 +92,7 @@ async fn send_inner(
         WorkerRequest::Continuation { params, review } => {
             let eligible = {
                 let store = store.lock().await;
-                super::super::misalignment_policy::review_matches_store(&store, &review)
+                misalignment_policy::review_matches_store(&store, &review)
             };
             if !eligible {
                 return finished(ReplacementContinuation::NoReceipt, Vec::new(), Ok(SubmissionReceipt::Deferred("This conversation changed while continuation was queued. No continuation was sent.".into())));

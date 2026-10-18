@@ -131,6 +131,7 @@ where
 
 impl FileChangeReceipt {
     /// Rejects an attachment as a whole; rejection never changes the actual tool result.
+    #[must_use]
     pub fn parse(value: &Value) -> Option<Self> {
         serde_json::to_writer(AttachmentBudget(0), value).ok()?;
         let receipt: Receipt = serde_json::from_value(value.clone()).ok()?;
@@ -174,15 +175,19 @@ impl FileChangeReceipt {
         Some(Self(receipt))
     }
 
+    #[must_use]
     pub fn outcome(&self) -> PublicationOutcome {
         self.0.outcome
     }
+    #[must_use]
     pub fn files(&self) -> &[FileChangeRecord] {
         &self.0.files
     }
+    #[must_use]
     pub fn into_files(self) -> Vec<FileChangeRecord> {
         self.0.files
     }
+    #[must_use]
     pub fn omitted_files(&self) -> u64 {
         self.0.omitted_files
     }
@@ -192,12 +197,14 @@ impl FileChangeReceipt {
         clippy::expect_used,
         reason = "Receipt fields have infallible JSON scalar/list serialization"
     )]
+    #[must_use]
     pub fn into_value(self) -> Value {
         serde_json::to_value(self.0).expect("validated receipt is serializable")
     }
 }
 
 impl FileChangeRecord {
+    #[must_use]
     pub fn identities(&self) -> (FilePublication, FileOperation, Option<&str>, Option<&str>) {
         match self {
             Self::Text {
@@ -246,8 +253,8 @@ impl FileChangeRecord {
                 after,
                 unified_diff,
             } => {
-                valid_snapshots(*publication, *operation, before, after)
-                    && valid_diff(*operation, before, after, unified_diff)
+                valid_snapshots(*publication, *operation, before.as_ref(), after.as_ref())
+                    && valid_diff(*operation, before.as_ref(), after.as_ref(), unified_diff)
             }
             Self::Summary {
                 publication,
@@ -255,7 +262,7 @@ impl FileChangeRecord {
                 before,
                 after,
                 ..
-            } => valid_snapshots(*publication, *operation, before, after),
+            } => valid_snapshots(*publication, *operation, before.as_ref(), after.as_ref()),
         }
     }
 }
@@ -302,20 +309,20 @@ fn valid_uri(uri: &str) -> bool {
     })
 }
 
-fn same_content(before: &Option<FileSnapshot>, after: &Option<FileSnapshot>) -> bool {
+fn same_content(before: Option<&FileSnapshot>, after: Option<&FileSnapshot>) -> bool {
     matches!((before, after), (Some(before), Some(after)) if before.sha256 == after.sha256 && before.bytes == after.bytes)
 }
 
 fn valid_snapshots(
     publication: FilePublication,
     operation: FileOperation,
-    before: &Option<FileSnapshot>,
-    after: &Option<FileSnapshot>,
+    before: Option<&FileSnapshot>,
+    after: Option<&FileSnapshot>,
 ) -> bool {
     matches!(
         publication,
         FilePublication::Applied | FilePublication::Preview
-    ) && before.iter().chain(after).all(|s| {
+    ) && before.into_iter().chain(after).all(|s| {
         s.bytes <= COUNT_MAX
             && s.sha256.len() == 64
             && s.sha256
@@ -326,8 +333,8 @@ fn valid_snapshots(
 
 fn valid_diff(
     operation: FileOperation,
-    before: &Option<FileSnapshot>,
-    after: &Option<FileSnapshot>,
+    before: Option<&FileSnapshot>,
+    after: Option<&FileSnapshot>,
     diff: &str,
 ) -> bool {
     if diff.len() > 65_536 {
@@ -335,8 +342,8 @@ fn valid_diff(
     }
     if diff.is_empty() {
         return match operation {
-            FileOperation::Create => after.as_ref().is_some_and(|s| s.bytes == 0),
-            FileOperation::Delete => before.as_ref().is_some_and(|s| s.bytes == 0),
+            FileOperation::Create => after.is_some_and(|s| s.bytes == 0),
+            FileOperation::Delete => before.is_some_and(|s| s.bytes == 0),
             FileOperation::Rename => same_content(before, after),
             FileOperation::Modify => false,
         };
@@ -379,8 +386,8 @@ fn valid_diff(
     if patch.original().is_none() || patch.modified().is_none() {
         return false;
     }
-    let old_bytes = before.as_ref().map_or(0, |snapshot| snapshot.bytes);
-    let new_bytes = after.as_ref().map_or(0, |snapshot| snapshot.bytes);
+    let old_bytes = before.map_or(0, |snapshot| snapshot.bytes);
+    let new_bytes = after.map_or(0, |snapshot| snapshot.bytes);
     let mut represented_old = 0;
     let mut represented_new = 0;
     for hunk in patch.hunks() {
@@ -432,7 +439,7 @@ fn valid_diff(
             absent.start() == 0
                 && absent.is_empty()
                 && present.start() == 1
-                && snapshot.as_ref().is_some_and(|s| {
+                && snapshot.is_some_and(|s| {
                     s.bytes
                         == hunk
                             .lines()

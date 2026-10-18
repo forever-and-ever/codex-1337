@@ -1,5 +1,7 @@
 //! Hit targets become interactive only when their frame finishes terminal output.
-use super::*;
+use super::Focus;
+use super::LiveWorkView;
+use super::Rect;
 use crate::custom_terminal::output;
 use crate::custom_terminal::output::FrameId;
 

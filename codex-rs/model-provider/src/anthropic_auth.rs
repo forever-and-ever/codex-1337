@@ -39,6 +39,7 @@ impl AnthropicAuthContext {
         })
     }
 
+    #[must_use]
     pub fn discovery_account_id(&self) -> Option<&AccountId> {
         self.discovery_account.as_ref()
     }
@@ -96,6 +97,7 @@ impl AnthropicRequestAuth {
         })
     }
 
+    #[must_use]
     pub fn auth(&self) -> SharedAuthProvider {
         Arc::clone(&self.auth)
     }
@@ -117,6 +119,6 @@ struct AnthropicBearerAuth(HeaderValue);
 
 impl AuthProvider for AnthropicBearerAuth {
     fn add_auth_headers(&self, headers: &mut HeaderMap) {
-        headers.insert(http::header::AUTHORIZATION, self.0.clone());
+        let _ = headers.insert(http::header::AUTHORIZATION, self.0.clone());
     }
 }

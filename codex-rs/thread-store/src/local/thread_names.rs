@@ -9,7 +9,7 @@ use crate::ThreadStoreError;
 use crate::ThreadStoreResult;
 
 pub(super) async fn ensure_thread_name_claims(store: &LocalThreadStore) -> ThreadStoreResult<()> {
-    store
+    let &() = store
         .thread_name_claims
         .get_or_try_init(|| async {
             let Some(db) = store.state_db().await else {
@@ -20,10 +20,10 @@ pub(super) async fn ensure_thread_name_claims(store: &LocalThreadStore) -> Threa
                 .thread_name_claims_imported()
                 .await
                 .map_err(name_claim_error)?;
-            let names = if !imported {
-                read_legacy_names(store, db.as_ref()).await?
-            } else {
+            let names = if imported {
                 Vec::new()
+            } else {
+                read_legacy_names(store, db.as_ref()).await?
             };
             db.import_legacy_thread_names(&names)
                 .await
@@ -59,7 +59,7 @@ async fn read_legacy_names(
             tracing::warn!("skipping malformed legacy thread name-index entry");
             continue;
         };
-        names.insert(entry.id, entry.thread_name.trim().to_string());
+        let _ = names.insert(entry.id, entry.thread_name.trim().to_string());
     }
     for (&id, name) in &names {
         if name.is_empty() || db.get_thread(id).await.map_err(name_claim_error)?.is_some() {

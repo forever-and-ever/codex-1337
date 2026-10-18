@@ -8,6 +8,7 @@
 use codex_app_server_protocol::ThreadItem;
 
 /// Reads a stored [`ThreadItem`], or omits it when this build cannot.
+#[must_use]
 pub fn legible_item(item_id: &str, item_json: &[u8]) -> Option<ThreadItem> {
     serde_json::from_slice(item_json)
         .inspect_err(|err| {

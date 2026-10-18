@@ -1,6 +1,10 @@
 //! Adapters for the existing alarm, question and agent-name owners.
 
-use super::*;
+use super::AppEvent;
+use super::ChatWidget;
+use super::HashMap;
+use super::ThreadId;
+use super::history_cell;
 use crate::live_work::Action;
 use crate::live_work::Key;
 use crate::live_work::Row;
@@ -32,7 +36,7 @@ impl ChatWidget {
                 )
                 .into_owned();
                 let detail = history_cell::sanitize_user_text(
-                    format!("{} · {}", alarm.id, crate::bottom_pane::alarm_detail(alarm),).into(),
+                    format!("{} · {}", alarm.id, crate::bottom_pane::alarm_detail(alarm)).into(),
                 )
                 .into_owned();
                 Row {

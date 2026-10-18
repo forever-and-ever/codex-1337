@@ -181,6 +181,13 @@ pub fn stdout() -> Output {
 
 impl Output {
     #[cfg(unix)]
+    #[cfg_attr(
+        test,
+        expect(
+            clippy::unnecessary_wraps,
+            reason = "The headless test implementation retains the fallible terminal-owner construction interface."
+        )
+    )]
     pub(crate) fn start(size: Size, cursor: Position) -> io::Result<Self> {
         #[cfg(test)]
         {
@@ -205,7 +212,7 @@ impl Output {
             );
             let worker = thread::Builder::new()
                 .name("terminal-output".into())
-                .spawn(move || run(mailbox, terminal))?;
+                .spawn(move || run(&mailbox, terminal))?;
             *registry = Some(Arc::downgrade(&shared));
             Ok(Self {
                 _owner: Some(Owner {
@@ -216,6 +223,10 @@ impl Output {
         }
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "Output replaces the stdout writer at existing call sites; terminal detection stays an instance operation on that sink."
+    )]
     pub fn is_terminal(&self) -> bool {
         io::stdout().is_terminal()
     }
@@ -239,7 +250,7 @@ impl Output {
             *capture = Some(Capture {
                 id,
                 operations: Vec::new(),
-            })
+            });
         });
         let capture = CaptureGuard { shared };
         let result = f(self);
@@ -340,7 +351,7 @@ impl CaptureGuard {
                 }
             }
             bytes.extend_from_slice(b"\x1b[?2026l");
-            enqueue(&self.shared, Job::Control(bytes))?;
+            let _ = enqueue(&self.shared, Job::Control(bytes))?;
             return Ok(());
         }
         let mut stamp = ui_latency::frame_submitted();
@@ -671,7 +682,7 @@ fn write_snapshot<B: Backend<Error = io::Error> + Write>(
     clippy::expect_used,
     reason = "The writer owns an unpoisoned mailbox and removes work only after its queue is nonempty."
 )]
-fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal: Terminal<B>) {
+fn run<B: Backend<Error = io::Error> + Write>(shared: &Shared, mut terminal: Terminal<B>) {
     IS_WRITER.set(true);
     loop {
         let envelope = {
@@ -697,21 +708,21 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
             Job::Control(bytes) => terminal
                 .backend_mut()
                 .write_all(&bytes)
-                .and_then(|_| Write::flush(terminal.backend_mut())),
+                .and_then(|()| Write::flush(terminal.backend_mut())),
             Job::Frame(frame) => {
                 let now = Instant::now();
                 let mut phases = [(now, now); 3];
                 let result = terminal
                     .backend_mut()
                     .write_all(b"\x1b[?2026h")
-                    .and_then(|_| {
+                    .and_then(|()| {
                         for operation in frame.operations {
                             match operation {
                                 Operation::Bytes(bytes) => {
-                                    terminal.backend_mut().write_all(&bytes)?
+                                    terminal.backend_mut().write_all(&bytes)?;
                                 }
                                 Operation::Frame(snapshot) => {
-                                    phases = write_snapshot(&mut terminal, snapshot)?
+                                    phases = write_snapshot(&mut terminal, snapshot)?;
                                 }
                             }
                         }
@@ -721,7 +732,7 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
                 let ended = terminal
                     .backend_mut()
                     .write_all(b"\x1b[?2026l")
-                    .and_then(|_| Write::flush(terminal.backend_mut()));
+                    .and_then(|()| Write::flush(terminal.backend_mut()));
                 let ended_at = Instant::now();
                 phases[2].1 = ended_at;
                 if result.is_ok() && ended.is_ok() {
@@ -765,9 +776,9 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: Arc<Shared>, mut terminal:
     }
 }
 
-impl<B> super::Terminal<B>
+impl<B> Terminal<B>
 where
-    B: ratatui::backend::Backend<Error = io::Error> + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     pub(super) fn capture_output_frame(
         &mut self,
@@ -810,14 +821,14 @@ pub(super) fn is_painted_column(x: u16, left: u16, last_nonblank: u16) -> bool {
 pub(crate) fn begin_restoration(restore: impl FnOnce() -> io::Result<()>) -> Option<io::Error> {
     let mut first_error = restoration_barrier().err();
     if let Err(error) = restore() {
-        first_error.get_or_insert(error);
+        let _ = first_error.get_or_insert(error);
     }
     first_error
 }
 
 pub(crate) fn finish_restoration(first_error: &mut Option<io::Error>) {
     if let Err(error) = restoration_barrier() {
-        first_error.get_or_insert(error);
+        let _ = first_error.get_or_insert(error);
     }
 }
 
@@ -866,6 +877,70 @@ mod tests {
     #[test]
     fn blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order() -> io::Result<()>
     {
+        use crate::test_backend::VT100Backend;
+        use ratatui::layout::Rect;
+        use ratatui::style::Style;
+
+        fn capture(
+            ui: &mut Terminal<VT100Backend>,
+            buffer: Buffer,
+            size: Size,
+        ) -> io::Result<Snapshot> {
+            ui.set_viewport_area(buffer.area);
+            CAPTURE.with_borrow_mut(|capture| {
+                *capture = Some(Capture {
+                    id: FrameId(0),
+                    operations: Vec::new(),
+                });
+            });
+            ui.try_draw_with_size(size, |frame| {
+                *frame.buffer_mut() = buffer;
+                Ok::<_, io::Error>(())
+            })?;
+            let capture = CAPTURE
+                .with_borrow_mut(Option::take)
+                .expect("captured draw");
+            let mut frames =
+                capture
+                    .operations
+                    .into_iter()
+                    .filter_map(|operation| match operation {
+                        Operation::Frame(frame) => Some(frame),
+                        Operation::Bytes(_) => None,
+                    });
+            let snapshot = frames.next().expect("one frame");
+            assert!(frames.next().is_none());
+            Ok(snapshot)
+        }
+
+        fn rule(area: Rect) -> Buffer {
+            let mut buffer = Buffer::empty(area);
+            buffer.set_string(
+                area.x,
+                area.y + 1,
+                "─".repeat(usize::from(area.width)),
+                Style::default(),
+            );
+            buffer
+        }
+
+        fn assert_rule(writer: &Terminal<VT100Backend>, area: Rect) {
+            let contents = writer.backend().vt100().screen().contents();
+            let row: String = contents
+                .lines()
+                .nth(usize::from(area.y + 1))
+                .unwrap_or("")
+                .chars()
+                .skip(usize::from(area.x))
+                .take(usize::from(area.width))
+                .collect();
+            assert_eq!(row, "─".repeat(usize::from(area.width)));
+            assert!(
+                contents.lines().nth(2).unwrap_or("").trim().is_empty(),
+                "resize paints blank, never clipped old-width content"
+            );
+        }
+
         let shared = Arc::new(Shared::default());
         let bytes = Arc::new(Mutex::new(Vec::new()));
         let block = Arc::new(AtomicBool::new(false));
@@ -886,21 +961,18 @@ mod tests {
         let mailbox = Arc::clone(&shared);
         let owner = Owner {
             shared: Arc::clone(&shared),
-            worker: Some(thread::spawn(move || run(mailbox, terminal))),
+            worker: Some(thread::spawn(move || run(&mailbox, terminal))),
         };
         let (requester, mut draws) = FrameRequester::test_channel();
         bind(requester);
         let mut completions = completion_events().expect("writer completion stream");
         let view = RefCell::new(crate::transcript_view::TranscriptView::default());
         let submit = |text: &str, width: u16| -> io::Result<()> {
-            let mut buffer = Buffer::empty(ratatui::layout::Rect::new(0, 0, 3, 1));
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 1));
             stdout().sync_update(|_| {
-                view.borrow_mut().render(
-                    ratatui::layout::Rect::new(0, 0, width, 1),
-                    &mut buffer,
-                    &[],
-                );
-                buffer.set_string(0, 0, text, ratatui::style::Style::default());
+                view.borrow_mut()
+                    .render(Rect::new(0, 0, width, 1), &mut buffer, &[]);
+                buffer.set_string(0, 0, text, Style::default());
                 assert!(capture_frame(
                     &buffer,
                     false,
@@ -1033,76 +1105,12 @@ mod tests {
         // The writer and UI own distinct diff buffers, even when a UI clear has
         // already erased the physical screen. Buffer::resize must not turn a
         // 120-column rule into only the 24 columns whose flat indexes differ.
-        use crate::test_backend::VT100Backend;
-        use ratatui::layout::Rect;
-        use ratatui::style::Style;
-
-        fn capture(
-            ui: &mut Terminal<VT100Backend>,
-            buffer: Buffer,
-            size: Size,
-        ) -> io::Result<Snapshot> {
-            ui.set_viewport_area(buffer.area);
-            CAPTURE.with_borrow_mut(|capture| {
-                *capture = Some(Capture {
-                    id: FrameId(0),
-                    operations: Vec::new(),
-                });
-            });
-            ui.try_draw_with_size(size, |frame| {
-                *frame.buffer_mut() = buffer;
-                Ok::<_, io::Error>(())
-            })?;
-            let capture = CAPTURE
-                .with_borrow_mut(Option::take)
-                .expect("captured draw");
-            let mut frames =
-                capture
-                    .operations
-                    .into_iter()
-                    .filter_map(|operation| match operation {
-                        Operation::Frame(frame) => Some(frame),
-                        Operation::Bytes(_) => None,
-                    });
-            let snapshot = frames.next().expect("one frame");
-            assert!(frames.next().is_none());
-            Ok(snapshot)
-        }
-
-        fn rule(area: Rect) -> Buffer {
-            let mut buffer = Buffer::empty(area);
-            buffer.set_string(
-                area.x,
-                area.y + 1,
-                "─".repeat(usize::from(area.width)),
-                Style::default(),
-            );
-            buffer
-        }
-
-        fn assert_rule(writer: &Terminal<VT100Backend>, area: Rect) {
-            let contents = writer.backend().vt100().screen().contents();
-            let row: String = contents
-                .lines()
-                .nth(usize::from(area.y + 1))
-                .unwrap_or("")
-                .chars()
-                .skip(usize::from(area.x))
-                .take(usize::from(area.width))
-                .collect();
-            assert_eq!(row, "─".repeat(usize::from(area.width)));
-            assert!(
-                contents.lines().nth(2).unwrap_or("").trim().is_empty(),
-                "resize paints blank, never clipped old-width content"
-            );
-        }
-
         let screen = Size::new(120, 4);
         let mut ui = Terminal::with_options(VT100Backend::new(120, 4))?;
         let mut writer = Terminal::with_options(VT100Backend::new(120, 4))?;
         let mut initial = rule(Rect::new(0, 0, 120, 4));
         initial.set_string(0, 2, "old-width transcript rows", Style::default());
-        write_snapshot(&mut writer, capture(&mut ui, initial, screen)?)?;
+        let _ = write_snapshot(&mut writer, capture(&mut ui, initial, screen)?)?;
 
         // Each geometry axis independently makes a diff invalid: width, viewport
         // origin, and screen size with an otherwise identical viewport.
@@ -1120,7 +1128,7 @@ mod tests {
                 !snapshot.invalidate,
                 "geometry is checked by the writer itself"
             );
-            write_snapshot(&mut writer, snapshot)?;
+            let _ = write_snapshot(&mut writer, snapshot)?;
             assert_rule(&writer, viewport);
         }
 
@@ -1138,7 +1146,7 @@ mod tests {
                 .clear_region(ratatui::backend::ClearType::All)?;
             let snapshot = capture(&mut ui, rule(area), screen)?;
             assert!(snapshot.invalidate, "clear must survive capture");
-            write_snapshot(&mut writer, snapshot)?;
+            let _ = write_snapshot(&mut writer, snapshot)?;
             assert_rule(&writer, area);
             assert!(
                 !capture(&mut ui, rule(area), screen)?.invalidate,

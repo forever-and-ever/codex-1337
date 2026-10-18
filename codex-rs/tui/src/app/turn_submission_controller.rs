@@ -1,6 +1,65 @@
 //! App-owned transitions and draft recovery for ordered submission lanes.
 
-use super::*;
+use super::AbortOnDropHandle;
+use super::App;
+use super::AppCommand;
+use super::AppEvent;
+use super::AppRunControl;
+use super::AppServerSession;
+use super::Arc;
+use super::ChatWidget;
+use super::ConnectionMutation;
+use super::ControlCompletion;
+use super::ControlOperation;
+use super::DraftDisposition;
+use super::HashSet;
+use super::LaneState;
+use super::LocalThreadCompletion;
+use super::Mutex;
+use super::OperationLane;
+use super::OperationOrigin;
+use super::OperationReceipt;
+use super::OperationScope;
+use super::PendingSteerCancelAction;
+use super::PendingSubmission;
+use super::ReadyTurn;
+use super::ReplacementContinuation;
+use super::Result;
+use super::ServerCompletion;
+use super::ServerNotification;
+use super::ServerOperation;
+use super::SubagentTextSource;
+use super::SubmissionDraft;
+use super::SubmissionEvent;
+use super::SubmissionFailure;
+use super::SubmissionLane;
+use super::SubmissionOutcome;
+use super::SubmissionReceipt;
+use super::SubmissionRequest;
+use super::ThreadEventStore;
+use super::ThreadId;
+use super::ThreadMutation;
+#[cfg(test)]
+use super::ThreadStartSource;
+use super::Turn;
+use super::TurnObservation;
+use super::TurnOrigin;
+use super::TurnStartParams;
+use super::TypedRequestError;
+use super::UserTurnReplay;
+use super::Uuid;
+use super::VecDeque;
+use super::WorkerRequest;
+use super::recoverable_drafts;
+use super::requests;
+use super::tui;
+use super::ui_requests;
+use super::voice_preferences;
+use super::worker;
+#[cfg(test)]
+use crate::chatwidget::UserMessage;
+#[cfg(test)]
+use std::time::Duration;
 
 enum RecoveryNotice {
     Rejected(String),
@@ -77,7 +136,7 @@ impl App {
                     })
         {
             // The previous steer has not left this frontend. Replace it at its original FIFO slot.
-            turn.params.input = previous.input.clone();
+            turn.params.input.clone_from(&previous.input);
             turn.draft = waiting.draft.clone().merge_waiting(turn.draft);
             turn.params.client_user_message_id = Some(turn.draft.client_id.clone());
             if let TurnOrigin::User(replay) = &mut turn.origin {
@@ -101,7 +160,7 @@ impl App {
         thread_id: ThreadId,
         expected_turn_id: Option<String>,
         input: Vec<codex_app_server_protocol::UserInput>,
-        source: crate::app::turn_submissions::SubagentTextSource,
+        source: SubagentTextSource,
     ) {
         let client_id = Uuid::new_v4().to_string();
         let draft = ChatWidget::submission_draft_from_inputs(
@@ -211,7 +270,7 @@ impl App {
         &mut self,
         thread_id: ThreadId,
         submission: &PendingSubmission,
-        turn: codex_app_server_protocol::Turn,
+        turn: Turn,
     ) {
         let SubmissionRequest::Continuation { review, .. } = &submission.request else {
             unreachable!("continuation receipt without reviewed intent");
@@ -326,7 +385,7 @@ impl App {
                 lane.waiting.push_back(entry);
             }
         } else {
-            self.server_operations.lanes.insert(
+            let _ = self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active: entry,
@@ -361,7 +420,7 @@ impl App {
                         OperationLane::Exit | OperationLane::Response(_) => true,
                         OperationLane::Control(thread_id) => {
                             !matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                                if matches!(&**operation, ServerOperation::Control(control::ControlOperation::RealtimeStop { .. })))
+                                if matches!(&**operation, ServerOperation::Control(ControlOperation::RealtimeStop { .. })))
                                 || !self.server_operations.realtime_start_precedes(*thread_id, lane.active.order)
                         }
                         OperationLane::Thread(thread_id) => barrier.is_none_or(|order| lane.active.order < order)
@@ -412,9 +471,7 @@ impl App {
         let scope = active.origin.scope();
         let permitted = match &active.request {
             SubmissionRequest::Operation(operation) => match &**operation {
-                ServerOperation::Control(control::ControlOperation::RealtimeStop {
-                    attempt_id,
-                }) => {
+                ServerOperation::Control(ControlOperation::RealtimeStop { attempt_id }) => {
                     let thread_id = active.origin.thread().0;
                     self.voice_widget_for_thread(thread_id)
                         .is_none_or(|widget| widget.owns_realtime_attempt(thread_id, *attempt_id))
@@ -450,7 +507,7 @@ impl App {
             let outcome = if !permitted {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::RealtimeDiscarded))
             } else if !settings_supported
-                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ServerOperation::Mutation(requests::ThreadMutation::Settings(_))))
+                && matches!(&request, WorkerRequest::Operation { operation, .. } if matches!(&**operation, ServerOperation::Mutation(ThreadMutation::Settings(_))))
             {
                 SubmissionOutcome::Operation(Ok(OperationReceipt::SettingsUnsupported))
             } else {
@@ -483,7 +540,7 @@ impl App {
             SubmissionRequest::Operation(operation) => operation.lane(scope),
             _ => OperationLane::Thread(active.origin.thread().0),
         };
-        self.server_operations.lanes.insert(
+        let _ = self.server_operations.lanes.insert(
             key,
             SubmissionLane {
                 active,
@@ -508,7 +565,7 @@ impl App {
             };
             if !matches!(lane.state, LaneState::Queued) && requests::holds_start_lease(&lane.active)
             {
-                protected_starts.insert(thread_id);
+                let _ = protected_starts.insert(thread_id);
             }
             let mut retained = VecDeque::new();
             for entry in lane.waiting.drain(..) {
@@ -522,7 +579,7 @@ impl App {
             if matches!(lane.state, LaneState::Queued) && matches_origin(&lane.active) {
                 removed.push(lane.active);
                 if let Some(active) = lane.waiting.pop_front() {
-                    self.server_operations.lanes.insert(
+                    let _ = self.server_operations.lanes.insert(
                         key,
                         SubmissionLane {
                             active,
@@ -532,7 +589,7 @@ impl App {
                     );
                 }
             } else {
-                self.server_operations.lanes.insert(key, lane);
+                let _ = self.server_operations.lanes.insert(key, lane);
             }
         }
         removed.sort_by_key(|entry| entry.order);
@@ -630,7 +687,7 @@ impl App {
                         self.chat_widget.add_error_message("Voice preference was saved, but confirmation was interrupted by a connection change. No write was retried.".into());
                     }
                     if let SubmissionRequest::Operation(operation) = &lane.active.request
-                        && let ServerOperation::Control(control::ControlOperation::DetachAndExit {
+                        && let ServerOperation::Control(ControlOperation::DetachAndExit {
                             reason,
                             ..
                         }) = &**operation
@@ -657,7 +714,7 @@ impl App {
                         task.abort();
                     }
                     if matches!(&lane.active.request, SubmissionRequest::Operation(operation)
-                        if matches!(&**operation, ServerOperation::Control(control::ControlOperation::Interrupt { .. } | control::ControlOperation::InterruptActive { .. })))
+                        if matches!(&**operation, ServerOperation::Control(ControlOperation::Interrupt { .. } | ControlOperation::InterruptActive { .. })))
                     {
                         lane.active
                             .origin
@@ -704,9 +761,8 @@ impl App {
                     .await
             }
             ServerCompletion::Request(completion) => {
-                let control = self
-                    .continue_confirmed_trust(tui, server, &completion)
-                    .await?;
+                let control =
+                    Box::pin(self.continue_confirmed_trust(tui, server, &completion)).await?;
                 self.finish_submission(
                     server,
                     completion.scope,
@@ -718,8 +774,7 @@ impl App {
                 Ok(control)
             }
             ServerCompletion::Navigation(completion) => {
-                self.finish_navigation_operation(tui, server, *completion)
-                    .await
+                Box::pin(self.finish_navigation_operation(tui, server, *completion)).await
             }
         }
     }
@@ -839,7 +894,7 @@ impl App {
             )
             .await;
             if uncertain {
-                self.server_operations.lanes.insert(
+                let _ = self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active,
@@ -861,7 +916,7 @@ impl App {
                 .is_some_and(|channel| Arc::ptr_eq(&channel.store, store))
             && self.continue_realtime_preparation(*thread_id, &mut active, result.clone())
         {
-            self.server_operations.lanes.insert(
+            let _ = self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active,
@@ -876,9 +931,9 @@ impl App {
         if let SubmissionOutcome::Operation(Ok(OperationReceipt::VoicePreference(
             voice_preferences::VoicePreferenceReceipt::Saved(write),
         ))) = &outcome
-            && self.continue_voice_preference(&mut active, write)
+            && Self::continue_voice_preference(&mut active, write)
         {
-            self.server_operations.lanes.insert(
+            let _ = self.server_operations.lanes.insert(
                 key,
                 SubmissionLane {
                     active,
@@ -897,8 +952,7 @@ impl App {
             if matches!(
                 &**operation,
                 ServerOperation::Control(
-                    control::ControlOperation::Interrupt { .. }
-                        | control::ControlOperation::InterruptActive { .. }
+                    ControlOperation::Interrupt { .. } | ControlOperation::InterruptActive { .. }
                 )
             ) {
                 // This is the sole active control lease for this captured store. A successor
@@ -907,7 +961,7 @@ impl App {
             }
             let applicable = matches!(
                 &**operation,
-                ServerOperation::Control(control::ControlOperation::DetachAndExit { .. })
+                ServerOperation::Control(ControlOperation::DetachAndExit { .. })
             ) || match &origin {
                 OperationOrigin::Connection => true,
                 OperationOrigin::Thread { thread_id, store } => self
@@ -942,9 +996,7 @@ impl App {
                         }
                         if matches!(
                             &**operation,
-                            ServerOperation::Control(
-                                control::ControlOperation::InterruptActive { .. }
-                            )
+                            ServerOperation::Control(ControlOperation::InterruptActive { .. })
                         ) {
                             self.refresh_agents_overview_threads(server);
                         }
@@ -982,7 +1034,7 @@ impl App {
                                 .await;
                             }
                         }
-                        self.server_operations.lanes.insert(
+                        let _ = self.server_operations.lanes.insert(
                             key,
                             SubmissionLane {
                                 active,
@@ -997,7 +1049,7 @@ impl App {
                 }
             }
             if let Some(next) = waiting.pop_front() {
-                self.server_operations.lanes.insert(
+                let _ = self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -1045,12 +1097,12 @@ impl App {
                             TurnObservation::Missing { expected }
                                 if store.active_turn_id() == Some(expected.as_str()) =>
                             {
-                                store.clear_active_turn_id()
+                                store.clear_active_turn_id();
                             }
                             TurnObservation::Mismatch { expected, actual }
                                 if store.active_turn_id() == Some(expected.as_str()) =>
                             {
-                                store.set_active_turn_id(actual)
+                                store.set_active_turn_id(actual);
                             }
                             _ => {}
                         }
@@ -1119,7 +1171,7 @@ impl App {
                 )),
             }
             if transport_failed {
-                self.begin_reconnect();
+                let _ = self.begin_reconnect();
             }
         } else {
             if current
@@ -1131,7 +1183,7 @@ impl App {
                 );
             }
             if let Some(next) = waiting.pop_front() {
-                self.server_operations.lanes.insert(
+                let _ = self.server_operations.lanes.insert(
                     key,
                     SubmissionLane {
                         active: next,
@@ -1168,7 +1220,8 @@ impl App {
             // The retained original store outlives channel-map removal. Child question
             // submissions seed it from their exact emitter only when no state survived.
             input.recover_submission_drafts(drafts, action);
-            self.agents_overview
+            let _ = self
+                .agents_overview
                 .input_states
                 .insert(thread_id, input.clone());
         } else {
@@ -1223,8 +1276,8 @@ impl App {
         &mut self,
         server: &mut AppServerSession,
     ) -> Result<()> {
-        let mut tui = crate::tui::test_support::make_test_tui()?;
-        tokio::time::timeout(Duration::from_secs(5), async {
+        let mut tui = tui::test_support::make_test_tui()?;
+        Box::pin(tokio::time::timeout(Duration::from_secs(5), async {
             while !self.server_operations.is_empty() {
                 tokio::select! {
                     completion = self.thread_delivery.completion_rx.recv() => {
@@ -1233,12 +1286,12 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.ok_or_else(|| color_eyre::eyre::eyre!("control receipt channel closed"))?;
-                        self.handle_server_completion(&mut tui, server, completion).await?;
+                        let _ = Box::pin(self.handle_server_completion(&mut tui, server, completion)).await?;
                     }
                 }
             }
             Ok::<_, color_eyre::Report>(())
-        })
+        }))
         .await??;
         Ok(())
     }
@@ -1249,7 +1302,7 @@ impl App {
         tui: &mut tui::Tui,
         server: &mut AppServerSession,
     ) -> Result<AppRunControl> {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        Box::pin(tokio::time::timeout(Duration::from_secs(5), async {
             // An uncertain effect is quiescent, not completed. Tests must inspect its
             // retained fence instead of waiting for a receipt that cannot arrive.
             while self
@@ -1272,7 +1325,7 @@ impl App {
                     }
                     completion = self.server_operations.control_rx.recv() => {
                         let completion = completion.expect("server receipt channel open");
-                        let control = self.handle_server_completion(tui, server, completion).await?;
+                        let control = Box::pin(self.handle_server_completion(tui, server, completion)).await?;
                         if matches!(control, AppRunControl::Exit(_)) {
                             return Ok(control);
                         }
@@ -1280,7 +1333,7 @@ impl App {
                 }
             }
             Ok::<_, color_eyre::Report>(AppRunControl::Continue)
-        })
+        }))
         .await?
     }
     #[cfg(test)]
@@ -1294,7 +1347,7 @@ impl App {
         if matches!(control, AppRunControl::Exit(_)) {
             return Ok(control);
         }
-        self.settle_navigation(tui, server).await
+        Box::pin(self.settle_navigation(tui, server)).await
     }
     #[cfg(test)]
     pub(in crate::app) async fn start_fresh_session_and_settle(
@@ -1307,7 +1360,7 @@ impl App {
     ) {
         self.start_fresh_session(tui, server, source, message, name)
             .await;
-        self.settle_navigation(tui, server)
+        let _ = Box::pin(self.settle_navigation(tui, server))
             .await
             .expect("fresh navigation settled");
     }
@@ -1319,7 +1372,9 @@ impl App {
         thread_id: ThreadId,
     ) -> Result<()> {
         self.select_agent_thread(tui, server, thread_id).await?;
-        self.settle_navigation(tui, server).await.map(|_| ())
+        Box::pin(self.settle_navigation(tui, server))
+            .await
+            .map(|_| ())
     }
     #[cfg(test)]
     pub(in crate::app) async fn open_agent_picker_and_settle(
@@ -1327,7 +1382,9 @@ impl App {
         server: &mut AppServerSession,
     ) -> Result<()> {
         self.open_agent_picker(server).await;
-        let mut tui = crate::tui::test_support::make_test_tui()?;
-        self.settle_navigation(&mut tui, server).await.map(|_| ())
+        let mut tui = tui::test_support::make_test_tui()?;
+        Box::pin(self.settle_navigation(&mut tui, server))
+            .await
+            .map(|_| ())
     }
 }

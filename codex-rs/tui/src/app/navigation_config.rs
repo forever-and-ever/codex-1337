@@ -1,6 +1,12 @@
 //! Move-only configuration work carried by navigation receipts.
 
-use super::*;
+use super::App;
+use super::Config;
+use super::ConfigBuilder;
+use super::Path;
+use super::PathBuf;
+use super::Result;
+use super::config_persistence;
 use crate::local_settings::LocalSettings;
 
 pub(super) struct ConfigRebuild {
@@ -13,7 +19,7 @@ pub(super) struct ConfigRebuild {
 
 impl ConfigRebuild {
     pub(super) async fn run(self) -> Result<Box<(Config, LocalSettings)>> {
-        let config = match super::config_persistence::build_config_on_runtime_worker(
+        let config = match config_persistence::build_config_on_runtime_worker(
             self.builder,
             self.network,
             format!("Failed to rebuild config for cwd {}", self.cwd.display()),

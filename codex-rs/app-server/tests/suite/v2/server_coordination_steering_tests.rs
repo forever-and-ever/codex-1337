@@ -33,7 +33,7 @@ async fn headless_message_steers_stale_active_destination_with_authentic_provena
     let (mut process, address) = spawn_websocket_server(home.path()).await?;
     let mut frontend = connect_websocket(address).await?;
     send_initialize_request(&mut frontend, /*id*/ 1, "steering-origin").await?;
-    read_response_for_id(&mut frontend, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 1).await?;
     let caller = start_thread(&mut frontend, /*id*/ 2).await?;
     send_request(
         &mut frontend,
@@ -87,7 +87,7 @@ async fn headless_message_steers_stale_active_destination_with_authentic_provena
         Some(json!({"threadId": caller, "input": [{"type": "text", "text": "coordinate"}]})),
     )
     .await?;
-    read_response_for_id(&mut frontend, /*id*/ 5).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 5).await?;
     timeout(TIMEOUT, gate.entered.notified()).await?;
     frontend.close(None).await?;
     drop(frontend);
@@ -126,7 +126,7 @@ async fn headless_message_steers_stale_active_destination_with_authentic_provena
 
     let mut replacement = connect_websocket(address).await?;
     send_initialize_request(&mut replacement, /*id*/ 1, "steering-replacement").await?;
-    read_response_for_id(&mut replacement, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut replacement, /*id*/ 1).await?;
     send_request(
         &mut replacement,
         "thread/read",

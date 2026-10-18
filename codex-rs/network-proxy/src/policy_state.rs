@@ -55,6 +55,7 @@ pub struct BlockedRequestArgs {
 }
 
 impl BlockedRequest {
+    #[must_use]
     pub fn new(args: BlockedRequestArgs) -> Self {
         let BlockedRequestArgs {
             host,
@@ -133,6 +134,10 @@ pub enum LocalBindingPolicy {
 #[derive(Clone, Debug)]
 pub enum NetworkProxyState {}
 
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "The uninhabited stub preserves upstream state mutation call signatures"
+)]
 #[allow(
     unused_variables,
     reason = "Compatibility signatures for an uninhabited runtime"

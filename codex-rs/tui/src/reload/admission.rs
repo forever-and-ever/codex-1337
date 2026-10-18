@@ -73,12 +73,12 @@ impl Admission {
         if let Some(slot) = Slot::reserve(slots) {
             // Even canonicalization and spawn can stall in the kernel. The host's
             // independent expiry rejects admission while this slot stays bounded.
-            tokio::task::spawn_blocking(move || {
+            drop(tokio::task::spawn_blocking(move || {
                 let result = tokio::runtime::Handle::current()
                     .block_on(async { probe::admit(&candidate, version?).await });
                 drop(slot);
                 let _ = reply.send(result);
-            });
+            }));
         } else {
             let _ = reply.send(Err(io::Error::other("No UI probe slot available")));
         }

@@ -43,6 +43,7 @@ pub enum AlarmCause {
 impl AlarmSounding {
     /// Callers also require an absent call ID: an ordinary tool response is not
     /// an unsolicited alarm sounding.
+    #[must_use]
     pub fn from_tool_output(
         name: &str,
         namespace: Option<&str>,
@@ -54,6 +55,7 @@ impl AlarmSounding {
         Self::parse(output.to_text().as_deref()?)
     }
 
+    #[must_use]
     pub fn render(&self) -> String {
         let (cause, detail) = match &self.cause {
             AlarmCause::Clock { late_by_seconds } => {
@@ -78,8 +80,7 @@ impl AlarmSounding {
                 format!(
                     "session {session_id} (`{}`) exited with code {}.",
                     escape_lines(command),
-                    code.map(|code| code.to_string())
-                        .unwrap_or_else(|| "signal/unknown".to_string())
+                    code.map_or_else(|| "signal/unknown".to_string(), |code| code.to_string())
                 ),
                 format!("\nLast output:\n{}", escape_lines(tail)),
             ),

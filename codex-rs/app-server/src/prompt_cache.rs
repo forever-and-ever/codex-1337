@@ -39,9 +39,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 /// A can-warm event keeps the cache warm this long.
-const HOLD: Duration = Duration::from_secs(/*secs*/ 8 * 60 * 60);
+const HOLD: Duration = Duration::from_hours(/*secs*/ 8);
 /// Replays land this long before the cache would expire.
-const LEAD: Duration = Duration::from_secs(/*secs*/ 3 * 60);
+const LEAD: Duration = Duration::from_mins(/*secs*/ 3);
 const MAX_REPLAYS: usize = 64;
 const MAX_REPLAY_BYTES: usize = 128_000_000;
 
@@ -116,8 +116,7 @@ impl Entry {
             } if refreshed.age() < lore.lifetime() => PromptCacheEstimate::Warm {
                 expires_at: unix_seconds(refreshed.wall() + lore.lifetime()),
             },
-            Cache::Warm { .. } => PromptCacheEstimate::Cold,
-            Cache::Cold => PromptCacheEstimate::Cold,
+            Cache::Warm { .. } | Cache::Cold => PromptCacheEstimate::Cold,
         };
         let warming = match self.warming {
             Warming::Off => PromptCacheWarming::Off,
@@ -404,7 +403,7 @@ impl Shared {
             Ok(Some(sent)) => Ok(sent),
             Err(error) => Err(error),
         };
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             let Cache::Warm {
                 refreshed,
                 replay: Some(retained),
@@ -463,7 +462,7 @@ impl PromptCacheObserver for Shared {
     }
 
     fn fact(&self, thread: ThreadId, fact: PromptCacheFact) {
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             match fact {
                 PromptCacheFact::HumanTurn => {
                     if let Warming::On { until } = &mut entry.warming {
@@ -487,7 +486,7 @@ impl PromptCacheObserver for Shared {
             usage,
             replay,
         } = request;
-        self.update(thread, |entry| {
+        let _ = self.update(thread, |entry| {
             if epoch != entry.epoch {
                 return Vec::new();
             }

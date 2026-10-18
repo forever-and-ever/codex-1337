@@ -1,10 +1,41 @@
+use super::AppServerSession;
+use super::ClientRequest;
+use super::Config;
+use super::ForkConfigSource;
+use super::ForkGoalContinuation;
+use super::ForkName;
+use super::ForkPermissionMode;
+use super::ForkPresentation;
+use super::HistoryHydrationScope;
+use super::LocalSettings;
+use super::PermissionProfile;
+use super::PermissionProfileSelection;
+use super::RequestId;
+use super::ResponseItem;
+use super::ThreadForkParams;
+use super::ThreadForkResponse;
+use super::ThreadHistoryMode;
+use super::ThreadHistorySupport;
+use super::ThreadId;
+use super::ThreadInjectItemsParams;
+use super::ThreadInjectItemsResponse;
+use super::ThreadParamsMode;
+use super::TypedRequestError;
+use super::Uuid;
+use super::bootstrap_request_error;
+use super::history;
 use super::history::preparation::HistoryPaginationUpdate;
+use super::is_history_pagination_unsupported;
+use super::remove_permission_config_overrides;
+use super::session_preparation;
 use super::session_preparation::PreparedSession;
 use super::session_preparation::RequestPolicy;
 use super::session_preparation::SessionObservations;
 use super::session_preparation::SubscriptionCustody;
 use super::session_preparation::read_thread;
-use super::*;
+use super::started_thread_from_fork_response;
+use super::thread_blocks_direct_input;
+use super::thread_fork_params_from_config;
 use codex_app_server_client::AppServerRequestHandle;
 
 enum ForkPermissions {
@@ -228,7 +259,7 @@ impl ForkPreparation {
             custody = SubscriptionCustody::NewThreadUncertain;
             let response: ThreadForkResponse = match handle
                 .request_typed(ClientRequest::ThreadFork {
-                    request_id: RequestId::String(format!("tui-fork-{}", uuid::Uuid::new_v4())),
+                    request_id: RequestId::String(format!("tui-fork-{}", Uuid::new_v4())),
                     params: params.clone(),
                 })
                 .await
@@ -241,10 +272,7 @@ impl ForkPreparation {
                     params.exclude_turns = false;
                     handle
                         .request_typed(ClientRequest::ThreadFork {
-                            request_id: RequestId::String(format!(
-                                "tui-fork-{}",
-                                uuid::Uuid::new_v4()
-                            )),
+                            request_id: RequestId::String(format!("tui-fork-{}", Uuid::new_v4())),
                             params,
                         })
                         .await
@@ -274,15 +302,15 @@ impl ForkPreparation {
                 let items = boundary_items
                     .into_iter()
                     .map(serde_json::to_value)
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                let injected: std::result::Result<ThreadInjectItemsResponse, TypedRequestError> =
-                    super::session_preparation::request(
+                    .collect::<Result<Vec<_>, _>>()?;
+                let injected: Result<ThreadInjectItemsResponse, TypedRequestError> =
+                    session_preparation::request(
                         policy,
                         &handle,
                         ClientRequest::ThreadInjectItems {
                             request_id: RequestId::String(format!(
                                 "tui-side-boundary-{}",
-                                uuid::Uuid::new_v4()
+                                Uuid::new_v4()
                             )),
                             params: ThreadInjectItemsParams {
                                 thread_id: child.to_string(),

@@ -21,7 +21,7 @@ async fn context_role_is_discoverable_until_cleared() -> Result<()> {
     let (mut process, address) = spawn_websocket_server(home.path()).await?;
     let mut frontend = connect_websocket(address).await?;
     send_initialize_request(&mut frontend, /*id*/ 1, "context-role").await?;
-    read_response_for_id(&mut frontend, /*id*/ 1).await?;
+    let _ = read_response_for_id(&mut frontend, /*id*/ 1).await?;
     let caller = start_thread(&mut frontend, /*id*/ 2).await?;
     let destination = start_thread(&mut frontend, /*id*/ 3).await?;
     persist_destination(&mut frontend, /*id*/ 4, &destination).await?;

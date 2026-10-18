@@ -48,6 +48,7 @@ impl Channel {
     }
 
     /// Root of this channel's daemon runtime files under `codex_home`.
+    #[must_use]
     pub fn daemon_home(self, codex_home: &Path) -> PathBuf {
         match self {
             Self::Production => codex_home.to_path_buf(),
@@ -87,7 +88,7 @@ impl Distribution {
             return Ok(None);
         };
         let mut manifest = String::new();
-        match std::fs::File::open(bundle.join(MANIFEST_FILENAME)) {
+        let _ = match std::fs::File::open(bundle.join(MANIFEST_FILENAME)) {
             Ok(file) => file.take(MANIFEST_LIMIT).read_to_string(&mut manifest)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
@@ -119,16 +120,19 @@ impl Distribution {
         Ok(Some(distribution))
     }
 
+    #[must_use]
     pub fn channel(&self) -> Channel {
         self.channel
     }
 
     /// The number `scripts/tui_revision.py` assigned to this bundle's binary.
+    #[must_use]
     pub fn tui_revision(&self) -> Option<u64> {
         self.tui_revision
     }
 
     /// The executable of the latest release installed beside this bundle.
+    #[must_use]
     pub fn entrypoint(&self) -> PathBuf {
         self.distributions.join("current/bin/codex")
     }

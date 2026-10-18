@@ -9,13 +9,13 @@ use super::turn_submissions::SubmissionFailure;
 use codex_app_server_client::TypedRequestError;
 impl App {
     /// The server broadcasts the resulting state; only a refusal needs reporting here.
-    pub(super) async fn set_warming(
+    pub(super) fn set_warming(
         &mut self,
         server: &mut AppServerSession,
         thread_id: ThreadId,
         enabled: bool,
     ) {
-        self.request_server(
+        let _ = self.request_server(
             server,
             UiRequestScope::Thread(thread_id),
             UiRequestKind::Mutation,

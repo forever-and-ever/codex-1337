@@ -90,6 +90,13 @@ pub(super) struct Script {
 }
 
 impl Script {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss,
+        clippy::cast_possible_wrap,
+        reason = "The fixed 17-second preview has 340 nonnegative slots; per-slot visual token inflow is deliberately floored."
+    )]
     pub(super) fn new() -> Self {
         let slots = (length() / SLOT).round() as usize;
         let mut before = vec![0; slots + 1];
@@ -101,6 +108,11 @@ impl Script {
     }
 
     /// The spell, the header and the paced tokens arrived `t` seconds into the looping script.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Preview time deliberately selects whole schedule slots, with Rust's saturating cast mapping the pre-first tick to slot zero."
+    )]
     pub(super) fn at(&self, t: f64) -> (Spell, &'static str, u64) {
         let segment = segment(t % length());
         let slots = self.before.len() - 1;

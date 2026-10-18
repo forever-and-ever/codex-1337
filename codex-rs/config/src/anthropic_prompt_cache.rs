@@ -27,6 +27,7 @@ impl Default for AnthropicPromptCache {
 }
 
 impl AnthropicPromptCache {
+    #[must_use]
     pub fn resolve(
         &self,
         model: &str,

@@ -77,8 +77,10 @@ impl Session {
                 "Account selection requires a conversation started with a saved ChatGPT login.",
             ));
         }
-        self.publish_account_selection(ProviderAccountSelection::Chatgpt { id: id.to_owned() })
-            .await
+        Box::pin(
+            self.publish_account_selection(ProviderAccountSelection::Chatgpt { id: id.to_owned() }),
+        )
+        .await
     }
 
     pub(crate) async fn select_claude_account(&self, id: &str) -> std::io::Result<()> {
@@ -94,9 +96,11 @@ impl Session {
                 "Claude subscription account is not saved.",
             ));
         }
-        self.publish_account_selection(ProviderAccountSelection::ClaudeSubscription {
-            id: id.to_owned(),
-        })
+        Box::pin(
+            self.publish_account_selection(ProviderAccountSelection::ClaudeSubscription {
+                id: id.to_owned(),
+            }),
+        )
         .await
     }
 
@@ -113,8 +117,12 @@ impl Session {
         {
             return Err(std::io::Error::other("OpenRouter key is not saved."));
         }
-        self.publish_account_selection(ProviderAccountSelection::OpenRouter { key: key.clone() })
-            .await
+        Box::pin(
+            self.publish_account_selection(ProviderAccountSelection::OpenRouter {
+                key: key.clone(),
+            }),
+        )
+        .await
     }
 
     async fn publish_account_selection(
@@ -165,7 +173,7 @@ impl Session {
             // Only the root may publish desired family ownership. Its durable
             // binding survives even when this caller's idle parent has no next turn.
             Box::pin(root.session.publish_account_selection(selection)).await?;
-            return self.apply_pending_account_if_idle().await;
+            return Box::pin(self.apply_pending_account_if_idle()).await;
         }
         let id = selection.id();
         // Validate before publishing. The refresh permit must not survive while waiting
@@ -188,7 +196,7 @@ impl Session {
             })
             .await;
         }
-        self.apply_pending_account_if_idle().await
+        Box::pin(self.apply_pending_account_if_idle()).await
     }
 
     #[expect(
@@ -206,13 +214,13 @@ impl Session {
         let _settings = thread_settings::acquire_persistence_lock(self).await;
         let active = self.active_turn.lock().await;
         if active.is_none() {
-            self.commit_pending_account().await?;
+            Box::pin(self.commit_pending_account()).await?;
         }
         Ok(())
     }
 
     pub(crate) async fn settle_idle_account(&self) {
-        if let Err(error) = self.apply_pending_account_if_idle().await {
+        if let Err(error) = Box::pin(self.apply_pending_account_if_idle()).await {
             self.send_event_raw(Event {
                 id: self.next_internal_event_id(),
                 msg: EventMsg::Warning(WarningEvent {
@@ -229,7 +237,7 @@ impl Session {
             return Ok(());
         }
         let _settings = thread_settings::acquire_persistence_lock(self).await;
-        self.commit_pending_account().await
+        Box::pin(self.commit_pending_account()).await
     }
 
     /// The caller owns the persistence permit and a safe work boundary.
@@ -268,7 +276,8 @@ impl Session {
         self.services.model_client.invalidate_account();
         self.services.models_manager.invalidate_account().await;
         self.services.plugins_manager.clear_cache();
-        self.services
+        let _ = self
+            .services
             .plugins_manager
             .clear_remote_installed_plugins_cache();
         // Account-dependent extension state uses the same rebuild path as configuration.

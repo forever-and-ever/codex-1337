@@ -1,4 +1,4 @@
-//! Multiple ChatGPT logins in the existing credential-store document.
+//! Multiple `ChatGPT` logins in the existing credential-store document.
 //! The flattened active record retains the upstream single-login representation.
 
 use std::collections::BTreeMap;
@@ -108,7 +108,7 @@ impl AuthDocument {
 
     pub fn retain_active(&mut self) {
         if let Some(id) = identity(&self.active) {
-            self.wrangler_accounts.insert(id, self.active.clone());
+            let _ = self.wrangler_accounts.insert(id, self.active.clone());
         }
     }
 
@@ -127,19 +127,19 @@ impl AuthDocument {
     pub fn install(&mut self, auth: AuthDotJson) {
         self.retain_active();
         if let Some(id) = identity(&auth) {
-            self.wrangler_accounts.remove(&id);
+            let _ = self.wrangler_accounts.remove(&id);
         }
         self.active = auth;
     }
 
     /// A login joins the saved accounts. It displaces the active login only when it renews that
-    /// account, when no ChatGPT account is active, or when it has no identity to be saved under;
+    /// account, when no `ChatGPT` account is active, or when it has no identity to be saved under;
     /// choosing among saved accounts belongs to `/account`.
     pub fn admit(&mut self, auth: AuthDotJson) {
         if let Some(id) = identity(&auth)
             && identity(&self.active).is_some_and(|active| active != id)
         {
-            self.wrangler_accounts.insert(id, auth);
+            let _ = self.wrangler_accounts.insert(id, auth);
             return;
         }
         self.install(auth);
@@ -209,9 +209,9 @@ impl AuthStorageBackend for AccountStorage {
             .ok_or_else(|| std::io::Error::other("This account has been removed; log in again."))?;
         if identity(&document.active).as_deref() == Some(&self.id) {
             document.active = auth.clone();
-            document.wrangler_accounts.remove(&self.id);
+            let _ = document.wrangler_accounts.remove(&self.id);
         } else {
-            document
+            let _ = document
                 .wrangler_accounts
                 .insert(self.id.clone(), auth.clone());
         }
@@ -235,7 +235,7 @@ impl AuthStorageBackend for AccountStorage {
             document.active = replacement;
         }
         if let Some(active) = identity(&document.active) {
-            document.wrangler_accounts.remove(&active);
+            let _ = document.wrangler_accounts.remove(&active);
         }
         self.write(&document)?;
         Ok(removed)

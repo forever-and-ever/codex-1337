@@ -1,4 +1,17 @@
-use super::*;
+use super::AppEvent;
+use super::Arc;
+use super::ChatWidget;
+use super::CustomPromptView;
+use super::Duration;
+use super::Instant;
+use super::KeyCode;
+use super::ModelPreset;
+use super::PlainHistoryCell;
+use super::ReasoningEffortConfig;
+use super::SelectionItem;
+use super::SelectionViewParams;
+use super::ThreadId;
+use super::key_hint;
 use crate::openrouter::ACCOUNT_SELECTION_VIEW;
 use crate::openrouter::Event;
 use crate::openrouter::ModelMenu;
@@ -84,7 +97,8 @@ impl ChatWidget {
         }
         self.openrouter_ui.request = None;
         let visible = self.bottom_pane.active_view_id() == Some(crate::openrouter::BUSY_VIEW);
-        self.bottom_pane
+        let _ = self
+            .bottom_pane
             .dismiss_view_by_id(crate::openrouter::BUSY_VIEW);
         visible
     }
@@ -93,20 +107,21 @@ impl ChatWidget {
         &mut self,
         menu: ModelMenu,
         listing: crate::model_catalog::ModelListing,
-        selected: Option<ModelSlug>,
+        selected: Option<&ModelSlug>,
         error: Option<String>,
     ) {
-        self.bottom_pane.dismiss_view_by_id(VIEW);
-        self.bottom_pane
+        let _ = self.bottom_pane.dismiss_view_by_id(VIEW);
+        let _ = self
+            .bottom_pane
             .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
         if matches!(menu, ModelMenu::Current) && error.is_none() {
             let catalog = Arc::make_mut(&mut self.model_catalog);
-            catalog.models = listing.models.clone();
-            catalog.providers = listing.providers.clone();
+            catalog.models.clone_from(&listing.models);
+            catalog.providers.clone_from(&listing.providers);
             self.refresh_effective_service_tier();
             self.refresh_model_dependent_surfaces();
         }
-        let params = self.openrouter_model_params(&menu, &listing.models, selected.as_ref(), error);
+        let params = self.openrouter_model_params(&menu, &listing.models, selected, error);
         let view = views::ModelView::new(
             params,
             listing.models,
@@ -159,7 +174,7 @@ impl ChatWidget {
             actions: vec![Box::new(move |tx| {
                 tx.send(AppEvent::OpenRouter(Event::AddModel {
                     menu: add_menu.clone(),
-                }))
+                }));
             })],
             dismiss_on_select: false,
             ..Default::default()
@@ -196,7 +211,7 @@ impl ChatWidget {
                 tx.send(AppEvent::OpenRouter(Event::ModelSubmitted {
                     menu: menu.clone(),
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -207,7 +222,8 @@ impl ChatWidget {
         slug: ModelSlug,
         response: OpenRouterModelEndpointsResponse,
     ) {
-        self.bottom_pane
+        let _ = self
+            .bottom_pane
             .dismiss_view_by_id(crate::openrouter::ENDPOINTS_VIEW);
         self.bottom_pane
             .show_view(Box::new(views::EndpointsView::new(
@@ -235,7 +251,7 @@ impl ChatWidget {
     pub(crate) fn show_openrouter_failure(&mut self, request: Request, error: String) {
         match request {
             Request::Save { menu, slug } => {
-                self.openrouter_model_prompt(menu, slug.to_string(), Some(error))
+                self.openrouter_model_prompt(menu, slug.to_string(), Some(error));
             }
             Request::AddKey {
                 thread_id,
@@ -265,7 +281,7 @@ impl ChatWidget {
                     items: vec![SelectionItem {
                         name: "Retry".into(),
                         actions: vec![Box::new(move |tx| {
-                            tx.send(AppEvent::OpenRouter(Event::Request(tx_request.clone())))
+                            tx.send(AppEvent::OpenRouter(Event::Request(tx_request.clone())));
                         })],
                         dismiss_on_select: true,
                         ..Default::default()
@@ -292,7 +308,7 @@ impl ChatWidget {
                 tx.send(AppEvent::OpenRouter(Event::KeyNameSubmitted {
                     thread_id,
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -320,7 +336,7 @@ impl ChatWidget {
                     thread_id,
                     name: name.clone(),
                     input,
-                }))
+                }));
             }),
         ));
     }
@@ -341,7 +357,6 @@ impl ChatWidget {
     }
 
     pub(crate) fn append_openrouter_accounts(
-        &self,
         thread_id: ThreadId,
         response: &codex_app_server_protocol::ThreadAccountListResponse,
         items: &mut Vec<SelectionItem>,
@@ -388,7 +403,7 @@ impl ChatWidget {
                         thread_id,
                         account_id: name.to_string(),
                         provider: codex_app_server_protocol::AccountProvider::OpenRouter,
-                    })
+                    });
                 })],
                 secondary_action: Some(crate::bottom_pane::SelectionSecondaryAction {
                     key: key_hint::ctrl(KeyCode::Char('d')),
@@ -397,7 +412,7 @@ impl ChatWidget {
                         tx.send(AppEvent::OpenRouter(Event::RemoveKeyConfirm {
                             thread_id,
                             name: remove_name.clone(),
-                        }))
+                        }));
                     }),
                 }),
                 dismiss_on_select: true,
@@ -407,7 +422,7 @@ impl ChatWidget {
         items.push(SelectionItem {
             name: "Add OpenRouter key…".into(),
             actions: vec![Box::new(move |tx| {
-                tx.send(AppEvent::OpenRouter(Event::KeyNamePrompt { thread_id }))
+                tx.send(AppEvent::OpenRouter(Event::KeyNamePrompt { thread_id }));
             })],
             dismiss_on_select: true,
             ..Default::default()
@@ -421,7 +436,7 @@ impl ChatWidget {
         self.openrouter_ui.status = None;
         self.openrouter_ui.status_request = None;
         self.openrouter_ui.last_refresh = None;
-        self.refresh_openrouter_status(StatusRefresh::Now);
+        let _ = self.refresh_openrouter_status(StatusRefresh::Now);
     }
 
     pub(crate) fn refresh_openrouter_status(&mut self, mode: StatusRefresh) -> bool {
@@ -462,7 +477,7 @@ impl ChatWidget {
         thread_id: ThreadId,
         id: uuid::Uuid,
         mode: StatusRefresh,
-        result: Result<OpenRouterKeyStatus, StatusFailure>,
+        result: &Result<OpenRouterKeyStatus, StatusFailure>,
     ) {
         if self.thread_id != Some(thread_id) || self.openrouter_ui.status_request != Some(id) {
             return;
@@ -478,7 +493,7 @@ impl ChatWidget {
                 .as_ref()
                 .and_then(|info| info.total_token_usage.cost);
             let status = result.as_ref().map_err(ToString::to_string);
-            self.add_to_history(history_cell::PlainHistoryCell::new(views::status_lines(
+            self.add_to_history(PlainHistoryCell::new(views::status_lines(
                 status.as_ref().copied().map_err(String::as_str),
                 spend,
             )));
@@ -522,7 +537,7 @@ impl ChatWidget {
         result: &Result<codex_app_server_protocol::ThreadAccountSelectResponse, String>,
     ) -> bool {
         let visible = self.bottom_pane.active_view_id() == Some(ACCOUNT_SELECTION_VIEW);
-        self.bottom_pane.dismiss_view_by_id(ACCOUNT_SELECTION_VIEW);
+        let _ = self.bottom_pane.dismiss_view_by_id(ACCOUNT_SELECTION_VIEW);
         if visible && let Err(error) = result {
             self.show_openrouter_error(format!("Cannot change OpenRouter key: {error}"));
             return true;

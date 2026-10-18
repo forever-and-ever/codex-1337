@@ -44,13 +44,13 @@ impl ToolOutputTokens {
             };
             if kind == "output" {
                 if let Some(count) = self.measurements.get(id) {
-                    subset.measurements.insert(id.to_owned(), *count);
+                    let _ = subset.measurements.insert(id.to_owned(), *count);
                 }
             } else if let Some(outputs) = self.by_call.get(id) {
-                subset.by_call.insert(id.to_owned(), outputs.clone());
+                let _ = subset.by_call.insert(id.to_owned(), outputs.clone());
                 for output in outputs {
                     if let Some(count) = self.measurements.get(output) {
-                        subset.measurements.insert(output.clone(), *count);
+                        let _ = subset.measurements.insert(output.clone(), *count);
                     }
                 }
             }
@@ -70,7 +70,7 @@ impl ToolOutputTokens {
         for id in ids {
             let (kind, id) = id.split_once(':')?;
             if kind == "output" {
-                outputs.insert(id);
+                let _ = outputs.insert(id);
             } else {
                 match counts.by_call.get(id) {
                     Some(ids) => outputs.extend(ids.iter().map(String::as_str)),

@@ -1,7 +1,19 @@
 //! Integration hooks for the inline roster. Typing yields focus to the composer.
+use super::App;
+use super::AppEvent;
+use super::AppServerSession;
+use super::ClientRequest;
+use super::KeyCode;
+use super::KeyEvent;
+use super::KeyEventKind;
+use super::KeyModifiers;
+use super::Result;
+use super::ThreadId;
+use super::TokenUsage;
+use super::Uuid;
 use super::app_server_event_targets::ServerNotificationThreadTarget;
 use super::app_server_event_targets::server_notification_thread_target;
-use super::*;
+use super::tui;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadStatus;
 
@@ -63,7 +75,7 @@ impl App {
                 if let Ok(id) = ThreadId::from_string(&event.thread_id)
                     && self.agent_navigation.get(&id).is_some()
                 {
-                    self.agent_navigation.models.insert(
+                    let _ = self.agent_navigation.models.insert(
                         id,
                         crate::subagent_roster::AgentModel {
                             model: event.thread_settings.model.clone(),
@@ -157,7 +169,7 @@ impl App {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(event) => {
-                row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total())
+                row.tokens = Some(TokenUsage::from(&event.token_usage.total).blended_total());
             }
             _ => return,
         }
@@ -289,7 +301,7 @@ impl App {
         drop(roster);
         let request = server.request_handle();
         let events = self.app_event_tx.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let result = request
                 .request_typed::<codex_app_server_protocol::ThreadRetireResponse>(
                     ClientRequest::ThreadRetire {
@@ -310,7 +322,7 @@ impl App {
                 target,
                 result,
             });
-        });
+        }));
     }
 
     pub(super) async fn finish_agent_retirement(

@@ -1,6 +1,6 @@
 //! Submission gates while deferred model settings are pending.
 
-use super::*;
+use super::ChatWidget;
 
 impl ChatWidget {
     pub(in crate::chatwidget) fn submission_settings_pending(&self) -> bool {
@@ -22,7 +22,7 @@ impl ChatWidget {
     pub(crate) fn finish_automatic_model_switch(&mut self) {
         if std::mem::take(&mut self.input_queue_frontend.automatic_model_switch_pending) {
             self.submit_initial_user_message_if_pending();
-            self.maybe_send_next_queued_input();
+            let _ = self.maybe_send_next_queued_input();
         }
     }
 }

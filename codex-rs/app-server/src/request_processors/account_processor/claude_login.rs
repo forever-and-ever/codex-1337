@@ -1,4 +1,12 @@
-use super::*;
+use super::AccountLoginCompletedNotification;
+use super::AccountRequestProcessor;
+use super::ActiveLogin;
+use super::ConnectionRequestId;
+use super::JSONRPCErrorError;
+use super::LoginAccountResponse;
+use super::ServerNotification;
+use super::Uuid;
+use super::internal_error;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
 use codex_login::anthropic::AccountStore;
@@ -40,7 +48,7 @@ impl AccountRequestProcessor {
             )
             .await;
         let processor = self.clone();
-        tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             let store = AccountStore::new(processor.config.codex_home.to_path_buf());
             let (success, error) = match attempt.complete(&store).await {
                 Ok(id) => {
@@ -83,6 +91,6 @@ impl AccountRequestProcessor {
             if active.as_ref().map(ActiveLogin::login_id) == Some(login_id) {
                 *active = None;
             }
-        });
+        }));
     }
 }
