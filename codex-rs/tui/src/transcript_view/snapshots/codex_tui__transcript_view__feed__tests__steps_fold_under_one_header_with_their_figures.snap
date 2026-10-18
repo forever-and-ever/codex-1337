@@ -20,7 +20,7 @@ unfolded
         [-] User                                                                3
             Thanks
 
-  HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
         [-] Response
             No step billed this reply.
@@ -58,7 +58,7 @@ injection opened
         [-] User                                                                3
             Thanks
 
-  HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
         [-] Response
             No step billed this reply.
@@ -92,7 +92,7 @@ script
         [-] User                                                                3
             Thanks
 
-  HH:MM [-] Code Mode (ζσξζ)            [in [raw] [fmt]] [out]                154    120     34        …
+  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
               const status = await tools.exec_command({ cmd: "git status" });
               text(status.output);
 
@@ -126,7 +126,7 @@ folded
         [-] User                                                                3
             Thanks
 
-  HH:MM [-] Code Mode (ζσξζ)            [in]             [out]                154    120     34        …
+  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
         [-] Response
             No step billed this reply.

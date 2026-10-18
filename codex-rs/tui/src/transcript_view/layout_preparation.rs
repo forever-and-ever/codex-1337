@@ -420,6 +420,19 @@ impl TranscriptView {
                 {
                     return TextLayout::new(cell.display_hyperlink_lines(width), width);
                 }
+                let mut header = header;
+                let content = if header.as_mut().is_some_and(|header| {
+                    header.keep_empty_code_mode_open(
+                        invocations,
+                        &expanded_parts,
+                        full_content,
+                        width,
+                    )
+                }) {
+                    Content::Beheaded
+                } else {
+                    seat.content
+                };
                 let content_width = crate::transcript_geometry::content_width(width, mode);
                 // A member's clock is its item's header's.
                 let timestamp = if loose {
@@ -483,27 +496,26 @@ impl TranscriptView {
                     }
                     lines
                 };
-                let invocation = (mode == HistoryRenderMode::Rich
-                    && !detailed
-                    && seat.content != Content::Hidden)
-                    .then(|| {
-                        invocations.layout(
-                            cell.as_ref(),
-                            invocation::PreparationSource::Retained(&cell),
-                            width,
-                            input_open,
-                            seat.content,
-                            full_content,
-                            &output_tokens,
-                            &expanded_parts,
-                            Vec::new(),
-                        )
-                    })
-                    .flatten();
+                let invocation =
+                    (mode == HistoryRenderMode::Rich && !detailed && content != Content::Hidden)
+                        .then(|| {
+                            invocations.layout(
+                                cell.as_ref(),
+                                invocation::PreparationSource::Retained(&cell),
+                                width,
+                                input_open,
+                                content,
+                                full_content,
+                                &output_tokens,
+                                &expanded_parts,
+                                Vec::new(),
+                            )
+                        })
+                        .flatten();
                 let mut layout = if let Some(layout) = invocation {
                     layout
                 } else {
-                    match seat.content {
+                    match content {
                         Content::Hidden => TextLayout::new(Vec::new(), width),
                         Content::Body => {
                             let parts = feed::entry_body(
@@ -535,7 +547,7 @@ impl TranscriptView {
                         // Detailed content and markerless cards share the gutter without acquiring
                         // synthetic markers, disclosure identities, or expansion controls.
                         _ if !disclosure => {
-                            let columns = if seat.content == Content::Beheaded {
+                            let columns = if content == Content::Beheaded {
                                 crate::transcript_geometry::NESTED_COLUMNS
                             } else if cell.as_any().is::<crate::history_cell::RespondingCell>()
                                 || crate::history_cell::is_message(cell.as_ref())
@@ -562,7 +574,7 @@ impl TranscriptView {
                                 mode,
                             );
                             if mode == HistoryRenderMode::Rich {
-                                if seat.content == Content::Beheaded {
+                                if content == Content::Beheaded {
                                     feed::behead(&mut lines);
                                 }
                                 TextLayout::new(

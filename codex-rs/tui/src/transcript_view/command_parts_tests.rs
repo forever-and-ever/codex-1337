@@ -407,6 +407,58 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let pending = view.current_layout(&code, 0).unwrap();
         assert!(pending.text().starts_with("Code Mode"));
         assert!(!shown.contains("const answer"));
+        for status_only in [false, true] {
+            if status_only {
+                code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
+                    ToolInput {
+                        id: "input:status-child".into(),
+                        call_id: "status-child".into(),
+                        name: ToolName::plain("update_work_status"),
+                        payload: ToolInputPayload::Json(r#"{"activity":"Reading source"}"#.into()),
+                    },
+                ));
+            }
+            let mut empty_view = TranscriptView::default();
+            if admitted {
+                empty_view.record_step_admission(admission());
+            }
+            let buffer = tests::render(&mut empty_view, &code, 104, 26);
+            let layout = empty_view.current_layout(&code, 0).unwrap();
+            assert_eq!(layout.text(), pending.text());
+            assert!(layout.fold_targets().iter().all(|target| !matches!(
+                target,
+                FoldTarget::Part(_)
+                    | FoldTarget::Invocation {
+                        action: Action::Format(Port::Input, OutputMode::Fmt),
+                        ..
+                    }
+            )));
+            let open_raw = FoldTarget::Invocation {
+                call_id: "code".into(),
+                action: Action::Format(Port::Input, OutputMode::Raw),
+            };
+            assert!(layout.fold_position(&open_raw).is_some());
+            let shown = tests::text(&buffer);
+            let header = shown
+                .lines()
+                .find(|line| line.contains("Code Mode"))
+                .unwrap();
+            assert!(header.contains("[in [raw]"));
+            assert!(!header.contains("[fmt]"));
+            assert!(!header.contains("[-]"));
+            assert!(!header.contains("[+]"));
+            assert!(empty_view.focus_fold(&code, 0, open_raw));
+            let _ = empty_view.handle_key(KeyCode::Enter.into(), &code);
+            drop(tests::render(&mut empty_view, &code, 104, 26));
+            let opened = empty_view.current_layout(&code, 0).unwrap();
+            assert!(opened.text().contains(script));
+            assert!(
+                opened
+                    .fold_targets()
+                    .iter()
+                    .all(|target| !matches!(target, FoldTarget::Part(_)))
+            );
+        }
         code[0] = reduce(codex_app_server_protocol::ThreadItem::ToolInput(
             ToolInput {
                 id: "input:read-child".into(),

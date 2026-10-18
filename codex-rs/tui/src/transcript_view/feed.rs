@@ -281,6 +281,42 @@ impl HeaderPreparation {
         self.cells.iter().map(AsRef::as_ref)
     }
 
+    pub(super) fn keep_empty_code_mode_open(
+        &mut self,
+        invocations: &invocation::Invocations,
+        expanded: &HashSet<String>,
+        full: bool,
+        width: u16,
+    ) -> bool {
+        let Title::Owned(index) = self.header.title else {
+            return false;
+        };
+        let cell = &self.cells[index];
+        if self.feed.items[self.header.item].steps.len() > 1 || !cell.as_any().is::<CodeModeCell>()
+        {
+            return false;
+        }
+        let call = crate::history_cell::invocation::collect(cell.as_ref()).remove(0);
+        let prepared = invocations.prepared(&call, invocation::PreparationSource::Retained(cell));
+        let input_width = width
+            .saturating_sub(
+                crate::transcript_geometry::TITLE_COLUMN + crate::transcript_geometry::ENTRY_INDENT,
+            )
+            .max(1);
+        if prepared
+            .input(&call, invocations.input(call.id), input_width, false)
+            .0
+            || !call
+                .edit_parts(input_width, expanded, full)
+                .lines
+                .is_empty()
+        {
+            return false;
+        }
+        self.header.disclosure = HeaderDisclosure::FixedOpen;
+        true
+    }
+
     pub(super) fn render(
         &self,
         output_tokens: &tool_output_tokens::ToolOutputTokens,

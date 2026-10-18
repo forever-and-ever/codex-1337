@@ -664,7 +664,7 @@ impl Invocation<'_> {
             },
             Source::Output => return argument_input(input).map(Into::into),
         };
-        if parts.parts.lines.is_empty() && !matches!(self.source, Source::Code(_)) {
+        if parts.parts.lines.is_empty() {
             return None;
         }
         mark_lines(&mut parts.parts.lines, OutputProvenance::Formatted);

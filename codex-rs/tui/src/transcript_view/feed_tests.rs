@@ -609,7 +609,20 @@ fn steps_fold_under_one_header_with_their_figures() {
     };
     let buffer = crate::transcript_view::tests::render(&mut view, &cells, 104, 20);
     let shown = crate::transcript_view::tests::text(&buffer);
-    assert!(shown.contains("text("));
+    assert!(!shown.contains("text("));
+    let (row, header) = shown
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("Code Mode"))
+        .unwrap();
+    for label in ["[in", "[raw]", "[out"] {
+        let column = header.find(label).unwrap() + 1;
+        assert!(
+            !buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        );
+    }
     let layout = view.current_layout(&cells, 0).unwrap();
     assert!(
         !layout
@@ -620,8 +633,17 @@ fn steps_fold_under_one_header_with_their_figures() {
         layout
             .fold_targets()
             .iter()
-            .any(|target| matches!(target, FoldTarget::Part(_)))
+            .all(|target| !matches!(target, FoldTarget::Part(_)))
     );
+    assert!(view.focus_fold(
+        &cells,
+        0,
+        target(Action::Format(Port::Input, OutputMode::Raw)),
+    ));
+    let _ = view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    drop(crate::transcript_view::tests::render(
+        &mut view, &cells, 104, 20,
+    ));
     assert!(view.focus_fold(
         &cells,
         0,

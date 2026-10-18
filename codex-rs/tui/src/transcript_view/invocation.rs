@@ -220,7 +220,7 @@ impl PreparedInvocation {
         Some(lines)
     }
 
-    fn input(
+    pub(super) fn input(
         &self,
         call: &Invocation<'_>,
         input: Option<&ToolInput>,
@@ -462,14 +462,12 @@ impl Invocations {
         } else {
             OutputMode::Raw
         };
-        // A live/page-prefix Code Mode source is not its settled semantic projection.
-        // Keep the default body unpainted until arguments or the terminal fact arrive.
+        // Code Mode opens semantic projections by default; raw source is opt-in.
         let preferred = choices.and_then(|choice| choice.input).unwrap_or(
             if open
                 && input_open_by_default(call.name(self.input(call.id)))
                 && (formatted
-                    || (!matches!(call.source, Source::Code(block)
-                            if block.status().is_none())
+                    || (!matches!(call.source, Source::Code(_))
                         && call.raw_source(self.input(call.id)).is_some()))
             {
                 Panel::Visible(mode)
@@ -557,14 +555,16 @@ impl Invocations {
                     action: Action::Toggle(port, panel.toggled()),
                 },
             });
-            if panel.visible() {
+            if panel.visible()
+                || (port == Port::Input && !formatted && matches!(call.source, Source::Code(_)))
+            {
                 for (mode, label) in [(OutputMode::Raw, "raw"), (OutputMode::Fmt, "fmt")] {
                     strip.push_span(" ");
                     let start = strip.width() as u16;
                     let enabled = mode == OutputMode::Raw || available;
                     strip.push_span(if !enabled {
                         Span::raw(" ".repeat(label.len() + 2))
-                    } else if panel.mode() == mode {
+                    } else if panel.visible() && panel.mode() == mode {
                         Span::styled(format!("[{label}]"), crate::render::disclosure::tab_style())
                     } else {
                         format!("[{label}]").dim()
