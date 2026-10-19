@@ -3904,6 +3904,7 @@ async fn model_advanced_reasoning_selection_popup_snapshot() {
 #[tokio::test]
 async fn model_reasoning_selection_popup_applies_custom_effort() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
     let custom_effort = ReasoningEffortConfig::Custom("future".to_string());
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
 
@@ -3914,7 +3915,8 @@ async fn model_reasoning_selection_popup_applies_custom_effort() {
             effort: custom_effort.clone(),
             description: "Maximum available reasoning".to_string(),
         });
-    chat.open_reasoning_popup(preset);
+    Arc::make_mut(&mut chat.model_catalog).models = vec![preset];
+    chat.dispatch_command(SlashCommand::Effort);
     while rx.try_recv().is_ok() {}
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));

@@ -148,6 +148,28 @@ impl ChatWidget {
         true
     }
 
+    pub(super) fn open_effort_popup(&mut self) {
+        if !self.is_session_configured() && self.session_draft != Some(super::SessionDraft::Editing)
+        {
+            self.add_info_message(
+                "Reasoning selection is disabled until startup completes.".to_string(),
+                None,
+            );
+            return;
+        }
+        let Some(preset) = self.current_model_preset() else {
+            self.add_info_message(
+                format!(
+                    "Reasoning choices are unavailable for {}. Refresh the model catalog with /model and try again.",
+                    self.current_model()
+                ),
+                None,
+            );
+            return;
+        };
+        self.open_reasoning_popup(preset);
+    }
+
     fn current_model_preset(&self) -> Option<ModelPreset> {
         let current_model = self.current_model();
         self.model_catalog

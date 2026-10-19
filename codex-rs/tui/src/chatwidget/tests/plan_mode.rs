@@ -246,8 +246,7 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
     set_chatgpt_auth(&mut chat);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
-    let preset = get_available_model(&chat, "gpt-5.5");
-    chat.open_reasoning_popup(preset);
+    chat.dispatch_command(SlashCommand::Effort);
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 

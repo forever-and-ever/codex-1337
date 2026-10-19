@@ -13,6 +13,7 @@ pub enum SlashCommand {
     // DO NOT ALPHA-SORT! Enum order is presentation order in the popup, so
     // more frequently used commands should be listed first.
     Model,
+    Effort,
     Account,
     Daybreak,
     Permissions,
@@ -147,6 +148,7 @@ impl SlashCommand {
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::Effort => "choose this model's reasoning effort",
             SlashCommand::Account => {
                 "choose this conversation's account; /account <alias> also works"
             }
@@ -288,6 +290,7 @@ impl SlashCommand {
             | SlashCommand::Archive
             | SlashCommand::Resume
             | SlashCommand::Model
+            | SlashCommand::Effort
             | SlashCommand::Daybreak
             | SlashCommand::Permissions
             | SlashCommand::Copy
