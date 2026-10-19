@@ -22,6 +22,8 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result;
+use codex_protocol::models::ContentItem;
+use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_tools::ToolSpec;
@@ -145,7 +147,38 @@ impl ModelClient {
         // belong to OpenAI, regardless of configured or inherited model metadata.
         request.store = false;
         request.access_programs = None;
-        Ok(Some(tools::Projection::request(request, &prompt.tools)?))
+        let projection = tools::Projection::request(request, &prompt.tools)?;
+        // Google and other routed hosts reject assistant-prefilled requests.
+        // A failed stream can leave completed model items but no completed response.
+        // Keep their original roles and tool receipts; the continuation notice belongs
+        // only to this wire copy, never to durable history or a new human turn.
+        if request.input.last().is_some_and(|item| match item {
+            ResponseItem::Reasoning { .. } => true,
+            ResponseItem::Message { role, .. } => role == "assistant",
+            _ => false,
+        }) {
+            request.input.push(ResponseItem::Message {
+                id: None,
+                role: "user".into(),
+                content: vec![ContentItem::InputText {
+                    text: concat!(
+                        "<harness_continuation>\n",
+                        "This is an automated harness continuation, not new user input. ",
+                        "The prior response did not finish the turn. Continue the existing task ",
+                        "from the assistant context above. Do not repeat completed tool actions ",
+                        "merely because the response was interrupted; their results are already ",
+                        "in the conversation.\n",
+                        "</harness_continuation>",
+                    )
+                    .into(),
+                }],
+                encrypted_content: None,
+                status: None,
+                phase: None,
+                internal_chat_message_metadata_passthrough: None,
+            });
+        }
+        Ok(Some(projection))
     }
 
     pub(super) fn map_request_error(&self, mut error: ApiError, model: &str) -> CodexErr {

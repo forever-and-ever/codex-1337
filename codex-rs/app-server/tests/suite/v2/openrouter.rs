@@ -58,6 +58,7 @@ base_url = {}
 requires_openai_auth = false
 supports_websockets = false
 request_max_retries = 0
+stream_max_retries = 2
 "#,
                 serde_json::to_string(&server.uri())?,
             ),
@@ -103,9 +104,37 @@ request_max_retries = 0
             .await;
         let mut completed = responses::ev_completed_with_tokens("paid-turn", 123);
         completed["response"]["usage"]["cost"] = json!(0.0123);
+        // Item completion is not response completion. Exercise both a provider
+        // timeout and a closed stream, before and after a non-idempotent tool.
+        let unfinished = |id: &str| responses::sse(vec![
+            responses::ev_response_created(id),
+            responses::ev_assistant_message(&format!("{id}-message"), "Partial answer."),
+            responses::ev_reasoning_item(&format!("{id}-thought"), &[], &["Unfinished reasoning."]),
+        ]);
+        let timed_out = |id: &str| format!(
+            "{}{}",
+            unfinished(id),
+            responses::sse_failed(id, "server_error", "Upstream idle timeout exceeded"),
+        );
         let wire = responses::mount_response_sequence(
             &server,
             vec![
+                responses::sse_response(timed_out("before-tool")),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("tool-turn"),
+                    responses::ev_function_call("retry-effect", "exec_command", &json!({
+                        "cmd": "printf 'executed\\n' >> retry-effect",
+                        "workdir": home.path(),
+                        "max_output_tokens": 1000
+                    }).to_string()),
+                    responses::ev_completed("tool-turn"),
+                ])),
+                responses::sse_response(timed_out("after-tool")),
+                responses::sse_response(responses::sse(vec![
+                    responses::ev_response_created("closed-stream"),
+                    responses::ev_reasoning_item("closed-stream-thought", &[], &["Unfinished reasoning."]),
+                    responses::ev_assistant_message("closed-stream-message", "Partial answer."),
+                ])),
                 responses::sse_response(responses::sse(vec![
                     responses::ev_response_created("paid-turn"),
                     completed,
@@ -126,6 +155,24 @@ request_max_retries = 0
             ],
         )
         .await;
+        // Google rejects assistant-prefilled requests rather than resuming them.
+        Mock::given(method("POST"))
+            .and(|request: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&request.body).expect("request JSON");
+                body["input"].as_array().and_then(|input| input.last()).is_some_and(|item| {
+                    item["type"] == "reasoning" || item["role"] == "assistant"
+                })
+            })
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error": {
+                "message": "Host failed", "metadata": {
+                    "provider_name": "Google",
+                    "raw": json!({"error": {"message": "Requests ending with a model turn are not supported."}}).to_string()
+                }
+            }})))
+            .with_priority(1)
+            .expect(0)
+            .mount(&server)
+            .await;
         let mut app = TestAppServer::builder()
             .with_codex_home(home.path())
             .with_env_overrides(&[("OPENAI_API_KEY", None)])
@@ -194,14 +241,43 @@ request_max_retries = 0
             ..Default::default()
         }).await?;
         let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        let usage: ThreadTokenUsageUpdatedNotification = timeout(
-            READ_TIMEOUT, app.read_notification("thread/tokenUsage/updated")
-        ).await??;
+        let usage = timeout(READ_TIMEOUT, async {
+            loop {
+                let usage: ThreadTokenUsageUpdatedNotification =
+                    app.read_notification("thread/tokenUsage/updated").await?;
+                if usage.token_usage.total.cost.is_some() {
+                    break Ok::<_, anyhow::Error>(usage);
+                }
+            }
+        }).await??;
         assert_eq!(usage.token_usage.total.cost, Some(Usd::from_nanodollars(12_300_000)));
         assert_eq!(usage.token_usage.last.cost, usage.token_usage.total.cost);
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Completed);
-        let request = wire.requests().into_iter().next().ok_or_else(|| anyhow::anyhow!("paid turn request is missing"))?;
+        let requests = wire.requests();
+        assert_eq!(requests.len(), 5);
+        assert_eq!(std::fs::read_to_string(home.path().join("retry-effect"))?, "executed\n");
+        // Recovery retains original assistant/reasoning items and adds exactly one
+        // request-only harness notice. Repeated retries must not accumulate fake turns.
+        for index in [1, 3, 4] {
+            let body = requests[index].body_json();
+            let input = body["input"].as_array().expect("retry input");
+            let notice = input.last().expect("continuation notice");
+            assert_eq!(notice["role"], "user");
+            assert!(notice["content"][0]["text"].as_str().expect("notice text").starts_with("<harness_continuation>"));
+            let preceding = &input[input.len() - 3..input.len() - 1];
+            assert!(preceding.iter().any(|item| item["type"] == "reasoning"));
+            assert!(preceding.iter().any(|item| item["role"] == "assistant"));
+            assert_eq!(input.iter().filter(|item| item.to_string().contains("<harness_continuation>")).count(), 1);
+        }
+        let settled_input = requests[2].body_json()["input"].clone();
+        assert!(!settled_input.to_string().contains("<harness_continuation>"));
+        assert!(settled_input.to_string().contains("Unfinished reasoning."));
+        let input = settled_input.as_array().expect("settled input");
+        assert_eq!(input.last().expect("tool result")["type"], "function_call_output");
+        assert_eq!(input.iter().filter(|item| item["type"] == "function_call" && item["call_id"] == "retry-effect").count(), 1);
+        assert_eq!(input.iter().filter(|item| item["type"] == "function_call_output" && item["call_id"] == "retry-effect").count(), 1);
+        let request = &requests[0];
         assert_eq!(request.header("authorization"), Some("Bearer sk-or-test".into()));
         let body = request.body_json();
         assert_eq!(body["provider"], json!({"sort": "exacto", "only": ["moonshotai"]}));
@@ -215,14 +291,25 @@ request_max_retries = 0
             ..Default::default()
         }).await?;
         let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        let error: ErrorNotification = timeout(READ_TIMEOUT, app.read_notification("error")).await??;
-        assert!(!error.will_retry);
+        let error = timeout(READ_TIMEOUT, async {
+            loop {
+                let error: ErrorNotification = app.read_notification("error").await?;
+                if !error.will_retry {
+                    break Ok::<_, anyhow::Error>(error);
+                }
+            }
+        }).await??;
         assert_eq!(error.error.codex_error_info, Some(codex_app_server_protocol::CodexErrorInfo::UsageLimitExceeded));
         assert!(error.error.message.contains("main"));
         assert!(error.error.message.contains("/account"));
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Failed);
-        assert_eq!(wire.requests().len(), 2);
+        assert_eq!(wire.requests().len(), 6);
+        // The following real user turn still sees the saved assistant context, but
+        // never any synthetic user message from earlier request projections.
+        let next_input = wire.requests()[5].body_json()["input"].clone();
+        assert!(next_input.to_string().contains("Unfinished reasoning."));
+        assert!(!next_input.to_string().contains("<harness_continuation>"));
 
         let spare_path = home.path().join("openrouter-spare.key");
         std::fs::write(&spare_path, "sk-or-spare\n")?;
@@ -280,8 +367,8 @@ request_max_retries = 0
             timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Completed);
         let requests = wire.requests();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[2].header("authorization"), Some("Bearer sk-or-spare".into()));
+        assert_eq!(requests.len(), 7);
+        assert_eq!(requests[6].header("authorization"), Some("Bearer sk-or-spare".into()));
         let request = app.send_turn_start_request(TurnStartParams {
             thread_id: started.thread.id,
             input: vec![UserInput::Text { text: "Check the host rejection.".into(), text_elements: Vec::new() }],
@@ -293,7 +380,7 @@ request_max_retries = 0
         assert!(error.error.message.contains("OpenRouter host Moonshot AI rejected the request: Only function tools are supported"));
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Failed);
-        assert_eq!(wire.requests().len(), 4);
+        assert_eq!(wire.requests().len(), 8);
         Ok(())
     })).await
 }
