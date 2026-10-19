@@ -91,6 +91,50 @@ filters narrow: workspace feature unification stabilizes dependencies without
 building or running the whole workspace. Shared compiler cache and Cargo targets
 are disposable; durable release bundles and evidence belong outside them.
 
+The workspace vendors arboard 3.6.1 for standard X11 `MULTIPLE` clipboard-manager
+handoff and advertised UTF-8 aliases. Provenance, local changes, validation and
+removal condition live in `codex-rs/vendor/arboard/DOWNSTREAM.md`. Do not replace
+this patch with build-time edits to Cargo's shared registry cache.
+
+## Current X11 clipboard keeper
+
+The optional desktop-wide keeper retains only the current CLIPBOARD offer in
+memory: no history, disk archive, PRIMARY monitoring or clipboard synchronization.
+It hosts the installed `Libxfce4ui.ClipboardManager` API, not a Codex protocol
+implementation. Requirements are system Python/PyGObject, GTK 3 and libxfce4ui
+4.20 with the `Libxfce4ui-2.0` typelib. The host's `/tmp` must be tmpfs: GTK image
+decoding uses temporary files there; the unit fixes `TMPDIR=/tmp`. Memory-only is
+not a guarantee against swap or privileged memory inspection.
+
+Setup is separate from `install-local` and does not activate itself:
+
+```sh
+python3 scripts/local_integration.py install-clipboard-keeper "$HOME/.local"
+systemctl --user daemon-reload
+systemctl --user import-environment DISPLAY XAUTHORITY
+systemctl --user enable --now codex-clipboard-keeper.service
+```
+
+Run activation from the intended X11 session. The existing host `.xinitrc` imports
+DISPLAY/XAUTHORITY into the user manager and starts `x11-apps.target`, as for dunst
+and picom. The keeper follows that target, not the inactive generic
+`graphical-session.target`, app server or individual TUI. There is no restart
+loop and it refuses to replace another clipboard manager. Diagnose an unavailable
+display or competing owner before explicitly starting it again.
+
+Arboard's generic text/HTML handoff is cooperative on orderly application exit;
+SIGKILL and arbitrary crashes are not covered. Offers from other desktop apps
+also use this keeper, subject to their supported handoff/target formats. The
+current contents disappear when the keeper/session exits. To stop and remove it:
+
+```sh
+systemctl --user disable --now codex-clipboard-keeper.service
+```
+
+Then remove only the installed `libexec/codex-clipboard-keeper` under the selected
+prefix and the `codex-clipboard-keeper.service` user unit, and reload user units.
+Codex daemon installation/uninstallation never changes this desktop-wide opt-in.
+
 ## Snapshots
 
 For snapshot changes, iterate with the relevant snapshot test or a narrow filter,

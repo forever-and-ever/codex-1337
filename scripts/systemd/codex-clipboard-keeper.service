@@ -1,0 +1,17 @@
+[Unit]
+Description=Current X11 clipboard keeper (no history)
+ConditionEnvironment=DISPLAY
+PartOf=x11-apps.target
+
+[Service]
+Type=exec
+ExecStart=@KEEPER@
+Environment=GDK_BACKEND=x11
+Environment=NO_AT_BRIDGE=1
+# GTK image decoder scratch belongs on the host RAM-backed /tmp.
+Environment=TMPDIR=/tmp
+Restart=no
+UMask=0077
+
+[Install]
+WantedBy=x11-apps.target

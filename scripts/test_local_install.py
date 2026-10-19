@@ -201,6 +201,20 @@ class LocalInstallTest(unittest.TestCase):
                 )
                 local_integration.integrate_staging("uninstall-staging", prefix)
                 systemctl.reset_mock()
+                # Clipboard ownership is a separate opt-in, not daemon deployment.
+                local_integration.install_clipboard_keeper(prefix)
+                systemctl.assert_not_called()
+                keeper_unit = (units / "codex-clipboard-keeper.service").read_text()
+                self.assertIn("Restart=no", keeper_unit)
+                self.assertIn("x11-apps.target", keeper_unit)
+                self.assertIn(
+                    str(prefix / "libexec/codex-clipboard-keeper"), keeper_unit
+                )
+                self.assertEqual(
+                    (prefix / "libexec/codex-clipboard-keeper").read_bytes(),
+                    (Path(__file__).parent / "clipboard-keeper").read_bytes(),
+                )
+                # Daemon uninstallation must not remove a desktop-wide keeper.
                 local_integration.integrate("uninstall", prefix)
                 self.assertEqual(
                     [call.args for call in systemctl.call_args_list],
@@ -214,7 +228,10 @@ class LocalInstallTest(unittest.TestCase):
                         ("daemon-reload",),
                     ],
                 )
-                self.assertEqual(list(units.iterdir()), [])
+                self.assertEqual(
+                    [unit.name for unit in units.iterdir()],
+                    ["codex-clipboard-keeper.service"],
+                )
                 self.assertEqual(roster.read_text(), "preserve")
 
     def test_launcher_preserves_arguments_and_refuses_unowned_files(self) -> None:

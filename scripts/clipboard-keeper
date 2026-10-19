@@ -1,0 +1,38 @@
+#!/usr/bin/python3
+"""Retain the current X11 CLIPBOARD in memory without history or PRIMARY sync."""
+
+import signal
+
+import gi
+
+
+def main() -> None:
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("GdkX11", "3.0")
+    gi.require_version("Libxfce4ui", "2.0")
+    # Installed GI typelibs generate these namespaces; no static Python modules exist.
+    from gi.repository import Gdk, GdkX11, GLib, GLibUnix, Gtk, Libxfce4ui  # ty: ignore[unresolved-import]
+
+    if not Gtk.init_check()[0] or not isinstance(
+        Gdk.Display.get_default(), GdkX11.X11Display
+    ):
+        raise SystemExit("clipboard keeper requires an available X11 display")
+    try:
+        keeper = Libxfce4ui.ClipboardManager.new(False)
+    except TypeError as error:
+        raise SystemExit(
+            "another clipboard manager already owns this display"
+        ) from error
+    if keeper is None:
+        raise SystemExit("another clipboard manager already owns this display")
+    loop = GLib.MainLoop()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, signum, loop.quit)
+    loop.run()
+    # Keep the manager alive until the loop exits; no copied content enters Python.
+    del keeper
+
+
+if __name__ == "__main__":
+    main()

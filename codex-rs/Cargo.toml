@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["external-agent-migration"]
+exclude = ["external-agent-migration", "vendor/arboard"]
 members = [
     "analytics",
     "agent-graph-store",
@@ -637,6 +637,8 @@ inherits = "test"
 opt-level = 0
 
 [patch.crates-io]
+# Standard X11 MULTIPLE handoff for the no-history desktop clipboard keeper.
+arboard = { path = "vendor/arboard" }
 # Uncomment to debug local changes.
 # ratatui = { path = "../../ratatui" }
 crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "ed1cdab335221515706178d68495bba2aed1924f" }
