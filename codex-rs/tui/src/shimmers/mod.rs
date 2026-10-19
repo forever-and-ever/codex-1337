@@ -11,7 +11,7 @@
 //! in tests, and wherever the terminal lacks 24-bit color, the classic sweep remains. Reduced or frozen
 //! windows do not run the shimmer clock; reduced motion keeps the existing static fallbacks.
 //! To add a shimmer, implement `stage::Shimmer` in a new file beside a `RECIPE` and list it in
-//! `ROSTER` with the model that authored it. `/shimmer` shows that credit beside the blurb.
+//! `ROSTER` with its author. `/shimmer` shows that credit beside the blurb.
 
 mod critter;
 mod engine;
@@ -19,6 +19,7 @@ mod fireflies;
 mod forge;
 mod kit;
 mod lava_lamp;
+mod lfsr;
 mod live;
 mod neon;
 mod phyllotaxis;
@@ -43,7 +44,7 @@ pub(crate) use live::shade_status;
 pub(crate) use live::tool_mark;
 pub(crate) use picker::picker;
 
-/// A stock shimmer and the model that authored it.
+/// A stock shimmer and its author.
 struct RosterEntry {
     recipe: stage::Recipe,
     credit: &'static str,
@@ -55,9 +56,10 @@ const fn credited(recipe: stage::Recipe, credit: &'static str) -> RosterEntry {
 
 const OPUS: &str = "Claude Opus 5.5";
 const DEEPSEEK: &str = "DeepSeek V4.1 Flash 1017";
+const USER: &str = "The User";
 
 /// The stock shimmers, in the order `/shimmer` lists them.
-const ROSTER: [RosterEntry; 15] = [
+const ROSTER: [RosterEntry; 16] = [
     credited(lava_lamp::RECIPE, OPUS),
     credited(critter::RECIPE, OPUS),
     credited(rubik::RECIPE, OPUS),
@@ -73,4 +75,5 @@ const ROSTER: [RosterEntry; 15] = [
     credited(relay::RECIPE, DEEPSEEK),
     credited(phyllotaxis::RECIPE, DEEPSEEK),
     credited(tectonic::RECIPE, DEEPSEEK),
+    credited(lfsr::RECIPE, USER),
 ];
