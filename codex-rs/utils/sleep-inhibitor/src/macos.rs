@@ -2,6 +2,9 @@ use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use tracing::warn;
 
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {}
+
 #[allow(
     dead_code,
     non_camel_case_types,
@@ -9,12 +12,8 @@ use tracing::warn;
     non_upper_case_globals,
     clippy::all
 )]
-mod iokit {
-    #[link(name = "IOKit", kind = "framework")]
-    unsafe extern "C" {}
-
-    include!("iokit_bindings.rs");
-}
+#[path = "iokit_bindings.rs"]
+mod iokit;
 
 type IOPMAssertionID = iokit::IOPMAssertionID;
 type IOPMAssertionLevel = iokit::IOPMAssertionLevel;

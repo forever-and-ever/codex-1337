@@ -2554,9 +2554,8 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 }
 
 #[cfg(test)]
-mod markdown_render_tests {
-    include!("markdown_render_tests.rs");
-}
+#[path = "markdown_render_tests.rs"]
+mod markdown_render_tests;
 
 #[cfg(test)]
 mod tests {
