@@ -41,6 +41,11 @@ impl HistoryCell for CompactionCell {
 }
 
 impl FeedEntry for CompactionCell {
+    fn feed_kind(&self) -> crate::transcript_view::EntryKind {
+        use crate::transcript_view::EntryKind;
+        EntryKind::Compaction
+    }
+
     fn feed_id(&self) -> String {
         format!("compaction:{}", self.id)
     }

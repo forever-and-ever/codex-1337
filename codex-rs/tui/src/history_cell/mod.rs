@@ -10,6 +10,8 @@
 //! bumps the active-cell revision tracked by `ChatWidget`, so the cache key changes whenever the
 //! rendered transcript output can change.
 
+use crate::history_cell::activity_parts::FoldState;
+
 mod alarm;
 pub(crate) use alarm::AlarmSoundingCell;
 
@@ -343,7 +345,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     fn nested_summary_parts(
         &self,
         width: u16,
-        _expanded: &std::collections::HashSet<String>,
+        _expanded: &FoldState,
     ) -> activity_parts::ActivityParts {
         activity_parts::ActivityParts {
             lines: self.nested_summary_lines(width),
@@ -356,7 +358,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     fn nested_activity_parts(
         &self,
         width: u16,
-        _expanded: &std::collections::HashSet<String>,
+        _expanded: &FoldState,
     ) -> Option<activity_parts::ActivityParts> {
         Some(activity_parts::ActivityParts {
             lines: self.nested_detail_lines(width),
@@ -390,7 +392,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         &self,
         _width: u16,
         _header_reserve: usize,
-        _expanded: &std::collections::HashSet<String>,
+        _expanded: &FoldState,
     ) -> Option<activity_parts::ActivityParts> {
         None
     }
@@ -407,7 +409,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         &self,
         width: u16,
         reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         _mode: OutputMode,
     ) -> Option<activity_parts::ActivityParts> {
         self.activity_parts(width, reserve, expanded)

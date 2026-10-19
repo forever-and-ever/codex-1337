@@ -1,5 +1,6 @@
 //! Producer evidence stays scoped to its MCP call; this adapter never opens its URIs.
 
+use crate::history_cell::activity_parts::FoldState;
 use codex_protocol::mcp_file_changes::FileChangeReceipt;
 use codex_protocol::mcp_file_changes::FileChangeRecord;
 use codex_protocol::mcp_file_changes::FilePublication;
@@ -7,7 +8,6 @@ use codex_protocol::mcp_file_changes::PublicationOutcome;
 use codex_protocol::mcp_file_changes::SummaryReason;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use std::collections::HashSet;
 use std::path::PathBuf;
 
 use super::activity_parts::PartControl;
@@ -107,7 +107,7 @@ impl ReceiptView {
         width: u16,
         detail: FileChangeDetail,
         call_id: &str,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
     ) -> (Vec<HyperlinkLine>, Vec<PartControl>) {
         let outcome = match self.outcome {
             PublicationOutcome::Applied if self.files.is_empty() && self.omitted_files == 0 => {
@@ -138,11 +138,13 @@ impl ReceiptView {
                 qualifier: file.qualifier,
             };
             let id = format!("mcp-file:{call_id}:{index}");
-            let is_expanded = matches!(detail, FileChangeDetail::Full) || expanded.contains(&id);
+            let is_expanded = matches!(detail, FileChangeDetail::Full)
+                || expanded.is_open(super::activity_parts::FoldGroup::Diff, &id, false);
             if matches!(detail, FileChangeDetail::Disclosed)
                 && matches!(&file.change, Some(FileChange::Update { unified_diff, .. }) if !unified_diff.is_empty())
             {
                 controls.push(PartControl {
+                    group: super::activity_parts::FoldGroup::Diff,
                     id,
                     line: lines.len(),
                     expanded: is_expanded,

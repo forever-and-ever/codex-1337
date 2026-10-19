@@ -9,6 +9,7 @@ use super::output_provenance::mark_lines;
 use super::output_provenance::unsafe_control;
 use super::raw_lines_from_source;
 use super::returned_output::WaitOutcome;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
@@ -24,7 +25,7 @@ pub(super) fn result_parts(
     owner: Option<&dyn HistoryCell>,
     outputs: &[&ToolOutputCell],
     width: u16,
-    expanded: &std::collections::HashSet<String>,
+    expanded: &FoldState,
     mode: OutputMode,
 ) -> super::activity_parts::ActivityParts {
     let first = match (owner, outputs.first()) {
@@ -44,7 +45,7 @@ pub(super) fn result_parts(
         .into_iter()
         .flat_map(HistoryCell::activity_ids)
         .chain(outputs.iter().flat_map(|output| output.activity_ids()))
-        .any(|id| expanded.contains(&id));
+        .any(|id| expanded.is_open(super::activity_parts::FoldGroup::Result, &id, false));
     if open {
         if let Some(owner) = owner {
             parts.lines.extend(owner.activity_argument_lines(width));
@@ -114,15 +115,16 @@ impl ToolOutputCell {
         &self,
         parts: &mut super::activity_parts::ActivityParts,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) {
         if self.readable.is_empty() {
             return;
         }
         let id = format!("result:{}", self.id());
-        let open = expanded.contains(&id);
+        let open = expanded.is_open(super::activity_parts::FoldGroup::Result, &id, false);
         parts.controls.push(super::activity_parts::PartControl {
+            group: super::activity_parts::FoldGroup::Result,
             id,
             line: parts.lines.len(),
             expanded: open,
@@ -323,7 +325,7 @@ impl HistoryCell for ToolOutputCell {
         &self,
         width: u16,
         _reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
         (self.has_agent_wait_name() || self.activity_disclosure(width).is_some())

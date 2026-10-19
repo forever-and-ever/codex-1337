@@ -6,6 +6,7 @@ use super::ProjectionChange;
 use super::ReasoningSummaryCell;
 use super::ToolOutputCell;
 use super::output_provenance::OutputMode;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use codex_app_server_protocol::ThreadItem;
@@ -35,7 +36,7 @@ impl ToolOutputGroup {
     fn captured_output_parts(
         &self,
         width: u16,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
         if !self
@@ -390,7 +391,7 @@ impl HistoryCell for ToolOutputGroup {
         &self,
         width: u16,
         header_reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<super::activity_parts::ActivityParts> {
         self.output_parts(width, header_reserve, expanded, OutputMode::Raw)
     }
@@ -399,7 +400,7 @@ impl HistoryCell for ToolOutputGroup {
         &self,
         width: u16,
         header_reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
         let wait = self.members.iter().find(|member| {

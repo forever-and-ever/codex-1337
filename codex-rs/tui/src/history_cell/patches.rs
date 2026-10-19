@@ -1,6 +1,7 @@
 //! Patch summaries and image-tool transcript helpers.
 
 use super::*;
+use crate::history_cell::activity_parts::FoldState;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_utils_path_uri::LegacyAppPathString;
@@ -142,9 +143,13 @@ impl HistoryCell for PatchHistoryCell {
     fn nested_summary_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> super::activity_parts::ActivityParts {
-        let open = expanded.contains(&self.activity_id);
+        let open = expanded.is_open(
+            super::activity_parts::FoldGroup::Diff,
+            &self.activity_id,
+            false,
+        );
         super::activity_parts::ActivityParts {
             lines: if open {
                 self.display_hyperlink_lines(width)
@@ -157,6 +162,7 @@ impl HistoryCell for PatchHistoryCell {
                 .file
                 .as_ref()
                 .map(|_| super::activity_parts::PartControl {
+                    group: super::activity_parts::FoldGroup::Diff,
                     id: self.activity_id.clone(),
                     line: usize::from(!self.continuation),
                     expanded: open,
@@ -168,7 +174,7 @@ impl HistoryCell for PatchHistoryCell {
     fn nested_activity_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<super::activity_parts::ActivityParts> {
         Some(self.nested_summary_parts(width, expanded))
     }

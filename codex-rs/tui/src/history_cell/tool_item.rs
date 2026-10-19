@@ -4,9 +4,9 @@ use super::ActivityDisclosure;
 use super::HistoryCell;
 use super::activity_parts::ActivityHeader;
 use super::activity_parts::ActivityParts;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use ratatui::text::Line;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -96,17 +96,13 @@ impl HistoryCell for ToolItemCell {
         }
         self.inner.nested_detail_lines(width)
     }
-    fn nested_activity_parts(
-        &self,
-        width: u16,
-        expanded: &HashSet<String>,
-    ) -> Option<ActivityParts> {
+    fn nested_activity_parts(&self, width: u16, expanded: &FoldState) -> Option<ActivityParts> {
         if self.inner.as_any().is::<super::PlainHistoryCell>() {
             return None;
         }
         self.inner.nested_activity_parts(width, expanded)
     }
-    fn nested_summary_parts(&self, width: u16, expanded: &HashSet<String>) -> ActivityParts {
+    fn nested_summary_parts(&self, width: u16, expanded: &FoldState) -> ActivityParts {
         if self.inner.as_any().is::<super::PlainHistoryCell>() {
             return ActivityParts {
                 lines: self.nested_summary_lines(width),
@@ -145,7 +141,7 @@ impl HistoryCell for ToolItemCell {
         &self,
         width: u16,
         reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<ActivityParts> {
         self.inner.activity_parts(width, reserve, expanded)
     }
@@ -191,7 +187,7 @@ impl HistoryCell for ToolItemCell {
         &self,
         width: u16,
         reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: super::output_provenance::OutputMode,
     ) -> Option<ActivityParts> {
         self.inner.output_parts(width, reserve, expanded, mode)

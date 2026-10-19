@@ -5,6 +5,8 @@
 //! them and rewrapping does not turn a reading position into an unrelated screen row.
 //! Recap tail spacing is reserved by layout and never enters selectable cell content.
 
+use crate::history_cell::activity_parts::FoldState;
+
 mod activity;
 mod bookmark;
 mod composer_gap;
@@ -58,6 +60,7 @@ use snapshot::ViewSnapshot;
 use text::TextLayout;
 
 pub(crate) use bookmark::TranscriptBookmark;
+pub(crate) use feed::EntryKind;
 pub(crate) use feed::FeedEntry;
 pub(crate) use feed::HeaderDisclosure;
 pub(crate) use input::JumpTarget;
@@ -401,7 +404,7 @@ impl TranscriptView {
         expanded: bool,
         lines: impl FnOnce(
             u16,
-            &std::collections::HashSet<String>,
+            &FoldState,
             crate::history_cell::output_provenance::OutputMode,
         ) -> Option<ActivityTranscriptLines>,
     ) -> bool {
@@ -410,7 +413,7 @@ impl TranscriptView {
         self.sync_live_layout(width, key, |width, view| {
             lines(
                 crate::transcript_geometry::content_width(width, mode),
-                &view.disclosure.expanded,
+                &view.disclosure.expanded.scoped(view.live_fold_scope()),
                 output_mode,
             )
             .map(|mut lines| {

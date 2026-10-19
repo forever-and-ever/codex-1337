@@ -5,6 +5,7 @@ use super::TranscriptView;
 use super::text::HeaderControl;
 use super::text::HeaderRows;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Invocation;
@@ -663,7 +664,7 @@ impl Invocations {
         open: bool,
         width: u16,
         full: bool,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> ActivityParts {
         let input = self.input(call.id);
         let formatted = prepared.input(call, input, width, false).0;
@@ -720,7 +721,7 @@ impl Invocations {
         placement: super::feed::Content,
         full: bool,
         tokens: &super::tool_output_tokens::ToolOutputTokens,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         auxiliary: Vec<HyperlinkLine>,
     ) -> Option<TextLayout> {
         self.layout_inner(
@@ -741,7 +742,7 @@ impl Invocations {
         placement: super::feed::Content,
         full: bool,
         tokens: &super::tool_output_tokens::ToolOutputTokens,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         auxiliary: Vec<HyperlinkLine>,
     ) -> Option<TextLayout> {
         let calls = collect(cell);

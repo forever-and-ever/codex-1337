@@ -11,6 +11,7 @@ use super::prefix_lines;
 use super::sanitize_user_text;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::alarm_output_lines;
+use crate::history_cell::activity_parts::FoldState;
 use codex_app_server_protocol::alarm_sounding::AlarmCause;
 use codex_app_server_protocol::alarm_sounding::AlarmSounding;
 
@@ -142,6 +143,11 @@ impl HistoryCell for AlarmSoundingCell {
 }
 
 impl crate::transcript_view::FeedEntry for AlarmSoundingCell {
+    fn feed_kind(&self) -> crate::transcript_view::EntryKind {
+        use crate::transcript_view::EntryKind;
+        EntryKind::Alarm
+    }
+
     fn feed_id(&self) -> String {
         format!("alarm:{}", self.0.id)
     }
@@ -153,7 +159,7 @@ impl crate::transcript_view::FeedEntry for AlarmSoundingCell {
     fn feed_body(
         &self,
         width: u16,
-        _expanded: &std::collections::HashSet<String>,
+        _expanded: &FoldState,
         _mode: OutputMode,
     ) -> activity_parts::ActivityParts {
         activity_parts::ActivityParts {

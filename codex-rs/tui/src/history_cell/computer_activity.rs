@@ -5,6 +5,7 @@
 //! Preview selection favors failures and images, but never changes the order of retained rows.
 
 use super::*;
+use crate::history_cell::activity_parts::FoldState;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ComputerActivityCell {
@@ -312,7 +313,7 @@ impl HistoryCell for ComputerActivityCell {
         &self,
         width: u16,
         _reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
         self.group.details.returned_output_has_details()?;

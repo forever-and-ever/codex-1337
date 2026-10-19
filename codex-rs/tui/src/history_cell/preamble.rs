@@ -6,6 +6,7 @@ use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
 use super::activity_parts::ActivityParts;
 use super::activity_parts::PartControl;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
@@ -18,7 +19,6 @@ use codex_protocol::num_format::format_with_separators;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::collections::BTreeMap;
-use std::collections::HashSet;
 
 /// Changed parts named in full before the rest are counted.
 const CHANGE_NAMES: usize = 8;
@@ -277,6 +277,10 @@ fn count(tokens: u64) -> String {
 }
 
 impl FeedEntry for PreambleCell {
+    fn feed_kind(&self) -> crate::transcript_view::EntryKind {
+        use crate::transcript_view::EntryKind;
+        EntryKind::Preamble
+    }
     fn feed_id(&self) -> String {
         self.id.clone()
     }
@@ -291,7 +295,7 @@ impl FeedEntry for PreambleCell {
     fn feed_body(
         &self,
         _width: u16,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: super::output_provenance::OutputMode,
     ) -> ActivityParts {
         use super::output_provenance::OutputProvenance;
@@ -302,9 +306,11 @@ impl FeedEntry for PreambleCell {
         let mut controls = Vec::new();
         if self.raw.is_some() || !self.sources.is_empty() {
             let id = self.raw_fold();
-            let expanded = expanded.contains(&id);
+            let expanded =
+                expanded.is_open(super::activity_parts::FoldGroup::RawContext, &id, false);
             lines.push("".into());
             controls.push(PartControl {
+                group: super::activity_parts::FoldGroup::RawContext,
                 id,
                 line: lines.len(),
                 expanded,
@@ -393,7 +399,7 @@ impl HistoryCell for PreambleCell {
     }
 
     fn expanded_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        let mut expanded = HashSet::new();
+        let mut expanded = FoldState::new();
         expanded.insert(self.raw_fold());
         let mut lines = self.display_hyperlink_lines(width);
         lines.extend(

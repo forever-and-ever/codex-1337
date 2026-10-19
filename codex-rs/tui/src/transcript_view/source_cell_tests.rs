@@ -5,6 +5,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::RequestUserInputResultCell;
 use crate::history_cell::ThreadRecapHistoryCell;
+use crate::history_cell::activity_parts::FoldState;
 use crate::transcript_geometry::GUTTER_COLUMNS;
 use codex_app_server_protocol::ToolRequestUserInputAnswer;
 use codex_app_server_protocol::ToolRequestUserInputQuestion;
@@ -132,7 +133,7 @@ fn question_copy_retains_answer_labels_masks_secrets_and_keeps_unanswered_suffix
     ) as Arc<dyn HistoryCell>;
     let (range, joined) = crate::history_cell::ToolOutputGroup::attach(&[receipt], output).unwrap();
     assert_eq!(range, 0..1);
-    let mut expanded = std::collections::HashSet::from_iter(joined[0].activity_ids());
+    let mut expanded = FoldState::from_iter(joined[0].activity_ids());
     let parts = joined[0]
         .output_parts(
             200,

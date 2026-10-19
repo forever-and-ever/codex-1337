@@ -21,6 +21,8 @@
 //! `TranscriptOverlay::sync_live_tail`. This preserves the invariant that the overlay reflects
 //! both committed history and in-flight activity without changing flush or coalescing behavior.
 
+use crate::history_cell::activity_parts::FoldState;
+
 mod browsing;
 mod legacy_input;
 mod prompt_navigation;
@@ -401,7 +403,7 @@ impl App {
                         .active_cell_owned_transcript_lines(
                             width,
                             /*expanded*/ false,
-                            &std::collections::HashSet::new(),
+                            &FoldState::new(),
                             /*tool_output_tokens*/ None,
                             crate::history_cell::output_provenance::OutputMode::Fmt,
                         )

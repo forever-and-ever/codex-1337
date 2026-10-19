@@ -4,6 +4,7 @@
 //! Invocation and result rows retain exact logical source ranges through wrapping and gutters.
 
 use super::*;
+use crate::history_cell::activity_parts::FoldState;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 
 use codex_protocol::mcp::is_node_repl_backed_server;
@@ -100,7 +101,7 @@ impl McpToolCallCell {
     pub(super) fn receipt_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         full: bool,
     ) -> super::activity_parts::ActivityParts {
         let Some(Ok(result)) = &self.result else {
@@ -151,7 +152,7 @@ impl McpToolCallCell {
     fn nested_receipt_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         lines: Vec<HyperlinkLine>,
     ) -> super::activity_parts::ActivityParts {
         let mut receipt = self.receipt_parts(
@@ -568,7 +569,7 @@ impl HistoryCell for McpToolCallCell {
     fn nested_summary_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> super::activity_parts::ActivityParts {
         let lines = self.render_hyperlink_lines(width, McpToolCallRenderMode::Summary);
         self.nested_receipt_parts(width, expanded, lines)
@@ -577,7 +578,7 @@ impl HistoryCell for McpToolCallCell {
     fn nested_activity_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<super::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
@@ -600,7 +601,7 @@ impl HistoryCell for McpToolCallCell {
         &self,
         width: u16,
         header_reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<super::activity_parts::ActivityParts> {
         let Some(Ok(result)) = &self.result else {
             return None;

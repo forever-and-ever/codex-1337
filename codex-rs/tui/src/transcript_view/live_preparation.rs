@@ -15,8 +15,8 @@ use super::layout;
 use super::layout::RenderState;
 use super::preparation::Pending;
 use super::tool_output_tokens;
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::output_provenance::OutputMode;
-use std::collections::HashSet;
 
 #[derive(Clone)]
 pub(crate) struct OwnedLiveTail {
@@ -31,7 +31,7 @@ struct Key {
     detailed: bool,
     mode: HistoryRenderMode,
     render: RenderState,
-    expanded: HashSet<String>,
+    expanded: FoldState,
     output_mode: OutputMode,
     tokens: Option<u64>,
     invocations: u64,
@@ -260,7 +260,7 @@ impl TranscriptView {
             detailed: self.detailed,
             mode: self.mode,
             render: RenderState::current(),
-            expanded: self.disclosure.expanded.clone(),
+            expanded: self.disclosure.expanded.scoped(self.live_fold_scope()),
             output_mode: self.disclosure.output_mode(&self.disclosure.live_ids),
             tokens: self.activity_output_tokens(&self.disclosure.live_ids),
             invocations: self.invocations.revision(),
