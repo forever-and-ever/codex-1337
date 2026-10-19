@@ -242,6 +242,8 @@ pub(super) struct Row {
     pub(super) mark: Vec<Ink>,
     /// One ink per header grapheme; a glyph stands in for its letter.
     pub(super) header: Vec<Ink>,
+    /// An extra glyph at a header grapheme boundary, without replacing any text.
+    pub(super) header_insert: Option<(usize, Ink)>,
     /// Cells between the header and the timer, each with a glyph.
     pub(super) tail: Vec<Ink>,
     /// Backgrounds laid under the row's cells from its first column, whatever text lands there.
