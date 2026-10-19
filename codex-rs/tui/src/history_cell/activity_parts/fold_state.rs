@@ -1,6 +1,7 @@
 //! Viewer-owned choices. A group action supersedes older exceptions without visiting history.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum FoldGroup {
@@ -32,12 +33,18 @@ struct Choice {
     open: bool,
 }
 
+/// Worker snapshots share immutable policy; only viewer actions copy retained choices.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FoldState {
-    choices: HashMap<String, Choice>,
-    defaults: HashMap<FoldScope, HashMap<FoldGroup, Choice>>,
+    policy: Arc<FoldPolicy>,
     revision: u64,
     scope: FoldScope,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct FoldPolicy {
+    choices: HashMap<String, Choice>,
+    defaults: HashMap<FoldScope, HashMap<FoldGroup, Choice>>,
 }
 
 impl<const N: usize> From<[String; N]> for FoldState {
@@ -57,7 +64,8 @@ impl FoldState {
     }
 
     pub(crate) fn has_item_defaults(&self) -> bool {
-        self.defaults
+        self.policy
+            .defaults
             .keys()
             .any(|scope| matches!(scope, FoldScope::Item(_)))
     }
@@ -81,10 +89,12 @@ impl FoldState {
         initial: bool,
     ) -> bool {
         let default = self
+            .policy
             .defaults
             .get(scope)
             .and_then(|groups| groups.get(&group));
-        self.choices
+        self.policy
+            .choices
             .get(id)
             .filter(|choice| default.is_none_or(|default| choice.revision > default.revision))
             .or(default)
@@ -93,7 +103,8 @@ impl FoldState {
 
     pub(crate) fn set_default(&mut self, scope: FoldScope, group: FoldGroup, open: bool) {
         let choice = self.choice(open);
-        self.defaults
+        Arc::make_mut(&mut self.policy)
+            .defaults
             .entry(scope)
             .or_default()
             .insert(group, choice);
@@ -101,26 +112,33 @@ impl FoldState {
 
     pub(crate) fn set(&mut self, id: String, open: bool) {
         let choice = self.choice(open);
-        self.choices.insert(id, choice);
+        Arc::make_mut(&mut self.policy).choices.insert(id, choice);
     }
 
     pub(crate) fn forget(&mut self, id: &str) {
-        self.choices.remove(id);
+        if self.policy.choices.contains_key(id) {
+            Arc::make_mut(&mut self.policy).choices.remove(id);
+        }
     }
     pub(crate) fn remap(&mut self, from: &str, to: &str) {
-        if let Some(choice) = self.choices.remove(from) {
-            let current = self.choices.entry(to.to_owned()).or_insert(choice);
+        if from == to || !self.policy.choices.contains_key(from) {
+            return;
+        }
+        let choices = &mut Arc::make_mut(&mut self.policy).choices;
+        if let Some(choice) = choices.remove(from) {
+            let current = choices.entry(to.to_owned()).or_insert(choice);
             if choice.revision > current.revision {
                 *current = choice;
             }
         }
     }
     pub(crate) fn remap_scope(&mut self, from: &FoldScope, to: FoldScope) {
-        if *from == to {
+        if *from == to || !self.policy.defaults.contains_key(from) {
             return;
         }
-        if let Some(moved) = self.defaults.remove(from) {
-            let target = self.defaults.entry(to).or_default();
+        let defaults = &mut Arc::make_mut(&mut self.policy).defaults;
+        if let Some(moved) = defaults.remove(from) {
+            let target = defaults.entry(to).or_default();
             for (group, choice) in moved {
                 let current = target.entry(group).or_insert(choice);
                 if choice.revision > current.revision {
@@ -132,11 +150,15 @@ impl FoldState {
 
     // Ungrouped controls (notably [cot]) retain their existing independent choices.
     pub(crate) fn contains(&self, id: &str) -> bool {
-        self.choices.get(id).is_some_and(|choice| choice.open)
+        self.policy
+            .choices
+            .get(id)
+            .is_some_and(|choice| choice.open)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &String> {
-        self.choices
+        self.policy
+            .choices
             .iter()
             .filter(|(_, choice)| choice.open)
             .map(|(id, _)| id)
@@ -156,6 +178,7 @@ impl FoldState {
 
     pub(crate) fn retain(&mut self, mut keep: impl FnMut(&String) -> bool) {
         let closed: Vec<_> = self
+            .policy
             .choices
             .iter()
             .filter(|(id, choice)| choice.open && !keep(id))

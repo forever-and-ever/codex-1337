@@ -303,7 +303,13 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
                 .contains("beta body")
         );
     }
+    // An already prepared worker's scoped policy must not follow later viewer actions.
+    let closed_snapshot = view.disclosure.expanded.scoped(view.feed.fold_scope(0));
     click(&mut view, &first);
+    let FoldTarget::GroupedPart { id, group } = &first else {
+        unreachable!("file disclosure")
+    };
+    assert!(!closed_snapshot.is_open(*group, id, false));
     assert!(
         view.current_layout(&cells, 1)
             .unwrap()

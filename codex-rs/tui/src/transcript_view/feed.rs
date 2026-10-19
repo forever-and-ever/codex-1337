@@ -210,8 +210,9 @@ enum WorkKind {
 
 #[derive(Clone, PartialEq, Eq)]
 enum Kind {
-    /// One or more steps; `calls` when any of them made a call.
-    Steps { calls: bool, work: WorkKind },
+    /// Seals attest calls even when their activity cells are not loaded yet.
+    /// `work` classifies retained cells, independently of seal evidence.
+    Steps { sealed_calls: bool, work: WorkKind },
     /// The step whose seal admitted the input, and the input's place among its user inputs.
     User { admitted: Option<(String, usize)> },
     Entry {
@@ -298,7 +299,12 @@ impl Item {
     fn spacious(&self) -> bool {
         matches!(
             self.kind,
-            Kind::User { .. } | Kind::Reply | Kind::Steps { calls: false, .. }
+            Kind::User { .. }
+                | Kind::Reply
+                | Kind::Steps {
+                    sealed_calls: false,
+                    ..
+                }
         )
     }
 
@@ -307,7 +313,14 @@ impl Item {
         match member.contribution {
             Contribution::Silent | Contribution::Thought => false,
             Contribution::Message => {
-                unfolded || matches!(self.kind, Kind::Steps { calls: true, .. })
+                unfolded
+                    || matches!(
+                        self.kind,
+                        Kind::Steps {
+                            sealed_calls: true,
+                            ..
+                        }
+                    )
             }
             Contribution::Activity => unfolded,
         }
@@ -614,7 +627,7 @@ impl FeedIndex {
             let item = *item_of_root.entry(root).or_insert_with(|| {
                 items.push(Item::new(
                     Kind::Steps {
-                        calls: false,
+                        sealed_calls: false,
                         work: WorkKind::Response,
                     },
                     names[*first],
@@ -655,14 +668,14 @@ impl FeedIndex {
         }
 
         for item in &mut items {
-            if let Kind::Steps { calls, work } = &mut item.kind {
+            if let Kind::Steps { sealed_calls, work } = &mut item.kind {
                 *work = WorkKind::of(
                     item.segments
                         .iter()
                         .flatten()
                         .map(|index| cells[*index].as_ref()),
                 );
-                *calls = item.steps.iter().any(|step| {
+                *sealed_calls = item.steps.iter().any(|step| {
                     bills
                         .step(step)
                         .is_some_and(|step| !step.call_ids.is_empty())
@@ -783,7 +796,14 @@ impl FeedIndex {
         {
             return false;
         }
-        if !matches!(item.kind, Kind::Steps { calls: true, .. }) || item.steps.len() > 1 {
+        if !matches!(
+            item.kind,
+            Kind::Steps {
+                sealed_calls: true,
+                ..
+            }
+        ) || item.steps.len() > 1
+        {
             return true;
         }
         let calls: HashSet<_> = item
@@ -1310,7 +1330,13 @@ impl FeedIndex {
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
-        if matches!(item.kind, Kind::Steps { calls: true, .. } | Kind::CodeMode) {
+        if matches!(
+            item.kind,
+            Kind::Steps {
+                sealed_calls: true,
+                ..
+            } | Kind::CodeMode
+        ) {
             let active = header
                 .scope
                 .iter()
