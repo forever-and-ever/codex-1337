@@ -157,21 +157,30 @@ impl ModelClient {
             ResponseItem::Message { role, .. } => role == "assistant",
             _ => false,
         }) {
+            let mut text = concat!(
+                "<harness_continuation>\n",
+                "This is an automated harness continuation, not new user input. ",
+                "The prior response did not finish the turn. Continue the existing task ",
+                "from the assistant context above. Do not repeat completed tool actions ",
+                "merely because the response was interrupted; their results are already ",
+                "in the conversation.\n",
+            )
+            .to_owned();
+            // Reattempting a large Google tool call can repeat the upstream idle
+            // timeout. Ask for one small step on recovery, never on normal requests.
+            if request.model.starts_with("google/") {
+                text.push_str(concat!(
+                    "For this recovery, take one small, useful step rather than generating a large tool call. ",
+                    "Keep the next tool input under 2000 characters; split large edits into smaller complete ",
+                    "steps and continue after receiving their results. This is recovery guidance, not a ",
+                    "change to the task or its completion criteria.\n",
+                ));
+            }
+            text.push_str("</harness_continuation>");
             request.input.push(ResponseItem::Message {
                 id: None,
                 role: "user".into(),
-                content: vec![ContentItem::InputText {
-                    text: concat!(
-                        "<harness_continuation>\n",
-                        "This is an automated harness continuation, not new user input. ",
-                        "The prior response did not finish the turn. Continue the existing task ",
-                        "from the assistant context above. Do not repeat completed tool actions ",
-                        "merely because the response was interrupted; their results are already ",
-                        "in the conversation.\n",
-                        "</harness_continuation>",
-                    )
-                    .into(),
-                }],
+                content: vec![ContentItem::InputText { text }],
                 encrypted_content: None,
                 status: None,
                 phase: None,

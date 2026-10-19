@@ -34,10 +34,20 @@ use wiremock::matchers::path;
 
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-// The public configuration path must reach the same catalog, payer and routing
-// used by a live turn; checking only the request handlers cannot prove that.
 #[tokio::test]
 async fn openrouter_saved_model_routes_spend_and_key_quota() -> Result<()> {
+    for (model, host) in [
+        ("moonshotai/kimi-test", "moonshotai"),
+        ("google/gemini-test", "google"),
+    ] {
+        check_saved_model_routes_spend_and_key_quota(model, host).await?;
+    }
+    Ok(())
+}
+
+// The public configuration path must reach the same catalog, payer and routing
+// used by a live turn; checking only the request handlers cannot prove that.
+async fn check_saved_model_routes_spend_and_key_quota(model: &str, host: &str) -> Result<()> {
     let home = TempDir::new()?;
     let server = MockServer::start().await;
     Box::pin(mock_server::run(&[&server], async {
@@ -48,7 +58,7 @@ async fn openrouter_saved_model_routes_spend_and_key_quota() -> Result<()> {
             &config_path,
             format!(
                 r#"model_provider = "openrouter"
-model = "moonshotai/kimi-test"
+model = "{model}"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 [model_providers.openrouter]
@@ -84,18 +94,18 @@ stream_max_retries = 2
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/model/moonshotai/kimi-test"))
+            .and(path(format!("/model/{model}")))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {
-                "id": "moonshotai/kimi-test", "name": "MoonshotAI: Kimi Test",
+                "id": model, "name": "Routing Test",
                 "context_length": 262_144, "architecture": {"input_modalities": ["text"]},
                 "supported_parameters": ["tools"], "pricing": {"prompt": "0.0000003", "completion": "0.000002"}
             }})))
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/models/moonshotai/kimi-test/endpoints"))
+            .and(path(format!("/models/{model}/endpoints")))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": {"endpoints": [{
-                "tag": "moonshotai/turbo", "provider_name": "Moonshot AI",
+                "tag": format!("{host}/test"), "provider_name": host,
                 "quantization": "fp8", "service_tier": "priority", "context_length": 131_072,
                 "pricing": {"prompt": "0.0000003", "completion": "0.000002"},
                 "uptime_last_30m": 99.5, "status": 0
@@ -148,7 +158,7 @@ stream_max_retries = 2
                 ])),
                 ResponseTemplate::new(422).set_body_json(json!({"error": {
                     "message": "Host failed", "metadata": {
-                        "provider_name": "Moonshot AI",
+                        "provider_name": host,
                         "raw": json!({"error": {"message": "Only function tools are supported"}}).to_string()
                     }
                 }})),
@@ -196,10 +206,10 @@ stream_max_retries = 2
         }
 
         let request = app.send_request("openrouter/model/save", Some(json!({
-            "slug": "moonshotai/kimi-test"
+            "slug": model
         }))).await?;
         let saved: OpenRouterModelSaveResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        assert_eq!(saved.model.model, "moonshotai/kimi-test");
+        assert_eq!(saved.model.model, model);
         let request = app.send_thread_start_request_with_auto_env(ThreadStartParams::default()).await?;
         let started: ThreadStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         let request = app.send_request("thread/account/list", Some(json!({"threadId": started.thread.id}))).await?;
@@ -217,13 +227,13 @@ stream_max_retries = 2
             assert!(!account.requires_openai_auth);
         }
         let request = app.send_request("openrouter/model/endpoints", Some(json!({
-            "slug": "moonshotai/kimi-test"
+            "slug": model
         }))).await?;
         let endpoints: OpenRouterModelEndpointsResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
-        assert_eq!(endpoints.hosts[0].slug.as_str(), "moonshotai");
+        assert_eq!(endpoints.hosts[0].slug.as_str(), host);
         assert_eq!(endpoints.hosts[0].endpoints[0].prompt_per_mtok, Some(Usd::from_nanodollars(300_000_000)));
         let request = app.send_request("openrouter/model/route", Some(json!({
-            "slug": "moonshotai/kimi-test", "filter": {"only": ["moonshotai"]}
+            "slug": model, "filter": {"only": [host]}
         }))).await?;
         let _: OpenRouterModelRouteResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         let request = app.send_request("model/list", Some(json!({"modelProvider": "openrouter"}))).await?;
@@ -232,7 +242,7 @@ stream_max_retries = 2
         assert_eq!(listed.data[0].model, saved.model.model);
         assert!(listed.providers.iter().any(|provider| provider.id == "openrouter"));
         let stored: toml::Value = toml::from_str(&std::fs::read_to_string(&config_path)?)?;
-        assert_eq!(stored["wrangler"]["openrouter"]["models"]["moonshotai/kimi-test"]["only"][0].as_str(), Some("moonshotai"));
+        assert_eq!(stored["wrangler"]["openrouter"]["models"][model]["only"][0].as_str(), Some(host));
         assert!(!std::fs::read_to_string(&config_path)?.contains("sk-or-test"));
 
         let request = app.send_turn_start_request(TurnStartParams {
@@ -264,7 +274,11 @@ stream_max_retries = 2
             let input = body["input"].as_array().expect("retry input");
             let notice = input.last().expect("continuation notice");
             assert_eq!(notice["role"], "user");
-            assert!(notice["content"][0]["text"].as_str().expect("notice text").starts_with("<harness_continuation>"));
+            let text = notice["content"][0]["text"].as_str().expect("notice text");
+            assert!(text.starts_with("<harness_continuation>"));
+            // Recovery asks Google for a small next step without constraining other
+            // hosts, normal requests, or the subsequent tool-result continuation.
+            assert_eq!(text.contains("Keep the next tool input under 2000 characters"), model.starts_with("google/"));
             let preceding = &input[input.len() - 3..input.len() - 1];
             assert!(preceding.iter().any(|item| item["type"] == "reasoning"));
             assert!(preceding.iter().any(|item| item["role"] == "assistant"));
@@ -280,8 +294,9 @@ stream_max_retries = 2
         let request = &requests[0];
         assert_eq!(request.header("authorization"), Some("Bearer sk-or-test".into()));
         let body = request.body_json();
-        assert_eq!(body["provider"], json!({"sort": "exacto", "only": ["moonshotai"]}));
-        assert_eq!(body["model"], "moonshotai/kimi-test");
+        assert!(!body["input"].to_string().contains("<harness_continuation>"));
+        assert_eq!(body["provider"], json!({"sort": "exacto", "only": [host]}));
+        assert_eq!(body["model"], model);
         assert_eq!(body["store"], false);
         assert!(body["tools"].as_array().expect("request tools").iter().all(|tool| tool["type"] == "function"));
 
@@ -377,7 +392,7 @@ stream_max_retries = 2
         let _: TurnStartResponse = timeout(READ_TIMEOUT, app.read_response(request)).await??;
         let error: ErrorNotification = timeout(READ_TIMEOUT, app.read_notification("error")).await??;
         assert!(!error.will_retry);
-        assert!(error.error.message.contains("OpenRouter host Moonshot AI rejected the request: Only function tools are supported"));
+        assert!(error.error.message.contains(&format!("OpenRouter host {host} rejected the request: Only function tools are supported")));
         let completed: TurnCompletedNotification = timeout(READ_TIMEOUT, app.read_notification("turn/completed")).await??;
         assert_eq!(completed.turn.status, TurnStatus::Failed);
         assert_eq!(wire.requests().len(), 8);
