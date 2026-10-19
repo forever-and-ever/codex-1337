@@ -288,6 +288,7 @@ impl HeaderPreparation {
 
     pub(super) fn keep_empty_code_mode_open(
         &mut self,
+        host: &Arc<dyn HistoryCell>,
         invocations: &invocation::Invocations,
         expanded: &HashSet<String>,
         full: bool,
@@ -319,7 +320,8 @@ impl HeaderPreparation {
             return false;
         }
         self.header.disclosure = HeaderDisclosure::FixedOpen;
-        true
+        // The shared header may live on a Thought; only its owner supplies this body.
+        Arc::ptr_eq(cell, host)
     }
 
     pub(super) fn render(

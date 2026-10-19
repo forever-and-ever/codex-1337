@@ -618,6 +618,62 @@ fn steps_fold_under_one_header_with_their_figures() {
     assert_eq!(view.disclosure.expanded, manual);
     assert!(!screen(&mut view, &cells, "search cancelled", 80).contains("<instructions>"));
     insta::assert_snapshot!("preamble_disclosure", snapshots.join("\n\n"));
+    // A Thought can host another member's header. Repairing a source-only Code Mode
+    // header must not promote that host's independently closed reasoning body.
+    let mut cells = vec![
+        script_block("cot-source-only", None, Some("public result")),
+        Arc::new(ThoughtCell::from_item(
+            ThreadItem::Thought {
+                id: "thought:cot-source-step".into(),
+                response_id: "cot-source-step".into(),
+                completed_at_ms: CLOCK_MS,
+                summary: vec!["Provider summary".into()],
+                content: vec![
+                    "Private alpha.".into(),
+                    "Private omega.".into(),
+                    "Private terminus.".into(),
+                ],
+                reported_reasoning_tokens: Some(42),
+            },
+            std::path::Path::new("/tmp"),
+        )) as Arc<dyn HistoryCell>,
+    ];
+    let mut view = TranscriptView::default();
+    view.record_step_admission(step(
+        "cot-source-step",
+        &["cot-source-only"],
+        &[],
+        Admission::Pending,
+    ));
+    view.seat_thoughts(&mut cells);
+    assert!(cells[0].as_any().is::<ThoughtCell>());
+    let cot = FoldTarget::Thought(vec!["thought:cot-source-step".into()]);
+    for open in [false, true, false] {
+        if view.disclosure.expanded.contains("thought:cot-source-step") != open {
+            assert!(view.focus_fold(&cells, 0, cot.clone()));
+            view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        }
+        for width in [104, 40, 80] {
+            let shown = crate::transcript_view::tests::text(
+                &crate::transcript_view::tests::render(&mut view, &cells, width, 24),
+            );
+            assert_eq!(shown.matches("[cot]").count(), 1, "{shown}");
+            assert_eq!(shown.matches("Code Mode").count(), 1, "{shown}");
+            assert!(!shown.contains("[+]"), "{shown}");
+            assert!(!shown.contains("Provider summary"), "{shown}");
+            for paragraph in ["Private alpha.", "Private omega.", "Private terminus."] {
+                assert_eq!(
+                    shown.matches(paragraph).count(),
+                    usize::from(open),
+                    "{shown}"
+                );
+            }
+            let targets = view.current_layout(&cells, 0).unwrap().fold_targets();
+            assert_eq!(targets.iter().filter(|target| **target == cot).count(), 1);
+            assert!(!targets.contains(&FoldTarget::Activity));
+        }
+    }
+
     // Source formatting cannot depend on nested tool members: a source-only call must
     // paint its settled highlighted input immediately, live and after admission.
     let exec = "source-only";
