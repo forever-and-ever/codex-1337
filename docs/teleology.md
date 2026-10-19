@@ -520,7 +520,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/tui/src/warpaint.rs`, `codex-rs/tui/src/warpaint/` (`paint.rs`, `pairs.rs`, `bind.rs`, `pack.rs`, `investiture.rs`, `scopes.rs`, `livery.rs`), `codex-rs/tui/src/style/speaker_backgrounds.rs`, `codex-rs/ansi-escape/src/quarantine.rs`, `codex-rs/tui/src/app/warpaint_capture.rs`, `scripts/warpaint/`.
 - Tripwire: `roles_json_matches_the_declaration` (`codex-rs/tui/src/warpaint/pairs.rs`), `embedded_packs_are_the_pack_directory` (`codex-rs/tui/src/warpaint/pack.rs`), `revoke_returns_the_colors_the_terminal_reported` (`codex-rs/tui/src/warpaint/investiture.rs`), `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` (`codex-rs/tui/src/custom_terminal/output.rs`) for the replay, `previewing_and_cancelling_rebinds_pack_style_over_unchanged_frames` (`codex-rs/tui/src/warpaint.rs`), `just warpaint-check`. Token painting at seams: noisy (snapshots showing `Indexed(..)`).
 - Pressure: upstream palette helpers in `style.rs`, `style/contrast.rs`, `diff_render.rs`, the activity chart and the composer sparkle derive colors from the terminal's default colors. A new helper that paints its own RGB escapes the pack until it is repainted; one that paints `Color::Indexed` collides with the token ranges. `render/highlight.rs` lost two-face's bundled theme registry and custom `.tmTheme` loading: upstream edits to either conflict as modify/delete, and both stay deleted.
-- Evidence: 6898f632bc.
+- Evidence: e68772b43b, 48fc0612ba.
 
 ## Merge hygiene
 
