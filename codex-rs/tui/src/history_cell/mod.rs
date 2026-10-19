@@ -13,6 +13,9 @@
 mod alarm;
 pub(crate) use alarm::AlarmSoundingCell;
 
+mod farm;
+pub(crate) use farm::FarmReceipt;
+
 mod compaction;
 pub(crate) use compaction::CompactionCell;
 

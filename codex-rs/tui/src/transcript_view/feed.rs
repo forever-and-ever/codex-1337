@@ -95,6 +95,9 @@ pub(crate) trait FeedEntry {
 
 pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
     let any = cell.as_any();
+    if let Some(farm) = any.downcast_ref::<crate::history_cell::FarmReceipt>() {
+        return Some(farm);
+    }
     if let Some(arrival) = any.downcast_ref::<ArrivalCell>() {
         return Some(arrival);
     }

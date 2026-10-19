@@ -740,4 +740,38 @@ fn steps_fold_under_one_header_with_their_figures() {
             }
         },
     );
+    // A farm RPC can finish between two calls in the same billed step. Its independent
+    // header must break the visual segment without becoming part of the step's fold.
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        script_block("farm-before", None, Some("before farming")),
+        Arc::new(crate::history_cell::FarmReceipt {
+            thread_id: ThreadId::from_u128(7),
+            request_id: "independent-farm".into(),
+            message: "Farmed to /root/farm_1".into(),
+        }),
+        script_block("farm-after", None, Some("after farming")),
+    ];
+    let mut view = TranscriptView::default();
+    view.record_step_admission(step(
+        "farm-step",
+        &["farm-before", "farm-after"],
+        &[],
+        Admission::Pending,
+    ));
+    for width in [104, 40] {
+        let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
+        let shown = crate::transcript_view::tests::text(&buffer);
+        let line = shown.lines().find(|line| line.contains("Farmed")).unwrap();
+        assert_eq!(
+            line.find("Farmed").unwrap(),
+            usize::from(crate::transcript_geometry::TITLE_COLUMN),
+        );
+        assert_eq!(shown.matches("Code Mode").count(), 2, "{shown}");
+        assert!(
+            view.current_layout(&cells, 1)
+                .unwrap()
+                .fold_targets()
+                .is_empty()
+        );
+    }
 }
