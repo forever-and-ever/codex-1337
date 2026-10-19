@@ -117,7 +117,7 @@ impl ChatWidget {
             requires_openai_auth,
             has_codex_backend_auth,
             model_catalog,
-            model_popup_request_id: None,
+            model_popup_request: None,
             permission_popup_request_id: None,
             permission_discovery: None,
             permission_profiles_menu_opened: false,

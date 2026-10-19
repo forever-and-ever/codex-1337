@@ -120,7 +120,7 @@ impl ChatWidget {
             }
             Arc::make_mut(&mut self.model_catalog).models.clear();
             let request_id = uuid::Uuid::new_v4();
-            self.model_popup_request_id = Some(request_id);
+            self.set_model_refresh_request(request_id);
             self.app_event_tx.send(AppEvent::FetchModels { request_id });
         }
         self.realtime_conversation_available_for_thread = self.realtime_supported_by_provider()

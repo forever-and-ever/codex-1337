@@ -247,6 +247,15 @@ async fn reasoning_selection_in_plan_mode_opens_scope_prompt_event() {
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     chat.dispatch_command(SlashCommand::Effort);
+    let request_id = chat.model_popup_request.as_ref().unwrap().id();
+    assert!(!chat.on_models_loaded(
+        request_id,
+        Ok(crate::model_catalog::ModelListing {
+            models: chat.model_catalog.models.clone(),
+            providers: chat.model_catalog.providers.clone(),
+        }),
+    ));
+    while rx.try_recv().is_ok() {}
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 

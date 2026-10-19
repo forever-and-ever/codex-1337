@@ -1367,6 +1367,9 @@ pub(crate) enum AppEvent {
         enabled: bool,
     },
 
+    CancelModelRequest {
+        request_id: uuid::Uuid,
+    },
     /// Fetch the current catalog even when cached models produce no picker.
     FetchModels {
         request_id: uuid::Uuid,

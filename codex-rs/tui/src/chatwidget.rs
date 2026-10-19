@@ -561,7 +561,7 @@ pub(crate) struct ChatWidget {
     pub(crate) requires_openai_auth: bool,
     has_codex_backend_auth: bool,
     model_catalog: Arc<ModelCatalog>,
-    model_popup_request_id: Option<uuid::Uuid>,
+    model_popup_request: Option<model_popup_state::ModelPopupRequest>,
     permission_popup_request_id: Option<uuid::Uuid>,
     permission_discovery: Option<crate::permission_discovery::PermissionDiscovery>,
     permission_profiles_menu_opened: bool,

@@ -26,7 +26,7 @@ async fn collaboration_catalog_selection_clears_restored_prompt_and_survives_mod
     let mut models = chat.model_catalog.try_list_models().unwrap();
     models[0].description = "Refreshed model description".into();
     let request_id = uuid::Uuid::new_v4();
-    chat.model_popup_request_id = Some(request_id);
+    chat.set_model_refresh_request(request_id);
     assert!(chat.on_models_loaded(
         request_id,
         Ok(crate::model_catalog::ModelListing {
