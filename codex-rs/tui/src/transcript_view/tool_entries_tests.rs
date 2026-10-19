@@ -407,6 +407,106 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             );
         }
     }
+    // The compact view must project only a validated harness envelope, never rewrite
+    // the capture or strip an envelope-shaped section inside the actual message.
+    for message_type in ["MESSAGE", "NEW_TASK", "FINAL_ANSWER", "FINAL_MESSAGE"] {
+        let payload = "  Keep this indentation.\nMessage Type: MESSAGE\nTask name: /nested\nSender: /nested\nPayload:\nKeep this too.\n";
+        let capture = format!(
+            "Message Type: {message_type}\nTask name: /root\nSender: /root/scout\nPayload:\n{payload}"
+        );
+        let arrival = crate::history_cell::ArrivalCell::new(ArrivalItem {
+            placement: None,
+            id: "message-envelope".into(),
+            response_id: "response".into(),
+            announced_at_ms: 0,
+            kind: ArrivalKind::InterAgent,
+            label: "/root/scout".into(),
+            text: None,
+            source: ArrivalSource::Captured {
+                blocks: vec![capture.clone()],
+            },
+        });
+        let title = FeedEntry::feed_title(&arrival).to_string();
+        assert_eq!(
+            title,
+            if message_type == "MESSAGE" {
+                "Message from /root/scout".into()
+            } else {
+                format!("Message from /root/scout ({message_type})")
+            }
+        );
+        assert!(!arrival.has_formatted_output());
+        for mode in [OutputMode::Raw, OutputMode::Fmt] {
+            let body = FeedEntry::feed_body(&arrival, u16::MAX, &HashSet::new(), mode);
+            assert!(body.header.is_none());
+            assert!(body.controls.is_empty());
+            assert_eq!(
+                body.lines
+                    .iter()
+                    .map(|line| line.line.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                payload
+            );
+        }
+        assert_eq!(
+            crate::history_cell::output_provenance::raw_cell_lines(&arrival, u16::MAX)
+                .iter()
+                .map(|line| line.line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            capture
+        );
+        let cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(arrival)];
+        let mut view = TranscriptView::default();
+        for width in [104, 32, 104] {
+            tests::render(&mut view, &cells, width, 30);
+            let layout = view.current_layout(&cells, 0).unwrap();
+            assert!(
+                !layout
+                    .fold_targets()
+                    .iter()
+                    .any(|target| { matches!(target, FoldTarget::OutputMode(_)) })
+            );
+            assert!(!layout.text().contains("Context"));
+            assert_eq!(layout.text().matches("Message Type:").count(), 1);
+        }
+    }
+    for (kind, sender, prefix) in [
+        (ArrivalKind::InterAgent, "/other", ""),
+        (
+            ArrivalKind::InterAgent,
+            "/root/scout",
+            "A quoted envelope:\n",
+        ),
+        (ArrivalKind::Injection, "/root/scout", ""),
+    ] {
+        let capture = format!(
+            "{prefix}Message Type: MESSAGE\nTask name: /root\nSender: {sender}\nPayload:\nUnchanged."
+        );
+        let arrival = crate::history_cell::ArrivalCell::new(ArrivalItem {
+            placement: None,
+            id: "unrecognized-envelope".into(),
+            response_id: "response".into(),
+            announced_at_ms: 0,
+            kind,
+            label: "/root/scout".into(),
+            text: None,
+            source: ArrivalSource::Captured {
+                blocks: vec![capture.clone()],
+            },
+        });
+        let body = FeedEntry::feed_body(&arrival, u16::MAX, &HashSet::new(), OutputMode::Raw);
+        assert!(
+            body.lines
+                .iter()
+                .map(|line| line.line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .ends_with(&capture)
+        );
+    }
+
     crate::terminal_palette::with_test_default_colors(
         crate::terminal_probe::DefaultColors {
             fg: (230, 230, 230),

@@ -93,7 +93,7 @@ pub(crate) fn captured_lines(
 }
 
 pub(crate) fn captured_blocks(
-    blocks: &[String],
+    blocks: &[impl AsRef<str>],
     author: ContextAuthor,
     mode: OutputMode,
 ) -> Vec<HyperlinkLine> {
@@ -102,7 +102,7 @@ pub(crate) fn captured_blocks(
         if blocks.len() > 1 {
             lines.push(client_notice(&format!("Text block {}", index + 1)));
         }
-        lines.extend(captured_lines(text, author, mode));
+        lines.extend(captured_lines(text.as_ref(), author, mode));
     }
     lines
 }
@@ -196,7 +196,10 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
         return preamble.source_lines(OutputMode::Raw);
     }
     if let Some(arrival) = any.downcast_ref::<super::ArrivalCell>() {
-        return arrival.context_lines(width, OutputMode::Raw);
+        return crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
+            &arrival.source_lines(OutputMode::Raw),
+            crate::wrapping::RtOptions::new(width.saturating_sub(2).max(1) as usize),
+        );
     }
     if let Some(output) = any.downcast_ref::<super::ToolOutputCell>() {
         return output.output_lines(width, OutputMode::Raw);
