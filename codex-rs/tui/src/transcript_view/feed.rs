@@ -88,6 +88,9 @@ pub(crate) trait FeedEntry {
     fn feed_body(&self, _width: u16, _expanded: &FoldState, _mode: OutputMode) -> ActivityParts {
         ActivityParts::default()
     }
+    fn feed_marker(&self) -> Option<Span<'static>> {
+        None
+    }
 }
 
 pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
@@ -1261,13 +1264,25 @@ impl FeedIndex {
             .next()
             .unwrap_or_else(|| HeaderRows::label(Line::default(), 0..0));
         let used = first.line.width();
+        let marker = matches!(item.kind, Kind::Entry { .. })
+            .then(|| {
+                header
+                    .scope
+                    .first()
+                    .and_then(|index| feed_entry(cells.get(*index)?.as_ref()))
+                    .and_then(FeedEntry::feed_marker)
+            })
+            .flatten();
+        let marker_width = marker.as_ref().map_or(0, Span::width);
         let mut spans = vec![
             clock.map_or_else(
                 || " ".repeat(usize::from(CLOCK_COLUMNS)).into(),
                 HistoryTimestamp::span,
             ),
-            " ".repeat(usize::from(TITLE_COLUMN - CLOCK_COLUMNS)).into(),
+            " ".repeat(usize::from(TITLE_COLUMN - CLOCK_COLUMNS).saturating_sub(marker_width))
+                .into(),
         ];
+        spans.extend(marker);
         if let Some(source) = &mut first.source {
             source.prefix_bytes += spans.iter().map(|span| span.content.len()).sum::<usize>();
         }

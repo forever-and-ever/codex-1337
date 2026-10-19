@@ -94,7 +94,7 @@ impl HistoryCell for TooltipHistoryCell {
 
 /// Startup metadata, including prior-session summaries and available usage resets.
 #[derive(Debug)]
-pub(crate) struct SessionNoticeCell(pub(crate) PlainHistoryCell);
+pub(crate) struct SessionNoticeCell(pub(crate) NotificationCell);
 
 impl HistoryCell for SessionNoticeCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {

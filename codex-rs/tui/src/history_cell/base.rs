@@ -95,7 +95,7 @@ impl HistoryCell for WebHyperlinkHistoryCell {
         plain_lines(self.lines.iter().map(|line| line.line.clone()))
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PrefixedWrappedHistoryCell {
     text: Text<'static>,
     initial_prefix: Line<'static>,

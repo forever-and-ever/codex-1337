@@ -545,11 +545,13 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn pending_rate_limit_reset_hint(&self) -> Option<&PlainHistoryCell> {
+    pub(super) fn pending_rate_limit_reset_hint(&self) -> Option<&history_cell::NotificationCell> {
         self.pending_rate_limit_reset_hint.as_ref()
     }
 
-    pub(crate) fn take_pending_rate_limit_reset_hint(&mut self) -> Option<PlainHistoryCell> {
+    pub(crate) fn take_pending_rate_limit_reset_hint(
+        &mut self,
+    ) -> Option<history_cell::NotificationCell> {
         let hint = self.pending_rate_limit_reset_hint.take()?;
         self.bump_active_cell_revision();
         Some(hint)

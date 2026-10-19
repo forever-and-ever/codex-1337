@@ -326,7 +326,7 @@ async fn farm_receipt_reconciles_identity_and_draft_without_steering_or_navigati
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join("\n");
-    insta::assert_snapshot!(text, @"Farmed to /root/farm_1 · child-id");
+    insta::assert_snapshot!(text, @"• Farmed to /root/farm_1 · child-id");
 
     #[cfg(target_os = "linux")]
     {

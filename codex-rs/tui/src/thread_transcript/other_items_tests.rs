@@ -204,6 +204,6 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
       └ A diagram of the history pages
     • Completed `/root/reviewer`
     << Code review finished: No findings >>
-    Context compacted
+    • Context compacted
     ");
 }

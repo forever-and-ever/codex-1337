@@ -319,14 +319,12 @@ impl HistoryCell for DeprecationNoticeCell {
         lines
     }
 }
-pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHistoryCell {
-    let mut line = vec!["• ".dim(), message.into()];
+pub(crate) fn new_info_event(message: String, hint: Option<String>) -> NotificationCell {
+    let mut line = Line::from(message);
     if let Some(hint) = hint {
-        line.push(" ".into());
-        line.push(hint.dark_gray());
+        line.push_span(format!(" {hint}"));
     }
-    let lines: Vec<Line<'static>> = vec![line.into()];
-    PlainHistoryCell::new(lines)
+    NotificationCell::new(line)
 }
 
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {

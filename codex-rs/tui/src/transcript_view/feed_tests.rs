@@ -324,7 +324,8 @@ fn steps_fold_under_one_header_with_their_figures() {
                 "Alarm",
                 "Context compacted",
             ] {
-                if let Some(column) = line.find(label) {
+                if let Some(offset) = line.find(label) {
+                    let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
                     assert_eq!(
                         column,
                         usize::from(crate::transcript_geometry::TITLE_COLUMN),
@@ -806,6 +807,18 @@ fn steps_fold_under_one_header_with_their_figures() {
             message: "Farmed to /root/farm_1".into(),
         }),
         script_block("farm-after", None, Some("after farming")),
+        Arc::new(crate::history_cell::new_info_event(
+            "Model interrupted to submit steer instructions.".into(),
+            None,
+        )),
+        Arc::new(crate::history_cell::CompactionCell {
+            id: "notification-layout".into(),
+            elapsed: None,
+        }),
+        Arc::new(crate::history_cell::WorkStatusCell::new(
+            "Checking notifications".into(),
+            None,
+        )),
     ];
     let mut view = TranscriptView::default();
     view.record_step_admission(step(
@@ -817,11 +830,35 @@ fn steps_fold_under_one_header_with_their_figures() {
     for width in [104, 40] {
         let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
         let shown = crate::transcript_view::tests::text(&buffer);
-        let line = shown.lines().find(|line| line.contains("Farmed")).unwrap();
-        assert_eq!(
-            line.find("Farmed").unwrap(),
-            usize::from(crate::transcript_geometry::TITLE_COLUMN),
-        );
+        for label in [
+            "Farmed",
+            "Model interrupted",
+            "Context compacted",
+            "Activity",
+        ] {
+            let (row, line) = shown
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(label))
+                .unwrap();
+            let offset = line.find(label).unwrap();
+            let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
+            assert_eq!(
+                column,
+                usize::from(crate::transcript_geometry::TITLE_COLUMN),
+                "{line}"
+            );
+            if label != "Activity" {
+                let row = u16::try_from(row).unwrap();
+                let column = u16::try_from(column).unwrap();
+                for column in [column - 2, column] {
+                    let cell = &buffer[(column, row)];
+                    assert_eq!(cell.fg, ratatui::style::Color::Yellow);
+                    assert!(cell.modifier.contains(ratatui::style::Modifier::BOLD));
+                }
+                assert!(line[..offset].ends_with("• "));
+            }
+        }
         assert_eq!(shown.matches("Code Mode").count(), 2, "{shown}");
         assert!(
             view.current_layout(&cells, 1)

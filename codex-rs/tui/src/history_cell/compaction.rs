@@ -1,9 +1,6 @@
 use super::HistoryCell;
 use crate::transcript_view::FeedEntry;
 use crate::transcript_view::HeaderDisclosure;
-use crate::wrapping::RtOptions;
-use crate::wrapping::adaptive_wrap_lines;
-use ratatui::style::Color;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use std::time::Duration;
@@ -16,7 +13,7 @@ pub(crate) struct CompactionCell {
 
 impl CompactionCell {
     fn heading(&self) -> Line<'static> {
-        let mut line = Line::from("Context compacted".bold()).fg(Color::Yellow);
+        let mut line = Line::from("Context compacted");
         if let Some(elapsed) = self.elapsed {
             line.push_span(
                 format!(
@@ -26,13 +23,13 @@ impl CompactionCell {
                 .dim(),
             );
         }
-        crate::render::header::paint(line)
+        super::notification::title(line)
     }
 }
 
 impl HistoryCell for CompactionCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        adaptive_wrap_lines(vec![self.heading()], RtOptions::new(usize::from(width)))
+        super::NotificationCell::new(self.heading()).display_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
@@ -56,5 +53,9 @@ impl FeedEntry for CompactionCell {
 
     fn feed_title(&self) -> Line<'static> {
         self.heading()
+    }
+
+    fn feed_marker(&self) -> Option<ratatui::text::Span<'static>> {
+        Some(super::notification::marker())
     }
 }

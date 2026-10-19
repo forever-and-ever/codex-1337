@@ -152,6 +152,8 @@ pub(crate) use responding::streaming_item_id;
 
 mod image_generation;
 mod notices;
+pub(crate) mod notification;
+pub(crate) use notification::NotificationCell;
 mod patches;
 mod plans;
 mod preamble;
