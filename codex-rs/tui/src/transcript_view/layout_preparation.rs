@@ -435,6 +435,7 @@ impl TranscriptView {
                 let mut header = header;
                 let content = if header.as_mut().is_some_and(|header| {
                     header.keep_empty_code_mode_open(
+                        &cell,
                         invocations,
                         &expanded_parts,
                         full_content,
