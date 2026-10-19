@@ -198,7 +198,7 @@ class Capture:
                         cells,
                         pack.resolve(raw["fg"], True, f"{at} fg"),
                         pack.resolve(raw["bg"], False, f"{at} bg"),
-                        frozenset(Mod(m) for m in raw["mods"]),
+                        frozenset(Mod(m) for m in (*raw["mods"], *pack.source.style.get(raw["fg"], ()))),
                     )
                 )
             actual = sum(run.width for run in runs)

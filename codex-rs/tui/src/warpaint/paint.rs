@@ -33,7 +33,6 @@ macro_rules! family {
             const TOKENS: u8 = $base;
 
             /// The member's key in pack files and `roles.json`.
-            #[cfg(test)]
             pub(crate) fn key(self) -> &'static str {
                 match self {
                     $(Self::$member => stringify!($key).trim_start_matches("r#"),)+
@@ -46,6 +45,18 @@ macro_rules! family {
 
             fn from_token(token: u8) -> Option<Self> {
                 Self::ALL.get(usize::from(token.checked_sub(Self::TOKENS)?)).copied()
+            }
+        }
+
+        /// A member as pack files spell it: by its key.
+        impl<'de> Deserialize<'de> for $family {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                let key = String::deserialize(deserializer)?;
+                Self::ALL
+                    .iter()
+                    .copied()
+                    .find(|member| member.key() == key)
+                    .ok_or_else(|| serde::de::Error::custom(format!("no member is called {key:?}")))
             }
         }
 

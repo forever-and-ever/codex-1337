@@ -1,0 +1,67 @@
+stance = """
+Prominence: at totality the chromosphere burns red-pink at the rim. One saturated prominence rank; everything else ash, with the horizon banded orange.
+"""
+
+[ground]
+hue = 265
+colorfulness = 0.5
+lightness = 9.0
+
+[ink]
+hue = 260
+colorfulness = 0.6
+contrast = 87
+
+[voice]
+colorfulness = 13
+lean = 0.9
+naturalism = 0.4
+
+[hues]
+accent = 350
+link = 215
+success = 150
+caution = 95
+failure = 20
+info = 235
+keyword = 350
+function = 190
+type = 125
+string = 85
+number = 355
+attribute = 290
+comment = 265
+prompt = 350
+aside = 25
+subagent = 200
+constant = 5
+
+[livery]
+count = 8
+
+[ranks.ash]
+members = ["function", "type", "string", "attribute"]
+lc = 58
+gain = 0.12
+naturalism = 0.2
+least = 0
+
+[ranks.prominence]
+members = ["keyword", "constant", "number"]
+lc = 68
+gain = 2.2
+naturalism = 0.1
+least = 0
+
+[gain]
+comment = 0.05
+punctuation = 0.2
+variable = 0.2
+
+[surfaces]
+band_tint = 7.0
+selection_rise = 7.5
+selection_tint = 3.0
+
+[style]
+constant = ["bold"]

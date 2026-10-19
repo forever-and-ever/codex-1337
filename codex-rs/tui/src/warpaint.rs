@@ -224,3 +224,73 @@ pub(crate) fn bind_history_line(
 pub(crate) fn revoke(terminal: &mut impl Write) -> io::Result<()> {
     with_warpaint(|warpaint| warpaint.investiture.revoke(terminal))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::custom_terminal::Terminal;
+    use crate::test_backend::VT100Backend;
+    use pretty_assertions::assert_eq;
+    use ratatui::layout::Rect;
+    use ratatui::style::Modifier;
+    use ratatui::widgets::Paragraph;
+    use ratatui::widgets::Widget;
+
+    use super::capture;
+
+    #[test]
+    fn previewing_and_cancelling_rebinds_pack_style_over_unchanged_frames() {
+        // Slag, the default, sets constants bold; eclipse styles no syntax class.
+        let slag =
+            crate::render::highlight::resolve_theme_by_name("slag", /*codex_home*/ None)
+                .expect("slag");
+        crate::render::highlight::set_syntax_theme(slag);
+        let params = crate::theme_picker::build_theme_picker_params(
+            Some("slag"),
+            /*codex_home*/ None,
+            /*terminal_width*/ None,
+        );
+        let eclipse = params
+            .items
+            .iter()
+            .position(|item| item.search_value.as_deref() == Some("eclipse"))
+            .expect("eclipse is listed");
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let tx = crate::app_event_sender::AppEventSender::new(tx);
+        let code = crate::render::highlight::highlight_code_to_lines("let ready = true;", "rust");
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 20, /*height*/ 1,
+        );
+        let mut terminal =
+            Terminal::with_options(VT100Backend::new(area.width, area.height)).expect("terminal");
+        terminal.set_viewport_area(area);
+        // The frame as painted, and which of `let` and `true` the bound frame shows bold.
+        let mut draw = || {
+            let (drawn, source) = capture::unbound(|| {
+                terminal.draw(|frame| {
+                    Paragraph::new(code.clone()).render(frame.area(), frame.buffer_mut());
+                })
+            });
+            drawn.expect("draw");
+            let bold = |columns: std::ops::Range<u16>| {
+                columns
+                    .map(|x| {
+                        terminal.previous_buffer()[(x, 0)]
+                            .modifier
+                            .contains(Modifier::BOLD)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            (source, bold(0..3), bold(12..16))
+        };
+
+        let (worn, keyword, constant) = draw();
+        assert_eq!((keyword, constant), (vec![false; 3], vec![true; 4]));
+        (params.on_selection_changed.as_ref().expect("previews"))(eclipse, &tx);
+        let (previewed, keyword, constant) = draw();
+        assert_eq!((keyword, constant), (vec![false; 3], vec![false; 4]));
+        (params.on_cancel.as_ref().expect("cancels"))(&tx);
+        let (restored, keyword, constant) = draw();
+        assert_eq!((keyword, constant), (vec![false; 3], vec![true; 4]));
+        assert_eq!((&previewed, &restored), (&worn, &worn));
+    }
+}

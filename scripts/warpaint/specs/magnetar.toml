@@ -1,12 +1,11 @@
 stance = """
-A field strong enough to light the sky: a blue-black ground, a cold aurora for the voice,
-and the code in auroral magenta, nitrogen violet, flare orange and ice.
+A magnetar seen from further out: the blue-black canvas drops to the edge of black while the aurora keeps every volt, so the page is darkness with weather in it.
 """
 
 [ground]
 hue = 225
-colorfulness = 3
-lightness = 12
+colorfulness = 3.0
+lightness = 9.0
 
 [ink]
 hue = 230
@@ -15,8 +14,9 @@ contrast = 86
 
 [voice]
 colorfulness = 30
-lean = 0.2
-naturalism = 0.25
+lean = 0.15
+naturalism = 0.3
+lift = 0.5
 
 [hues]
 accent = 185
@@ -38,3 +38,10 @@ subagent = 270
 
 [livery]
 count = 8
+
+[surfaces]
+trough = -2.5
+dais = 4.0
+selection_rise = 7.5
+band_tint = 3.0
+diff_tint = 7.5

@@ -1,0 +1,69 @@
+stance = """
+A charcoal drawing on indigo: everything is bone and violet at different values; one candle-amber literal and one blood number are the only warm notes. Weight and value carry the code.
+"""
+
+[ground]
+hue = 275
+colorfulness = 3.69
+lightness = 12
+
+[ink]
+hue = 95
+colorfulness = 2.2
+contrast = 84
+
+[voice]
+colorfulness = 12
+lean = 0.3
+naturalism = 0.25
+
+[hues]
+accent = 305
+link = 215
+success = 165
+caution = 88
+failure = 20
+info = 235
+keyword = 305
+function = 130
+type = 205
+string = 80
+number = 345
+attribute = 255
+comment = 275
+prompt = 305
+aside = 80
+subagent = 130
+added = 125
+removed = 345
+code = 80
+punctuation = 95
+variable = 95
+
+[livery]
+count = 8
+
+[ranks.shade]
+members = ["type", "comment", "punctuation", "variable"]
+lc = 44
+gain = 0.25
+naturalism = 0.2
+
+[ranks.body]
+members = ["function", "attribute", "keyword"]
+lc = 54
+gain = 0.5
+naturalism = 0.2
+
+[ranks.flame]
+members = ["string", "number", "constant"]
+lc = 66
+gain = 0.85
+naturalism = 0.2
+
+[gain]
+code = 0.4
+signal = 0.8
+
+[terminal]
+least = 8.0

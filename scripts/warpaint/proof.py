@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -19,11 +20,16 @@ from laws import (
     RAMP_FLOORS,
     REPELLERS,
     SIGNAL_RING,
-    TERMINAL_LEAST,
     TEXT_RING,
+    VALUE_STEP,
     WINDOWS,
+    Distinct,
+    Gain,
     Invalid,
     Pack,
+    Spec,
+    Surfaces,
+    Terminal,
     composition,
     within,
 )
@@ -69,25 +75,83 @@ def _row(label: object, s: Swatch) -> str:
     return f"| {label} | `{s.hex}` | {s.lightness:.1f} | {s.colorfulness:.1f} | {s.asked:.1f} | {s.hue:.0f} | {xterm(s.rgb)} |"
 
 
-def _apart(label: str, members: dict[str, Swatch], least: float, faults: list[str], dichromat: float | None = None) -> str:
-    """Pairwise distinctness of members; returns the report line."""
+def _apart(
+    label: str,
+    members: dict[str, Swatch],
+    least: float,
+    faults: list[str],
+    dichromat: float | None = None,
+    pairs: list[tuple[str, str]] | None = None,
+    value: Callable[[str, str], float] | None = None,
+    told: str = "",
+) -> str:
+    """Distinctness of every pair of members, or of `pairs`; returns the report line. Where `value`
+    is given, a pair nearer than `least` still stands apart when `value` gives it a step of
+    VALUE_STEP Lc or more, as `told` names it."""
     names = list(members)
+    if pairs is None:
+        pairs = [(left, right) for i, left in enumerate(names) for right in names[i + 1 :]]
     nearest = math.inf
-    for i, left in enumerate(names):
-        for right in names[i + 1 :]:
-            d = distance(members[left].rgb, members[right].rgb)
-            nearest = min(nearest, d)
-            if d < least:
+    steps: list[float] = []
+    for left, right in pairs:
+        d = distance(members[left].rgb, members[right].rgb)
+        nearest = min(nearest, d)
+        if d < least:
+            step = None if value is None else value(left, right)
+            if step is None:
                 faults.append(f"{label}: {left} and {right} are dE {d:.1f} apart, below {least:.0f}")
-            if dichromat is None:
-                continue
-            for vision in (Vision.PROTAN, Vision.DEUTAN):
-                seen = distance(members[left].rgb, members[right].rgb, vision)
-                if seen < dichromat:
-                    faults.append(
-                        f"{label}: {left} and {right} are dE {seen:.1f} apart for a {vision}, below {dichromat:.0f}"
-                    )
-    return f"- {label}: least dE {nearest:.1f}, floor {least:.0f}"
+            elif step < VALUE_STEP:
+                faults.append(
+                    f"{label}: {left} and {right} are dE {d:.1f} apart, below {least:.0f}, "
+                    f"and {told} by {step:.1f} Lc, below {VALUE_STEP:.0f}"
+                )
+            else:
+                steps.append(step)
+        if dichromat is None:
+            continue
+        for vision in (Vision.PROTAN, Vision.DEUTAN):
+            seen = distance(members[left].rgb, members[right].rgb, vision)
+            if seen < dichromat:
+                faults.append(f"{label}: {left} and {right} are dE {seen:.1f} apart for a {vision}, below {dichromat:.0f}")
+    line = f"- {label}: least dE {nearest:.1f}, floor {least:.0f}"
+    if steps:
+        line += f"; nearer pairs stand {told} by {min(steps):.1f} Lc or more, floor {VALUE_STEP:.0f}"
+    return line
+
+
+def _ranked(rule: Distinct, spec: Spec, members: dict[str, Swatch], lc: dict[str, float], faults: list[str]) -> list[str]:
+    """The syntax rule as the spec's ranks partition it: within the voice, within each rank, and
+    across levels."""
+    if not spec.ranks:
+        return [_apart(rule.label, members, spec.voice.least, faults)]
+    ranks = [(f"in rank {rank.name}", rank.least, [str(m) for m in rank.members if m in rule.roles]) for rank in spec.ranks]
+    ranked = {name for _, _, names in ranks for name in names}
+    levels = [("in the voice", spec.voice.least, [name for name in members if name not in ranked]), *ranks]
+    lines = [
+        _apart(f"{rule.label} {where}", {name: members[name] for name in names}, least, faults)
+        for where, least, names in levels
+        if len(names) > 1
+    ]
+    across = [
+        (left, right)
+        for i, (_, _, lower) in enumerate(levels)
+        for _, _, upper in levels[i + 1 :]
+        for left in lower
+        for right in upper
+    ]
+    if across:
+        lines.append(
+            _apart(
+                f"{rule.label} across levels",
+                members,
+                rule.least,
+                faults,
+                pairs=across,
+                value=lambda left, right: abs(lc[left] - lc[right]),
+                told="apart in level",
+            )
+        )
+    return lines
 
 
 def prove(pack: Pack) -> tuple[str, list[str]]:
@@ -116,8 +180,29 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         if role in (*TEXT_RING, *SIGNAL_RING) and s.colorfulness < s.asked - 1.0:
             advisories.append(f"{role} yields M {s.asked:.1f} to {s.colorfulness:.1f} at the edge of the gamut")
 
+    if spec.ranks:
+        voiced = next(rule for rule in DISTINCT if rule.ranked).roles
+        lines += ["", "## ranks", "", "| rank | classes | Lc | gain | naturalism | least dE |", "|---|---|---|---|---|---|"]
+        lines += [
+            f"| {r.name} | {', '.join(m.value for m in r.members)} | {r.lc:g} | {r.gain:g} | {r.naturalism:g} | "
+            f"{f'{r.least:g}' if sum(m in voiced for m in r.members) > 1 else '-'} |"
+            for r in spec.ranks
+        ]
+    for title, column, stated, doctrine in (
+        ("gain", "family", spec.gain, Gain()),
+        ("surfaces", "surface", spec.surfaces, Surfaces()),
+        ("terminal", "law", spec.terminal, Terminal()),
+    ):
+        laws = {f: getattr(doctrine, f) for f in doctrine.__dataclass_fields__}
+        if moved := [(f, getattr(stated, f), law) for f, law in laws.items() if getattr(stated, f) != law]:
+            lines += ["", f"## {title}", "", f"| {column} | spec | doctrine |", "|---|---|---|"]
+            lines += [f"| {f.replace('_', ' ')} | {mine:g} | {law:g} |" for f, mine, law in moved]
+    if spec.style:
+        lines += ["", "## style", "", "| class | modifiers |", "|---|---|"]
+        lines += [f"| {syntax} | {', '.join(modifiers)} |" for syntax, modifiers in spec.style.items()]
+
     lines += ["", "## contrast", "", "| text | ground | Lc | floor |", "|---|---|---|---|"]
-    floors = composition(spec.ink.contrast)
+    floors = composition(spec.ink.contrast, spec.ranks)
 
     def contrast(text: object, swatch: Swatch, ground: object, floor: float | None) -> None:
         lc = float(apca(swatch.array, roles[ground].array))
@@ -146,12 +231,24 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
                 contrast(f"{ramp} {index}", swatch, ground, held.get(ground))
 
     lines += ["", "## distinctness", ""]
+    lc = {str(role): float(apca(swatch.array, canvas.array)) for role, swatch in roles.items()}
+    ink = str(Figure.INK)
+
+    def beneath(left: str, right: str) -> float:
+        """How far the nearer to prose of two roles sits below the ink, in Lc over the canvas."""
+        return min(lc[ink] - lc[name] for name in (left, right) if name != ink)
+
     for rule in DISTINCT:
-        lines.append(_apart(rule.label, {str(role): roles[role] for role in rule.roles}, rule.least, faults, rule.dichromat))
+        members = {str(role): roles[role] for role in rule.roles}
+        if rule.ranked:
+            lines += _ranked(rule, spec, members, lc, faults)
+            continue
+        value = beneath if rule.beneath else None
+        lines.append(_apart(rule.label, members, rule.least, faults, rule.dichromat, value=value, told="beneath prose"))
     normal = {f"terminal {slot}": pack.terminal[slot] for slot in range(1, 7)}
     bright = {f"terminal {slot}": pack.terminal[slot] for slot in range(9, 15)}
-    lines.append(_apart("terminal", normal, TERMINAL_LEAST, faults))
-    lines.append(_apart("terminal brights", bright, TERMINAL_LEAST, faults))
+    lines.append(_apart("terminal", normal, spec.terminal.least, faults))
+    lines.append(_apart("terminal brights", bright, spec.terminal.least, faults))
     step = min((distance(pack.terminal[slot].rgb, pack.terminal[slot + 8].rgb), slot) for slot in range(1, 7))
     lines.append(f"- terminal brights from their slots: least dE {step[0]:.1f} (slot {step[1]}), floor {BRIGHT_LEAST:.0f}")
     if step[0] < BRIGHT_LEAST:

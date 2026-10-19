@@ -26,6 +26,15 @@
     ],
     [
       {"text": "                  ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "12 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "     ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "match", "fg": "syntax:keyword", "bg": "reset", "mods": []},
+      {"text": " op ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "{", "fg": "syntax:punctuation", "bg": "reset", "mods": []},
+      {"text": "                                                                ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                  ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "13 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "         Op", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "::", "fg": "syntax:punctuation", "bg": "reset", "mods": []},
@@ -114,15 +123,8 @@
       {"text": "Message", "fg": "rgb:#ffffff", "bg": "reset", "mods": ["bold"]},
       {"text": " from ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "reviewer                                      ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "   ≈16", "fg": "rgb:#2d3a48", "bg": "reset", "mods": []},
+      {"text": "   ≈16", "fg": "rgb:#352f2c", "bg": "reset", "mods": []},
       {"text": "                       ", "fg": "reset", "bg": "reset", "mods": []}
-    ],
-    [
-      {"text": "              Context ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "[Raw]", "fg": "rgb:#ffffff", "bg": "reset", "mods": ["bold", "underline"]},
-      {"text": " ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "[Fmt]", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "                                                                   ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "              Checked the binding powers against the grammar: only unary minus was out of order.    ", "fg": "reset", "bg": "ground:subagent", "mods": []}

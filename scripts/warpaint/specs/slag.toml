@@ -1,0 +1,71 @@
+stance = """
+Slag: amber constants burn bold at the bottom; the rest of the code sinks below the warm grey prose.
+"""
+
+[ground]
+hue = 45
+colorfulness = 1.0
+lightness = 9.0
+
+[ink]
+hue = 65
+colorfulness = 1.5
+contrast = 86
+
+[voice]
+colorfulness = 19
+lean = 0.6
+naturalism = 0.45
+
+[hues]
+accent = 65
+link = 60
+success = 155
+caution = 100
+failure = 5
+info = 235
+keyword = 55
+function = 60
+type = 50
+string = 45
+number = 65
+attribute = 55
+comment = 45
+prompt = 65
+aside = 45
+subagent = 25
+constant = 65
+
+[livery]
+count = 8
+
+[ranks.sunk]
+members = ["type", "string", "number", "comment"]
+lc = 44
+gain = 0.12
+naturalism = 0.1
+least = 0
+
+[ranks.body]
+members = ["variable", "attribute", "function", "keyword"]
+lc = 54
+gain = 0.25
+naturalism = 0.1
+least = 0
+
+[ranks.crown]
+members = ["constant"]
+lc = 80
+gain = 1.8
+naturalism = 0.1
+
+[gain]
+code = 0.3
+signal = 0.6
+
+[surfaces]
+dais = 4.0
+band_tint = 2.4
+
+[style]
+constant = ["bold"]

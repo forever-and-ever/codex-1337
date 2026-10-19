@@ -4,6 +4,9 @@ A capture names colors the way the TUI's cells hold them before binding: `ground
 `figure:<key>` and `syntax:<key>` for tokens, `heat:<step>` and `livery:<slot>` for ramps,
 `terminal:<index>` for tool output's sixteen colors, `xterm:<index>` for its extended ones,
 `rgb:#rrggbb` for literals, and `reset` for the default ink or canvas.
+
+A pack's `[style]` gives syntax classes modifiers, which the TUI adds wherever a cell's foreground
+is the class; captures, taken before binding, never carry them.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from pathlib import Path
 _DECLARED = json.loads((Path(__file__).resolve().parent / "roles.json").read_text())
 FAMILIES: dict[str, tuple[str, ...]] = {family: tuple(_DECLARED[family]) for family in ("ground", "figure", "syntax")}
 RAMPS = ("livery", "heat", "terminal")
+STYLES = ("bold", "italic")
 
 
 def _xterm(index: int) -> str:
@@ -34,19 +38,26 @@ class Pack:
     colors: dict[str, str]
     """`family:key` to `#rrggbb`."""
     ramps: dict[str, tuple[str, ...]]
+    style: dict[str, frozenset[str]]
+    """`syntax:key` to the modifiers the TUI adds to that class."""
 
     @classmethod
     def load(cls, path: Path) -> Pack:
         raw = tomllib.loads(path.read_text())
+        style = raw.pop("style", {})
         if set(raw) != {*FAMILIES, *RAMPS}:
             raise SystemExit(f"{path}: expected {sorted({*FAMILIES, *RAMPS})}, found {sorted(raw)}")
         for family, keys in FAMILIES.items():
             if set(raw[family]) != set(keys):
                 raise SystemExit(f"{path}: [{family}] differs from roles.json")
+        for key, modifiers in style.items():
+            if key not in FAMILIES["syntax"] or not modifiers or not set(modifiers) <= set(STYLES):
+                raise SystemExit(f"{path}: [style] {key} must be a syntax class given some of {list(STYLES)}")
         return cls(
             path.stem,
             {f"{family}:{key}": raw[family][key] for family, keys in FAMILIES.items() for key in keys},
             {ramp: tuple(raw[ramp]) for ramp in RAMPS},
+            {f"syntax:{key}": frozenset(modifiers) for key, modifiers in style.items()},
         )
 
     def resolve(self, color: str, foreground: bool) -> str:

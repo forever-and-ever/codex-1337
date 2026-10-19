@@ -1,0 +1,44 @@
+stance = """
+Totality: the page and the code are ash, and the only colour left is the horizon's banded glow, each band a different sheet.
+"""
+
+[ground]
+hue = 265
+colorfulness = 0.5
+lightness = 9.0
+
+[ink]
+hue = 260
+colorfulness = 0.6
+contrast = 87
+
+[voice]
+colorfulness = 13
+lean = 0.9
+naturalism = 0.4
+
+[hues]
+accent = 25
+link = 215
+success = 150
+caution = 95
+failure = 355
+info = 235
+keyword = 25
+function = 190
+type = 125
+string = 85
+number = 350
+attribute = 290
+comment = 265
+prompt = 25
+aside = 200
+subagent = 150
+
+[livery]
+count = 8
+
+[surfaces]
+band_tint = 6.0
+selection_rise = 7.5
+selection_tint = 3.0

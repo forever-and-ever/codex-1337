@@ -119,9 +119,14 @@ fn runs(frame: &Buffer, y: u16, pack: &Pack, binder: &mut Binder) -> Vec<(String
         }
         let cell = &frame[(x, y)];
         let (fg, bg, modifier) = Source::of_cell(cell.fg, cell.bg, cell.modifier);
+        let styled = pack
+            .style
+            .iter()
+            .filter(|&&(syntax, _)| fg == Source::Paint(Paint::Syntax(syntax)))
+            .fold(modifier, |modifier, &(_, style)| modifier | style);
         assert!(
             binder.bind(cell.fg, cell.bg, cell.modifier)
-                == (shown(pack, fg, false), shown(pack, bg, true), modifier),
+                == (shown(pack, fg, false), shown(pack, bg, true), styled),
             "the binder disagrees with {} on {} at ({x}, {y})",
             name_of(fg),
             name_of(bg)

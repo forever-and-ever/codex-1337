@@ -48,16 +48,18 @@ DIFF_BAND = 1.5
 SELECTION_RISE = 9.0
 """Elevations in CAM16-UCS J' from the canvas. A surface is the ground's material raised or
 recessed at constant hue and saturation, so a lit surface reads as the same paint in more light
-rather than as a different paint."""
+rather than as a different paint. A spec's `[surfaces]` may move the trough, dais and selection."""
 
 BAND_TINT = 2.8
 SELECTION_TINT = 9.0
 """Colorfulness a band adds toward its hue, as a vector in the appearance plane: a band is the
 ground tinted, not a color laid over it. The selection bar keeps the colors of the row it
-selects, so it is a lit band of the ground and never a light chip."""
+selects, so it is a lit band of the ground and never a light chip. A spec's `[surfaces]` may
+move either."""
 DIFF_TINT = 7.0
 """Colorfulness of a diff band, which takes its ink's hue outright: a removed line must read as
-the removed hue on every ground, not as that hue mixed with the page."""
+the removed hue on every ground, not as that hue mixed with the page. A spec's `[surfaces]`
+may move it."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""
@@ -102,7 +104,22 @@ class Distinct:
     roles: tuple[Paint, ...]
     least: float
     dichromat: float | None = None
+    beneath: bool = False
+    """Whether a pair nearer than `least` still stands apart where every member but the ink sits
+    beneath prose by value, VALUE_STEP or more below the ink over the canvas."""
+    ranked: bool = False
+    """Whether ranks partition the rule: it holds among the classes no rank holds at the voice's
+    least, each rank holds its own classes to the rank's least, and classes of different ranks
+    stand `least` apart or VALUE_STEP apart in Lc, told apart by level."""
 
+
+SYNTAX_LEAST = 9.0
+"""Least dE between two syntax classes the voice speaks at one level; a spec's voice or rank
+may state its own."""
+VALUE_STEP = 5.0
+"""Lc over the canvas that tells two colors apart by value alone. Inline code that far below the
+ink is set apart from prose, recessive classes that far below it may share a tone, and syntax
+classes of different ranks that far apart in Lc are told apart by level."""
 
 DISTINCT = (
     Distinct("status", (Figure.SUCCESS, Figure.CAUTION, Figure.FAILURE, Figure.INFO), 14.0, 6.0),
@@ -112,12 +129,13 @@ DISTINCT = (
     Distinct(
         "syntax",
         (Syntax.KEYWORD, Syntax.FUNCTION, Syntax.TYPE, Syntax.STRING, Syntax.NUMBER, Syntax.ATTRIBUTE),
-        9.0,
+        SYNTAX_LEAST,
+        ranked=True,
     ),
-    Distinct("code recession", (Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE), 5.0),
+    Distinct("code recession", (Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE), 5.0, beneath=True),
     Distinct("surfaces", SURFACES, 2.0),
     Distinct("ink ladder", (Figure.INK, Figure.INK_MUTED, Figure.INK_FAINT), 8.0),
-    Distinct("code against prose", (Figure.CODE, Figure.INK), 10.0),
+    Distinct("code against prose", (Figure.CODE, Figure.INK), 10.0, beneath=True),
 )
 
 SYNTAX_VOICE = (
@@ -138,9 +156,10 @@ BANDS = (Ground.PROMPT, Ground.REASONING, Ground.ASIDE, Ground.SUBAGENT)
 AUTHORED = (*TEXT_RING, *SIGNAL_RING, Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE, *BANDS, Figure.CODE)
 
 
-def composition(ink: float) -> dict[Paint, Floors]:
+def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]:
     """Every ground the TUI paints each text role on, with the Lc it must reach there. The solver
-    lifts each role to this table and the proof checks it, so the two cannot disagree."""
+    lifts each role to this table and the proof checks it, so the two cannot disagree. A rank's
+    classes take code's floors at the rank's Lc in place of their own."""
     body, secondary, tertiary = ink, ink * INK_MUTED, ink * INK_FAINT
 
     def ladder(tier: float) -> Floors:
@@ -170,7 +189,7 @@ def composition(ink: float) -> dict[Paint, Floors]:
         """`floors` and both diff bands at `floor`: highlighted code carries the role into diffs."""
         return (*floors, (Ground.ADDED, floor), (Ground.REMOVED, floor))
 
-    return {
+    table = {
         Figure.INK: (*ladder(body - 1), (Ground.ADDED, body - 6), (Ground.REMOVED, body - 6)),
         Figure.INK_MUTED: (*ladder(secondary - 1), (Ground.ADDED, secondary - 6), (Ground.REMOVED, secondary - 6)),
         Figure.INK_FAINT: (*ladder(tertiary - 1), (Ground.ADDED, tertiary - 6), (Ground.REMOVED, tertiary - 6)),
@@ -224,6 +243,10 @@ def composition(ink: float) -> dict[Paint, Floors]:
         Syntax.PUNCTUATION: tuple((g, secondary - 6) for g, _ in code),
         Syntax.VARIABLE: tuple((g, body - 10) for g, _ in code),
     }
+    for rank in ranks:
+        for member in rank.members:
+            table[member] = tuple((g, rank.lc + f - VOICE) for g, f in code)
+    return table
 
 
 RAMP_FLOORS: dict[str, Floors] = {
@@ -284,12 +307,68 @@ class VoiceSpec:
     M(h) = M (1 + lean cos(h - accent)), everywhere but the alarms and the diff. naturalism
     moves each hue off the common lightness toward its own natural lightness, the J_HK of its
     gamut cusp, by that fraction of its difference from the accent's; 0 is a strict
-    iso-lightness ring. lift raises the solved rings by that much J_HK."""
+    iso-lightness ring. lift raises the solved rings by that much J_HK. least is the least dE
+    between the syntax classes the voice speaks, those no rank holds."""
 
     colorfulness: float
     lean: float
     naturalism: float
     lift: float
+    least: float
+
+
+@dataclass(frozen=True, slots=True)
+class Rank:
+    """Syntax classes re-levelled together, out of the voice: they read at Lc `lc` over their
+    own ground where the voice reads at VOICE, ask `gain` times the voice's colorfulness, leave
+    the rank's common lightness by `naturalism` as the voice's rings do, and stand `least` dE
+    apart. A rank of 0 least is one tone, told from the others by level alone."""
+
+    name: str
+    members: tuple[Syntax, ...]
+    lc: float
+    gain: float
+    naturalism: float
+    least: float
+
+
+@dataclass(frozen=True, slots=True)
+class Gain:
+    """The colorfulness each family asks, as a multiple of the voice's for status, diff ink, tool
+    output, comments and inline code, and of the ink's for punctuation and variables, which never
+    ask less than M 6."""
+
+    signal: float = 1.0
+    diff: float = 1.0
+    terminal: float = 1.0
+    comment: float = 0.4
+    code: float = 0.6
+    punctuation: float = 1.5
+    variable: float = 2.0
+
+
+@dataclass(frozen=True, slots=True)
+class Surfaces:
+    """How the surfaces are built from the canvas: the trough's, dais's and selection bar's
+    elevations in J', and the colorfulness the bands, the selection bar and the diff bands add."""
+
+    trough: float = TROUGH
+    dais: float = DAIS
+    selection_rise: float = SELECTION_RISE
+    band_tint: float = BAND_TINT
+    selection_tint: float = SELECTION_TINT
+    diff_tint: float = DIFF_TINT
+
+
+@dataclass(frozen=True, slots=True)
+class Terminal:
+    """The least dE among tool output's six hues, and among their brights."""
+
+    least: float = TERMINAL_LEAST
+
+
+STYLES = ("bold", "italic")
+"""The modifiers a pack may give a syntax class; the TUI adds them wherever it binds the class."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -302,14 +381,21 @@ class Spec:
     hues: dict[Paint, float]
     livery: int
     arcs: tuple[Arc, ...]
+    ranks: tuple[Rank, ...]
+    gain: Gain
+    surfaces: Surfaces
+    terminal: Terminal
+    style: dict[Syntax, tuple[str, ...]]
 
     @classmethod
     def load(cls, path: Path) -> Spec:
         where = path.name
         raw = tomllib.loads(path.read_text())
 
-        def table(key: str, fields: tuple[str, ...], required: tuple[str, ...]) -> dict:
-            value = raw.get(key)
+        def table(key: str, fields: tuple[str, ...], required: tuple[str, ...], value: object = None) -> dict:
+            """`[key]`, or `value` standing for it, checked against its fields; an optional table may be absent."""
+            if value is None:
+                value = raw.get(key, None if required else {})
             if not isinstance(value, dict):
                 raise Invalid(f"{where}: missing [{key}]")
             if unknown := value.keys() - set(fields):
@@ -318,11 +404,12 @@ class Spec:
                 raise Invalid(f"{where}: [{key}] omits {sorted(missing)}")
             return value
 
-        if unknown := raw.keys() - {"stance", "ground", "ink", "voice", "hues", "livery"}:
+        tables = {"stance", "ground", "ink", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
+        if unknown := raw.keys() - tables:
             raise Invalid(f"{where}: unknown tables {sorted(unknown)}")
         ground = table("ground", ("hue", "colorfulness", "lightness"), ("hue", "colorfulness", "lightness"))
         ink = table("ink", ("hue", "colorfulness", "contrast"), ("colorfulness", "contrast"))
-        voice = table("voice", ("colorfulness", "lean", "naturalism", "lift"), ("colorfulness",))
+        voice = table("voice", ("colorfulness", "lean", "naturalism", "lift", "least"), ("colorfulness",))
         optional = (
             Figure.ADDED,
             Figure.REMOVED,
@@ -350,6 +437,38 @@ class Spec:
             Syntax.VARIABLE: ink_hue,
             Figure.CODE: authored[Syntax.STRING],
         }
+        naturalism = float(voice.get("naturalism", 0.0))
+        syntax = {member.value: member for member in Syntax}
+        ranks: list[Rank] = []
+        if not isinstance(raw.get("ranks", {}), dict):
+            raise Invalid(f"{where}: [ranks] must hold a table per rank")
+        for name, rank in raw.get("ranks", {}).items():
+            rank = table(f"ranks.{name}", ("members", "lc", "gain", "naturalism", "least"), ("members", "lc", "gain"), rank)
+            members = rank["members"]
+            if not members or not all(member in syntax for member in members):
+                raise Invalid(f"{where}: rank {name} must hold syntax classes")
+            ranks.append(
+                Rank(
+                    name,
+                    tuple(syntax[member] for member in members),
+                    float(rank["lc"]),
+                    float(rank["gain"]),
+                    float(rank.get("naturalism", naturalism)),
+                    float(rank.get("least", SYNTAX_LEAST)),
+                )
+            )
+        ranked = [member for rank in ranks for member in rank.members]
+        if len(ranked) != len(set(ranked)):
+            raise Invalid(f"{where}: a syntax class is ranked twice")
+        gain = table("gain", Gain.__dataclass_fields__, ())
+        if held := {member.value for member in ranked} & gain.keys():
+            raise Invalid(f"{where}: [gain] sets {sorted(held)}, whose ranks ask their own")
+        surfaces = table("surfaces", Surfaces.__dataclass_fields__, ())
+        terminal = table("terminal", Terminal.__dataclass_fields__, ())
+        style = table("style", tuple(syntax), ())
+        for name, modifiers in style.items():
+            if not modifiers or not set(modifiers) <= set(STYLES):
+                raise Invalid(f"{where}: [style] {name} must be some of {list(STYLES)}")
         return cls(
             name=path.stem,
             stance=str(raw["stance"]).strip(),
@@ -358,12 +477,18 @@ class Spec:
             voice=VoiceSpec(
                 float(voice["colorfulness"]),
                 float(voice.get("lean", 0.0)),
-                float(voice.get("naturalism", 0.0)),
+                naturalism,
                 float(voice.get("lift", 0.0)),
+                float(voice.get("least", SYNTAX_LEAST)),
             ),
             hues=defaults | authored,
             livery=int(livery["count"]),
             arcs=tuple((float(a), float(b)) for a, b in livery.get("arcs", [[0, 360]])),
+            ranks=tuple(ranks),
+            gain=Gain(**{key: float(value) for key, value in gain.items()}),
+            surfaces=Surfaces(**{key: float(value) for key, value in surfaces.items()}),
+            terminal=Terminal(**{key: float(value) for key, value in terminal.items()}),
+            style={syntax[name]: tuple(modifiers) for name, modifiers in style.items()},
         )
 
 
@@ -409,26 +534,26 @@ def reasoning(band: Callable[[float], Swatch], surfaces: list[Swatch]) -> Swatch
 
 
 def smelt(spec: Spec) -> Pack:
-    g, ink, voice, hues = spec.ground, spec.ink, spec.voice, spec.hues
-    floors = composition(ink.contrast)
+    g, ink, voice, hues, gain, surfaces = spec.ground, spec.ink, spec.voice, spec.hues, spec.gain, spec.surfaces
+    floors = composition(ink.contrast, spec.ranks)
     roles: dict[Paint, Swatch] = {}
     canvas = roles[Ground.CANVAS] = paint(g.lightness, g.colorfulness, g.hue)
     accent = hues[Figure.ACCENT]
 
-    for role, rise in ((Ground.TROUGH, TROUGH), (Ground.DAIS, DAIS), (Ground.RESPONSE, RESPONSE)):
+    for role, rise in ((Ground.TROUGH, surfaces.trough), (Ground.DAIS, surfaces.dais), (Ground.RESPONSE, RESPONSE)):
         roles[role] = paint(*elevated(canvas, rise), g.hue)
-    j, m = elevated(canvas, SELECTION_RISE)
-    roles[Ground.SELECTION] = paint(j, *tinted(m, g.hue, accent, SELECTION_TINT))
+    j, m = elevated(canvas, surfaces.selection_rise)
+    roles[Ground.SELECTION] = paint(j, *tinted(m, g.hue, accent, surfaces.selection_tint))
 
     def band(toward: float) -> Swatch:
         j, m = elevated(canvas, BAND)
-        return paint(j, *tinted(m, g.hue, toward, BAND_TINT))
+        return paint(j, *tinted(m, g.hue, toward, surfaces.band_tint))
 
     roles |= {role: band(hues[role]) for role in BANDS if role in hues}
     if Ground.REASONING not in roles:
         roles[Ground.REASONING] = reasoning(band, [roles[s] for s in SURFACES if s is not Ground.REASONING])
     for fill, figure in ((Ground.ADDED, Figure.ADDED), (Ground.REMOVED, Figure.REMOVED)):
-        roles[fill] = paint(elevated(canvas, DIFF_BAND)[0], DIFF_TINT, hues[figure])
+        roles[fill] = paint(elevated(canvas, DIFF_BAND)[0], surfaces.diff_tint, hues[figure])
 
     def margin(role: Paint, rgb: np.ndarray) -> np.ndarray:
         """Least Lc surplus of each candidate color over every ground the role is composed on."""
@@ -447,12 +572,19 @@ def smelt(spec: Spec) -> Pack:
     roles[Figure.RULE] = text(Figure.RULE, canvas.colorfulness * 1.6, g.hue)
 
     home = cusp(accent)
+    ranked = {member for rank in spec.ranks for member in rank.members}
+    families = (
+        ("text", tuple(role for role in TEXT_RING if role not in ranked), 1.0, voice.naturalism),
+        ("signal", SIGNAL_RING, gain.signal, voice.naturalism),
+        *((rank.name, rank.members, rank.gain, rank.naturalism) for rank in spec.ranks),
+    )
     rings = []
-    for label, members in (("text", TEXT_RING), ("signal", SIGNAL_RING)):
+    for label, members, scale, naturalism in families:
         ring_hues = np.array([hues[role] for role in members])
         leaning = np.array([role not in UNLEANED for role in members])
-        asked = voice.colorfulness * (1 + leaning * voice.lean * np.cos(np.radians(ring_hues - accent)))
-        offset = voice.naturalism * (np.array([cusp(h) for h in ring_hues]) - home)
+        diff = np.array([gain.diff if role in (Figure.ADDED, Figure.REMOVED) else 1.0 for role in members])
+        asked = voice.colorfulness * scale * diff * (1 + leaning * voice.lean * np.cos(np.radians(ring_hues - accent)))
+        offset = naturalism * (np.array([cusp(h) for h in ring_hues]) - home)
 
         def surplus(levels: np.ndarray, members=members, ring_hues=ring_hues, asked=asked, offset=offset) -> np.ndarray:
             """(levels, compositions) Lc surplus of every member over every ground it is composed on."""
@@ -474,10 +606,13 @@ def smelt(spec: Spec) -> Pack:
         for role, rgb, m in zip(members, yielding(level + offset, asked, ring_hues)[0], asked, strict=True):
             roles[role] = Swatch.of(rgb, m)
 
-    roles[Syntax.COMMENT] = text(Syntax.COMMENT, voice.colorfulness * 0.4, hues[Syntax.COMMENT])
-    roles[Syntax.PUNCTUATION] = text(Syntax.PUNCTUATION, ink.colorfulness * 1.5, hues[Syntax.PUNCTUATION])
-    roles[Syntax.VARIABLE] = text(Syntax.VARIABLE, max(ink.colorfulness * 2, 6.0), hues[Syntax.VARIABLE])
-    roles[Figure.CODE] = text(Figure.CODE, voice.colorfulness * 0.6, hues[Figure.CODE])
+    if Syntax.COMMENT not in ranked:
+        roles[Syntax.COMMENT] = text(Syntax.COMMENT, voice.colorfulness * gain.comment, hues[Syntax.COMMENT])
+    if Syntax.PUNCTUATION not in ranked:
+        roles[Syntax.PUNCTUATION] = text(Syntax.PUNCTUATION, ink.colorfulness * gain.punctuation, hues[Syntax.PUNCTUATION])
+    if Syntax.VARIABLE not in ranked:
+        roles[Syntax.VARIABLE] = text(Syntax.VARIABLE, max(ink.colorfulness * gain.variable, 6.0), hues[Syntax.VARIABLE])
+    roles[Figure.CODE] = text(Figure.CODE, voice.colorfulness * gain.code, hues[Figure.CODE])
     terminal_ring, terminal_ramp = terminal(spec, roles)
     rings.append(terminal_ring)
     ramp = livery(spec, roles, rings[0].level)
@@ -518,9 +653,10 @@ def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch
         return (float(ordered[0]), float(ordered[1]))
 
     best: tuple[tuple[float, float], np.ndarray, np.ndarray] | None = None
-    spacing = 360 / count
-    for start in range(int(spacing)):
-        h = np.round(start + spacing * np.arange(count)).astype(int) % 360
+    permitted = np.flatnonzero(allowed)
+    spacing = len(permitted) / count
+    for start in range(max(1, int(spacing))):
+        h = permitted[np.round(start + spacing * np.arange(count)).astype(int) % len(permitted)]
         r = (np.arange(count) % 2) * (len(rises) // 2)
         current = score(h, r)
         if current[0] < 0:
@@ -574,7 +710,7 @@ def terminal(spec: Spec, roles: dict[Paint, Swatch]) -> tuple[Ring, tuple[Swatch
         [spec.hues[role] for role in (Figure.FAILURE, Figure.SUCCESS, Figure.CAUTION, Figure.INFO)]
         + list(TERMINAL_HUES)
     )
-    asked = np.full(len(hues), voice.colorfulness)
+    asked = np.full(len(hues), voice.colorfulness * spec.gain.terminal)
     offset = voice.naturalism * (np.array([cusp(h) for h in hues]) - cusp(accent))
 
     def surplus(levels: np.ndarray) -> np.ndarray:

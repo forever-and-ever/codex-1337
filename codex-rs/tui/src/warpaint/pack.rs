@@ -1,10 +1,12 @@
 //! Packs: the palettes warpaint paints with. `scripts/warpaint` smelts each pack from a spec,
 //! proves every pair the vocabulary declares, and writes it here; the TUI derives no color.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::OnceLock;
 
+use ratatui::style::Modifier;
 use serde::Deserialize;
 use serde::Deserializer;
 
@@ -12,6 +14,7 @@ use super::paint::Figures;
 use super::paint::Grounds;
 use super::paint::HEAT_STEPS;
 use super::paint::Paint;
+use super::paint::Syntax;
 use super::paint::Syntaxes;
 
 /// An sRGB color, spelled `#rrggbb` in pack files.
@@ -65,6 +68,25 @@ pub(crate) struct Pack {
     pub(crate) heat: [Rgb; HEAT_STEPS],
     /// Tool output's sixteen colors, in xterm order.
     pub(crate) terminal: [Rgb; 16],
+    /// The modifiers syntax classes carry wherever they are bound, as `[style]` gives them.
+    pub(crate) style: Box<[(Syntax, Modifier)]>,
+}
+
+/// A modifier a pack may give a syntax class.
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Emphasis {
+    Bold,
+    Italic,
+}
+
+impl From<Emphasis> for Modifier {
+    fn from(emphasis: Emphasis) -> Self {
+        match emphasis {
+            Emphasis::Bold => Self::BOLD,
+            Emphasis::Italic => Self::ITALIC,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -76,6 +98,8 @@ struct PackFile {
     ground: Grounds,
     figure: Figures,
     syntax: Syntaxes,
+    #[serde(default)]
+    style: HashMap<Syntax, Vec<Emphasis>>,
 }
 
 #[derive(Debug)]
@@ -118,11 +142,19 @@ impl Pack {
             livery: file.livery.into_boxed_slice(),
             heat: file.heat,
             terminal: file.terminal,
+            style: file
+                .style
+                .into_iter()
+                .map(|(syntax, emphases)| {
+                    let modifier = emphases.into_iter().map(Modifier::from).collect();
+                    (syntax, modifier)
+                })
+                .collect(),
         })
     }
 }
 
-pub(crate) const DEFAULT: &str = "hadal";
+pub(crate) const DEFAULT: &str = "slag";
 
 /// The default pack's place in [`EMBEDDED`], and so in [`packs`]. It is found at compile time:
 /// a default that names no embedded pack fails the build.
@@ -153,18 +185,14 @@ const fn same(a: &str, b: &str) -> bool {
 
 /// Every pack in `packs/`, sorted by name.
 const EMBEDDED: &[(&str, &str)] = &[
-    ("anvil", include_str!("packs/anvil.toml")),
-    ("brine", include_str!("packs/brine.toml")),
-    ("coven", include_str!("packs/coven.toml")),
-    ("hadal", include_str!("packs/hadal.toml")),
-    ("hanko", include_str!("packs/hanko.toml")),
+    ("crucible", include_str!("packs/crucible.toml")),
+    ("eclipse", include_str!("packs/eclipse.toml")),
     ("magnetar", include_str!("packs/magnetar.toml")),
-    ("mire", include_str!("packs/mire.toml")),
-    ("plasma", include_str!("packs/plasma.toml")),
-    ("porphyry", include_str!("packs/porphyry.toml")),
-    ("rime", include_str!("packs/rime.toml")),
-    ("sanguine", include_str!("packs/sanguine.toml")),
-    ("simoom", include_str!("packs/simoom.toml")),
+    ("prominence", include_str!("packs/prominence.toml")),
+    ("shadow-play", include_str!("packs/shadow-play.toml")),
+    ("slag", include_str!("packs/slag.toml")),
+    ("sodium", include_str!("packs/sodium.toml")),
+    ("uranium", include_str!("packs/uranium.toml")),
 ];
 
 /// The embedded packs in [`EMBEDDED`]'s order, parsed once. They are generated and checked

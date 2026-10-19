@@ -291,7 +291,7 @@ login or not at all.
 
 `[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike;
 `/theme` previews packs and cancel restores the prior one. An unknown pack warns and the
-default, `hadal`, is worn. `docs/warpaint.md` describes the engine.
+default, `slag`, is worn. `docs/warpaint.md` describes the engine.
 
 Removed: foreign `.tmTheme` selection, the embedded `two_face` theme list,
 `$CODEX_HOME/themes/*.tmTheme` loading, model themes, adaptive light/dark theme choice,

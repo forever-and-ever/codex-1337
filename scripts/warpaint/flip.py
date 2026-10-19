@@ -40,7 +40,7 @@ def layer(capture: dict, pack: Pack) -> str:
     for row in capture["rows"]:
         spans = []
         for run in row:
-            mods = set(run.get("mods", []))
+            mods = set(run.get("mods", [])) | pack.style.get(run["fg"], frozenset())
             fore = pack.resolve(run["fg"], foreground=True)
             back = pack.background(run["bg"])
             if "reverse" in mods:

@@ -151,7 +151,7 @@ impl Binder {
                 binder.fg[usize::from(token)] = bound;
                 binder.bg[usize::from(token)] = bound;
             }
-            return binder;
+            return binder.styled(pack);
         }
         for (index, &rgb) in pack.terminal.iter().enumerate() {
             let shown = Bound::plain(binder.show(rgb));
@@ -188,7 +188,16 @@ impl Binder {
         binder.reset_fg = binder.fg[usize::from(Figure::Ink.token())].color;
         binder.reset_bg = binder.bg[usize::from(Ground::Canvas.token())].color;
         binder.faint = Some(binder.fg[usize::from(Figure::InkFaint.token())].color);
-        binder
+        binder.styled(pack)
+    }
+
+    /// The binder adding the pack's style to foreground syntax classes, at any depth, over the
+    /// modifiers the cell and the depth already carry.
+    fn styled(mut self, pack: &Pack) -> Self {
+        for &(syntax, modifier) in &pack.style {
+            self.fg[usize::from(syntax.token())].modifier |= modifier;
+        }
+        self
     }
 
     fn show(&mut self, rgb: Rgb) -> Color {

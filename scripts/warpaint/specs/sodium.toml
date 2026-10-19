@@ -1,0 +1,43 @@
+stance = """
+A street at three in the morning: the darkest warm-neutral page, one sodium lamp for voice and signature, and the code in the cool colours of things the lamp cannot reach.
+"""
+
+[ground]
+hue = 45
+colorfulness = 1.0
+lightness = 9.0
+
+[ink]
+hue = 65
+colorfulness = 1.5
+contrast = 86
+
+[voice]
+colorfulness = 19
+lean = 0.6
+naturalism = 0.45
+
+[hues]
+accent = 65
+link = 215
+success = 155
+caution = 100
+failure = 5
+info = 235
+keyword = 65
+function = 195
+type = 130
+string = 90
+number = 25
+attribute = 300
+comment = 45
+prompt = 65
+aside = 195
+subagent = 130
+
+[livery]
+count = 8
+
+[surfaces]
+dais = 4.0
+band_tint = 2.4

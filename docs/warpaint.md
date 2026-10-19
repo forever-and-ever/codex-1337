@@ -37,7 +37,12 @@ the pack's ink and canvas again over the default colors the handoff gave back. T
 - dimmed ink to the faint ink, so the proof rather than the terminal decides how faint;
 - tool output, which `codex-ansi-escape` quarantines at ingestion: its palette colors become
   indices below 16, resolved through the terminal ramp, and its extended colors become RGB;
-- RGB literals, unchanged in truecolor and quantized at 256.
+- RGB literals, unchanged in truecolor and quantized at 256;
+- the pack's style: a syntax class's modifiers, bold or italic, added wherever the class is a
+  cell's foreground, at every depth and over the modifiers the cell and the depth already
+  carry. Captures are taken before binding, so they never carry style, and a preview or cancel
+  restyles everything on the next frame as it recolors it. A terminal that draws bold as bright
+  may brighten a bold class at sixteen colors.
 
 At sixteen colors the terminal's palette is the user's: tokens become the ANSI color or
 modifier upstream would have painted, and nothing else changes. No other code paints an
@@ -87,7 +92,7 @@ draws a smaller flowchart grammar than Mermaid's and rejects `subgraph`, so rend
 
 | Artifact | Role |
 |---|---|
-| `scripts/warpaint/specs/<pack>.toml` | the spec: ground, ink, voice, authored hues, livery |
+| `scripts/warpaint/specs/<pack>.toml` | the spec: ground, ink, voice, authored hues, livery; ranks, gain, surfaces, terminal floor and style where it restates them |
 | `scripts/warpaint/smelt.py` | the gate and generator: spec to pack and proof; a uv script locked by `smelt.py.lock` |
 | `scripts/warpaint/appearance.py` | the appearance frame: CAM16, APCA, dichromacy |
 | `scripts/warpaint/laws.py` | the doctrine and every law, from spec to roles and ramps |
@@ -102,6 +107,18 @@ A spec makes the decisions that give a palette its character and nothing else: t
 hue, colorfulness and lightness; the ink's hue, tint and contrast; the voice's colorfulness,
 `lean` and `naturalism`; and the hue of each authored role. Every color is derived from
 them by law.
+
+A spec may restate how its code speaks and how its surfaces are built, and its proof states
+each restatement beside the doctrine's value:
+
+| table | restates |
+|---|---|
+| `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
+| `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
+| `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
+| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), and the tints `band_tint`, `selection_tint` and `diff_tint` (2.8, 9, 7 M) |
+| `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
+| `[style]` | modifiers, `bold` or `italic`, for syntax classes; the pack carries them for the binder |
 
 Colors are constructed in the Hellwig-Fairchild 2022 revision of CAM16 with the
 Hellwig-Stolitzka-Fairchild Helmholtz-Kohlrausch term, as apparent lightness, colorfulness and
@@ -130,8 +147,12 @@ light text on a dark ground correctly.
 - Status and diff hues stay inside windows that carry learned meaning, and must stay apart for
   protan and deutan observers as well as trichromats. Diff ink defaults to lime against rose,
   the pair that survives dichromacy.
-- Inline code is solved alone at a fraction of the voice's colorfulness and kept apart from
-  prose.
+- Syntax classes at one level stand 9 dE apart, or a rank's or the voice's stated least; classes
+  at different levels stand 9 apart or 5 Lc apart over the canvas, told apart by level.
+- Inline code is solved alone at a fraction of the voice's colorfulness and set apart from
+  prose: 10 dE from the ink, or beneath it by value, 5 Lc below it over the canvas. Comments,
+  punctuation and variables stand 5 dE apart, unless both sit beneath prose by value, where
+  they may share a tone.
 - Heat rises from the faintest mark that clears the rule's floor to the accent, in steps the
   eye can tell apart.
 - Tool output's sixteen colors keep their meaning, red is red and cyan is cyan, but are solved
@@ -150,6 +171,7 @@ pack must not be edited: the value would be unprovable and the next smelt would 
 doctrine. When the TUI's painting changes, `just warpaint-capture` re-exports the captures.
 
 A new pack is a spec file and an entry in `EMBEDDED` in `warpaint/pack.rs`; the
-`embedded_packs_are_the_pack_directory` test fails until both exist. The default is `hadal`;
-a default that names no embedded pack fails the build, and an embedded pack that fails to
-parse stops the TUI at startup rather than leave it wearing a pack nobody chose.
+`embedded_packs_are_the_pack_directory` test fails until both exist. Eight packs ship:
+crucible, eclipse, magnetar, prominence, shadow-play, slag, sodium and uranium. The default is
+`slag`; a default that names no embedded pack fails the build, and an embedded pack that fails
+to parse stops the TUI at startup rather than leave it wearing a pack nobody chose.
