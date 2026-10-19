@@ -19,6 +19,8 @@ use codex_utils_output_truncation::count_o200k_arrival;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
+mod message;
+
 #[derive(Debug)]
 pub(crate) struct ArrivalCell {
     item: ArrivalItem,
@@ -60,7 +62,13 @@ impl ArrivalCell {
             ArrivalKind::Injection => ("Injection", " · "),
             ArrivalKind::User => ("User input", " · "),
         };
-        Line::from(vec![kind.bold(), joint.dim(), label.into()])
+        let mut heading = Line::from(vec![kind.bold(), joint.dim(), label.into()]);
+        if let Some(envelope) = message::envelope(&self.item)
+            && envelope.message_type != "MESSAGE"
+        {
+            heading.push_span(format!(" ({})", envelope.message_type));
+        }
+        heading
     }
 
     pub(crate) fn source_lines(
@@ -108,8 +116,29 @@ impl ArrivalCell {
         width: u16,
         mode: super::output_provenance::OutputMode,
     ) -> Vec<HyperlinkLine> {
+        use super::output_provenance::ContextAuthor;
+        use super::output_provenance::captured_blocks;
+        use super::output_provenance::client_lines;
+        use super::output_provenance::client_notice;
+        use codex_protocol::step_admission::ArrivalSource;
+        let lines = match (&self.item.source, message::envelope(&self.item)) {
+            (ArrivalSource::Captured { blocks }, Some(envelope)) => {
+                let blocks: Vec<&str> = std::iter::once(envelope.payload)
+                    .chain(blocks.iter().skip(1).map(String::as_str))
+                    .collect();
+                captured_blocks(&blocks, ContextAuthor::Subagent, mode)
+            }
+            (ArrivalSource::Legacy, Some(envelope)) => {
+                let mut lines = vec![client_notice(
+                    "Legacy arrival — exact context provenance was not recorded",
+                )];
+                lines.extend(client_lines(envelope.payload, mode));
+                lines
+            }
+            _ => self.source_lines(mode),
+        };
         crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines(
-            &self.source_lines(mode),
+            &lines,
             RtOptions::new(width.saturating_sub(2).max(1) as usize),
         )
     }
@@ -144,6 +173,12 @@ impl FeedEntry for ArrivalCell {
         use super::activity_parts::PartControl;
         use super::output_provenance::OutputProvenance;
         use super::output_provenance::mark_lines;
+        if self.item.kind == ArrivalKind::InterAgent {
+            return ActivityParts {
+                lines: self.context_lines(width, super::output_provenance::OutputMode::Raw),
+                ..ActivityParts::default()
+            };
+        }
         let declarations = matches!(
             self.item.source,
             codex_protocol::step_admission::ArrivalSource::ToolDeclarations { .. }
@@ -190,6 +225,9 @@ impl HistoryCell for ArrivalCell {
     }
 
     fn has_formatted_output(&self) -> bool {
+        if self.item.kind == ArrivalKind::InterAgent {
+            return false;
+        }
         match &self.item.source {
             codex_protocol::step_admission::ArrivalSource::Captured { blocks } => {
                 !blocks.is_empty()
