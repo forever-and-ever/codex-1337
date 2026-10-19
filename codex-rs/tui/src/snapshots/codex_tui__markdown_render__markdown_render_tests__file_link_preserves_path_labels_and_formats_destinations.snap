@@ -2,11 +2,11 @@
 source: tui/src/markdown_render_tests.rs
 expression: rendered
 ---
-file:///repo/src/lib.rs (src/lib.rs)
+file:///repo/src/lib.rs (/repo/src/lib.rs)
 
-SRC\LIB.RS (src/lib.rs:12)
+SRC\LIB.RS (/repo/src/lib.rs:12)
 
-./src/lib.rs (src/lib.rs)
+./src/lib.rs (/repo/src/lib.rs)
 
 file:///C:/Repo/Src/Lib.rs (C:/Repo/Src/Lib.rs)
 
@@ -16,12 +16,12 @@ file://server/share/My File.rs (//server/share/My File.rs)
 
 //SERVER/SHARE/My File.rs (//server/share/My File.rs)
 
-file:///repo/My File.rs (My File.rs)
+file:///repo/My File.rs (/repo/My File.rs)
 
-file:///repo/percent%2520.rs (percent%20.rs)
+file:///repo/percent%2520.rs (/repo/percent%20.rs)
 
-percent%20.rs (percent%20.rs)
+percent%20.rs (/repo/percent%20.rs)
 
-open My File.rs (My File.rs)
+open My File.rs (/repo/My File.rs)
 
-other/src/lib.rs (src/lib.rs)
+other/src/lib.rs (/repo/src/lib.rs)

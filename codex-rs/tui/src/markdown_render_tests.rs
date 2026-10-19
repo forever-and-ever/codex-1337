@@ -770,7 +770,6 @@ fn inline_code_and_file_paths_follow_syntax_theme() {
             let mut writer = super::Writer::new(
                 markdown,
                 /*wrap_width*/ Some(24),
-                /*cwd*/ None,
                 &|_| false,
             );
             writer.styles = styles;
@@ -920,7 +919,7 @@ fn file_link_preserves_label_and_decodes_fallback_destination() {
         "/Users/example/code/codex/codex-rs/tui/src/My%20File.rs".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/My File.rs",
+            "/Users/example/code/codex/codex-rs/tui/src/My File.rs",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -941,7 +940,7 @@ fn file_link_keeps_descriptive_label_and_target() {
         "automatically adds those overrides".into(),
         " (".into(),
         Span::styled(
-            "project/dotslash-gen/bin/codex:1105",
+            "/home/dev-user/code/openai/project/dotslash-gen/bin/codex:1105",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1021,7 +1020,7 @@ fn file_link_decodes_percent_encoded_bare_path_destination() {
         "open Example Folder/Résumé/report.md".into(),
         " (".into(),
         Span::styled(
-            "Example Folder/Résumé/report.md",
+            "/Users/example/code/codex/Example Folder/Résumé/report.md",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1054,7 +1053,7 @@ fn file_link_keeps_unrelated_relative_label_with_matching_suffix() {
     let expected = Text::from(Line::from_iter([
         "other/src/lib.rs".into(),
         " (".into(),
-        Span::styled("src/lib.rs", MarkdownStyles::default().code),
+        Span::styled("/repo/src/lib.rs", MarkdownStyles::default().code),
         ")".into(),
     ]));
     assert_eq!(text, expected);
@@ -1071,7 +1070,7 @@ fn file_link_appends_line_number_when_label_lacks_it() {
         "markdown_render.rs".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1113,8 +1112,8 @@ fn file_links_preserve_foreign_windows_paths_and_anchors_snapshot() {
     .join("\n");
 
     insta::assert_snapshot!(rendered, @r"
-    report (Quarterly Report.xlsx:4:2)
-    report (Quarterly Report.xlsx:4:2)
+    report (C:/repo/Quarterly Report.xlsx:4:2)
+    report (//server/share/Quarterly Report.xlsx:4:2)
     ");
 }
 
@@ -1128,7 +1127,7 @@ fn file_link_appends_hash_anchor_when_label_lacks_it() {
         "markdown_render.rs".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1146,7 +1145,7 @@ fn file_link_uses_target_path_for_hash_anchor() {
         "markdown_render.rs#L74C3".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1164,7 +1163,7 @@ fn file_link_appends_range_when_label_lacks_it() {
         "markdown_render.rs".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3-76:9",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3-76:9",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1182,7 +1181,7 @@ fn file_link_uses_target_path_for_range() {
         "markdown_render.rs:74:3-76:9".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3-76:9",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3-76:9",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1200,7 +1199,7 @@ fn file_link_appends_hash_range_when_label_lacks_it() {
         "markdown_render.rs".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3-76:9",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3-76:9",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1222,7 +1221,7 @@ fn multiline_file_link_label_after_styled_prefix_does_not_panic() {
         "bar".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1240,7 +1239,7 @@ fn file_link_uses_target_path_for_hash_range() {
         "markdown_render.rs#L74C3-L76C9".into(),
         " (".into(),
         Span::styled(
-            "codex-rs/tui/src/markdown_render.rs:74:3-76:9",
+            "/Users/example/code/codex/codex-rs/tui/src/markdown_render.rs:74:3-76:9",
             MarkdownStyles::default().code,
         ),
         ")".into(),
@@ -1293,9 +1292,9 @@ fn unordered_list_local_file_link_stays_inline_with_following_text() {
     assert_eq!(
         rendered,
         vec![
-            "• binary (codex-rs/README.md:93): core is the agent/business logic, tui",
-            "  is the terminal UI, exec is the headless automation surface, and cli",
-            "  is the top-level multitool binary.",
+            "• binary (/Users/example/code/codex/codex-rs/README.md:93): core is the",
+            "  agent/business logic, tui is the terminal UI, exec is the headless",
+            "  automation surface, and cli is the top-level multitool binary.",
         ]
     );
 }
@@ -1319,7 +1318,10 @@ fn unordered_list_local_file_link_soft_break_before_colon_stays_inline() {
         .collect::<Vec<_>>();
     assert_eq!(
         rendered,
-        vec!["• binary (codex-rs/README.md:93): core is the agent/business logic.",]
+        vec![
+            "• binary (/Users/example/code/codex/codex-rs/README.md:93): core is the",
+            "  agent/business logic.",
+        ]
     );
 }
 
@@ -1343,9 +1345,11 @@ fn consecutive_unordered_list_local_file_links_do_not_detach_paths() {
     assert_eq!(
         rendered,
         vec![
-            "• binary (codex-rs/README.md:93): cli is the top-level multitool binary.",
-            "• expectations (codex-rs/core/README.md:1): codex-core owns the real",
-            "  runtime behavior.",
+            "• binary (/Users/example/code/codex/codex-rs/README.md:93): cli is the",
+            "  top-level multitool binary.",
+            "",
+            "• expectations (/Users/example/code/codex/codex-rs/core/README.md:1):",
+            "  codex-core owns the real runtime behavior.",
         ]
     );
 }

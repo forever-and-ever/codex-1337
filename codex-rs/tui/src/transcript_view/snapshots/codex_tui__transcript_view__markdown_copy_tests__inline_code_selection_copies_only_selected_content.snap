@@ -19,13 +19,13 @@ Selected " leading" → (" leading", PlainText)
 before ``real\_literal\!`` after
 Selected "real\\_literal\\!" → ("real\\_literal\\!", PlainText)
 before [`foo_bar!`](/repo/foo_bar!) after
-Selected "repo/foo_bar!" → ("repo/foo_bar!", PlainText)
+Selected "/repo/foo_bar!" → ("/repo/foo_bar!", PlainText)
 before [`foo_bar!`](/repo/foo_bar!) after
 Selected "bar!" → ("bar!", PlainText)
 [](/foo_bar!)[](/baz_qux!)
-Selected "foo_bar!baz_qux!" → ("foo_bar!baz_qux!", PlainText)
+Selected "/foo_bar!/baz_qux!" → ("/foo_bar!/baz_qux!", PlainText)
 `foo_bar!`[](/baz_qux!)
-Selected "foo_bar!baz_qux!" → ("foo_bar!baz_qux!", PlainText)
+Selected "foo_bar!/baz_qux!" → ("foo_bar!/baz_qux!", PlainText)
 before **[file](/repo/foo_bar!)** after
 Selected "foo_bar!" → ("foo_bar!", PlainText)
 | File |
@@ -33,4 +33,4 @@ Selected "foo_bar!" → ("foo_bar!", PlainText)
 | [`foo_bar!`](/repo/foo_bar!) |
 Selected "foo_bar!" → ("foo_bar!", PlainText)
 before [file](</repo/%60%2A_%5B%5D%3C%3E~%23%7C%26!%3D-+.)>) after
-Selected "repo/`*_[]<>~#|&!=-+.)" → ("repo/`*_[]<>~#|&!=-+.)", PlainText)
+Selected "/repo/`*_[]<>~#|&!=-+.)" → ("/repo/`*_[]<>~#|&!=-+.)", PlainText)

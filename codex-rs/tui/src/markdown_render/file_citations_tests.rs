@@ -32,18 +32,18 @@ fn file_citation_paths_preserve_markdown_significant_characters() {
 }
 
 #[test]
-fn file_url_citation_preserves_literal_query_delimiters_snapshot() {
-    let cwd = std::env::temp_dir();
-    let directory = url::Url::from_directory_path(&cwd).unwrap();
-    for (cwd, directory) in [
-        (cwd.as_path(), directory.as_str()),
-        (Path::new("C:/repo"), "file:///C:/repo/"),
-        (Path::new("C:/repo"), "file://localhost/C:/repo/"),
+fn file_url_citation_preserves_literal_query_delimiters() {
+    for (cwd, directory, expected) in [
+        ("/repo", "file:///repo/", "/repo/report?final.xlsx"),
+        ("C:/repo", "file:///C:/repo/", "C:/repo/report?final.xlsx"),
+        (
+            "C:/repo",
+            "file://localhost/C:/repo/",
+            "C:/repo/report?final.xlsx",
+        ),
     ] {
         let markdown = format!(":codex-file-citation{{path=\"{directory}report?final.xlsx\"}}");
-        insta::allow_duplicates! {
-            insta::assert_snapshot!(rendered_text(&markdown, Some(cwd)), @"report?final.xlsx");
-        }
+        assert_eq!(rendered_text(&markdown, Some(Path::new(cwd))), expected);
     }
 }
 
@@ -138,7 +138,7 @@ fn file_citations_preserve_escaped_nested_and_reference_directives() {
 
 #[test]
 fn multiple_file_citations_render_without_interpreting_encoded_source() {
-    let cwd = std::env::temp_dir();
+    let cwd = Path::new("/workspace");
     let second = cwd.join("second.xlsx");
     let markdown = format!(
         r#"&#58;codex-file-citation{{path="ignored.xlsx"}} :codex-file-citation{{artifact_kind="workbook" path="reports/final%20report.xlsx" purpose="output" sheet="Dashboard" range="A1:D8"}} and ::codex-file-citation{{path="{}"}}"#,
@@ -146,8 +146,8 @@ fn multiple_file_citations_render_without_interpreting_encoded_source() {
     );
 
     assert_eq!(
-        rendered_text(&markdown, Some(&cwd)),
-        r#":codex-file-citation{path="ignored.xlsx"} reports/final%20report.xlsx and second.xlsx"#,
+        rendered_text(&markdown, Some(cwd)),
+        r#":codex-file-citation{path="ignored.xlsx"} /workspace/reports/final%20report.xlsx and /workspace/second.xlsx"#,
     );
 
     // A work budget must not become a fixed count limit on legitimate citations.
@@ -167,33 +167,33 @@ fn file_citations_preserve_adjacent_entities_and_escaped_punctuation() {
         ),
         "α/tmp/$x$/report.mdβ",
     );
-    let cwd = std::env::temp_dir();
+    let cwd = Path::new("/workspace");
     for (markdown, expected) in [
         (
             r#"Préface &amp;:codex-file-citation{path="first&amp;.txt"}&#x1F642;:codex-file-citation{path="second.txt"}&lt;fin&gt;"#,
-            "Préface &first&amp;.txt🙂second.txt<fin>",
+            "Préface &/workspace/first&amp;.txt🙂/workspace/second.txt<fin>",
         ),
         (
             r#"\[:codex-file-citation{path="first.txt"}\]\*:codex-file-citation{path="second.txt"}\!"#,
-            "[first.txt]*second.txt!",
+            "[/workspace/first.txt]*/workspace/second.txt!",
         ),
     ] {
-        assert_eq!(rendered_text(markdown, Some(&cwd)), expected);
+        assert_eq!(rendered_text(markdown, Some(cwd)), expected);
     }
 }
 
 #[test]
 fn file_citation_after_local_link_soft_break_starts_a_new_line_snapshot() {
-    let cwd = std::env::temp_dir();
+    let cwd = Path::new("/workspace");
     let markdown = format!(
         "[first](<{}>)\n:codex-file-citation{{path=\"second.txt\"}}",
         cwd.join("first.txt").display(),
     );
-    let rendered = rendered_text(&markdown, Some(&cwd));
+    let rendered = rendered_text(&markdown, Some(cwd));
 
     insta::assert_snapshot!(rendered, @r"
-    first (first.txt)
-    second.txt
+    first (/workspace/first.txt)
+    /workspace/second.txt
     ");
 }
 
