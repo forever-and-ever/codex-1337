@@ -289,9 +289,14 @@ login or not at all.
 
 ## Warpaint
 
-`[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike;
-`/theme` previews packs and cancel restores the prior one. An unknown pack warns and the
-default, `slag`, is worn. `docs/warpaint.md` describes the engine.
+`[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike.
+Set it to `"random"` to choose a pack once on each TUI launch; switching conversations
+or folders does not reroll it. `/theme` previews packs and cancel restores the prior one;
+confirming changes only the running TUI, never the saved preference. An unknown pack
+warns and the default, `slag`, is worn. `docs/warpaint.md` describes the engine.
+
+Speed-tier commands such as `/fast` and their keybindings change the conversation,
+not the saved `service_tier` default. Edit configuration explicitly to change defaults.
 
 Removed: foreign `.tmTheme` selection, the embedded `two_face` theme list,
 `$CODEX_HOME/themes/*.tmTheme` loading, model themes, adaptive light/dark theme choice,

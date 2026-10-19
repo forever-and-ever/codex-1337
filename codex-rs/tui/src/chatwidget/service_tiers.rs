@@ -113,7 +113,7 @@ impl ChatWidget {
                 /*collaboration_mode*/ None,
             )));
         self.app_event_tx
-            .send(AppEvent::PersistServiceTierSelection { service_tier });
+            .send(AppEvent::ServiceTierSelected { service_tier });
     }
 
     fn current_model_fast_service_tier(&self) -> Option<ServiceTierCommand> {

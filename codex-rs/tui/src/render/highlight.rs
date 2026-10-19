@@ -104,6 +104,7 @@ pub(crate) fn set_theme_override(
     name: Option<String>,
     codex_home: Option<PathBuf>,
 ) -> Option<String> {
+    let name = crate::warpaint::startup_theme(name);
     let warning = validate_theme_name(name.as_deref(), codex_home.as_deref());
     let override_set_ok = THEME_OVERRIDE.set(name.clone()).is_ok();
     let codex_home_set_ok = CODEX_HOME.set(codex_home.clone()).is_ok();
@@ -130,7 +131,7 @@ pub(crate) fn set_theme_override(
 /// does not.
 pub(crate) fn validate_theme_name(name: Option<&str>, codex_home: Option<&Path>) -> Option<String> {
     let name = name?;
-    if resolve_theme_by_name(name, codex_home).is_some() {
+    if name == "random" || resolve_theme_by_name(name, codex_home).is_some() {
         return None;
     }
     Some(format!(

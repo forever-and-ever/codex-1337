@@ -145,6 +145,22 @@ pub(crate) fn pack_names() -> impl Iterator<Item = &'static str> {
     pack::packs().iter().map(|pack| pack.name)
 }
 
+/// Resolve the startup preference once, before the runtime theme is initialized.
+pub(crate) fn startup_theme(name: Option<String>) -> Option<String> {
+    use rand::Rng as _;
+
+    if name.as_deref() == Some("random") {
+        let packs = pack::packs();
+        Some(
+            packs[rand::rng().random_range(0..packs.len())]
+                .name
+                .to_string(),
+        )
+    } else {
+        name
+    }
+}
+
 /// The theme a pack highlights with, if `name` is a pack.
 pub(crate) fn theme(name: &str) -> Option<Theme> {
     pack::find(name).map(|index| scopes::theme(pack::packs()[index].name))

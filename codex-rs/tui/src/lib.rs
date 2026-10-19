@@ -3692,6 +3692,10 @@ trust_level = "untrusted"
         let initial_config = build_config(&temp_dir).await?;
         assert!(initial_config.tui_theme.is_none());
 
+        let picked = crate::warpaint::startup_theme(Some("random".into())).expect("random pack");
+        assert!(crate::warpaint::pack_names().any(|name| name == picked));
+        assert!(validate_theme_name(Some("random"), Some(temp_dir.path())).is_none());
+
         // Simulate resume/fork reload: the final config has an invalid theme.
         let mut config = build_config(&temp_dir).await?;
         config.tui_theme = Some("bogus-theme".into());
