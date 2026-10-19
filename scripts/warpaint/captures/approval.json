@@ -110,9 +110,9 @@
       {"text": "    ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "Command (exec_command)", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "  [", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "[raw]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "]                                          ", "fg": "figure:ink", "bg": "reset", "mods": []}
@@ -316,7 +316,7 @@
       {"text": "    ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "Response", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                             ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "[cot]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "[cot]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": "                              ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [

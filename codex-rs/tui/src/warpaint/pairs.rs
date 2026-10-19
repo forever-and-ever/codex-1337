@@ -85,6 +85,7 @@ fn painted(figure: Figure) -> &'static [Ground] {
     match figure {
         Figure::Ink | Figure::InkMuted | Figure::InkFaint => TEXT,
         Figure::InkSelected => &[Ground::Selection],
+        Figure::Tab => &[Ground::Canvas],
         Figure::Rule => &[
             Ground::Canvas,
             Ground::Dais,

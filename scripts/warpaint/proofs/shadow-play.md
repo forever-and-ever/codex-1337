@@ -9,7 +9,7 @@ The shade ring stands at J_HK 62.3, held there by syntax.comment over ground.can
 The body ring stands at J_HK 70.8, held there by syntax.keyword over ground.canvas.
 The flame ring stands at J_HK 77.4, held there by syntax.number over ground.canvas.
 The terminal ring stands at J_HK 66.3, held there by slot 5 over ground.canvas.
-The label reads at Lc 80.2 over the canvas, ceiling 95.
+The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, above the faint ink's 45.3.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -39,6 +39,7 @@ The label reads at Lc 80.2 over the canvas, ceiling 95.
 | figure.added | `#c8d799` | 83.7 | 12.1 | 12.0 | 126 | 186 |
 | figure.removed | `#dea4c4` | 77.0 | 12.1 | 12.0 | 345 | 182 |
 | figure.label | `#deceea` | 87.7 | 8.8 | 9.0 | 305 | 189 |
+| figure.tab | `#c3addd` | 78.0 | 14.9 | 15.0 | 305 | 182 |
 | syntax.keyword | `#b1a3bc` | 70.8 | 7.9 | 7.8 | 306 | 146 |
 | syntax.function | `#c2c6b1` | 78.6 | 4.3 | 4.2 | 131 | 251 |
 | syntax.type | `#a3abac` | 70.0 | 2.7 | 2.8 | 207 | 248 |
@@ -222,6 +223,7 @@ The label reads at Lc 80.2 over the canvas, ceiling 95.
 | figure.label | ground.reasoning | 79.8 | 76 |
 | figure.label | ground.environment | 78.7 | 76 |
 | figure.label | ground.message | 80.0 | 76 |
+| figure.tab | ground.canvas | 62.7 | 63 |
 | syntax.keyword | ground.canvas | 55.0 | 54 |
 | syntax.keyword | ground.trough | 55.2 | 54 |
 | syntax.keyword | ground.response | 54.9 | 50 |

@@ -1,5 +1,5 @@
-//! Feed headings: entry titles and the disclosure tabs speak in the pack's label, bold; active
-//! work speaks in its accent, the pack's signature, as heat does.
+//! Feed headings: entry titles speak in the pack's label, bold; active work speaks in its accent,
+//! the pack's signature, as heat does. An open tab beneath them takes the pack's tab.
 
 use ratatui::style::Modifier;
 use ratatui::style::Style;

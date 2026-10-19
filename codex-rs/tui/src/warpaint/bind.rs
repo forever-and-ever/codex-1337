@@ -371,7 +371,9 @@ fn ansi(paint: Paint) -> Bound {
         },
         Paint::Ground(_) => Bound::plain(Color::Reset),
         Paint::Figure(figure) => match figure {
-            Figure::Ink | Figure::Label | Figure::InkSelected => Bound::plain(Color::Reset),
+            Figure::Ink | Figure::Label | Figure::Tab | Figure::InkSelected => {
+                Bound::plain(Color::Reset)
+            }
             Figure::InkMuted | Figure::InkFaint | Figure::Rule => dim(Color::Reset),
             Figure::Accent => Bound::plain(Color::Magenta),
             Figure::Link | Figure::Code | Figure::Info => Bound::plain(Color::Cyan),

@@ -8,7 +8,7 @@ The signal ring stands at J_HK 68.5, held there by figure.failure over ground.ca
 The ash ring stands at J_HK 75.2, held there by syntax.attribute over ground.canvas.
 The prominence ring stands at J_HK 83.0, held there by syntax.keyword over ground.canvas.
 The terminal ring stands at J_HK 71.3, held there by slot 5 over ground.canvas.
-The label reads at Lc 83.0 over the canvas, ceiling 95.
+The label reads at Lc 83.0 over the canvas, ceiling 95; an open tab at Lc 65.2, above the faint ink's 47.0.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -38,6 +38,7 @@ The label reads at Lc 83.0 over the canvas, ceiling 95.
 | figure.added | `#cfdf9c` | 86.6 | 13.0 | 13.0 | 125 | 186 |
 | figure.removed | `#dea0c2` | 76.2 | 12.9 | 13.0 | 345 | 182 |
 | figure.label | `#fccbdf` | 89.4 | 8.8 | 9.0 | 350 | 224 |
+| figure.tab | `#efa4c7` | 79.6 | 14.8 | 15.0 | 350 | 218 |
 | syntax.keyword | `#ffa6d1` | 83.0 | 17.9 | 54.3 | 350 | 218 |
 | syntax.function | `#d0cbca` | 81.1 | 0.1 | 0.2 | 200 | 252 |
 | syntax.type | `#cfcac6` | 80.5 | 0.6 | 0.6 | 118 | 251 |
@@ -228,6 +229,7 @@ The label reads at Lc 83.0 over the canvas, ceiling 95.
 | figure.label | ground.reasoning | 82.6 | 79 |
 | figure.label | ground.environment | 81.8 | 79 |
 | figure.label | ground.message | 82.9 | 79 |
+| figure.tab | ground.canvas | 65.2 | 65 |
 | syntax.keyword | ground.canvas | 69.2 | 68 |
 | syntax.keyword | ground.trough | 69.2 | 68 |
 | syntax.keyword | ground.response | 69.1 | 64 |

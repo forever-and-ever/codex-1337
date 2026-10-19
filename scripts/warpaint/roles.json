@@ -27,7 +27,8 @@
     "info",
     "added",
     "removed",
-    "label"
+    "label",
+    "tab"
   ],
   "syntax": [
     "keyword",
@@ -216,6 +217,9 @@
         "reasoning",
         "environment",
         "message"
+      ],
+      "tab": [
+        "canvas"
       ]
     },
     "syntax": {

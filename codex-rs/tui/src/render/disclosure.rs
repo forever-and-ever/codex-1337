@@ -22,5 +22,8 @@ pub(crate) fn style(focused: bool) -> Style {
 }
 
 pub(crate) fn tab_style() -> Style {
-    super::header::style().add_modifier(Modifier::UNDERLINED)
+    Style::default()
+        .fg(crate::warpaint::Figure::Tab.color())
+        .remove_modifier(Modifier::BOLD | Modifier::DIM)
+        .add_modifier(Modifier::UNDERLINED)
 }

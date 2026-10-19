@@ -65,6 +65,7 @@ info = "#76afd1"
 added = "#cfdf9c"
 removed = "#dea0c2"
 label = "#fccbdf"
+tab = "#efa4c7"
 
 [syntax]
 keyword = "#ffa6d1"

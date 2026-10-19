@@ -125,6 +125,7 @@ each restatement beside the doctrine's value:
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
 | `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), the tints `selection_tint` and `diff_tint` (9, 7 M), and the speaker grounds' rises `response`, `message`, `prompt`, `reasoning` and `environment` (2, 2.5, 9.5, 3, 9.5 J') |
 | `[label]` | the label's `hue`, `colorfulness` and `contrast` |
+| `[tab]` | the open tab's `hue`, `colorfulness` and `contrast` |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
 | `[style]` | modifiers, `bold` or `italic`, for syntax classes; the pack carries them for the binder |
 
@@ -149,10 +150,13 @@ light text on a dark ground correctly.
   prompt loudest. A grey ground is untinted and seen by its rise alone. A spec may author the
   reasoning hue; otherwise the law takes the hue inside caution's window that needs the least
   tint, the farthest from every surface among equals.
-- Labels, the chrome's bold words (the feed's headings and tabs, titles, the keys a hint names,
-  Markdown headings), speak in a pale tint of the accent: its hue at 9 M, 3 Lc beneath the
-  ink's contrast, unless a spec's `[label]` states otherwise. Bold carries the rest of their
-  prominence, and no label reads above Lc 95 over the canvas.
+- Labels, the chrome's bold words (the feed's headings, titles, the keys a hint names, Markdown
+  headings), speak in a pale tint of the accent: its hue at 9 M, 3 Lc beneath the ink's
+  contrast, unless a spec's `[label]` states otherwise. Bold carries the rest of their
+  prominence, and no label reads above Lc 95 over the canvas. An open disclosure tab reads
+  between the faint ink of the tabs beside it and the label above it: the accent's hue at
+  15 M, halfway between their contrasts, underlined rather than bold, unless a spec's `[tab]`
+  states otherwise.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A

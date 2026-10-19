@@ -33,9 +33,9 @@
     ],
     [
       {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "[raw]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}
@@ -75,9 +75,9 @@
     ],
     [
       {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "[raw]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}

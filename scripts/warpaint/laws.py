@@ -99,6 +99,12 @@ never a second accent."""
 LABEL_DROP = 3.0
 """How far beneath the ink's contrast a label reads unless its spec states otherwise; bold carries
 the rest of its prominence."""
+TAB_TINT = 15.0
+"""An open disclosure tab's colorfulness unless its spec states one: deeper than the label's tint,
+so the tab reads as the accent's hue rather than as a second label."""
+TAB_LEVEL = 0.5
+"""Where an open tab's contrast falls between the faint ink of the tabs beside it (0) and the label
+of the heading above it (1), unless its spec states its contrast."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""
@@ -224,6 +230,7 @@ def composition(spec: Spec) -> dict[Paint, Floors]:
     table = {
         Figure.INK: ink(body),
         Figure.LABEL: tuple((g, f) for g, f in ink(spec.label.contrast) if g in PAIRS[Figure.LABEL]),
+        Figure.TAB: tuple((g, f) for g, f in ink(spec.tab.contrast) if g in PAIRS[Figure.TAB]),
         Figure.INK_MUTED: ink(secondary),
         Figure.INK_FAINT: ink(tertiary),
         Figure.INK_SELECTED: ((Ground.SELECTION, body - 4),),
@@ -414,6 +421,13 @@ def label_law(ink: InkSpec, accent: float) -> InkSpec:
     return InkSpec(accent, LABEL_TINT, ink.contrast - LABEL_DROP)
 
 
+def tab_law(ink: InkSpec, label: InkSpec, accent: float) -> InkSpec:
+    """The open tab as the doctrine paints it: the accent's hue at TAB_TINT, TAB_LEVEL of the way
+    from the faint ink's contrast to the label's."""
+    faint = ink.contrast * INK_FAINT
+    return InkSpec(accent, TAB_TINT, faint + TAB_LEVEL * (label.contrast - faint))
+
+
 @dataclass(frozen=True, slots=True)
 class Spec:
     name: str
@@ -421,6 +435,7 @@ class Spec:
     ground: GroundSpec
     ink: InkSpec
     label: InkSpec
+    tab: InkSpec
     voice: VoiceSpec
     hues: dict[Paint, float]
     speakers: dict[Paint, float | None]
@@ -451,12 +466,13 @@ class Spec:
                 raise Invalid(f"{where}: [{key}] omits {sorted(missing)}")
             return value
 
-        tables = {"stance", "ground", "ink", "label", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
+        tables = {"stance", "ground", "ink", "label", "tab", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
         if unknown := raw.keys() - tables:
             raise Invalid(f"{where}: unknown tables {sorted(unknown)}")
         ground = table("ground", ("hue", "colorfulness", "lightness"), ("hue", "colorfulness", "lightness"))
         ink = table("ink", ("hue", "colorfulness", "contrast"), ("colorfulness", "contrast"))
         label = table("label", ("hue", "colorfulness", "contrast"), ())
+        tab = table("tab", ("hue", "colorfulness", "contrast"), ())
         voice = table("voice", ("colorfulness", "lean", "naturalism", "lift", "least"), ("colorfulness",))
         optional = (
             Figure.ADDED,
@@ -528,16 +544,24 @@ class Spec:
         for name, modifiers in style.items():
             if not modifiers or not set(modifiers) <= set(STYLES):
                 raise Invalid(f"{where}: [style] {name} must be some of {list(STYLES)}")
-        law = label_law(InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"])), authored[Figure.ACCENT])
+        inked = InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"]))
+        law = label_law(inked, authored[Figure.ACCENT])
+        labeled = InkSpec(
+            float(label.get("hue", law.hue)) % 360,
+            float(label.get("colorfulness", law.colorfulness)),
+            float(label.get("contrast", law.contrast)),
+        )
+        tabbed = tab_law(inked, labeled, authored[Figure.ACCENT])
         return cls(
             name=path.stem,
             stance=str(raw["stance"]).strip(),
             ground=GroundSpec(float(ground["hue"]), float(ground["colorfulness"]), float(ground["lightness"])),
-            ink=InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"])),
-            label=InkSpec(
-                float(label.get("hue", law.hue)) % 360,
-                float(label.get("colorfulness", law.colorfulness)),
-                float(label.get("contrast", law.contrast)),
+            ink=inked,
+            label=labeled,
+            tab=InkSpec(
+                float(tab.get("hue", tabbed.hue)) % 360,
+                float(tab.get("colorfulness", tabbed.colorfulness)),
+                float(tab.get("contrast", tabbed.contrast)),
             ),
             voice=VoiceSpec(
                 float(voice["colorfulness"]),
@@ -695,6 +719,7 @@ def smelt(spec: Spec) -> Pack:
         roles[role] = text(role, ink.colorfulness * probe.lightness / primary.lightness, ink.hue)
     roles[Figure.INK_SELECTED] = text(Figure.INK_SELECTED, ink.colorfulness, ink.hue)
     roles[Figure.LABEL] = text(Figure.LABEL, spec.label.colorfulness, spec.label.hue)
+    roles[Figure.TAB] = text(Figure.TAB, spec.tab.colorfulness, spec.tab.hue)
     roles[Figure.RULE] = text(Figure.RULE, canvas.colorfulness * 1.6, g.hue)
 
     home = cusp(accent)

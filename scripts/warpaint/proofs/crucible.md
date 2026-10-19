@@ -9,7 +9,7 @@ The sunk ring stands at J_HK 61.8, held there by syntax.number over ground.canva
 The body ring stands at J_HK 69.7, held there by syntax.keyword over ground.canvas.
 The crown ring stands at J_HK 89.7, held there by syntax.constant over ground.canvas.
 The terminal ring stands at J_HK 71.6, held there by slot 5 over ground.canvas.
-The label reads at Lc 80.0 over the canvas, ceiling 95.
+The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, above the faint ink's 45.3.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -39,6 +39,7 @@ The label reads at Lc 80.0 over the canvas, ceiling 95.
 | figure.added | `#8ed892` | 82.2 | 22.0 | 22.0 | 150 | 114 |
 | figure.removed | `#f188be` | 75.2 | 21.9 | 22.0 | 350 | 211 |
 | figure.label | `#fbc8ba` | 86.5 | 9.2 | 9.0 | 35 | 224 |
+| figure.tab | `#efa38d` | 76.3 | 15.1 | 15.0 | 35 | 216 |
 | syntax.keyword | `#de917a` | 69.8 | 15.6 | 15.7 | 35 | 173 |
 | syntax.function | `#95b5a5` | 72.7 | 9.4 | 9.5 | 171 | 109 |
 | syntax.type | `#a7a078` | 64.6 | 7.3 | 7.3 | 106 | 144 |
@@ -230,6 +231,7 @@ The label reads at Lc 80.0 over the canvas, ceiling 95.
 | figure.label | ground.reasoning | 79.7 | 76 |
 | figure.label | ground.environment | 78.2 | 76 |
 | figure.label | ground.message | 79.5 | 76 |
+| figure.tab | ground.canvas | 62.6 | 63 |
 | syntax.keyword | ground.canvas | 53.1 | 52 |
 | syntax.keyword | ground.trough | 53.3 | 52 |
 | syntax.keyword | ground.response | 52.7 | 48 |
