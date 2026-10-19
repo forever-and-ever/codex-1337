@@ -26,7 +26,7 @@ fn finalized_plan_reuses_rendered_transcript_lines() {
 
 #[test]
 fn finalized_plan_file_citation_renders_as_local_path_snapshot() {
-    let cwd = std::env::temp_dir();
+    let cwd = PathBuf::from("/workspace");
     let output = cwd.join("Quarterly Report.xlsx").display().to_string();
     let plan = new_proposed_plan(
         format!(
@@ -37,5 +37,5 @@ fn finalized_plan_file_citation_renders_as_local_path_snapshot() {
 
     let rendered = ratatui::text::Text::from(plan.display_lines(/*width*/ 80));
 
-    insta::assert_snapshot!(rendered, @"• Proposed Plan\n \n \n  • Quarterly Report.xlsx");
+    insta::assert_snapshot!(rendered, @"• Proposed Plan\n \n \n  • /workspace/Quarterly Report.xlsx");
 }

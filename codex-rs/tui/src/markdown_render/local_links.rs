@@ -1,14 +1,12 @@
 //! Local file-link destination parsing and display for Markdown transcripts.
 //!
-//! Local Markdown links preserve their labels. Since ordinary file destinations have no trusted
-//! navigation capability, the renderer also displays their target, shortening absolute paths
-//! relative to the session working directory when possible. This module only formats destinations;
-//! it does not resolve files or infer execution-host paths from the frontend filesystem.
+//! TELOS(literal-local-paths): local Markdown links show their full targets as ordinary text.
+//! Preserve labels and absolute paths so they remain useful when copied. This module only formats
+//! destinations; it does not resolve files or infer execution-host paths from the frontend filesystem.
 
 use codex_utils_path_uri::PathUri;
 use codex_utils_string::normalize_markdown_hash_location_suffix;
 use regex_lite::Regex;
-use std::path::Path;
 use std::sync::LazyLock;
 use url::Url;
 
@@ -44,9 +42,8 @@ pub(super) fn is_local_path_like_link(dest_url: &str) -> bool {
 ///
 /// This accepts the path shapes Codex emits today: `file://` URLs, absolute and relative paths,
 /// `~/...`, Windows paths, and `#L..C..` or `:line:col` suffixes.
-pub(super) fn render_local_link_target(dest_url: &str, cwd: Option<&Path>) -> Option<String> {
-    let (path_text, location_suffix) = parse_local_link_target(dest_url)?;
-    let mut rendered = display_local_link_path(&path_text, cwd);
+pub(super) fn render_local_link_target(dest_url: &str) -> Option<String> {
+    let (mut rendered, location_suffix) = parse_local_link_target(dest_url)?;
     if let Some(location_suffix) = location_suffix {
         rendered.push_str(&location_suffix);
     }
@@ -125,10 +122,9 @@ pub(super) fn extract_colon_location_suffix(path_text: &str) -> Option<String> {
 ///
 /// Display normalization is intentionally lexical: it does not touch the filesystem, resolve
 /// symlinks, or collapse `.` / `..`. It only converts separators to forward slashes and rewrites
-/// UNC-style `\\\\server\\share` inputs into `//server/share` so later prefix checks operate on a
-/// stable representation.
+/// UNC-style `\\\\server\\share` inputs into `//server/share` for display.
 fn normalize_local_link_path_text(path_text: &str) -> String {
-    // Render all local link paths with forward slashes so display and prefix stripping are stable
+    // Render all local link paths with forward slashes so display is stable
     // across mixed Windows and Unix-style inputs.
     if let Some(rest) = path_text.strip_prefix("\\\\") {
         format!("//{}", rest.replace('\\', "/").trim_start_matches('/'))
@@ -136,75 +132,3 @@ fn normalize_local_link_path_text(path_text: &str) -> String {
         path_text.replace('\\', "/")
     }
 }
-
-fn is_absolute_local_link_path(path_text: &str) -> bool {
-    path_text.starts_with('/')
-        || path_text.starts_with("//")
-        || matches!(
-            path_text.as_bytes(),
-            [drive, b':', b'/', ..] if drive.is_ascii_alphabetic()
-        )
-}
-
-/// Remove trailing separators from a local path without destroying root semantics.
-///
-/// Roots like `/`, `//`, and `C:/` stay intact so callers can still distinguish "the root itself"
-/// from "a path under the root".
-fn trim_trailing_local_path_separator(path_text: &str) -> &str {
-    if path_text == "/" || path_text == "//" {
-        return path_text;
-    }
-    if matches!(path_text.as_bytes(), [drive, b':', b'/'] if drive.is_ascii_alphabetic()) {
-        return path_text;
-    }
-    path_text.trim_end_matches('/')
-}
-
-/// Strip `cwd_text` from the start of `path_text` when `path_text` is strictly underneath it.
-///
-/// Returns the relative remainder without a leading slash. If the path equals the cwd exactly, this
-/// returns `None` so callers can keep rendering the full path instead of collapsing it to an empty
-/// string.
-fn strip_local_path_prefix<'a>(path_text: &'a str, cwd_text: &str) -> Option<&'a str> {
-    let path_text = trim_trailing_local_path_separator(path_text);
-    let cwd_text = trim_trailing_local_path_separator(cwd_text);
-    if path_text == cwd_text {
-        return None;
-    }
-
-    // Treat filesystem roots specially so `/tmp/x` under `/` becomes `tmp/x` instead of being
-    // left unchanged by the generic prefix-stripping branch.
-    if cwd_text == "/" || cwd_text == "//" {
-        return path_text.strip_prefix('/');
-    }
-
-    path_text
-        .strip_prefix(cwd_text)
-        .and_then(|rest| rest.strip_prefix('/'))
-}
-
-/// Choose the visible path text for a local link after normalization.
-///
-/// Relative paths (including `~/...`) stay relative. Absolute paths prefer cwd-relative display
-/// and otherwise stay absolute: the frontend home may differ from the execution host's home.
-/// This is display logic only, not filesystem canonicalization.
-fn display_local_link_path(path_text: &str, cwd: Option<&Path>) -> String {
-    let path_text = normalize_local_link_path_text(path_text);
-    if !is_absolute_local_link_path(&path_text) {
-        return path_text;
-    }
-
-    if let Some(cwd) = cwd {
-        // Only the session cwd is known to refer to the execution host.
-        let cwd_text = normalize_local_link_path_text(&cwd.to_string_lossy());
-        if let Some(stripped) = strip_local_path_prefix(&path_text, &cwd_text) {
-            return stripped.to_string();
-        }
-    }
-
-    path_text
-}
-
-#[cfg(test)]
-#[path = "local_links_tests.rs"]
-mod tests;

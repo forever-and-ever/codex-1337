@@ -117,7 +117,7 @@ fn incremental_render_keeps_final_block_mutable_and_matches_full_render() {
 
 #[test]
 fn incremental_file_citations_preserve_metadata_unicode_and_markdown() {
-    let cwd = test_cwd();
+    let cwd = Path::new("/workspace");
     let rendered_cases = [
         (
             "Quarterly Report.xlsx",

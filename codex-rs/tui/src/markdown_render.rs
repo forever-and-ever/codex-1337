@@ -71,7 +71,6 @@ use ratatui::text::Span;
 use ratatui::text::Text;
 use std::ops::Range;
 use std::path::Path;
-use std::path::PathBuf;
 
 mod inline_directives;
 mod list_spacing;
@@ -350,18 +349,12 @@ pub fn render_markdown_text(input: &str) -> Text<'static> {
 /// The renderer preserves columnar table structure while values remain
 /// scannable and falls back to key/value records when body rows cannot fit
 /// readably. Passing `None` keeps intrinsic line widths and disables
-/// width-driven wrapping in the markdown writer. Local file links render
-/// relative to the current process working directory.
+/// width-driven wrapping in the markdown writer. Local file links retain their full targets.
 pub(crate) fn render_markdown_text_with_width(input: &str, width: Option<usize>) -> Text<'static> {
-    let cwd = std::env::current_dir().ok();
-    render_markdown_text_with_width_and_cwd(input, width, cwd.as_deref())
+    render_markdown_text_with_width_and_cwd(input, width, /*cwd*/ None)
 }
 
-/// Render markdown with an explicit working directory for local file links.
-///
-/// The `cwd` parameter controls how absolute local targets are shortened before display. Passing
-/// the session cwd keeps full renders, history cells, and streamed deltas visually aligned even
-/// when rendering happens away from the process cwd.
+/// Keep the shared renderer entry point; cwd never shortens local file targets.
 pub(crate) fn render_markdown_text_with_width_and_cwd(
     input: &str,
     width: Option<usize>,
@@ -394,7 +387,7 @@ fn never_hide_link_destination(_: &str) -> bool {
 pub(crate) fn render_markdown_lines_with_width_cwd_and_hidden_link_destinations(
     input: &str,
     width: Option<usize>,
-    cwd: Option<&Path>,
+    _cwd: Option<&Path>,
     is_hidden_link_destination: &dyn Fn(&str) -> bool,
 ) -> Vec<HyperlinkLine> {
     let mut options = Options::empty();
@@ -406,7 +399,7 @@ pub(crate) fn render_markdown_lines_with_width_cwd_and_hidden_link_destinations(
         input,
         math.events(Parser::new_ext(&math.markdown, options).into_offset_iter()),
     ));
-    let mut w = Writer::new(input, width, cwd, is_hidden_link_destination);
+    let mut w = Writer::new(input, width, is_hidden_link_destination);
     // Drop the consumed parser before the rendering state, including on unwind.
     let mut parser = parser;
     w.run(&mut parser);
@@ -466,7 +459,6 @@ struct Writer<'a, 'policy> {
     code_block_buffer: String,
     code_block_content_end: usize,
     wrap_width: Option<usize>,
-    cwd: Option<PathBuf>,
     is_hidden_link_destination: &'policy dyn Fn(&str) -> bool,
     line_ends_with_local_link_target: bool,
     pending_local_link_soft_break: bool,
@@ -482,7 +474,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
     fn new(
         input: &'a str,
         wrap_width: Option<usize>,
-        cwd: Option<&Path>,
         is_hidden_link_destination: &'policy dyn Fn(&str) -> bool,
     ) -> Self {
         Self {
@@ -511,7 +502,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             code_block_buffer: String::new(),
             code_block_content_end: 0,
             wrap_width,
-            cwd: cwd.map(Path::to_path_buf),
             is_hidden_link_destination,
             line_ends_with_local_link_target: false,
             pending_local_link_soft_break: false,
@@ -2171,10 +2161,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             style_label,
             has_visible_label: false,
             local_target_display: if is_local_path_like_link(&dest_url) {
-                Some(
-                    render_local_link_target(&dest_url, self.cwd.as_deref())
-                        .unwrap_or_else(|| dest_url.clone()),
-                )
+                Some(render_local_link_target(&dest_url).unwrap_or_else(|| dest_url.clone()))
             } else {
                 None
             },
@@ -2782,7 +2769,6 @@ mod tests {
         let writer = W::new(
             "",
             /*wrap_width*/ Some(80),
-            /*cwd*/ None,
             &never_hide_link_destination,
         );
         let wrapped = writer.wrap_cell(&cell, /*width*/ 40);
@@ -2813,7 +2799,6 @@ mod tests {
         let writer = W::new(
             "",
             /*wrap_width*/ Some(80),
-            /*cwd*/ None,
             &never_hide_link_destination,
         );
         let lines = writer.render_table_row(
