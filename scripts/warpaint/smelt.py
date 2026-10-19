@@ -8,13 +8,14 @@
 The laws derive every role and ramp from a spec (laws.py) in the appearance frame
 (appearance.py); the proof checks every pair the TUI declares it paints (vocabulary.py, from
 roles.json); the pack is what the TUI embeds. `--check` is the gate: it fails when a pack or
-proof differs from its spec, when a spec breaks the doctrine, or when the vocabulary and the
-laws disagree.
+proof differs from its spec, when a spec breaks the doctrine, when the vocabulary and the
+laws disagree, or when a live capture shows chrome no pack paints.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -25,6 +26,23 @@ from proof import TUI, prove
 from vocabulary import LIVERY_COUNT, Figure, Ground, Syntax
 
 HERE = Path(__file__).resolve().parent
+CLIENT = {"reset", "ground:canvas", "ground:trough", "ground:dais"}
+"""The grounds the client speaks on, where bold default ink is a label the pack must paint."""
+
+
+def audit(capture: Path) -> list[str]:
+    """Chrome in a live capture that no pack paints: a literal color, which the pack never
+    decides, or bold default ink on the client's grounds, a label left unpainted."""
+    faults = []
+    for y, row in enumerate(json.loads(capture.read_text())["rows"]):
+        for run in row:
+            text = run["text"].strip()
+            named = (run["fg"],) * bool(text) + (run["bg"],)
+            for name in (name for name in named if name.startswith(("rgb:", "xterm:"))):
+                faults.append(f"{capture.stem} row {y}: {text or 'a fill'!r} paints the literal {name}")
+            if text and run["fg"] == "reset" and "bold" in run["mods"] and run["bg"] in CLIENT:
+                faults.append(f"{capture.stem} row {y}: {text!r} is bold default ink, a label left unpainted")
+    return faults
 
 
 def emit(pack: Pack) -> str:
@@ -95,6 +113,11 @@ def main() -> int:
                     failed = True
                 else:
                     stale.unlink()
+        if args.check:
+            for capture in sorted((HERE / "captures").glob("*.json")):
+                for fault in audit(capture):
+                    print(fault)
+                    failed = True
     return 1 if failed else 0
 
 

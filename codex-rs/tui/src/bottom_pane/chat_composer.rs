@@ -4684,9 +4684,7 @@ impl ChatComposer {
                     Span::from("!").light_red().bold()
                 } else if self.luna_reserve_active {
                     // Reserve keeps one arrow at every reasoning effort; only its foreground changes.
-                    "›"
-                        .fg(crate::terminal_palette::best_color((246, 197, 67)))
-                        .bold()
+                    "›".fg(crate::warpaint::Figure::Caution.color()).bold()
                 } else if let Some(tier) = self.effort_tier {
                     let charge = self
                         .effort_ignition

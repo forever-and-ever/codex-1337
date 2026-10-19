@@ -21,6 +21,7 @@ Buffer {
         x: 20, y: 0, fg: Indexed(75), bg: Reset, underline: Reset, modifier: NONE,
         x: 4, y: 1, fg: Indexed(99), bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 1, fg: Indexed(75), bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 2, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

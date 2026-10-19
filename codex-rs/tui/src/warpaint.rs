@@ -23,6 +23,7 @@ use std::io::Write;
 
 use ratatui::buffer::Buffer;
 use ratatui::style::Color;
+use ratatui::style::Style;
 use syntect::highlighting::Theme;
 
 pub(crate) use pack::DEFAULT as DEFAULT_PACK;
@@ -221,9 +222,10 @@ pub(crate) fn bind_history_line(
     with_warpaint(|warpaint| {
         let binder = warpaint.binder(terminal)?;
         let mut line = line.clone();
-        line.line.style = binder.bind_style(line.line.style);
+        let under = line.line.style;
+        line.line.style = binder.bind_style(under, Style::default());
         for span in &mut line.line.spans {
-            span.style = binder.bind_style(span.style);
+            span.style = binder.bind_style(span.style, under);
         }
         Ok(line)
     })

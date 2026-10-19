@@ -74,18 +74,18 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "    ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Command (exec_command)", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
-      {"text": "  [", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "in", "fg": "figure:heading", "bg": "reset", "mods": ["bold", "underline"]},
-      {"text": " ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "[raw]", "fg": "figure:heading", "bg": "reset", "mods": ["bold", "underline"]},
-      {"text": "      ] [", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "    ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "Command (exec_command)", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": "  [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "]                                          ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "]                                          ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "reset", "bg": "ground:environment", "mods": []}
+      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "ground:environment", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -93,14 +93,14 @@
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Message", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
+      {"text": "Message", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " from ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "reviewer                                      ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "   ≈16", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "                       ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              Checked the binding powers against the grammar: only unary minus was out of order.    ", "fg": "reset", "bg": "ground:message", "mods": []}
+      {"text": "              Checked the binding powers against the grammar: only unary minus was out of order.    ", "fg": "figure:ink", "bg": "ground:message", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -108,12 +108,12 @@
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Response", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
+      {"text": "Response", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                                ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "            ", "fg": "reset", "bg": "ground:response", "mods": []},
-      {"text": "## Fixed: operator precedence", "fg": "reset", "bg": "ground:response", "mods": ["bold"]},
+      {"text": "## Fixed: operator precedence", "fg": "figure:label", "bg": "ground:response", "mods": ["bold"]},
       {"text": "                                                           ", "fg": "reset", "bg": "ground:response", "mods": []}
     ],
     [
@@ -281,24 +281,24 @@
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "    ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Response", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
+      {"text": "Response", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                             ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "[cot]", "fg": "figure:heading", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "[cot]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
       {"text": "                              ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              • The rerun passes, so the answer is the one-line change to ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "              • The rerun passes, so the answer is the one-line change to ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "precedence()", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": ".             ", "fg": "reset", "bg": "ground:reasoning", "mods": []}
+      {"text": ".             ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []}
     ],
     [
-      {"text": "              • ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "              • ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "Op::Neg", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": " drops from 30 to 15, below ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": " drops from 30 to 15, below ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "*", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": "; the ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "; the ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "span", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": " warning is unrelated.                ", "fg": "reset", "bg": "ground:reasoning", "mods": []}
+      {"text": " warning is unrelated.                ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -315,7 +315,7 @@
     ],
     [
       {"text": "  ", "fg": "reset", "bg": "ground:trough", "mods": []},
-      {"text": "Select Theme", "fg": "reset", "bg": "ground:trough", "mods": ["bold"]},
+      {"text": "Select Theme", "fg": "figure:label", "bg": "ground:trough", "mods": ["bold"]},
       {"text": "                                   ", "fg": "reset", "bg": "ground:trough", "mods": []},
       {"text": "                                                   ", "fg": "reset", "bg": "reset", "mods": []}
     ],
@@ -484,9 +484,9 @@
     ],
     [
       {"text": "  ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "enter", "fg": "reset", "bg": "reset", "mods": ["bold"]},
+      {"text": "enter", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " select · ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "esc", "fg": "reset", "bg": "reset", "mods": ["bold"]},
+      {"text": "esc", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " back                                                                           ", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
     ]
   ]

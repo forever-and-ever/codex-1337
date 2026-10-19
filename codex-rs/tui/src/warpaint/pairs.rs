@@ -85,7 +85,6 @@ fn painted(figure: Figure) -> &'static [Ground] {
     match figure {
         Figure::Ink | Figure::InkMuted | Figure::InkFaint => TEXT,
         Figure::InkSelected => &[Ground::Selection],
-        Figure::Heading => &[Ground::Canvas],
         Figure::Rule => &[
             Ground::Canvas,
             Ground::Dais,
@@ -94,7 +93,8 @@ fn painted(figure: Figure) -> &'static [Ground] {
             Ground::Message,
         ],
         Figure::Code => INLINE,
-        Figure::Accent
+        Figure::Label
+        | Figure::Accent
         | Figure::Link
         | Figure::Success
         | Figure::Caution

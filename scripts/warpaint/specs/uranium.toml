@@ -61,4 +61,5 @@ diff = 0.5
 terminal = 0.5
 
 [surfaces]
+response = 4.5
 diff_tint = 8.5

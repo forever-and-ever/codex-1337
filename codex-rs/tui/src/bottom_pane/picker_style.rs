@@ -43,8 +43,9 @@ pub(crate) fn active_tab_style() -> Style {
         return fallback;
     }
     Style::default()
-        .fg(crate::style::readable_color_on(Color::Reset, Some(fill)))
-        .bg(fill)
+        .fg(crate::warpaint::Figure::InkSelected
+            .repaint(crate::style::readable_color_on(Color::Reset, Some(fill))))
+        .bg(crate::warpaint::Ground::Selection.repaint(fill))
         .bold()
         .not_dim()
         .not_underlined()

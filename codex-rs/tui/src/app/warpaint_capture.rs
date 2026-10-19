@@ -6,6 +6,8 @@ use super::*;
 use crate::transcript_mode::TranscriptMode;
 use codex_app_server_protocol::ArrivalItem;
 use codex_app_server_protocol::CommandAction;
+use codex_app_server_protocol::CommandExecutionApprovalKind;
+use codex_app_server_protocol::CommandExecutionRequestApprovalParams;
 use codex_app_server_protocol::CommandExecutionSource;
 use codex_app_server_protocol::CommandExecutionStatus;
 use codex_app_server_protocol::FileUpdateChange;
@@ -13,7 +15,9 @@ use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ItemStartedNotification;
 use codex_app_server_protocol::PatchApplyStatus;
 use codex_app_server_protocol::PatchChangeKind;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::Turn;
 use codex_app_server_protocol::TurnCompletedNotification;
@@ -77,6 +81,16 @@ async fn drive() -> Result<()> {
         settings.tui.animations = false;
         settings.transcript_mode = TranscriptMode::Owned;
     }
+    // The status row reads its motion from the bottom pane, which a setting reaches only as the
+    // config panel applies it.
+    let still = app.chat_widget.local_settings.tui.clone();
+    app.chat_widget.apply_config_preference(
+        crate::config_panel::ConfigPreference::Toggle {
+            setting: crate::config_panel::ConfigToggle::Animations,
+            enabled: false,
+        },
+        &still,
+    );
     app.chat_widget
         .handle_thread_session_quiet(ThreadSessionState {
             model: app.chat_widget.current_model().to_string(),
@@ -92,11 +106,22 @@ async fn drive() -> Result<()> {
         events: &mut events,
     };
     for notification in script(THREAD, &session.app.config.cwd) {
+        let rerun = matches!(
+            &notification,
+            ServerNotification::ItemStarted(ItemStartedNotification {
+                item: ThreadItem::CommandExecution { id, .. },
+                ..
+            }) if id == "exec-2"
+        );
         session
             .app
             .chat_widget
             .handle_server_notification(notification, /*replay_kind*/ None);
         session.settle().await?;
+        // While the rerun runs, the turn is at work: its status line and the keys that stop it.
+        if rerun {
+            session.capture("working")?;
+        }
     }
     // Open the patch, and the answer's reasoning from its response header, as a reader would.
     session.click("[+]").await?;
@@ -106,12 +131,27 @@ async fn drive() -> Result<()> {
     // `/copy` selects the latest response; `/theme` lists the packs over the conversation.
     session.command("/copy", "selection").await?;
     session.command("/theme", "picker").await?;
+    // `?` in the empty composer lists the shortcuts, and puts them away again.
+    let shortcuts = TuiEvent::Key(KeyCode::Char('?').into());
+    session.input(shortcuts.clone()).await?;
+    session.capture("shortcuts")?;
+    session.input(shortcuts).await?;
     session.app.chat_widget.insert_str(DRAFT);
     session.capture("conversation")?;
     // The same transcript in detail, where tool output keeps its terminal colors.
     let detail = KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL);
     session.input(TuiEvent::Key(detail)).await?;
     session.capture("detail")?;
+    // Back on the conversation, the agent asks to run the whole workspace's tests. Approvals
+    // wait out a second of typing, lest a keystroke answer them.
+    session.input(TuiEvent::Key(detail)).await?;
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    session
+        .app
+        .chat_widget
+        .handle_server_request(approval(THREAD), /*replay_kind*/ None);
+    session.settle().await?;
+    session.capture("approval")?;
     tui.set_owned_screen(/*owned*/ false)?;
     server.shutdown().await?;
     Ok(())
@@ -356,6 +396,31 @@ fn script(thread: &str, cwd: &AbsolutePathBuf) -> Vec<ServerNotification> {
     ]
 }
 
+/// The agent's request to run `APPROVAL`, as the app server sends it.
+fn approval(thread: &str) -> ServerRequest {
+    ServerRequest::CommandExecutionRequestApproval {
+        request_id: RequestId::Integer(1),
+        params: CommandExecutionRequestApprovalParams {
+            kind: CommandExecutionApprovalKind::Command,
+            thread_id: thread.to_string(),
+            turn_id: TURN.to_string(),
+            item_id: "exec-3".to_string(),
+            started_at_ms: (STARTED_AT + 45) * 1_000,
+            approval_id: Some("approval-1".to_string()),
+            environment_id: None,
+            reason: Some(REASON.to_string()),
+            network_approval_context: None,
+            command: Some(APPROVAL.to_string()),
+            cwd: None,
+            command_actions: None,
+            additional_permissions: None,
+            proposed_execpolicy_amendment: None,
+            proposed_network_policy_amendments: None,
+            available_decisions: None,
+        },
+    }
+}
+
 const PROMPT: &str = "cargo test fails on the parser branch. Find out why and fix it.";
 
 const COMMAND: &str = "cargo test -p parser";
@@ -416,3 +481,7 @@ const REASONING: &str =
 ";
 
 const DRAFT: &str = "Now run the whole workspace";
+
+const APPROVAL: &str = "cargo test --workspace";
+
+const REASON: &str = "Every crate's tests, to be sure the fix broke nothing else.";

@@ -19,7 +19,7 @@ from laws import (
     DISTINCT,
     FAMILY,
     GROUND_CEILING,
-    HEADING_CEILING,
+    LABEL_CEILING,
     HEAT_LEAST,
     LIVERY_LEAST,
     RAMP_FLOORS,
@@ -41,6 +41,7 @@ from laws import (
     composition,
     within,
 )
+from laws import label_law
 from vocabulary import PAIRS, RAMP_PAIRS, Figure, Ground, Syntax
 
 TUI = Path(__file__).resolve().parent / "../../codex-rs/tui/src"
@@ -215,9 +216,9 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
     for role, arc in WINDOWS.items():
         if not within(spec.hues[role], arc):
             faults.append(f"{role} at h {spec.hues[role]:.0f} leaves its window {arc[0]:.0f}-{arc[1]:.0f}")
-    heading = float(apca(roles[Figure.HEADING].array, canvas.array))
-    if heading > HEADING_CEILING:
-        faults.append(f"the heading reads at Lc {heading:.1f} over the canvas, above the ceiling {HEADING_CEILING:.0f}")
+    label = float(apca(roles[Figure.LABEL].array, canvas.array))
+    if label > LABEL_CEILING:
+        faults.append(f"the label reads at Lc {label:.1f} over the canvas, above the ceiling {LABEL_CEILING:.0f}")
     lines = [
         f"# {spec.name}",
         "",
@@ -225,7 +226,7 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         "",
         f"Canvas `{canvas.hex}`: J_HK {canvas.lightness:.1f}, M {canvas.colorfulness:.1f}, h {canvas.hue:.0f}.",
         *(f"The {ring.label} ring stands at J_HK {ring.level:.1f}, held there by {ring.held_by} over {ring.over}." for ring in pack.rings),
-        f"The heading reads at Lc {heading:.1f} over the canvas, ceiling {HEADING_CEILING:.0f}.",
+        f"The label reads at Lc {label:.1f} over the canvas, ceiling {LABEL_CEILING:.0f}.",
         "",
         "| role | hex | J_HK | M | asked | h | xterm |",
         "|---|---|---|---|---|---|---|",
@@ -253,12 +254,12 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         if moved := [(f, getattr(stated, f), law) for f, law in laws.items() if getattr(stated, f) != law]:
             lines += ["", f"## {title}", "", f"| {column} | spec | doctrine |", "|---|---|---|"]
             lines += [f"| {f.replace('_', ' ')} | {mine:g} | {law:g} |" for f, mine, law in moved]
-    if spec.heading != spec.ink:
-        lines += ["", "## heading", "", "| property | heading | ink |", "|---|---|---|"]
+    if spec.label != (law := label_law(spec.ink, spec.hues[Figure.ACCENT])):
+        lines += ["", "## label", "", "| property | spec | doctrine |", "|---|---|---|"]
         lines += [
-            f"| {f} | {getattr(spec.heading, f):g} | {getattr(spec.ink, f):g} |"
-            for f in spec.ink.__dataclass_fields__
-            if getattr(spec.heading, f) != getattr(spec.ink, f)
+            f"| {f} | {getattr(spec.label, f):g} | {getattr(law, f):g} |"
+            for f in law.__dataclass_fields__
+            if getattr(spec.label, f) != getattr(law, f)
         ]
     if spec.style:
         lines += ["", "## style", "", "| class | modifiers |", "|---|---|"]

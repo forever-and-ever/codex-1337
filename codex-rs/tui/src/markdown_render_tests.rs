@@ -1,5 +1,6 @@
 use super::MarkdownStyles;
 use crate::style::accent_color;
+use crate::warpaint::Figure;
 use pretty_assertions::assert_eq;
 use ratatui::style::Modifier;
 use ratatui::style::Stylize;
@@ -148,18 +149,25 @@ fn paragraph_multiple() {
 fn headings() {
     let md = "# Heading 1\n## Heading 2\n### Heading 3\n#### Heading 4\n##### Heading 5\n###### Heading 6\n";
     let text = render_markdown_text(md);
+    let label = Figure::Label.color();
     let expected = Text::from_iter([
-        Line::from_iter(["# ".bold().underlined(), "Heading 1".bold().underlined()]),
+        Line::from_iter([
+            "# ".fg(label).bold().underlined(),
+            "Heading 1".fg(label).bold().underlined(),
+        ]),
         Line::default(),
-        Line::from_iter(["## ".bold(), "Heading 2".bold()]),
+        Line::from_iter(["## ".fg(label).bold(), "Heading 2".fg(label).bold()]),
         Line::default(),
-        Line::from_iter(["### ".bold().italic(), "Heading 3".bold().italic()]),
+        Line::from_iter([
+            "### ".fg(label).bold().italic(),
+            "Heading 3".fg(label).bold().italic(),
+        ]),
         Line::default(),
-        Line::from_iter(["#### ".italic(), "Heading 4".italic()]),
+        Line::from_iter(["#### ".fg(label).italic(), "Heading 4".fg(label).italic()]),
         Line::default(),
-        Line::from_iter(["##### ".italic(), "Heading 5".italic()]),
+        Line::from_iter(["##### ".fg(label).italic(), "Heading 5".fg(label).italic()]),
         Line::default(),
-        Line::from_iter(["###### ".italic(), "Heading 6".italic()]),
+        Line::from_iter(["###### ".fg(label).italic(), "Heading 6".fg(label).italic()]),
     ]);
     assert_eq!(text, expected);
 }
@@ -476,8 +484,8 @@ fn blockquote_heading_inherits_heading_style() {
         [
             Line::from_iter([
                 "> ".into(),
-                "# ".bold().underlined(),
-                "test header".bold().underlined(),
+                "# ".fg(Figure::Label.color()).bold().underlined(),
+                "test header".fg(Figure::Label.color()).bold().underlined(),
             ])
             .green(),
             Line::from_iter(["> "]).green(),

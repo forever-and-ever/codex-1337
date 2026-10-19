@@ -1,0 +1,240 @@
+{
+  "name": "working",
+  "width": 100,
+  "height": 60,
+  "rows": [
+    [
+      {"text": "  ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "?", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": " for shortcuts", "fg": "figure:ink_muted", "bg": "reset", "mods": []},
+      {"text": "                                                                                   ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "User", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": "                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "            cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "ground:prompt", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "    ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "Command (exec_command)", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": " · failed (101)", "fg": "figure:failure", "bg": "reset", "mods": []},
+      {"text": "                                                   ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "ground:environment", "mods": []}
+    ],
+    [
+      {"text": "            ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "Command", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": "                 [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "in", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "]             [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "]                                          ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "              ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "Edited", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": "                                                                              ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "[+]", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "       src/parser.rs (", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "+1", "fg": "figure:success", "bg": "reset", "mods": []},
+      {"text": ", ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "-1", "fg": "figure:failure", "bg": "reset", "mods": []},
+      {"text": ")                                                            ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "            ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "Command (exec_command)", "fg": "figure:accent", "bg": "reset", "mods": ["bold"]},
+      {"text": " · running", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "in", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "[raw]", "fg": "figure:label", "bg": "reset", "mods": ["bold", "underline"]},
+      {"text": "      ] [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "out", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "ground:environment", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "  Working ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "(0s • ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "⌃c", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": " to interrupt)", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
+      {"text": "                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "ground:trough", "mods": []}
+    ],
+    [
+      {"text": "›", "fg": "figure:label", "bg": "ground:trough", "mods": ["bold"]},
+      {"text": " ", "fg": "reset", "bg": "ground:trough", "mods": []},
+      {"text": "Ask Codex to do anything", "fg": "figure:ink_faint", "bg": "ground:trough", "mods": []},
+      {"text": "                                                                          ", "fg": "reset", "bg": "ground:trough", "mods": []}
+    ],
+    [
+      {"text": "                                                                                                  ", "fg": "reset", "bg": "ground:trough", "mods": []},
+      {"text": "󰜗", "fg": "figure:info", "bg": "ground:trough", "mods": []},
+      {"text": " ", "fg": "reset", "bg": "ground:trough", "mods": []}
+    ],
+    [
+      {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
+    ],
+    [
+      {"text": "  ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "GPT-5.6-Sol default", "fg": "syntax:type", "bg": "reset", "mods": []},
+      {"text": " · ", "fg": "figure:ink_muted", "bg": "reset", "mods": []},
+      {"text": "/tmp/project", "fg": "syntax:string", "bg": "reset", "mods": []},
+      {"text": "                                                                ", "fg": "reset", "bg": "reset", "mods": []}
+    ]
+  ]
+}

@@ -1,8 +1,9 @@
 //! The binder: where every color in a frame becomes what the terminal is sent, as the frame is
 //! flushed. Tokens resolve against the pack worn; upstream's named chrome colors resolve through
-//! the roles they stand for; tool output, quarantined at ingestion into indices below 16,
-//! resolves through the pack's terminal ramp. At sixteen colors the terminal's palette is the
-//! user's: only tokens are translated, to their nearest ANSI meaning.
+//! the roles they stand for, and bold default ink on the client's grounds through the label;
+//! tool output, quarantined at ingestion into indices below 16, resolves through the pack's
+//! terminal ramp. At sixteen colors the terminal's palette is the user's: only tokens are
+//! translated, to their nearest ANSI meaning.
 
 use std::collections::HashMap;
 
@@ -245,6 +246,11 @@ impl Binder {
         bg: Color,
         modifier: Modifier,
     ) -> (Color, Color, Modifier) {
+        self.resolve(label_figure(fg, bg, modifier), bg, modifier)
+    }
+
+    /// Binds colors whose label, if they carry one, is already read.
+    fn resolve(&mut self, fg: Color, bg: Color, modifier: Modifier) -> (Color, Color, Modifier) {
         let mut modifier = modifier;
         let dimmed_ink = modifier.contains(Modifier::DIM) && is_ink(fg);
         let fg = self.channel(
@@ -262,17 +268,26 @@ impl Binder {
         }
     }
 
-    /// Binds a span's style. Unset colors stay unset, so that patching still inherits them,
-    /// unless dimmed ink became the faint ink.
-    pub(super) fn bind_style(&mut self, style: Style) -> Style {
-        let (fg, bg, modifier) = self.bind(
-            style.fg.unwrap_or(Color::Reset),
+    /// Binds a span's style laid over `under`, its line's. Unset colors stay unset, so that
+    /// patching still inherits them, unless dimmed ink became the faint ink or the span, as its
+    /// line shows it, is a label.
+    pub(super) fn bind_style(&mut self, style: Style, under: Style) -> Style {
+        let seen = under.patch(style);
+        let shown = seen.fg.unwrap_or(Color::Reset);
+        let labeled =
+            label_figure(shown, seen.bg.unwrap_or(Color::Reset), seen.add_modifier) != shown;
+        let (fg, bg, modifier) = self.resolve(
+            if labeled {
+                Figure::Label.color()
+            } else {
+                style.fg.unwrap_or(Color::Reset)
+            },
             style.bg.unwrap_or(Color::Reset),
             style.add_modifier,
         );
         let undimmed = style.add_modifier - modifier;
         Style {
-            fg: (style.fg.is_some() || !undimmed.is_empty()).then_some(fg),
+            fg: (style.fg.is_some() || labeled || !undimmed.is_empty()).then_some(fg),
             bg: style.bg.map(|_| bg),
             add_modifier: modifier,
             sub_modifier: style.sub_modifier | undimmed,
@@ -318,6 +333,21 @@ fn diff_figure(fg: Color, bg: Color) -> Color {
     }
 }
 
+/// Upstream emphasizes its own words in bold default ink: on the client's grounds they are its
+/// labels, which the pack paints. Words the client quotes carry the ink itself and keep it.
+fn label_figure(fg: Color, bg: Color, modifier: Modifier) -> Color {
+    let client = matches!(bg, Color::Reset | Color::Black)
+        || [Ground::Canvas, Ground::Trough, Ground::Dais]
+            .iter()
+            .any(|ground| bg == ground.color());
+    let emphasized = modifier.contains(Modifier::BOLD) && !modifier.contains(Modifier::DIM);
+    if client && emphasized && matches!(fg, Color::Reset | Color::White) {
+        Figure::Label.color()
+    } else {
+        fg
+    }
+}
+
 /// The nearest fixed xterm color; the first sixteen are the terminal's to define.
 fn quantize(rgb: (u8, u8, u8)) -> Color {
     let nearest = xterm_fixed_colors()
@@ -341,7 +371,7 @@ fn ansi(paint: Paint) -> Bound {
         },
         Paint::Ground(_) => Bound::plain(Color::Reset),
         Paint::Figure(figure) => match figure {
-            Figure::Ink | Figure::Heading | Figure::InkSelected => Bound::plain(Color::Reset),
+            Figure::Ink | Figure::Label | Figure::InkSelected => Bound::plain(Color::Reset),
             Figure::InkMuted | Figure::InkFaint | Figure::Rule => dim(Color::Reset),
             Figure::Accent => Bound::plain(Color::Magenta),
             Figure::Link | Figure::Code | Figure::Info => Bound::plain(Color::Cyan),
@@ -389,7 +419,11 @@ impl Source {
             return (faint, ground, modifier.difference(Modifier::DIM));
         }
         let chrome = CHROME_FIGURES.map(|figure| figure.map(Paint::Figure));
-        (Self::of(diff_figure(fg, bg), chrome), ground, modifier)
+        (
+            Self::of(diff_figure(label_figure(fg, bg, modifier), bg), chrome),
+            ground,
+            modifier,
+        )
     }
 
     fn of(color: Color, chrome: [Option<Paint>; 16]) -> Self {

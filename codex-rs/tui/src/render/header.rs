@@ -1,4 +1,4 @@
-//! Feed headings: entry titles and the disclosure tabs speak in the pack's heading, bold; active
+//! Feed headings: entry titles and the disclosure tabs speak in the pack's label, bold; active
 //! work speaks in its accent, the pack's signature, as heat does.
 
 use ratatui::style::Modifier;
@@ -10,7 +10,7 @@ use crate::warpaint::Figure;
 
 pub(crate) fn style() -> Style {
     Style::default()
-        .fg(Figure::Heading.color())
+        .fg(Figure::Label.color())
         .add_modifier(Modifier::BOLD)
         .remove_modifier(Modifier::DIM)
 }

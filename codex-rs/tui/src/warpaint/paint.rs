@@ -141,9 +141,9 @@ family! {
         Added => added,
         /// Removed diff text.
         Removed => removed,
-        /// Feed headings and disclosure tabs. Bold carries their prominence; the pack decides
-        /// their color.
-        Heading => heading,
+        /// The chrome's bold words: feed headings and their tabs, titles, the keys hints name,
+        /// and Markdown headings. Bold carries their prominence; the pack decides their color.
+        Label => label,
     }
 }
 

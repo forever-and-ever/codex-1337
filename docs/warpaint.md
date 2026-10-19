@@ -35,6 +35,9 @@ the pack's ink and canvas again over the default colors the handoff gave back. T
 - green and red text over a diff line's ground to the diff figures, which are proven there,
   rather than to success and failure;
 - dimmed ink to the faint ink, so the proof rather than the terminal decides how faint;
+- bold default ink on the client's grounds, the canvas, trough and dais, to the label: upstream's
+  titles, keys and emphasis there. Lines the client quotes, such as tool output, carry the ink
+  itself, so a quoted bold is never taken for a label;
 - tool output, which `codex-ansi-escape` quarantines at ingestion: its palette colors become
   indices below 16, resolved through the terminal ramp, and its extended colors become RGB;
 - RGB literals, unchanged in truecolor and quantized at 256;
@@ -71,18 +74,22 @@ Warpaint follows upstream's theme revision rather than being told, so lazy initi
 previews and cancel-restore cannot leave the two apart. `terminal_palette.rs` reports the
 pack's ink and canvas as the default colors.
 
-Upstream's palette helpers still compute their colors and decide, as upstream does, whether
-to paint at all. Where one settles on a color of its own, an RGB or a fixed index, the role's
-token replaces it (`Figure::repaint`, `Ground::repaint`); where it degrades to the terminal's
-palette, with the default colors unknown or at sixteen colors, its degradation stands. So
-`style.rs` repaints its fills, accent, secondary and selection; `diff_render.rs` its two line
-backgrounds; the activity chart replaces a gradient it would show with the heat ramp; and
-`readable_color_on` passes tokens and the ink through, since packs prove both, except that at
-an unknown color depth, where upstream paints no computed color, it paints no token either.
-Effects that blend over a painted cell, such as the composer's sparkle, read a token's color
-through `warpaint::rgb`. Thread colors come from `warpaint/livery.rs`, mounted as
-`thread_color`. RGB literals that upstream or the fork's own chrome paints, such as the session
-header's, are outside the pack.
+Upstream's palette helpers still compute their colors and decide, as upstream does, whether to
+paint at all. Where one settles on a color of its own, an RGB or a fixed index, the role's token
+replaces it (`Figure::repaint`, `Ground::repaint`); where it degrades to the terminal's palette,
+with the default colors unknown or at sixteen colors, its degradation stands. So `style.rs`
+repaints its fills, accent, secondary and selection; `diff_render.rs` its two line backgrounds;
+the pickers their active tab and the resume picker its rows; the activity chart replaces a
+gradient it would show with the heat ramp; and `readable_color_on` passes tokens and the ink
+through, since packs prove both, except that at an unknown color depth, where upstream paints no
+computed color, it paints no token either. Markdown headings, which lie on the speakers'
+grounds, name the label themselves. Thread colors come from `warpaint/livery.rs`, mounted as
+`thread_color`.
+
+Animated flourishes are aesthetic isolates: the shimmers, the composer's sparkle and effort
+ignition and the empty state's animation paint their own art, which no pack repaints; their
+contrast with the pack is the point. Those that blend over a painted cell read its token's color
+through `warpaint::rgb`.
 
 ## Pipeline
 
@@ -116,8 +123,8 @@ each restatement beside the doctrine's value:
 | `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
 | `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
-| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), the tints `selection_tint` and `diff_tint` (9, 7 M), and the speaker grounds' rises `response`, `message`, `prompt`, `reasoning` and `environment` (2, 2.5, 7.5, 3, 7.5 J') |
-| `[heading]` | the heading's `hue`, `colorfulness` and `contrast`, the ink's unless stated |
+| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), the tints `selection_tint` and `diff_tint` (9, 7 M), and the speaker grounds' rises `response`, `message`, `prompt`, `reasoning` and `environment` (2, 2.5, 9.5, 3, 9.5 J') |
+| `[label]` | the label's `hue`, `colorfulness` and `contrast` |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
 | `[style]` | modifiers, `bold` or `italic`, for syntax classes; the pack carries them for the binder |
 
@@ -135,15 +142,17 @@ light text on a dark ground correctly.
   agent's corner holds this thread's responses and other agents' messages, the user's the
   prompt, the chain of thought's the reasoning, and the environment's tool output, the verbatim
   input of tool calls and injected context. The canvas holds only what the client says. Each
-  ground rises by its own amount and takes the least tint toward its hue that stands it 5 dE
-  off the canvas (the response 4.5), 5 dE from every other corner's ground and 2.5 to 4 from its
-  own corner's; the grounds take their tints quietest first, response, message, environment,
+  ground rises by its own amount and takes the least tint toward its hue that stands it 6.5
+  dE off the canvas (the response 6), 6.5 dE from every other corner's ground and 3 to 5 from
+  its own corner's; the grounds take their tints quietest first, response, message, environment,
   reasoning, prompt, so the louder pays for distinctness, and the response stands quietest, the
   prompt loudest. A grey ground is untinted and seen by its rise alone. A spec may author the
   reasoning hue; otherwise the law takes the hue inside caution's window that needs the least
   tint, the farthest from every surface among equals.
-- Headings take the ink's hue, colorfulness and contrast unless a spec's `[heading]` states
-  them; bold carries their prominence, and no heading reads above Lc 95 over the canvas.
+- Labels, the chrome's bold words (the feed's headings and tabs, titles, the keys a hint names,
+  Markdown headings), speak in a pale tint of the accent: its hue at 9 M, 3 Lc beneath the
+  ink's contrast, unless a spec's `[label]` states otherwise. Bold carries the rest of their
+  prominence, and no label reads above Lc 95 over the canvas.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A
@@ -179,8 +188,9 @@ light text on a dark ground correctly.
 
 Edit the spec, run `scripts/warpaint/smelt.py`, re-swatch, and look at the result. A generated
 pack must not be edited: the value would be unprovable and the next smelt would overwrite it.
-`just warpaint-check` fails when a pack or proof has drifted from its spec or a pack breaks the
-doctrine. When the TUI's painting changes, `just warpaint-capture` re-exports the captures.
+`just warpaint-check` fails when a pack or proof has drifted from its spec, a pack breaks the
+doctrine, or a capture shows chrome no pack paints: a literal color, or bold default ink on the
+client's grounds. When the TUI's painting changes, `just warpaint-capture` re-exports the captures.
 
 A new pack is a spec file and an entry in `EMBEDDED` in `warpaint/pack.rs`; the
 `embedded_packs_are_the_pack_directory` test fails until both exist. Eight packs ship:

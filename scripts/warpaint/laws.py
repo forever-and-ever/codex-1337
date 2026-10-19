@@ -67,18 +67,18 @@ on it, and its corner says who said it: an agent, this thread's or another's; th
 agent's chain of thought; the environment. The canvas holds only what the client says."""
 SPEAKERS = tuple(ground for grounds in CORNERS.values() for ground in grounds)
 CORNER = {ground: name for name, grounds in CORNERS.items() for ground in grounds}
-RISES = {Ground.RESPONSE: 2.0, Ground.MESSAGE: 2.5, Ground.PROMPT: 7.5, Ground.REASONING: 3.0, Ground.ENVIRONMENT: 7.5}
+RISES = {Ground.RESPONSE: 3.0, Ground.MESSAGE: 3.5, Ground.PROMPT: 9.5, Ground.REASONING: 4.0, Ground.ENVIRONMENT: 9.5}
 """Each speaker ground's elevation in J'. The agents and their reasoning sit low and are told
 apart by hue. A grey ground has only its rise to be seen by, and the dais shares its material,
-so the environment stands two and a half above the dais; the prompt stands as high and is told
-from it by hue. A spec's `[surfaces]` may move any."""
-VISIBLE = 5.0
-RESPONSE_VISIBLE = 4.5
+so the environment stands well above the dais; the prompt stands as high and is told from it
+by hue. A spec's `[surfaces]` may move any."""
+VISIBLE = 6.5
+RESPONSE_VISIBLE = 6.0
 """Least dE a speaker ground stands off the canvas. The response, the bulk of the page, may
 stand quieter."""
-CORNER_LEAST = 5.0
+CORNER_LEAST = 6.5
 """Least dE between speaker grounds of different corners."""
-FAMILY = (2.5, 4.0)
+FAMILY = (3.0, 5.0)
 """Least and most dE between the grounds of one corner: told apart, and still one speaker."""
 SURFACE_LEAST = 2.0
 """Least dE between two surfaces."""
@@ -90,9 +90,15 @@ PLACEMENT = (Ground.RESPONSE, Ground.MESSAGE, Ground.ENVIRONMENT, Ground.REASONI
 """The order speaker grounds take their tints, quietest first: each satisfies its laws against
 the grounds placed before it, so the louder ground pays for distinctness. A grey ground cannot
 pay and goes first."""
-HEADING_CEILING = 95.0
-"""Most Lc a heading may reach over the canvas. Bold already carries a heading's prominence, and
+LABEL_CEILING = 95.0
+"""Most Lc a label may reach over the canvas. Bold already carries a label's prominence, and
 pure white reads near Lc 107 on these canvases."""
+LABEL_TINT = 9.0
+"""A label's colorfulness unless its spec states one: a pale tint of the accent, never white and
+never a second accent."""
+LABEL_DROP = 3.0
+"""How far beneath the ink's contrast a label reads unless its spec states otherwise; bold carries
+the rest of its prominence."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""
@@ -184,7 +190,7 @@ GREY = "grey"
 def composition(spec: Spec) -> dict[Paint, Floors]:
     """Every ground the TUI paints each text role on, with the Lc it must reach there. The solver
     lifts each role to this table and the proof checks it, so the two cannot disagree. A rank's
-    classes take code's floors at the rank's Lc in place of their own; the heading takes the
+    classes take code's floors at the rank's Lc in place of their own; the label takes the
     ink's at its own contrast, wherever it is painted."""
     body = spec.ink.contrast
     secondary, tertiary = body * INK_MUTED, body * INK_FAINT
@@ -217,7 +223,7 @@ def composition(spec: Spec) -> dict[Paint, Floors]:
 
     table = {
         Figure.INK: ink(body),
-        Figure.HEADING: tuple((g, f) for g, f in ink(spec.heading.contrast) if g in PAIRS[Figure.HEADING]),
+        Figure.LABEL: tuple((g, f) for g, f in ink(spec.label.contrast) if g in PAIRS[Figure.LABEL]),
         Figure.INK_MUTED: ink(secondary),
         Figure.INK_FAINT: ink(tertiary),
         Figure.INK_SELECTED: ((Ground.SELECTION, body - 4),),
@@ -402,13 +408,19 @@ STYLES = ("bold", "italic")
 """The modifiers a pack may give a syntax class; the TUI adds them wherever it binds the class."""
 
 
+def label_law(ink: InkSpec, accent: float) -> InkSpec:
+    """The label as the doctrine paints it: the accent's hue at LABEL_TINT, LABEL_DROP beneath the
+    ink's contrast."""
+    return InkSpec(accent, LABEL_TINT, ink.contrast - LABEL_DROP)
+
+
 @dataclass(frozen=True, slots=True)
 class Spec:
     name: str
     stance: str
     ground: GroundSpec
     ink: InkSpec
-    heading: InkSpec
+    label: InkSpec
     voice: VoiceSpec
     hues: dict[Paint, float]
     speakers: dict[Paint, float | None]
@@ -439,12 +451,12 @@ class Spec:
                 raise Invalid(f"{where}: [{key}] omits {sorted(missing)}")
             return value
 
-        tables = {"stance", "ground", "ink", "heading", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
+        tables = {"stance", "ground", "ink", "label", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
         if unknown := raw.keys() - tables:
             raise Invalid(f"{where}: unknown tables {sorted(unknown)}")
         ground = table("ground", ("hue", "colorfulness", "lightness"), ("hue", "colorfulness", "lightness"))
         ink = table("ink", ("hue", "colorfulness", "contrast"), ("colorfulness", "contrast"))
-        heading = table("heading", ("hue", "colorfulness", "contrast"), ())
+        label = table("label", ("hue", "colorfulness", "contrast"), ())
         voice = table("voice", ("colorfulness", "lean", "naturalism", "lift", "least"), ("colorfulness",))
         optional = (
             Figure.ADDED,
@@ -516,15 +528,16 @@ class Spec:
         for name, modifiers in style.items():
             if not modifiers or not set(modifiers) <= set(STYLES):
                 raise Invalid(f"{where}: [style] {name} must be some of {list(STYLES)}")
+        law = label_law(InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"])), authored[Figure.ACCENT])
         return cls(
             name=path.stem,
             stance=str(raw["stance"]).strip(),
             ground=GroundSpec(float(ground["hue"]), float(ground["colorfulness"]), float(ground["lightness"])),
             ink=InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"])),
-            heading=InkSpec(
-                float(heading.get("hue", ink_hue)) % 360,
-                float(heading.get("colorfulness", ink["colorfulness"])),
-                float(heading.get("contrast", ink["contrast"])),
+            label=InkSpec(
+                float(label.get("hue", law.hue)) % 360,
+                float(label.get("colorfulness", law.colorfulness)),
+                float(label.get("contrast", law.contrast)),
             ),
             voice=VoiceSpec(
                 float(voice["colorfulness"]),
@@ -681,7 +694,7 @@ def smelt(spec: Spec) -> Pack:
         probe = text(role, ink.colorfulness, ink.hue)
         roles[role] = text(role, ink.colorfulness * probe.lightness / primary.lightness, ink.hue)
     roles[Figure.INK_SELECTED] = text(Figure.INK_SELECTED, ink.colorfulness, ink.hue)
-    roles[Figure.HEADING] = text(Figure.HEADING, spec.heading.colorfulness, spec.heading.hue)
+    roles[Figure.LABEL] = text(Figure.LABEL, spec.label.colorfulness, spec.label.hue)
     roles[Figure.RULE] = text(Figure.RULE, canvas.colorfulness * 1.6, g.hue)
 
     home = cusp(accent)

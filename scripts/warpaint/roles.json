@@ -27,7 +27,7 @@
     "info",
     "added",
     "removed",
-    "heading"
+    "label"
   ],
   "syntax": [
     "keyword",
@@ -206,8 +206,16 @@
         "added",
         "removed"
       ],
-      "heading": [
-        "canvas"
+      "label": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "environment",
+        "message"
       ]
     },
     "syntax": {

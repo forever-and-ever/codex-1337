@@ -5,8 +5,8 @@ expression: render.lines
 [
     HyperlinkLine {
         line: Line::from_iter([
-            Span::from("# ").bold().underlined(),
-            Span::from("Heading").bold().underlined(),
+            Span::from("# ").fg(Color::Indexed(78)).bold().underlined(),
+            Span::from("Heading").fg(Color::Indexed(78)).bold().underlined(),
         ]),
         hyperlinks: [],
     },

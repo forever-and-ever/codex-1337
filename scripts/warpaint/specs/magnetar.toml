@@ -42,6 +42,7 @@ environment = "grey"
 count = 8
 
 [surfaces]
+response = 4.0
 trough = -2.5
 dais = 4.0
 selection_rise = 7.5

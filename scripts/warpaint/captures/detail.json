@@ -8,7 +8,7 @@
       {"text": "⚠ ", "fg": "figure:ink_muted", "bg": "reset", "mods": []},
       {"text": "1 warning", "fg": "figure:caution", "bg": "reset", "mods": []},
       {"text": " · ", "fg": "figure:ink_muted", "bg": "reset", "mods": []},
-      {"text": "f2", "fg": "reset", "bg": "reset", "mods": ["bold"]},
+      {"text": "f2", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " to view", "fg": "figure:ink_muted", "bg": "reset", "mods": []},
       {"text": " ", "fg": "reset", "bg": "reset", "mods": []}
     ],
@@ -19,31 +19,32 @@
       {"text": "            cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "ground:prompt", "mods": []}
     ],
     [
-      {"text": "              test lexer::numbers ... ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              test lexer::numbers ... ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "ok", "fg": "terminal:2", "bg": "reset", "mods": []},
-      {"text": "                                                            ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "                                                            ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              test parser::precedence ... ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              test parser::precedence ... ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "FAILED", "fg": "terminal:1", "bg": "reset", "mods": []},
-      {"text": "                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "                                                    ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "warning", "fg": "terminal:3", "bg": "reset", "mods": []},
-      {"text": ": unused variable: `span`                                                      ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": ": unused variable: `span`", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "                                                      ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "✗", "fg": "figure:failure", "bg": "reset", "mods": ["bold"]},
-      {"text": " (101)", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": " (101)", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": " • 1.84s", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "                                                                       ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "                                                                       ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
       {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "Edited", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
+      {"text": "Edited", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                              ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
@@ -139,31 +140,32 @@
       {"text": "                                                                ", "fg": "figure:info", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              test parser::precedence ... ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              test parser::precedence ... ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "ok", "fg": "terminal:2", "bg": "reset", "mods": []},
-      {"text": "                                                        ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              test result: ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              test result: ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "ok", "fg": "terminal:2", "bg": "reset", "mods": []},
-      {"text": ". 3 passed; 0 failed                                                   ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": ". 3 passed; 0 failed", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "                                                   ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "              ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "✓", "fg": "figure:success", "bg": "reset", "mods": ["bold"]},
       {"text": " • 1.84s", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "                                                                             ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "                                                                             ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "      ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "Message", "fg": "reset", "bg": "reset", "mods": ["bold"]},
+      {"text": "Message", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " from ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "reviewer                                                               ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                Checked the binding powers against the grammar: only unary minus was out of order.  ", "fg": "reset", "bg": "ground:message", "mods": []}
+      {"text": "                Checked the binding powers against the grammar: only unary minus was out of order.  ", "fg": "figure:ink", "bg": "ground:message", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -179,7 +181,7 @@
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "    ", "fg": "reset", "bg": "ground:response", "mods": []},
-      {"text": "## Fixed: operator precedence", "fg": "reset", "bg": "ground:response", "mods": ["bold"]},
+      {"text": "## Fixed: operator precedence", "fg": "figure:label", "bg": "ground:response", "mods": ["bold"]},
       {"text": "                                                           ", "fg": "reset", "bg": "ground:response", "mods": []}
     ],
     [
@@ -346,18 +348,18 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "      • The rerun passes, so the answer is the one-line change to ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "      • The rerun passes, so the answer is the one-line change to ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "precedence()", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": ".             ", "fg": "reset", "bg": "ground:reasoning", "mods": []}
+      {"text": ".             ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []}
     ],
     [
-      {"text": "              • ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "              • ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "Op::Neg", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": " drops from 30 to 15, below ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": " drops from 30 to 15, below ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "*", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": "; the ", "fg": "reset", "bg": "ground:reasoning", "mods": []},
+      {"text": "; the ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []},
       {"text": "span", "fg": "figure:code", "bg": "ground:reasoning", "mods": []},
-      {"text": " warning is unrelated.                ", "fg": "reset", "bg": "ground:reasoning", "mods": []}
+      {"text": " warning is unrelated.                ", "fg": "figure:ink", "bg": "ground:reasoning", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -375,7 +377,7 @@
       {"text": "                                                                                                    ", "fg": "reset", "bg": "ground:trough", "mods": []}
     ],
     [
-      {"text": "›", "fg": "reset", "bg": "ground:trough", "mods": ["bold"]},
+      {"text": "›", "fg": "figure:label", "bg": "ground:trough", "mods": ["bold"]},
       {"text": " Now run the whole workspace                                                                       ", "fg": "reset", "bg": "ground:trough", "mods": []}
     ],
     [

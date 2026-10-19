@@ -273,6 +273,11 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
         }
         let style = provenance.style();
         line.line.style = line.line.style.patch(style);
+        // Quoted words keep the page's ink: their bold is their speaker's, not a label.
+        line.line
+            .style
+            .fg
+            .get_or_insert(crate::warpaint::Figure::Ink.color());
         let source = line.source.get_or_insert_with(|| {
             crate::terminal_hyperlinks::LogicalLineSource::from_line(&line.line)
         });

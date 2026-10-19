@@ -52,6 +52,7 @@ use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::remap_wrapped_line;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::terminal_hyperlinks::web_destination;
+use crate::warpaint::Figure;
 use crate::width::char_width;
 use crate::width::display_width;
 use crate::wrapping::RtOptions;
@@ -133,12 +134,12 @@ impl Default for MarkdownStyles {
 impl MarkdownStyles {
     fn for_theme(theme: &syntect::highlighting::Theme) -> Self {
         Self {
-            h1: Style::new().bold().underlined(),
-            h2: Style::new().bold(),
-            h3: Style::new().bold().italic(),
-            h4: Style::new().italic(),
-            h5: Style::new().italic(),
-            h6: Style::new().italic(),
+            h1: Style::new().fg(Figure::Label.color()).bold().underlined(),
+            h2: Style::new().fg(Figure::Label.color()).bold(),
+            h3: Style::new().fg(Figure::Label.color()).bold().italic(),
+            h4: Style::new().fg(Figure::Label.color()).italic(),
+            h5: Style::new().fg(Figure::Label.color()).italic(),
+            h6: Style::new().fg(Figure::Label.color()).italic(),
             code: foreground_style_for_scopes_with_theme(
                 theme,
                 &[

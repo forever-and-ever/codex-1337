@@ -2592,7 +2592,7 @@ fn transcript_loading_overlay_style() -> Style {
     } else {
         ((255, 255, 255), 0.14)
     };
-    let fill = best_color(blend(overlay, bg, alpha));
+    let fill = crate::warpaint::Ground::Dais.repaint(best_color(blend(overlay, bg, alpha)));
     Style::default()
         .bg(fill)
         .fg(readable_color_on(Color::Reset, Some(fill)))
@@ -2977,7 +2977,12 @@ fn dense_row_background_style(selected: bool) -> Style {
     } else {
         ((255, 255, 255), if selected { 0.12 } else { 0.055 })
     };
-    Style::default().bg(best_color(blend(overlay, bg, alpha)))
+    let ground = if selected {
+        crate::warpaint::Ground::Selection
+    } else {
+        crate::warpaint::Ground::Dais
+    };
+    Style::default().bg(ground.repaint(best_color(blend(overlay, bg, alpha))))
 }
 
 fn dense_column_text(text: &str, width: usize) -> String {
