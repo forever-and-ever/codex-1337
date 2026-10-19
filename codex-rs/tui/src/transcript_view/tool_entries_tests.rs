@@ -380,9 +380,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         assert_eq!(body.source.as_ref().unwrap().output_provenance, expected);
         if matches!(source, ArrivalSource::Captured { .. }) {
             let style = if kind == ArrivalKind::InterAgent {
-                crate::style::subagent_message_style()
+                crate::style::message_style()
             } else {
-                crate::style::context_message_style()
+                crate::style::environment_style()
             };
             assert_eq!(body.line.style.bg, style.bg);
         }
@@ -675,7 +675,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     assert!(definitions.iter().all(|line| {
                         line.line.style.bg
                             == match mode {
-                                OutputMode::Raw => crate::style::context_message_style().bg,
+                                OutputMode::Raw => crate::style::environment_style().bg,
                                 OutputMode::Fmt => Some(ratatui::style::Color::Reset),
                             }
                     }));

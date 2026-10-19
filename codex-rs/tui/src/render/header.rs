@@ -1,32 +1,22 @@
-use ratatui::style::Color;
+//! Feed headings: entry titles and the disclosure tabs speak in the pack's heading, bold; active
+//! work speaks in its accent, the pack's signature, as heat does.
+
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "Fork header role colors are truecolor tokens contrast-corrected against the terminal background."
-)]
+use crate::warpaint::Figure;
+
 pub(crate) fn style() -> Style {
     Style::default()
-        .fg(crate::style::readable_color_on(
-            Color::Rgb(255, 255, 255),
-            None,
-        ))
+        .fg(Figure::Heading.color())
         .add_modifier(Modifier::BOLD)
         .remove_modifier(Modifier::DIM)
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "The active-work role uses its established contrast-corrected fork palette token."
-)]
 pub(crate) fn work_style() -> Style {
-    style().fg(crate::style::readable_color_on(
-        Color::Rgb(194, 217, 139),
-        None,
-    ))
+    style().fg(Figure::Accent.color())
 }
 
 pub(crate) fn leading(label: &'static str, mut tail: Line<'static>) -> Line<'static> {

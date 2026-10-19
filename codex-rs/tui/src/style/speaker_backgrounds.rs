@@ -1,5 +1,6 @@
-//! The speakers' bands: each turn is painted on its speaker's ground, wherever the terminal's
-//! background is known, as upstream paints its own fills.
+//! The speakers' grounds: whatever the model sees is painted on the ground of whoever said it,
+//! wherever the terminal's background is known, as upstream paints its own fills; the canvas
+//! holds only what the client says.
 
 use crate::terminal_palette::default_bg;
 use crate::warpaint::Ground;
@@ -17,12 +18,12 @@ pub(crate) fn reasoning_style() -> Style {
     band(Ground::Reasoning)
 }
 
-pub(crate) fn context_message_style() -> Style {
-    band(Ground::Aside)
+pub(crate) fn environment_style() -> Style {
+    band(Ground::Environment)
 }
 
-pub(crate) fn subagent_message_style() -> Style {
-    band(Ground::Subagent)
+pub(crate) fn message_style() -> Style {
+    band(Ground::Message)
 }
 
 fn band(ground: Ground) -> Style {

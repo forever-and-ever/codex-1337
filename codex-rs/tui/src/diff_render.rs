@@ -2153,14 +2153,14 @@ mod tests {
 
                 let lines =
                     create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
-                let has_rgb = lines.iter().any(|line| {
+                let highlighted = lines.iter().any(|line| {
                     line.spans
                         .iter()
-                        .any(|s| matches!(s.style.fg, Some(ratatui::style::Color::Rgb(..))))
+                        .any(|s| s.style.fg.is_some_and(crate::warpaint::is_syntax))
                 });
                 assert!(
-                    has_rgb,
-                    "add diff for .rs file should produce syntax-highlighted (RGB) spans"
+                    highlighted,
+                    "add diff for .rs file should produce syntax-highlighted spans"
                 );
             },
         );
@@ -2433,14 +2433,14 @@ mod tests {
 
                 let lines =
                     create_diff_summary(&changes, &PathBuf::from("/"), /*wrap_cols*/ 80);
-                let has_rgb = lines.iter().any(|line| {
+                let highlighted = lines.iter().any(|line| {
                     line.spans
                         .iter()
-                        .any(|s| matches!(s.style.fg, Some(ratatui::style::Color::Rgb(..))))
+                        .any(|s| s.style.fg.is_some_and(crate::warpaint::is_syntax))
                 });
                 assert!(
-                    has_rgb,
-                    "rename from .xyzzy to .rs should produce syntax-highlighted (RGB) spans"
+                    highlighted,
+                    "rename from .xyzzy to .rs should produce syntax-highlighted spans"
                 );
             },
         );

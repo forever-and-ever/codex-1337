@@ -13,15 +13,23 @@ import numpy as np
 from appearance import Rgb, Swatch, Vision, _decode, apca, distance
 from laws import (
     BRIGHT_LEAST,
+    CORNER,
+    CORNER_LEAST,
+    CORNERS,
     DISTINCT,
+    FAMILY,
     GROUND_CEILING,
+    HEADING_CEILING,
     HEAT_LEAST,
     LIVERY_LEAST,
     RAMP_FLOORS,
     REPELLERS,
+    RESPONSE_VISIBLE,
     SIGNAL_RING,
+    SPEAKERS,
     TEXT_RING,
     VALUE_STEP,
+    VISIBLE,
     WINDOWS,
     Distinct,
     Gain,
@@ -154,6 +162,50 @@ def _ranked(rule: Distinct, spec: Spec, members: dict[str, Swatch], lc: dict[str
     return lines
 
 
+def _speakers(pack: Pack, faults: list[str]) -> list[str]:
+    """Each speaker ground's corner, hue, rise and tint, and the laws its placement answers to."""
+    spec, roles, canvas = pack.spec, pack.roles, pack.roles[Ground.CANVAS]
+    loud = {ground: distance(roles[ground].rgb, canvas.rgb) for ground in SPEAKERS}
+    lines = ["", "## speakers", "", "| ground | corner | hue | rise | tint | dE off canvas |", "|---|---|---|---|---|---|"]
+    for ground in SPEAKERS:
+        band = pack.bands[ground]
+        hue = "grey" if band.hue is None else f"{band.hue:.0f}" + ("" if ground in spec.speakers else " (window)")
+        lines.append(f"| {ground} | {CORNER[ground]} | {hue} | {band.rise:g} | {band.tint:.2f} | {loud[ground]:.1f} |")
+        floor = RESPONSE_VISIBLE if ground is Ground.RESPONSE else VISIBLE
+        if loud[ground] < floor:
+            faults.append(f"{ground} stands dE {loud[ground]:.1f} off the canvas, below {floor:g}")
+    lines.append("")
+    quiet = min(SPEAKERS, key=loud.get)
+    lines.append(
+        f"- off the canvas: least dE {loud[quiet]:.1f} ({quiet}), floor {VISIBLE:g}, the response's {RESPONSE_VISIBLE:g}"
+    )
+    across = [(a, b) for i, a in enumerate(SPEAKERS) for b in SPEAKERS[i + 1 :] if CORNER[a] != CORNER[b]]
+    near = min((distance(roles[a].rgb, roles[b].rgb), a, b) for a, b in across)
+    lines.append(f"- corners: least dE {near[0]:.1f} ({near[1]} and {near[2]}), floor {CORNER_LEAST:g}")
+    for a, b in across:
+        apart = distance(roles[a].rgb, roles[b].rgb)
+        if apart < CORNER_LEAST:
+            faults.append(f"corners: {a} and {b} are dE {apart:.1f} apart, below {CORNER_LEAST:g}")
+    for name, grounds in CORNERS.items():
+        for i, a in enumerate(grounds):
+            for b in grounds[i + 1 :]:
+                apart = distance(roles[a].rgb, roles[b].rgb)
+                lines.append(f"- {name} corner: {a} and {b} stand dE {apart:.1f} apart, between {FAMILY[0]:g} and {FAMILY[1]:g}")
+                if not FAMILY[0] <= apart <= FAMILY[1]:
+                    faults.append(f"{name} corner: {a} and {b} are dE {apart:.1f} apart, outside {FAMILY[0]:g}-{FAMILY[1]:g}")
+    others = [ground for ground in SPEAKERS if ground not in (Ground.RESPONSE, Ground.PROMPT)]
+    lines.append(
+        f"- loudness: the response at dE {loud[Ground.RESPONSE]:.1f} and the prompt at dE {loud[Ground.PROMPT]:.1f}; "
+        f"the rest between {min(loud[g] for g in others):.1f} and {max(loud[g] for g in others):.1f}"
+    )
+    for ground in SPEAKERS:
+        if ground is not Ground.RESPONSE and loud[ground] <= loud[Ground.RESPONSE]:
+            faults.append(f"loudness: {ground} at dE {loud[ground]:.1f} is no louder than the response")
+        if ground is not Ground.PROMPT and loud[ground] >= loud[Ground.PROMPT]:
+            faults.append(f"loudness: {ground} at dE {loud[ground]:.1f} is no quieter than the prompt")
+    return lines
+
+
 def prove(pack: Pack) -> tuple[str, list[str]]:
     spec, roles, canvas = pack.spec, pack.roles, pack.roles[Ground.CANVAS]
     faults: list[str] = []
@@ -163,6 +215,9 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
     for role, arc in WINDOWS.items():
         if not within(spec.hues[role], arc):
             faults.append(f"{role} at h {spec.hues[role]:.0f} leaves its window {arc[0]:.0f}-{arc[1]:.0f}")
+    heading = float(apca(roles[Figure.HEADING].array, canvas.array))
+    if heading > HEADING_CEILING:
+        faults.append(f"the heading reads at Lc {heading:.1f} over the canvas, above the ceiling {HEADING_CEILING:.0f}")
     lines = [
         f"# {spec.name}",
         "",
@@ -170,6 +225,7 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         "",
         f"Canvas `{canvas.hex}`: J_HK {canvas.lightness:.1f}, M {canvas.colorfulness:.1f}, h {canvas.hue:.0f}.",
         *(f"The {ring.label} ring stands at J_HK {ring.level:.1f}, held there by {ring.held_by} over {ring.over}." for ring in pack.rings),
+        f"The heading reads at Lc {heading:.1f} over the canvas, ceiling {HEADING_CEILING:.0f}.",
         "",
         "| role | hex | J_HK | M | asked | h | xterm |",
         "|---|---|---|---|---|---|---|",
@@ -197,12 +253,21 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         if moved := [(f, getattr(stated, f), law) for f, law in laws.items() if getattr(stated, f) != law]:
             lines += ["", f"## {title}", "", f"| {column} | spec | doctrine |", "|---|---|---|"]
             lines += [f"| {f.replace('_', ' ')} | {mine:g} | {law:g} |" for f, mine, law in moved]
+    if spec.heading != spec.ink:
+        lines += ["", "## heading", "", "| property | heading | ink |", "|---|---|---|"]
+        lines += [
+            f"| {f} | {getattr(spec.heading, f):g} | {getattr(spec.ink, f):g} |"
+            for f in spec.ink.__dataclass_fields__
+            if getattr(spec.heading, f) != getattr(spec.ink, f)
+        ]
     if spec.style:
         lines += ["", "## style", "", "| class | modifiers |", "|---|---|"]
         lines += [f"| {syntax} | {', '.join(modifiers)} |" for syntax, modifiers in spec.style.items()]
 
+    lines += _speakers(pack, faults)
+
     lines += ["", "## contrast", "", "| text | ground | Lc | floor |", "|---|---|---|---|"]
-    floors = composition(spec.ink.contrast, spec.ranks)
+    floors = composition(spec)
 
     def contrast(text: object, swatch: Swatch, ground: object, floor: float | None) -> None:
         lc = float(apca(swatch.array, roles[ground].array))

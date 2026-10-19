@@ -31,9 +31,11 @@ string = 85
 number = 355
 attribute = 290
 comment = 265
-prompt = 350
-aside = 25
-subagent = 200
+response = 0
+message = 335
+prompt = 210
+reasoning = 80
+environment = "grey"
 constant = 5
 
 [livery]
@@ -59,7 +61,6 @@ punctuation = 0.2
 variable = 0.2
 
 [surfaces]
-band_tint = 7.0
 selection_rise = 7.5
 selection_tint = 3.0
 

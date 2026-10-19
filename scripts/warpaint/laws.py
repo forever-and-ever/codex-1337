@@ -7,14 +7,13 @@ color is chosen by hand at a call site or in a pack.
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from appearance import Swatch, apca, cusp, distance, elevated, least_lightness, paint, tinted, ucs, yielding
-from vocabulary import HEAT_STEPS, TERMINAL_SLOTS, Figure, Ground, Paint, Syntax
+from vocabulary import HEAT_STEPS, PAIRS, TERMINAL_SLOTS, Figure, Ground, Paint, Syntax
 
 type Arc = tuple[float, float]
 type Floors = tuple[tuple[Paint, float], ...]
@@ -42,24 +41,58 @@ RULE = 16.0
 
 TROUGH = -3.0
 DAIS = 5.0
-RESPONSE = 1.0
-BAND = 2.0
 DIFF_BAND = 1.5
 SELECTION_RISE = 9.0
 """Elevations in CAM16-UCS J' from the canvas. A surface is the ground's material raised or
 recessed at constant hue and saturation, so a lit surface reads as the same paint in more light
 rather than as a different paint. A spec's `[surfaces]` may move the trough, dais and selection."""
 
-BAND_TINT = 2.8
 SELECTION_TINT = 9.0
-"""Colorfulness a band adds toward its hue, as a vector in the appearance plane: a band is the
-ground tinted, not a color laid over it. The selection bar keeps the colors of the row it
-selects, so it is a lit band of the ground and never a light chip. A spec's `[surfaces]` may
-move either."""
+"""Colorfulness the selection bar adds toward the accent, as a vector in the appearance plane: the
+bar keeps the colors of the row it selects, so it is a lit band of the ground and never a light
+chip. A spec's `[surfaces]` may move it."""
 DIFF_TINT = 7.0
 """Colorfulness of a diff band, which takes its ink's hue outright: a removed line must read as
 the removed hue on every ground, not as that hue mixed with the page. A spec's `[surfaces]`
 may move it."""
+
+CORNERS: dict[str, tuple[Paint, ...]] = {
+    "agent": (Ground.RESPONSE, Ground.MESSAGE),
+    "user": (Ground.PROMPT,),
+    "cot": (Ground.REASONING,),
+    "environment": (Ground.ENVIRONMENT,),
+}
+"""Who said what lies on each speaker ground. A speaker's ground means the model sees what lies
+on it, and its corner says who said it: an agent, this thread's or another's; the user; the
+agent's chain of thought; the environment. The canvas holds only what the client says."""
+SPEAKERS = tuple(ground for grounds in CORNERS.values() for ground in grounds)
+CORNER = {ground: name for name, grounds in CORNERS.items() for ground in grounds}
+RISES = {Ground.RESPONSE: 2.0, Ground.MESSAGE: 2.5, Ground.PROMPT: 7.5, Ground.REASONING: 3.0, Ground.ENVIRONMENT: 7.5}
+"""Each speaker ground's elevation in J'. The agents and their reasoning sit low and are told
+apart by hue. A grey ground has only its rise to be seen by, and the dais shares its material,
+so the environment stands two and a half above the dais; the prompt stands as high and is told
+from it by hue. A spec's `[surfaces]` may move any."""
+VISIBLE = 5.0
+RESPONSE_VISIBLE = 4.5
+"""Least dE a speaker ground stands off the canvas. The response, the bulk of the page, may
+stand quieter."""
+CORNER_LEAST = 5.0
+"""Least dE between speaker grounds of different corners."""
+FAMILY = (2.5, 4.0)
+"""Least and most dE between the grounds of one corner: told apart, and still one speaker."""
+SURFACE_LEAST = 2.0
+"""Least dE between two surfaces."""
+TINT_STEP = 0.05
+TINT_MOST = 20.0
+"""The tints a speaker ground is tried at, in M. Each takes the least that satisfies its laws;
+by the most, the gamut has long yielded."""
+PLACEMENT = (Ground.RESPONSE, Ground.MESSAGE, Ground.ENVIRONMENT, Ground.REASONING, Ground.PROMPT)
+"""The order speaker grounds take their tints, quietest first: each satisfies its laws against
+the grounds placed before it, so the louder ground pays for distinctness. A grey ground cannot
+pay and goes first."""
+HEADING_CEILING = 95.0
+"""Most Lc a heading may reach over the canvas. Bold already carries a heading's prominence, and
+pure white reads near Lc 107 on these canvases."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""
@@ -86,16 +119,7 @@ it runs along the blue-yellow axis that survives dichromacy. A spec may move eit
 window."""
 
 
-SURFACES = (
-    Ground.CANVAS,
-    Ground.TROUGH,
-    Ground.DAIS,
-    Ground.SELECTION,
-    Ground.PROMPT,
-    Ground.REASONING,
-    Ground.ASIDE,
-    Ground.SUBAGENT,
-)
+SURFACES = (Ground.CANVAS, Ground.TROUGH, Ground.DAIS, Ground.SELECTION, *SPEAKERS, Ground.ADDED, Ground.REMOVED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +157,7 @@ DISTINCT = (
         ranked=True,
     ),
     Distinct("code recession", (Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE), 5.0, beneath=True),
-    Distinct("surfaces", SURFACES, 2.0),
+    Distinct("surfaces", SURFACES, SURFACE_LEAST),
     Distinct("ink ladder", (Figure.INK, Figure.INK_MUTED, Figure.INK_FAINT), 8.0),
     Distinct("code against prose", (Figure.CODE, Figure.INK), 10.0, beneath=True),
 )
@@ -152,35 +176,34 @@ SIGNAL_RING = (Figure.SUCCESS, Figure.CAUTION, Figure.FAILURE, Figure.INFO)
 UNLEANED = frozenset((*SIGNAL_RING, Figure.ADDED, Figure.REMOVED))
 """Roles that carry an alarm or a diff keep the voice's full colorfulness: lean is character,
 and character may not quiet a meaning."""
-BANDS = (Ground.PROMPT, Ground.REASONING, Ground.ASIDE, Ground.SUBAGENT)
-AUTHORED = (*TEXT_RING, *SIGNAL_RING, Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE, *BANDS, Figure.CODE)
+AUTHORED = (*TEXT_RING, *SIGNAL_RING, Syntax.COMMENT, Syntax.PUNCTUATION, Syntax.VARIABLE, Figure.CODE)
+GREY = "grey"
+"""A speaker ground's hue in a spec where it is untinted: the canvas's material, raised."""
 
 
-def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]:
+def composition(spec: Spec) -> dict[Paint, Floors]:
     """Every ground the TUI paints each text role on, with the Lc it must reach there. The solver
     lifts each role to this table and the proof checks it, so the two cannot disagree. A rank's
-    classes take code's floors at the rank's Lc in place of their own."""
-    body, secondary, tertiary = ink, ink * INK_MUTED, ink * INK_FAINT
+    classes take code's floors at the rank's Lc in place of their own; the heading takes the
+    ink's at its own contrast, wherever it is painted."""
+    body = spec.ink.contrast
+    secondary, tertiary = body * INK_MUTED, body * INK_FAINT
 
     def ladder(tier: float) -> Floors:
         return (
             (Ground.CANVAS, tier),
             (Ground.TROUGH, tier - 2),
             (Ground.DAIS, tier - 4),
-            (Ground.RESPONSE, tier - 3),
-            (Ground.PROMPT, tier - 4),
-            (Ground.REASONING, tier - 4),
-            (Ground.ASIDE, tier - 4),
-            (Ground.SUBAGENT, tier - 4),
+            *((ground, tier - 4) for ground in SPEAKERS),
             (Ground.SELECTION, tier - 10),
         )
 
     code: Floors = (
         (Ground.TROUGH, VOICE),
         (Ground.CANVAS, VOICE),
-        (Ground.RESPONSE, VOICE - 2),
+        (Ground.RESPONSE, VOICE - 4),
+        (Ground.MESSAGE, VOICE - 4),
         (Ground.REASONING, VOICE - 4),
-        (Ground.SUBAGENT, VOICE - 4),
         (Ground.ADDED, VOICE - 4),
         (Ground.REMOVED, VOICE - 4),
     )
@@ -189,17 +212,21 @@ def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]
         """`floors` and both diff bands at `floor`: highlighted code carries the role into diffs."""
         return (*floors, (Ground.ADDED, floor), (Ground.REMOVED, floor))
 
+    def ink(tier: float) -> Floors:
+        return (*ladder(tier - 1), (Ground.ADDED, tier - 6), (Ground.REMOVED, tier - 6))
+
     table = {
-        Figure.INK: (*ladder(body - 1), (Ground.ADDED, body - 6), (Ground.REMOVED, body - 6)),
-        Figure.INK_MUTED: (*ladder(secondary - 1), (Ground.ADDED, secondary - 6), (Ground.REMOVED, secondary - 6)),
-        Figure.INK_FAINT: (*ladder(tertiary - 1), (Ground.ADDED, tertiary - 6), (Ground.REMOVED, tertiary - 6)),
+        Figure.INK: ink(body),
+        Figure.HEADING: tuple((g, f) for g, f in ink(spec.heading.contrast) if g in PAIRS[Figure.HEADING]),
+        Figure.INK_MUTED: ink(secondary),
+        Figure.INK_FAINT: ink(tertiary),
         Figure.INK_SELECTED: ((Ground.SELECTION, body - 4),),
         Figure.RULE: (
             (Ground.CANVAS, RULE - 1),
             (Ground.DAIS, RULE - 8),
-            (Ground.RESPONSE, RULE - 4),
+            (Ground.RESPONSE, RULE - 5),
+            (Ground.MESSAGE, RULE - 5),
             (Ground.REASONING, RULE - 5),
-            (Ground.SUBAGENT, RULE - 5),
         ),
         Figure.ACCENT: ladder(VOICE),
         Figure.LINK: banded(ladder(VOICE), VOICE - 4),
@@ -211,18 +238,18 @@ def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]
             (Ground.ADDED, VOICE),
             (Ground.CANVAS, VOICE),
             (Ground.TROUGH, VOICE),
-            (Ground.RESPONSE, VOICE - 2),
+            (Ground.RESPONSE, VOICE - 4),
+            (Ground.MESSAGE, VOICE - 4),
             (Ground.REASONING, VOICE - 4),
-            (Ground.SUBAGENT, VOICE - 4),
             (Ground.REMOVED, VOICE - 4),
         ),
         Figure.REMOVED: (
             (Ground.REMOVED, VOICE),
             (Ground.CANVAS, VOICE),
             (Ground.TROUGH, VOICE),
-            (Ground.RESPONSE, VOICE - 2),
+            (Ground.RESPONSE, VOICE - 4),
+            (Ground.MESSAGE, VOICE - 4),
             (Ground.REASONING, VOICE - 4),
-            (Ground.SUBAGENT, VOICE - 4),
             (Ground.ADDED, VOICE - 4),
         ),
         Figure.CODE: banded(
@@ -230,11 +257,7 @@ def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]
                 (Ground.CANVAS, body - 8),
                 (Ground.TROUGH, body - 8),
                 (Ground.DAIS, body - 12),
-                (Ground.RESPONSE, body - 11),
-                (Ground.PROMPT, body - 12),
-                (Ground.REASONING, body - 12),
-                (Ground.ASIDE, body - 12),
-                (Ground.SUBAGENT, body - 12),
+                *((ground, body - 12) for ground in SPEAKERS),
             ),
             body - 12,
         ),
@@ -243,7 +266,7 @@ def composition(ink: float, ranks: tuple[Rank, ...] = ()) -> dict[Paint, Floors]
         Syntax.PUNCTUATION: tuple((g, secondary - 6) for g, _ in code),
         Syntax.VARIABLE: tuple((g, body - 10) for g, _ in code),
     }
-    for rank in ranks:
+    for rank in spec.ranks:
         for member in rank.members:
             table[member] = tuple((g, rank.lc + f - VOICE) for g, f in code)
     return table
@@ -254,10 +277,10 @@ RAMP_FLOORS: dict[str, Floors] = {
     "heat": ((Ground.CANVAS, RULE - 1),),
     "terminal": (
         (Ground.CANVAS, SIGNAL),
-        (Ground.RESPONSE, SIGNAL - 3),
+        (Ground.RESPONSE, SIGNAL - 4),
+        (Ground.MESSAGE, SIGNAL - 4),
         (Ground.PROMPT, SIGNAL - 4),
-        (Ground.ASIDE, SIGNAL - 4),
-        (Ground.SUBAGENT, SIGNAL - 4),
+        (Ground.ENVIRONMENT, SIGNAL - 4),
     ),
 }
 """Lc of the ramps over the grounds they are painted on. The terminal ring is solved to its
@@ -350,14 +373,22 @@ class Gain:
 @dataclass(frozen=True, slots=True)
 class Surfaces:
     """How the surfaces are built from the canvas: the trough's, dais's and selection bar's
-    elevations in J', and the colorfulness the bands, the selection bar and the diff bands add."""
+    elevations in J', the colorfulness the selection bar and the diff bands add, and each speaker
+    ground's rise in J'."""
 
     trough: float = TROUGH
     dais: float = DAIS
     selection_rise: float = SELECTION_RISE
-    band_tint: float = BAND_TINT
     selection_tint: float = SELECTION_TINT
     diff_tint: float = DIFF_TINT
+    response: float = RISES[Ground.RESPONSE]
+    message: float = RISES[Ground.MESSAGE]
+    prompt: float = RISES[Ground.PROMPT]
+    reasoning: float = RISES[Ground.REASONING]
+    environment: float = RISES[Ground.ENVIRONMENT]
+
+    def rise(self, ground: Paint) -> float:
+        return getattr(self, ground.value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,8 +408,12 @@ class Spec:
     stance: str
     ground: GroundSpec
     ink: InkSpec
+    heading: InkSpec
     voice: VoiceSpec
     hues: dict[Paint, float]
+    speakers: dict[Paint, float | None]
+    """Each speaker ground's authored hue, None where grey; reasoning is absent where the law
+    chooses its hue."""
     livery: int
     arcs: tuple[Arc, ...]
     ranks: tuple[Rank, ...]
@@ -404,11 +439,12 @@ class Spec:
                 raise Invalid(f"{where}: [{key}] omits {sorted(missing)}")
             return value
 
-        tables = {"stance", "ground", "ink", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
+        tables = {"stance", "ground", "ink", "heading", "voice", "hues", "livery", "ranks", "gain", "surfaces", "terminal", "style"}
         if unknown := raw.keys() - tables:
             raise Invalid(f"{where}: unknown tables {sorted(unknown)}")
         ground = table("ground", ("hue", "colorfulness", "lightness"), ("hue", "colorfulness", "lightness"))
         ink = table("ink", ("hue", "colorfulness", "contrast"), ("colorfulness", "contrast"))
+        heading = table("heading", ("hue", "colorfulness", "contrast"), ())
         voice = table("voice", ("colorfulness", "lean", "naturalism", "lift", "least"), ("colorfulness",))
         optional = (
             Figure.ADDED,
@@ -418,17 +454,28 @@ class Spec:
             Syntax.PUNCTUATION,
             Syntax.VARIABLE,
             Figure.CODE,
-            Ground.REASONING,
         )
         hues = table(
             "hues",
-            tuple(role.value for role in AUTHORED),
-            tuple(role.value for role in AUTHORED if role not in optional),
+            (*(role.value for role in AUTHORED), *(ground.value for ground in SPEAKERS)),
+            (*(role.value for role in AUTHORED if role not in optional), Ground.MESSAGE.value, Ground.PROMPT.value),
         )
+        spoken = {ground.value: ground for ground in SPEAKERS}
+
+        def hue(name: str, value: object) -> float | None:
+            if value == GREY and name in spoken:
+                return None
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise Invalid(f"{where}: [hues] {name} must be a hue{' or "grey"' if name in spoken else ''}")
+            return float(value) % 360
+
         livery = table("livery", ("count", "arcs"), ("count",))
         ink_hue = float(ink.get("hue", ground["hue"]))
         hued = {role.value: role for role in AUTHORED}
-        authored = {hued[name]: float(hue) % 360 for name, hue in hues.items()}
+        authored = {hued[name]: hue(name, value) for name, value in hues.items() if name in hued}
+        speakers = {spoken[name]: hue(name, value) for name, value in hues.items() if name in spoken}
+        speakers.setdefault(Ground.RESPONSE, speakers[Ground.MESSAGE])
+        speakers.setdefault(Ground.ENVIRONMENT, None)
         defaults = {
             **DIFF_HUES,
             Syntax.CONSTANT: authored[Syntax.NUMBER],
@@ -474,6 +521,11 @@ class Spec:
             stance=str(raw["stance"]).strip(),
             ground=GroundSpec(float(ground["hue"]), float(ground["colorfulness"]), float(ground["lightness"])),
             ink=InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"])),
+            heading=InkSpec(
+                float(heading.get("hue", ink_hue)) % 360,
+                float(heading.get("colorfulness", ink["colorfulness"])),
+                float(heading.get("contrast", ink["contrast"])),
+            ),
             voice=VoiceSpec(
                 float(voice["colorfulness"]),
                 float(voice.get("lean", 0.0)),
@@ -482,6 +534,7 @@ class Spec:
                 float(voice.get("least", SYNTAX_LEAST)),
             ),
             hues=defaults | authored,
+            speakers=speakers,
             livery=int(livery["count"]),
             arcs=tuple((float(a), float(b)) for a, b in livery.get("arcs", [[0, 360]])),
             ranks=tuple(ranks),
@@ -515,45 +568,104 @@ class Ring:
 
 
 @dataclass(frozen=True, slots=True)
+class Band:
+    """A speaker ground as its laws placed it: tinted toward `hue`, None where grey, risen `rise`
+    J' and tinted `tint` M."""
+
+    hue: float | None
+    rise: float
+    tint: float
+
+
+@dataclass(frozen=True, slots=True)
 class Pack:
     spec: Spec
     roles: dict[Paint, Swatch]
+    bands: dict[Paint, Band]
     livery: tuple[Swatch, ...]
     heat: tuple[Swatch, ...]
     terminal: tuple[Swatch, ...]
     rings: tuple[Ring, ...]
 
 
-def reasoning(band: Callable[[float], Swatch], surfaces: list[Swatch]) -> Swatch:
-    """The reasoning band where its spec authors no hue: tinted toward the hue inside caution's
-    window that stands farthest from every other surface, so disclosed reasoning keeps caution's
-    hue family without merging into a band it must be told apart from."""
+def speak(spec: Spec, roles: dict[Paint, Swatch]) -> dict[Paint, Band]:
+    """Every speaker ground, placed in PLACEMENT order at the least tint that satisfies its laws
+    against the surfaces already painted: it stands VISIBLE off the canvas, SURFACE_LEAST from
+    every other surface, CORNER_LEAST from the grounds of other corners and within FAMILY of its
+    own corner's, and the response stands quieter, the prompt louder, than every other. Where no
+    tint satisfies them all, the ground takes the tint that breaks them least, and the proof
+    faults it.
+
+    Where the spec authors no reasoning hue, reasoning takes the hue inside caution's window that
+    needs the least tint, the farthest from every surface among equals, so disclosed reasoning
+    keeps caution's hue family."""
+    g, canvas = spec.ground, roles[Ground.CANVAS]
+    origin = ucs(canvas.array)
+    fixed = [ucs(roles[s].array) for s in SURFACES if s not in SPEAKERS and s is not Ground.CANVAS]
     low, high = WINDOWS[Figure.CAUTION]
-    hues = (low + np.arange(0.0, (high - low) % 360 + 1.0)) % 360
-    return max((band(hue) for hue in hues), key=lambda s: min(distance(s.rgb, other.rgb) for other in surfaces))
+    window = (low + np.arange(0.0, (high - low) % 360 + 1.0)) % 360
+    tints = np.arange(0.0, TINT_MOST + TINT_STEP / 2, TINT_STEP)
+    greys = [ground for ground in PLACEMENT if ground in spec.speakers and spec.speakers[ground] is None]
+    placed: dict[Paint, tuple[np.ndarray, float]] = {}
+    bands: dict[Paint, Band] = {}
+    for ground in (*greys, *(ground for ground in PLACEMENT if ground not in greys)):
+        rise = spec.surfaces.rise(ground)
+        j, m = elevated(canvas, rise)
+        authored = spec.speakers.get(ground, window)
+        if authored is None:
+            toward, tried = np.array([g.hue]), np.zeros(1)
+        else:
+            toward, tried = np.atleast_1d(np.asarray(authored, float)), tints
+        hues, strengths = np.repeat(toward, len(tried)), np.tile(tried, len(toward))
+        asked, hue = tinted(m, g.hue, hues, strengths)
+        rgb = yielding(j, asked, hue)[0]
+        points = ucs(rgb)
+        loud = np.linalg.norm(points - origin, axis=-1)
+        floors = [loud - (RESPONSE_VISIBLE if ground is Ground.RESPONSE else VISIBLE)]
+        floors += [np.linalg.norm(points - surface, axis=-1) - SURFACE_LEAST for surface in fixed]
+        orders = []
+        for other, (point, other_loud) in placed.items():
+            apart = np.linalg.norm(points - point, axis=-1)
+            if CORNER[other] == CORNER[ground]:
+                floors += [apart - FAMILY[0], FAMILY[1] - apart]
+            else:
+                floors.append(apart - CORNER_LEAST)
+            if ground is Ground.RESPONSE or other is Ground.PROMPT:
+                orders.append(other_loud - loud)
+            if other is Ground.RESPONSE or ground is Ground.PROMPT:
+                orders.append(loud - other_loud)
+        held = np.min(floors, axis=0) >= 0
+        if orders:
+            held &= np.min(orders, axis=0) > 0
+        if not held.any():
+            pick = int(np.argmax(np.min(floors + orders, axis=0)))
+        elif len(toward) == 1:
+            pick = int(np.argmax(held))
+        else:
+            rows = held.reshape(len(toward), len(tried))
+            far = np.min([np.linalg.norm(points - p, axis=-1) for p in (origin, *fixed, *(p for p, _ in placed.values()))], axis=0)
+            firsts = [row * len(tried) + int(np.argmax(rows[row])) for row in range(len(toward)) if rows[row].any()]
+            pick = min(firsts, key=lambda i: (strengths[i], -far[i]))
+        roles[ground] = Swatch.of(rgb[pick], float(asked[pick]))
+        placed[ground] = (points[pick], float(loud[pick]))
+        bands[ground] = Band(None if authored is None else float(hues[pick]), rise, float(strengths[pick]))
+    return bands
 
 
 def smelt(spec: Spec) -> Pack:
     g, ink, voice, hues, gain, surfaces = spec.ground, spec.ink, spec.voice, spec.hues, spec.gain, spec.surfaces
-    floors = composition(ink.contrast, spec.ranks)
+    floors = composition(spec)
     roles: dict[Paint, Swatch] = {}
     canvas = roles[Ground.CANVAS] = paint(g.lightness, g.colorfulness, g.hue)
     accent = hues[Figure.ACCENT]
 
-    for role, rise in ((Ground.TROUGH, surfaces.trough), (Ground.DAIS, surfaces.dais), (Ground.RESPONSE, RESPONSE)):
+    for role, rise in ((Ground.TROUGH, surfaces.trough), (Ground.DAIS, surfaces.dais)):
         roles[role] = paint(*elevated(canvas, rise), g.hue)
     j, m = elevated(canvas, surfaces.selection_rise)
     roles[Ground.SELECTION] = paint(j, *tinted(m, g.hue, accent, surfaces.selection_tint))
-
-    def band(toward: float) -> Swatch:
-        j, m = elevated(canvas, BAND)
-        return paint(j, *tinted(m, g.hue, toward, surfaces.band_tint))
-
-    roles |= {role: band(hues[role]) for role in BANDS if role in hues}
-    if Ground.REASONING not in roles:
-        roles[Ground.REASONING] = reasoning(band, [roles[s] for s in SURFACES if s is not Ground.REASONING])
     for fill, figure in ((Ground.ADDED, Figure.ADDED), (Ground.REMOVED, Figure.REMOVED)):
         roles[fill] = paint(elevated(canvas, DIFF_BAND)[0], surfaces.diff_tint, hues[figure])
+    bands = speak(spec, roles)
 
     def margin(role: Paint, rgb: np.ndarray) -> np.ndarray:
         """Least Lc surplus of each candidate color over every ground the role is composed on."""
@@ -569,6 +681,7 @@ def smelt(spec: Spec) -> Pack:
         probe = text(role, ink.colorfulness, ink.hue)
         roles[role] = text(role, ink.colorfulness * probe.lightness / primary.lightness, ink.hue)
     roles[Figure.INK_SELECTED] = text(Figure.INK_SELECTED, ink.colorfulness, ink.hue)
+    roles[Figure.HEADING] = text(Figure.HEADING, spec.heading.colorfulness, spec.heading.hue)
     roles[Figure.RULE] = text(Figure.RULE, canvas.colorfulness * 1.6, g.hue)
 
     home = cusp(accent)
@@ -616,7 +729,7 @@ def smelt(spec: Spec) -> Pack:
     terminal_ring, terminal_ramp = terminal(spec, roles)
     rings.append(terminal_ring)
     ramp = livery(spec, roles, rings[0].level)
-    return Pack(spec, roles, ramp, heat(roles), terminal_ramp, tuple(rings))
+    return Pack(spec, roles, bands, ramp, heat(roles), terminal_ramp, tuple(rings))
 
 
 def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch, ...]:

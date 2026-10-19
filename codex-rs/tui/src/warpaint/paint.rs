@@ -80,9 +80,11 @@ macro_rules! family {
 }
 
 family! {
-    /// What a cell is painted on.
+    /// What a cell is painted on. A speaker's ground means the model sees what lies on it; the
+    /// canvas holds only what the client says.
     Ground, table Grounds, tokens from 0x20 {
-        /// The page; the terminal's default background while a pack is worn.
+        /// The page: headings, notices, summaries and every other word the client says. The
+        /// terminal's default background while a pack is worn.
         Canvas => canvas,
         /// Recessed: the composer and other inert panels.
         Trough => trough,
@@ -90,16 +92,17 @@ family! {
         Dais => dais,
         /// The selected row.
         Selection => selection,
-        /// The user's turn.
+        /// What the user says: prompts.
         Prompt => prompt,
-        /// The assistant's turn.
+        /// What this thread's assistant says: its responses.
         Response => response,
         /// The assistant's reasoning, disclosed from its response's header.
         Reasoning => reasoning,
-        /// Words neither speaker said: client notices, other threads' messages.
-        Aside => aside,
-        /// A subagent's turn.
-        Subagent => subagent,
+        /// What the environment tells the model: tool output, the verbatim input of tool calls,
+        /// injected context and submitted definitions.
+        Environment => environment,
+        /// What an agent in another thread says here: inter-agent prose and delivered messages.
+        Message => message,
         /// An added diff line.
         Added => added,
         /// A removed diff line.
@@ -138,6 +141,9 @@ family! {
         Added => added,
         /// Removed diff text.
         Removed => removed,
+        /// Feed headings and disclosure tabs. Bold carries their prominence; the pack decides
+        /// their color.
+        Heading => heading,
     }
 }
 

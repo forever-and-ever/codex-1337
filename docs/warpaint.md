@@ -105,8 +105,8 @@ draws a smaller flowchart grammar than Mermaid's and rejects `subgraph`, so rend
 
 A spec makes the decisions that give a palette its character and nothing else: the ground's
 hue, colorfulness and lightness; the ink's hue, tint and contrast; the voice's colorfulness,
-`lean` and `naturalism`; and the hue of each authored role. Every color is derived from
-them by law.
+`lean` and `naturalism`; and the hue of each authored role, a speaker's ground among them,
+which may be `"grey"`. Every color is derived from them by law.
 
 A spec may restate how its code speaks and how its surfaces are built, and its proof states
 each restatement beside the doctrine's value:
@@ -116,7 +116,8 @@ each restatement beside the doctrine's value:
 | `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
 | `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
-| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), and the tints `band_tint`, `selection_tint` and `diff_tint` (2.8, 9, 7 M) |
+| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), the tints `selection_tint` and `diff_tint` (9, 7 M), and the speaker grounds' rises `response`, `message`, `prompt`, `reasoning` and `environment` (2, 2.5, 7.5, 3, 7.5 J') |
+| `[heading]` | the heading's `hue`, `colorfulness` and `contrast`, the ink's unless stated |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
 | `[style]` | modifiers, `bold` or `italic`, for syntax classes; the pack carries them for the binder |
 
@@ -128,10 +129,21 @@ Distances are CAM16-UCS; legibility is APCA-W3 0.98G, which unlike the WCAG 2.x 
 light text on a dark ground correctly.
 
 - Surfaces are the canvas's material raised or recessed in equal perceptual steps at constant
-  hue and saturation. The prompt, reasoning, aside and subagent bands and the selection bar are
-  that material tinted toward a hue; diff bands take their ink's hue outright. A spec may author
-  the reasoning band's hue; otherwise the law takes the hue inside caution's window farthest
-  from every other surface.
+  hue and saturation. The selection bar is that material tinted toward the accent; diff bands
+  take their ink's hue outright. Every surface stands 2 dE from every other.
+- A speaker's ground means the model sees what lies on it, and its corner says who said it: the
+  agent's corner holds this thread's responses and other agents' messages, the user's the
+  prompt, the chain of thought's the reasoning, and the environment's tool output, the verbatim
+  input of tool calls and injected context. The canvas holds only what the client says. Each
+  ground rises by its own amount and takes the least tint toward its hue that stands it 5 dE
+  off the canvas (the response 4.5), 5 dE from every other corner's ground and 2.5 to 4 from its
+  own corner's; the grounds take their tints quietest first, response, message, environment,
+  reasoning, prompt, so the louder pays for distinctness, and the response stands quietest, the
+  prompt loudest. A grey ground is untinted and seen by its rise alone. A spec may author the
+  reasoning hue; otherwise the law takes the hue inside caution's window that needs the least
+  tint, the farthest from every surface among equals.
+- Headings take the ink's hue, colorfulness and contrast unless a spec's `[heading]` states
+  them; bold carries their prominence, and no heading reads above Lc 95 over the canvas.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A

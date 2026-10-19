@@ -786,7 +786,7 @@ fn steps_fold_under_one_header_with_their_figures() {
                 let column = line.find("text(").unwrap();
                 assert_eq!(
                     buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].bg,
-                    crate::style::context_message_style().bg.unwrap()
+                    crate::style::environment_style().bg.unwrap()
                 );
                 assert!(
                     view.current_layout(&cells, 0)

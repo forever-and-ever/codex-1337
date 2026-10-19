@@ -9,7 +9,7 @@ use super::adaptive_wrap_lines;
 use super::prefix_lines;
 use super::sanitize_user_text;
 use crate::dynamic_tools::DelegatedMessage;
-use crate::style::aside_style;
+use crate::style::message_style;
 
 #[derive(Debug)]
 pub(crate) struct DelegatedMessageCell(pub(crate) DelegatedMessage);
@@ -19,7 +19,7 @@ impl HistoryCell for DelegatedMessageCell {
         self.0.sent_at.and_then(HistoryTimestamp::from_millis)
     }
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let style = aside_style();
+        let style = message_style();
         let sender = self
             .0
             .source_thread_name

@@ -32,9 +32,11 @@ string = 110
 number = 30
 attribute = 215
 comment = 230
-prompt = 185
-aside = 320
-subagent = 270
+response = 248
+message = 275
+prompt = 320
+reasoning = 60
+environment = "grey"
 
 [livery]
 count = 8
@@ -43,5 +45,4 @@ count = 8
 trough = -2.5
 dais = 4.0
 selection_rise = 7.5
-band_tint = 3.0
 diff_tint = 7.5

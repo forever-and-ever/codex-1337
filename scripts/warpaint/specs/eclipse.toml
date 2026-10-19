@@ -31,14 +31,15 @@ string = 85
 number = 350
 attribute = 290
 comment = 265
-prompt = 25
-aside = 200
-subagent = 150
+response = 40
+message = 15
+prompt = 270
+reasoning = 165
+environment = "grey"
 
 [livery]
 count = 8
 
 [surfaces]
-band_tint = 6.0
 selection_rise = 7.5
 selection_tint = 3.0

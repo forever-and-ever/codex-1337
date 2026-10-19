@@ -10,7 +10,6 @@ dE; legibility is APCA-W3 0.98G Lc; dichromacy is Machado 2009 at full severity.
 
 from __future__ import annotations
 
-import math
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -195,11 +194,12 @@ def elevated(ground: Swatch, rise: float) -> tuple[float, float]:
     return j, ground.colorfulness * j / ground.lightness
 
 
-def tinted(m: float, hue: float, toward: float, strength: float) -> tuple[float, float]:
-    """M and h of a surface's own appearance vector plus strength colorfulness toward a hue."""
-    a = m * math.cos(math.radians(hue)) + strength * math.cos(math.radians(toward))
-    b = m * math.sin(math.radians(hue)) + strength * math.sin(math.radians(toward))
-    return math.hypot(a, b), math.degrees(math.atan2(b, a)) % 360
+def tinted(m: float, hue: float, toward: object, strength: object) -> tuple[np.ndarray, np.ndarray]:
+    """M and h of a surface's own appearance vector plus strength colorfulness toward a hue, for
+    one target or arrays of them."""
+    a = m * np.cos(np.radians(hue)) + np.multiply(strength, np.cos(np.radians(toward)))
+    b = m * np.sin(np.radians(hue)) + np.multiply(strength, np.sin(np.radians(toward)))
+    return np.hypot(a, b), np.degrees(np.arctan2(b, a)) % 360
 
 
 _CUSP_GRID = np.arange(20.0, 99.0, 0.5)

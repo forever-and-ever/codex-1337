@@ -6,6 +6,7 @@ Canvas `#050507`: J_HK 9.1, M 0.6, h 274.
 The text ring stands at J_HK 77.5, held there by syntax.attribute over ground.canvas.
 The signal ring stands at J_HK 65.3, held there by figure.failure over ground.canvas.
 The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
+The heading reads at Lc 86.1 over the canvas, ceiling 95.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -13,11 +14,11 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 | ground.trough | `#000102` | 7.3 | 0.5 | 0.5 | 239 | 16 |
 | ground.dais | `#0f0f12` | 12.3 | 0.9 | 0.9 | 274 | 233 |
 | ground.selection | `#1f0f12` | 14.3 | 2.6 | 2.6 | 7 | 233 |
-| ground.prompt | `#160000` | 10.4 | 4.2 | 5.7 | 20 | 232 |
-| ground.response | `#060709` | 9.7 | 0.6 | 0.7 | 252 | 232 |
-| ground.reasoning | `#110a00` | 10.5 | 2.3 | 5.3 | 83 | 232 |
-| ground.aside | `#000809` | 10.5 | 1.8 | 6.3 | 205 | 232 |
-| ground.subagent | `#000a02` | 10.4 | 2.9 | 5.7 | 155 | 232 |
+| ground.prompt | `#0e111b` | 14.1 | 2.9 | 2.8 | 271 | 233 |
+| ground.response | `#0e090a` | 10.5 | 0.6 | 0.7 | 1 | 232 |
+| ground.reasoning | `#050b0c` | 11.2 | 1.2 | 1.1 | 208 | 232 |
+| ground.environment | `#141518` | 14.3 | 0.9 | 1.0 | 259 | 233 |
+| ground.message | `#0f080c` | 10.8 | 1.2 | 1.2 | 342 | 232 |
 | ground.added | `#070b00` | 10.2 | 2.2 | 7.0 | 127 | 232 |
 | ground.removed | `#100009` | 10.1 | 3.5 | 7.0 | 346 | 232 |
 | figure.ink | `#e1dcdd` | 88.2 | 0.6 | 0.6 | 265 | 253 |
@@ -34,6 +35,7 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 | figure.info | `#74adcf` | 72.0 | 12.9 | 13.0 | 235 | 74 |
 | figure.added | `#dbeaa7` | 90.9 | 12.9 | 13.0 | 125 | 186 |
 | figure.removed | `#e9abcd` | 80.3 | 12.9 | 13.0 | 345 | 218 |
+| figure.heading | `#e1dcdd` | 88.2 | 0.6 | 0.6 | 265 | 253 |
 | syntax.keyword | `#ff998e` | 77.5 | 19.6 | 24.7 | 25 | 210 |
 | syntax.function | `#e5e6e4` | 92.2 | 1.8 | 1.7 | 190 | 254 |
 | syntax.type | `#dde9b0` | 90.8 | 11.0 | 11.0 | 125 | 187 |
@@ -50,8 +52,22 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 | surface | spec | doctrine |
 |---|---|---|
 | selection rise | 7.5 | 9 |
-| band tint | 6 | 2.8 |
 | selection tint | 3 | 9 |
+
+## speakers
+
+| ground | corner | hue | rise | tint | dE off canvas |
+|---|---|---|---|---|---|
+| ground.response | agent | 40 | 2 | 0.95 | 4.6 |
+| ground.message | agent | 15 | 2.5 | 1.25 | 5.4 |
+| ground.prompt | user | 270 | 7.5 | 1.85 | 8.1 |
+| ground.reasoning | cot | 165 | 3 | 0.95 | 5.2 |
+| ground.environment | environment | grey | 7.5 | 0.00 | 7.3 |
+
+- off the canvas: least dE 4.6 (ground.response), floor 5, the response's 4.5
+- corners: least dE 5.5 (ground.prompt and ground.environment), floor 5
+- agent corner: ground.response and ground.message stand dE 2.5 apart, between 2.5 and 4
+- loudness: the response at dE 4.6 and the prompt at dE 8.1; the rest between 5.2 and 7.3
 
 ## contrast
 
@@ -61,193 +77,194 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 | figure.ink | ground.trough | 86.1 | 84 |
 | figure.ink | ground.dais | 85.7 | 82 |
 | figure.ink | ground.selection | 85.4 | 76 |
-| figure.ink | ground.prompt | 85.9 | 82 |
-| figure.ink | ground.response | 86.1 | 83 |
-| figure.ink | ground.reasoning | 85.9 | 82 |
-| figure.ink | ground.aside | 86.0 | 82 |
-| figure.ink | ground.subagent | 86.0 | 82 |
+| figure.ink | ground.prompt | 85.6 | 82 |
+| figure.ink | ground.response | 86.0 | 82 |
+| figure.ink | ground.reasoning | 86.0 | 82 |
+| figure.ink | ground.environment | 85.3 | 82 |
+| figure.ink | ground.message | 86.0 | 82 |
 | figure.ink | ground.added | 86.0 | 81 |
 | figure.ink | ground.removed | 86.0 | 81 |
 | figure.ink_muted | ground.canvas | 63.4 | 63 |
 | figure.ink_muted | ground.trough | 63.4 | 61 |
 | figure.ink_muted | ground.dais | 63.0 | 59 |
 | figure.ink_muted | ground.selection | 62.7 | 53 |
-| figure.ink_muted | ground.prompt | 63.2 | 59 |
-| figure.ink_muted | ground.response | 63.4 | 60 |
-| figure.ink_muted | ground.reasoning | 63.2 | 59 |
-| figure.ink_muted | ground.aside | 63.4 | 59 |
-| figure.ink_muted | ground.subagent | 63.3 | 59 |
+| figure.ink_muted | ground.prompt | 62.9 | 59 |
+| figure.ink_muted | ground.response | 63.3 | 59 |
+| figure.ink_muted | ground.reasoning | 63.3 | 59 |
+| figure.ink_muted | ground.environment | 62.6 | 59 |
+| figure.ink_muted | ground.message | 63.3 | 59 |
 | figure.ink_muted | ground.added | 63.3 | 58 |
 | figure.ink_muted | ground.removed | 63.3 | 58 |
 | figure.ink_faint | ground.canvas | 47.0 | 47 |
 | figure.ink_faint | ground.trough | 47.0 | 45 |
 | figure.ink_faint | ground.dais | 46.6 | 43 |
 | figure.ink_faint | ground.selection | 46.3 | 37 |
-| figure.ink_faint | ground.prompt | 46.8 | 43 |
-| figure.ink_faint | ground.response | 46.9 | 44 |
-| figure.ink_faint | ground.reasoning | 46.8 | 43 |
-| figure.ink_faint | ground.aside | 46.9 | 43 |
-| figure.ink_faint | ground.subagent | 46.9 | 43 |
+| figure.ink_faint | ground.prompt | 46.5 | 43 |
+| figure.ink_faint | ground.response | 46.8 | 43 |
+| figure.ink_faint | ground.reasoning | 46.9 | 43 |
+| figure.ink_faint | ground.environment | 46.2 | 43 |
+| figure.ink_faint | ground.message | 46.9 | 43 |
 | figure.ink_faint | ground.added | 46.9 | 42 |
 | figure.ink_faint | ground.removed | 46.9 | 42 |
 | figure.ink_selected | ground.selection | 83.3 | 83 |
 | figure.rule | ground.canvas | 15.1 | 15 |
 | figure.rule | ground.dais | 14.7 | 8 |
-| figure.rule | ground.response | 15.0 | 12 |
+| figure.rule | ground.response | 14.9 | 11 |
 | figure.rule | ground.reasoning | 14.9 | 11 |
-| figure.rule | ground.subagent | 15.0 | 11 |
+| figure.rule | ground.message | 14.9 | 11 |
 | figure.accent | ground.canvas | 62.4 | 55 |
 | figure.accent | ground.trough | 62.4 | 53 |
 | figure.accent | ground.dais | 62.0 | 51 |
 | figure.accent | ground.selection | 61.7 | 45 |
-| figure.accent | ground.prompt | 62.2 | 51 |
-| figure.accent | ground.response | 62.4 | 52 |
-| figure.accent | ground.reasoning | 62.2 | 51 |
-| figure.accent | ground.aside | 62.4 | 51 |
-| figure.accent | ground.subagent | 62.3 | 51 |
+| figure.accent | ground.prompt | 61.9 | 51 |
+| figure.accent | ground.response | 62.3 | 51 |
+| figure.accent | ground.reasoning | 62.3 | 51 |
+| figure.accent | ground.environment | 61.6 | 51 |
+| figure.accent | ground.message | 62.3 | 51 |
 | figure.link | ground.canvas | 84.7 | 55 |
 | figure.link | ground.trough | 84.7 | 53 |
 | figure.link | ground.dais | 84.3 | 51 |
 | figure.link | ground.selection | 83.9 | 45 |
-| figure.link | ground.prompt | 84.5 | 51 |
-| figure.link | ground.response | 84.6 | 52 |
+| figure.link | ground.prompt | 84.2 | 51 |
+| figure.link | ground.response | 84.5 | 51 |
 | figure.link | ground.reasoning | 84.5 | 51 |
-| figure.link | ground.aside | 84.6 | 51 |
-| figure.link | ground.subagent | 84.6 | 51 |
+| figure.link | ground.environment | 83.9 | 51 |
+| figure.link | ground.message | 84.5 | 51 |
 | figure.link | ground.added | 84.6 | 51 |
 | figure.link | ground.removed | 84.6 | 51 |
 | figure.code | ground.canvas | 79.0 | 79 |
 | figure.code | ground.trough | 79.1 | 79 |
 | figure.code | ground.dais | 78.7 | 75 |
-| figure.code | ground.prompt | 78.9 | 75 |
-| figure.code | ground.response | 79.0 | 76 |
+| figure.code | ground.prompt | 78.5 | 75 |
+| figure.code | ground.response | 78.9 | 75 |
 | figure.code | ground.reasoning | 78.9 | 75 |
-| figure.code | ground.aside | 79.0 | 75 |
-| figure.code | ground.subagent | 79.0 | 75 |
+| figure.code | ground.environment | 78.2 | 75 |
+| figure.code | ground.message | 78.9 | 75 |
 | figure.code | ground.added | 78.9 | 75 |
 | figure.code | ground.removed | 79.0 | 75 |
 | figure.success | ground.canvas | 66.2 | 47 |
 | figure.success | ground.trough | 66.2 | 45 |
 | figure.success | ground.dais | 65.8 | 43 |
 | figure.success | ground.selection | 65.5 | 37 |
-| figure.success | ground.prompt | 66.0 | 43 |
-| figure.success | ground.response | 66.2 | 44 |
-| figure.success | ground.reasoning | 66.0 | 43 |
-| figure.success | ground.aside | 66.2 | 43 |
-| figure.success | ground.subagent | 66.1 | 43 |
+| figure.success | ground.prompt | 65.7 | 43 |
+| figure.success | ground.response | 66.1 | 43 |
+| figure.success | ground.reasoning | 66.1 | 43 |
+| figure.success | ground.environment | 65.4 | 43 |
+| figure.success | ground.message | 66.1 | 43 |
 | figure.caution | ground.canvas | 65.3 | 47 |
 | figure.caution | ground.trough | 65.4 | 45 |
 | figure.caution | ground.dais | 65.0 | 43 |
 | figure.caution | ground.selection | 64.6 | 37 |
-| figure.caution | ground.prompt | 65.2 | 43 |
-| figure.caution | ground.response | 65.3 | 44 |
+| figure.caution | ground.prompt | 64.8 | 43 |
+| figure.caution | ground.response | 65.2 | 43 |
 | figure.caution | ground.reasoning | 65.2 | 43 |
-| figure.caution | ground.aside | 65.3 | 43 |
-| figure.caution | ground.subagent | 65.3 | 43 |
+| figure.caution | ground.environment | 64.5 | 43 |
+| figure.caution | ground.message | 65.2 | 43 |
 | figure.caution | ground.added | 65.2 | 43 |
 | figure.caution | ground.removed | 65.3 | 43 |
 | figure.failure | ground.canvas | 48.2 | 47 |
 | figure.failure | ground.trough | 48.2 | 45 |
 | figure.failure | ground.dais | 47.8 | 43 |
 | figure.failure | ground.selection | 47.4 | 37 |
-| figure.failure | ground.prompt | 48.0 | 43 |
-| figure.failure | ground.response | 48.1 | 44 |
+| figure.failure | ground.prompt | 47.7 | 43 |
+| figure.failure | ground.response | 48.0 | 43 |
 | figure.failure | ground.reasoning | 48.0 | 43 |
-| figure.failure | ground.aside | 48.1 | 43 |
-| figure.failure | ground.subagent | 48.1 | 43 |
+| figure.failure | ground.environment | 47.4 | 43 |
+| figure.failure | ground.message | 48.0 | 43 |
 | figure.failure | ground.added | 48.0 | 43 |
 | figure.failure | ground.removed | 48.1 | 43 |
 | figure.info | ground.canvas | 54.1 | 47 |
 | figure.info | ground.trough | 54.2 | 45 |
 | figure.info | ground.dais | 53.8 | 43 |
 | figure.info | ground.selection | 53.4 | 37 |
-| figure.info | ground.prompt | 54.0 | 43 |
-| figure.info | ground.response | 54.1 | 44 |
-| figure.info | ground.reasoning | 53.9 | 43 |
-| figure.info | ground.aside | 54.1 | 43 |
-| figure.info | ground.subagent | 54.1 | 43 |
+| figure.info | ground.prompt | 53.6 | 43 |
+| figure.info | ground.response | 54.0 | 43 |
+| figure.info | ground.reasoning | 54.0 | 43 |
+| figure.info | ground.environment | 53.3 | 43 |
+| figure.info | ground.message | 54.0 | 43 |
 | figure.added | ground.canvas | 89.7 | 55 |
 | figure.added | ground.trough | 89.7 | 55 |
-| figure.added | ground.response | 89.6 | 53 |
+| figure.added | ground.response | 89.5 | 51 |
 | figure.added | ground.reasoning | 89.5 | 51 |
-| figure.added | ground.subagent | 89.6 | 51 |
+| figure.added | ground.message | 89.5 | 51 |
 | figure.added | ground.added | 89.6 | 55 |
 | figure.added | ground.removed | 89.6 | 51 |
 | figure.removed | ground.canvas | 66.9 | 55 |
 | figure.removed | ground.trough | 67.0 | 55 |
-| figure.removed | ground.response | 66.9 | 53 |
-| figure.removed | ground.reasoning | 66.7 | 51 |
-| figure.removed | ground.subagent | 66.9 | 51 |
+| figure.removed | ground.response | 66.8 | 51 |
+| figure.removed | ground.reasoning | 66.8 | 51 |
+| figure.removed | ground.message | 66.8 | 51 |
 | figure.removed | ground.added | 66.8 | 51 |
 | figure.removed | ground.removed | 66.9 | 55 |
+| figure.heading | ground.canvas | 86.1 | 86 |
 | syntax.keyword | ground.canvas | 62.4 | 55 |
 | syntax.keyword | ground.trough | 62.4 | 55 |
-| syntax.keyword | ground.response | 62.4 | 53 |
-| syntax.keyword | ground.reasoning | 62.2 | 51 |
-| syntax.keyword | ground.subagent | 62.3 | 51 |
+| syntax.keyword | ground.response | 62.3 | 51 |
+| syntax.keyword | ground.reasoning | 62.3 | 51 |
+| syntax.keyword | ground.message | 62.3 | 51 |
 | syntax.keyword | ground.added | 62.3 | 51 |
 | syntax.keyword | ground.removed | 62.3 | 51 |
 | syntax.function | ground.canvas | 91.4 | 55 |
 | syntax.function | ground.trough | 91.4 | 55 |
-| syntax.function | ground.response | 91.4 | 53 |
-| syntax.function | ground.reasoning | 91.2 | 51 |
-| syntax.function | ground.subagent | 91.3 | 51 |
+| syntax.function | ground.response | 91.3 | 51 |
+| syntax.function | ground.reasoning | 91.3 | 51 |
+| syntax.function | ground.message | 91.3 | 51 |
 | syntax.function | ground.added | 91.3 | 51 |
 | syntax.function | ground.removed | 91.3 | 51 |
 | syntax.type | ground.canvas | 89.7 | 55 |
 | syntax.type | ground.trough | 89.8 | 55 |
-| syntax.type | ground.response | 89.7 | 53 |
+| syntax.type | ground.response | 89.6 | 51 |
 | syntax.type | ground.reasoning | 89.6 | 51 |
-| syntax.type | ground.subagent | 89.7 | 51 |
+| syntax.type | ground.message | 89.6 | 51 |
 | syntax.type | ground.added | 89.6 | 51 |
 | syntax.type | ground.removed | 89.7 | 51 |
 | syntax.string | ground.canvas | 80.6 | 55 |
 | syntax.string | ground.trough | 80.7 | 55 |
-| syntax.string | ground.response | 80.6 | 53 |
+| syntax.string | ground.response | 80.5 | 51 |
 | syntax.string | ground.reasoning | 80.5 | 51 |
-| syntax.string | ground.subagent | 80.6 | 51 |
+| syntax.string | ground.message | 80.5 | 51 |
 | syntax.string | ground.added | 80.5 | 51 |
 | syntax.string | ground.removed | 80.6 | 51 |
 | syntax.number | ground.canvas | 62.9 | 55 |
 | syntax.number | ground.trough | 62.9 | 55 |
-| syntax.number | ground.response | 62.8 | 53 |
+| syntax.number | ground.response | 62.7 | 51 |
 | syntax.number | ground.reasoning | 62.7 | 51 |
-| syntax.number | ground.subagent | 62.8 | 51 |
+| syntax.number | ground.message | 62.7 | 51 |
 | syntax.number | ground.added | 62.8 | 51 |
 | syntax.number | ground.removed | 62.8 | 51 |
 | syntax.comment | ground.canvas | 44.2 | 41 |
 | syntax.comment | ground.trough | 44.2 | 44 |
-| syntax.comment | ground.response | 44.2 | 41 |
-| syntax.comment | ground.reasoning | 44.0 | 41 |
-| syntax.comment | ground.subagent | 44.1 | 41 |
+| syntax.comment | ground.response | 44.1 | 41 |
+| syntax.comment | ground.reasoning | 44.1 | 41 |
+| syntax.comment | ground.message | 44.1 | 41 |
 | syntax.comment | ground.added | 44.1 | 41 |
 | syntax.comment | ground.removed | 44.1 | 41 |
 | syntax.punctuation | ground.canvas | 58.8 | 58 |
 | syntax.punctuation | ground.trough | 58.9 | 58 |
-| syntax.punctuation | ground.response | 58.8 | 58 |
+| syntax.punctuation | ground.response | 58.7 | 58 |
 | syntax.punctuation | ground.reasoning | 58.7 | 58 |
-| syntax.punctuation | ground.subagent | 58.8 | 58 |
+| syntax.punctuation | ground.message | 58.7 | 58 |
 | syntax.punctuation | ground.added | 58.7 | 58 |
 | syntax.punctuation | ground.removed | 58.8 | 58 |
 | syntax.variable | ground.canvas | 77.4 | 77 |
 | syntax.variable | ground.trough | 77.4 | 77 |
-| syntax.variable | ground.response | 77.4 | 77 |
-| syntax.variable | ground.reasoning | 77.2 | 77 |
-| syntax.variable | ground.subagent | 77.3 | 77 |
+| syntax.variable | ground.response | 77.3 | 77 |
+| syntax.variable | ground.reasoning | 77.3 | 77 |
+| syntax.variable | ground.message | 77.3 | 77 |
 | syntax.variable | ground.added | 77.3 | 77 |
 | syntax.variable | ground.removed | 77.3 | 77 |
 | syntax.constant | ground.canvas | 62.9 | 55 |
 | syntax.constant | ground.trough | 62.9 | 55 |
-| syntax.constant | ground.response | 62.8 | 53 |
+| syntax.constant | ground.response | 62.7 | 51 |
 | syntax.constant | ground.reasoning | 62.7 | 51 |
-| syntax.constant | ground.subagent | 62.8 | 51 |
+| syntax.constant | ground.message | 62.7 | 51 |
 | syntax.constant | ground.added | 62.8 | 51 |
 | syntax.constant | ground.removed | 62.8 | 51 |
 | syntax.attribute | ground.canvas | 56.0 | 55 |
 | syntax.attribute | ground.trough | 56.0 | 55 |
-| syntax.attribute | ground.response | 56.0 | 53 |
-| syntax.attribute | ground.reasoning | 55.8 | 51 |
-| syntax.attribute | ground.subagent | 55.9 | 51 |
+| syntax.attribute | ground.response | 55.9 | 51 |
+| syntax.attribute | ground.reasoning | 55.9 | 51 |
+| syntax.attribute | ground.message | 55.9 | 51 |
 | syntax.attribute | ground.added | 55.9 | 51 |
 | syntax.attribute | ground.removed | 55.9 | 51 |
 | livery 0 | ground.canvas | 70.9 | 55 |
@@ -290,54 +307,54 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 | terminal 12 | ground.canvas | 71.5 | 47 |
 | terminal 13 | ground.canvas | 59.4 | 47 |
 | terminal 14 | ground.canvas | 84.6 | 47 |
-| terminal 1 | ground.prompt | 52.8 | 43 |
-| terminal 2 | ground.prompt | 71.4 | 43 |
-| terminal 3 | ground.prompt | 70.5 | 43 |
-| terminal 4 | ground.prompt | 59.3 | 43 |
-| terminal 5 | ground.prompt | 47.9 | 43 |
-| terminal 6 | ground.prompt | 71.8 | 43 |
-| terminal 9 | ground.prompt | 64.4 | 43 |
-| terminal 10 | ground.prompt | 83.9 | 43 |
-| terminal 11 | ground.prompt | 83.0 | 43 |
-| terminal 12 | ground.prompt | 71.3 | 43 |
-| terminal 13 | ground.prompt | 59.3 | 43 |
-| terminal 14 | ground.prompt | 84.4 | 43 |
-| terminal 1 | ground.response | 52.9 | 44 |
-| terminal 2 | ground.response | 71.5 | 44 |
-| terminal 3 | ground.response | 70.6 | 44 |
-| terminal 4 | ground.response | 59.5 | 44 |
-| terminal 5 | ground.response | 48.0 | 44 |
-| terminal 6 | ground.response | 71.9 | 44 |
-| terminal 9 | ground.response | 64.5 | 44 |
-| terminal 10 | ground.response | 84.1 | 44 |
-| terminal 11 | ground.response | 83.1 | 44 |
-| terminal 12 | ground.response | 71.5 | 44 |
-| terminal 13 | ground.response | 59.4 | 44 |
-| terminal 14 | ground.response | 84.6 | 44 |
-| terminal 1 | ground.aside | 52.9 | 43 |
-| terminal 2 | ground.aside | 71.5 | 43 |
-| terminal 3 | ground.aside | 70.6 | 43 |
-| terminal 4 | ground.aside | 59.5 | 43 |
-| terminal 5 | ground.aside | 48.0 | 43 |
-| terminal 6 | ground.aside | 71.9 | 43 |
-| terminal 9 | ground.aside | 64.5 | 43 |
-| terminal 10 | ground.aside | 84.1 | 43 |
-| terminal 11 | ground.aside | 83.1 | 43 |
-| terminal 12 | ground.aside | 71.5 | 43 |
-| terminal 13 | ground.aside | 59.4 | 43 |
-| terminal 14 | ground.aside | 84.6 | 43 |
-| terminal 1 | ground.subagent | 52.9 | 43 |
-| terminal 2 | ground.subagent | 71.5 | 43 |
-| terminal 3 | ground.subagent | 70.6 | 43 |
-| terminal 4 | ground.subagent | 59.4 | 43 |
-| terminal 5 | ground.subagent | 48.0 | 43 |
-| terminal 6 | ground.subagent | 71.9 | 43 |
-| terminal 9 | ground.subagent | 64.5 | 43 |
-| terminal 10 | ground.subagent | 84.0 | 43 |
-| terminal 11 | ground.subagent | 83.1 | 43 |
-| terminal 12 | ground.subagent | 71.4 | 43 |
-| terminal 13 | ground.subagent | 59.4 | 43 |
-| terminal 14 | ground.subagent | 84.5 | 43 |
+| terminal 1 | ground.prompt | 52.5 | 43 |
+| terminal 2 | ground.prompt | 71.0 | 43 |
+| terminal 3 | ground.prompt | 70.2 | 43 |
+| terminal 4 | ground.prompt | 59.0 | 43 |
+| terminal 5 | ground.prompt | 47.6 | 43 |
+| terminal 6 | ground.prompt | 71.4 | 43 |
+| terminal 9 | ground.prompt | 64.0 | 43 |
+| terminal 10 | ground.prompt | 83.6 | 43 |
+| terminal 11 | ground.prompt | 82.7 | 43 |
+| terminal 12 | ground.prompt | 71.0 | 43 |
+| terminal 13 | ground.prompt | 58.9 | 43 |
+| terminal 14 | ground.prompt | 84.1 | 43 |
+| terminal 1 | ground.response | 52.8 | 43 |
+| terminal 2 | ground.response | 71.4 | 43 |
+| terminal 3 | ground.response | 70.5 | 43 |
+| terminal 4 | ground.response | 59.4 | 43 |
+| terminal 5 | ground.response | 47.9 | 43 |
+| terminal 6 | ground.response | 71.8 | 43 |
+| terminal 9 | ground.response | 64.4 | 43 |
+| terminal 10 | ground.response | 84.0 | 43 |
+| terminal 11 | ground.response | 83.0 | 43 |
+| terminal 12 | ground.response | 71.4 | 43 |
+| terminal 13 | ground.response | 59.3 | 43 |
+| terminal 14 | ground.response | 84.5 | 43 |
+| terminal 1 | ground.environment | 52.2 | 43 |
+| terminal 2 | ground.environment | 70.7 | 43 |
+| terminal 3 | ground.environment | 69.9 | 43 |
+| terminal 4 | ground.environment | 58.7 | 43 |
+| terminal 5 | ground.environment | 47.3 | 43 |
+| terminal 6 | ground.environment | 71.2 | 43 |
+| terminal 9 | ground.environment | 63.7 | 43 |
+| terminal 10 | ground.environment | 83.3 | 43 |
+| terminal 11 | ground.environment | 82.4 | 43 |
+| terminal 12 | ground.environment | 70.7 | 43 |
+| terminal 13 | ground.environment | 58.6 | 43 |
+| terminal 14 | ground.environment | 83.8 | 43 |
+| terminal 1 | ground.message | 52.9 | 43 |
+| terminal 2 | ground.message | 71.4 | 43 |
+| terminal 3 | ground.message | 70.5 | 43 |
+| terminal 4 | ground.message | 59.4 | 43 |
+| terminal 5 | ground.message | 47.9 | 43 |
+| terminal 6 | ground.message | 71.8 | 43 |
+| terminal 9 | ground.message | 64.4 | 43 |
+| terminal 10 | ground.message | 84.0 | 43 |
+| terminal 11 | ground.message | 83.0 | 43 |
+| terminal 12 | ground.message | 71.4 | 43 |
+| terminal 13 | ground.message | 59.3 | 43 |
+| terminal 14 | ground.message | 84.5 | 43 |
 
 ## distinctness
 
@@ -347,7 +364,7 @@ The terminal ring stands at J_HK 68.9, held there by slot 5 over ground.canvas.
 - diff band: least dE 20.6, floor 6
 - syntax: least dE 14.1, floor 9
 - code recession: least dE 11.2, floor 5
-- surfaces: least dE 3.2, floor 2
+- surfaces: least dE 2.5, floor 2
 - ink ladder: least dE 9.1, floor 8
 - code against prose: least dE 12.4, floor 10
 - terminal: least dE 13.4, floor 10

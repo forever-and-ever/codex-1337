@@ -31,13 +31,14 @@ string = 90
 number = 25
 attribute = 300
 comment = 45
-prompt = 65
-aside = 195
-subagent = 130
+response = 70
+message = 45
+prompt = 215
+reasoning = 300
+environment = "grey"
 
 [livery]
 count = 8
 
 [surfaces]
 dais = 4.0
-band_tint = 2.4

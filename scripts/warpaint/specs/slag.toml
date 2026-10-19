@@ -31,9 +31,11 @@ string = 45
 number = 65
 attribute = 55
 comment = 45
-prompt = 65
-aside = 45
-subagent = 25
+response = 45
+message = 20
+prompt = 235
+reasoning = 115
+environment = "grey"
 constant = 65
 
 [livery]
@@ -65,7 +67,6 @@ signal = 0.6
 
 [surfaces]
 dais = 4.0
-band_tint = 2.4
 
 [style]
 constant = ["bold"]

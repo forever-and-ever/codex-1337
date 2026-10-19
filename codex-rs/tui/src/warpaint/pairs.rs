@@ -28,8 +28,8 @@ const SURFACES: &[Ground] = &[
     Ground::Prompt,
     Ground::Response,
     Ground::Reasoning,
-    Ground::Aside,
-    Ground::Subagent,
+    Ground::Environment,
+    Ground::Message,
 ];
 /// Where ink lands: prose's grounds and diff lines.
 const TEXT: &[Ground] = &[
@@ -40,8 +40,8 @@ const TEXT: &[Ground] = &[
     Ground::Prompt,
     Ground::Response,
     Ground::Reasoning,
-    Ground::Aside,
-    Ground::Subagent,
+    Ground::Environment,
+    Ground::Message,
     Ground::Added,
     Ground::Removed,
 ];
@@ -53,17 +53,17 @@ const INLINE: &[Ground] = &[
     Ground::Prompt,
     Ground::Response,
     Ground::Reasoning,
-    Ground::Aside,
-    Ground::Subagent,
+    Ground::Environment,
+    Ground::Message,
 ];
-/// Where code is highlighted: blocks on the page, in panels, in the agents' bands and the
+/// Where code is highlighted: blocks on the page, in panels, on the agents' grounds and the
 /// reasoning they disclose, and diffs.
 const CODE: &[Ground] = &[
     Ground::Canvas,
     Ground::Trough,
     Ground::Response,
     Ground::Reasoning,
-    Ground::Subagent,
+    Ground::Message,
     Ground::Added,
     Ground::Removed,
 ];
@@ -71,13 +71,13 @@ const CODE: &[Ground] = &[
 const LIVERY: &[Ground] = &[Ground::Canvas, Ground::Trough, Ground::Dais];
 /// The activity heat map is drawn on the page.
 const HEAT: &[Ground] = &[Ground::Canvas];
-/// Tool output sits on the page or in the band of the turn that ran it.
+/// Tool output sits on the page or on the ground of whoever ran it.
 const TERMINAL: &[Ground] = &[
     Ground::Canvas,
     Ground::Prompt,
     Ground::Response,
-    Ground::Aside,
-    Ground::Subagent,
+    Ground::Environment,
+    Ground::Message,
 ];
 
 /// Every ground a call site paints `figure` on.
@@ -85,12 +85,13 @@ fn painted(figure: Figure) -> &'static [Ground] {
     match figure {
         Figure::Ink | Figure::InkMuted | Figure::InkFaint => TEXT,
         Figure::InkSelected => &[Ground::Selection],
+        Figure::Heading => &[Ground::Canvas],
         Figure::Rule => &[
             Ground::Canvas,
             Ground::Dais,
             Ground::Response,
             Ground::Reasoning,
-            Ground::Subagent,
+            Ground::Message,
         ],
         Figure::Code => INLINE,
         Figure::Accent

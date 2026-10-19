@@ -4,11 +4,11 @@
 mod contrast;
 mod speaker_backgrounds;
 
-pub(crate) use speaker_backgrounds::context_message_style;
+pub(crate) use speaker_backgrounds::environment_style;
 pub(crate) use speaker_backgrounds::history_prompt_style;
 pub(crate) use speaker_backgrounds::history_response_style;
+pub(crate) use speaker_backgrounds::message_style;
 pub(crate) use speaker_backgrounds::reasoning_style;
-pub(crate) use speaker_backgrounds::subagent_message_style;
 
 use crate::color::blend;
 use crate::color::is_light;
@@ -68,22 +68,6 @@ const TABLE_SEPARATOR_FG_ALPHA: f32 = 0.20;
 
 pub fn user_message_style() -> Style {
     user_message_style_for(default_bg())
-}
-
-/// Words neither speaker said, such as client notices and other threads' messages: a neutral
-/// fill, lighter than the editable composer's in either theme.
-pub(crate) fn aside_style() -> Style {
-    default_bg().map_or_else(Style::default, |background| {
-        Style::default().bg(Ground::Aside.repaint(best_color(aside_rgb(background))))
-    })
-}
-
-fn aside_rgb(background: (u8, u8, u8)) -> (u8, u8, u8) {
-    if is_light(background) {
-        blend((0, 0, 0), background, 0.02)
-    } else {
-        blend((255, 255, 255), background, 0.16)
-    }
 }
 
 pub(crate) fn formatted_output_style() -> Style {

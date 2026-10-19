@@ -43,7 +43,7 @@
     [
       {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "Edited", "fg": "rgb:#ffffff", "bg": "reset", "mods": ["bold"]},
+      {"text": "Edited", "fg": "figure:heading", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                              ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
@@ -163,7 +163,7 @@
       {"text": "reviewer                                                               ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                Checked the binding powers against the grammar: only unary minus was out of order.  ", "fg": "reset", "bg": "ground:subagent", "mods": []}
+      {"text": "                Checked the binding powers against the grammar: only unary minus was out of order.  ", "fg": "reset", "bg": "ground:message", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}

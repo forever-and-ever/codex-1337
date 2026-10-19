@@ -1,10 +1,6 @@
 //! Display-only token figures. Accounting remains integer-valued upstream.
 
-use crate::color::blend;
-use crate::terminal_palette::best_color;
-use crate::terminal_palette::default_bg;
-use crate::terminal_palette::default_fg;
-use crate::terminal_palette::rgb_color;
+use crate::warpaint::Figure;
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -17,33 +13,25 @@ pub(super) fn token_span(tokens: u64) -> Span<'static> {
     )
 }
 
-/// A right-aligned figure, `label`, colored by the size of the tokens it reports.
+/// A right-aligned figure, `label`, painted by the size of the tokens it reports: small bills
+/// recede into the faint and muted inks, ordinary ones read as body text, large ones as caution
+/// and the largest as failure.
 pub(in crate::transcript_view) fn token_figure(
     label: &str,
     tokens: u64,
     width: usize,
 ) -> Span<'static> {
-    let color = match tokens {
-        0..=1_000 => {
-            let alpha = if tokens <= 300 { 0.2 } else { 0.45 };
-            // These two levels deliberately remain below informative-text contrast.
-            best_color(blend(
-                default_fg().unwrap_or((220, 220, 220)),
-                default_bg().unwrap_or((0, 0, 0)),
-                alpha,
-            ))
-        }
-        1_001..=3_000 => {
-            crate::style::readable_color_on(rgb_color((230, 190, 60)), /*background*/ None)
-        }
-        3_001..=10_000 => {
-            crate::style::readable_color_on(rgb_color((230, 130, 50)), /*background*/ None)
-        }
-        10_001.. => {
-            crate::style::readable_color_on(rgb_color((220, 65, 65)), /*background*/ None)
-        }
+    let figure = match tokens {
+        0..=300 => Figure::InkFaint,
+        301..=1_000 => Figure::InkMuted,
+        1_001..=3_000 => Figure::Ink,
+        3_001..=10_000 => Figure::Caution,
+        10_001.. => Figure::Failure,
     };
-    Span::styled(format!("{label:>width$}"), Style::reset().fg(color))
+    Span::styled(
+        format!("{label:>width$}"),
+        Style::reset().fg(figure.color()),
+    )
 }
 
 /// Exact below 100,000; three significant digits above.

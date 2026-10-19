@@ -7,8 +7,8 @@
     "prompt",
     "response",
     "reasoning",
-    "aside",
-    "subagent",
+    "environment",
+    "message",
     "added",
     "removed"
   ],
@@ -26,7 +26,8 @@
     "failure",
     "info",
     "added",
-    "removed"
+    "removed",
+    "heading"
   ],
   "syntax": [
     "keyword",
@@ -62,8 +63,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -75,8 +76,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -88,8 +89,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -101,7 +102,7 @@
         "dais",
         "response",
         "reasoning",
-        "subagent"
+        "message"
       ],
       "accent": [
         "canvas",
@@ -111,8 +112,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent"
+        "environment",
+        "message"
       ],
       "link": [
         "canvas",
@@ -122,8 +123,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -134,8 +135,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -147,8 +148,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent"
+        "environment",
+        "message"
       ],
       "caution": [
         "canvas",
@@ -158,8 +159,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -171,8 +172,8 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent",
+        "environment",
+        "message",
         "added",
         "removed"
       ],
@@ -184,15 +185,15 @@
         "prompt",
         "response",
         "reasoning",
-        "aside",
-        "subagent"
+        "environment",
+        "message"
       ],
       "added": [
         "canvas",
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -201,9 +202,12 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
+      ],
+      "heading": [
+        "canvas"
       ]
     },
     "syntax": {
@@ -212,7 +216,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -221,7 +225,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -230,7 +234,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -239,7 +243,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -248,7 +252,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -257,7 +261,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -266,7 +270,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -275,7 +279,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -284,7 +288,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ],
@@ -293,7 +297,7 @@
         "trough",
         "response",
         "reasoning",
-        "subagent",
+        "message",
         "added",
         "removed"
       ]
@@ -311,8 +315,8 @@
         "canvas",
         "prompt",
         "response",
-        "aside",
-        "subagent"
+        "environment",
+        "message"
       ]
     }
   }

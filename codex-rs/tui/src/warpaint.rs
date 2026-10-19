@@ -40,6 +40,15 @@ use investiture::Investiture;
 use pack::Pack;
 use paint::Paint;
 
+/// Whether `color` is a syntax class's token: the scope theme highlighted it.
+#[cfg(test)]
+pub(crate) fn is_syntax(color: Color) -> bool {
+    let Color::Indexed(token) = color else {
+        return false;
+    };
+    matches!(Paint::from_token(token), Some(Paint::Syntax(_)))
+}
+
 struct Warpaint {
     /// The syntax theme revision `worn` was read from.
     followed: Option<u64>,

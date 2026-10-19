@@ -20,8 +20,8 @@ qualified forms.
   initially closed Raw Context fold. Older mixed captures
   retain a legacy label rather than guessed section boundaries. User messages,
   assistant prose, disclosed raw reasoning, inter-agent prose and other incoming
-  context lie on the worn pack's prompt, response, reasoning, subagent and aside
-  grounds. Verbatim tool-call source also lies on the aside ground; syntax
+  context lie on the worn pack's prompt, response, reasoning, message and
+  environment grounds. Verbatim tool-call source also lies on the environment ground; syntax
   highlighting alone remains Raw. Human-only headings,
   summaries, notices and diagnostic decoration
   use the terminal's default background, never grey or reverse video. Author

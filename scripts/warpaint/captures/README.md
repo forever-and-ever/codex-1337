@@ -22,6 +22,4 @@ canvas. The exporter proves every cell's names against the real binder.
 
 Not exercised: `ground:dais` (proposed plans), `figure:link`, heat (only `/usage` draws the
 activity chart), livery (thread identities appear only in multi-agent views), and the terminal
-ramp beyond red, green and yellow. `render --audit` marks the RGB literals fork chrome still
-paints: entry titles and tabs (`render/header.rs`) and token figures
-(`transcript_view/text_gutter.rs`).
+ramp beyond red, green and yellow. `render --audit` marks any RGB literal chrome still paints.

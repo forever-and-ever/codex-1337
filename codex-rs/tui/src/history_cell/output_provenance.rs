@@ -39,8 +39,8 @@ impl ContextAuthor {
         match self {
             Self::User => crate::style::history_prompt_style(),
             Self::Assistant => crate::style::history_response_style(),
-            Self::Subagent => crate::style::subagent_message_style(),
-            Self::Environment => crate::style::context_message_style(),
+            Self::Subagent => crate::style::message_style(),
+            Self::Environment => crate::style::environment_style(),
         }
     }
 }
@@ -238,7 +238,7 @@ impl OutputProvenance {
             Self::Unspecified | Self::ClientDiff => Style::default(),
             Self::Reasoning => crate::style::reasoning_style(),
             Self::Captured | Self::Definitions(OutputMode::Raw) => {
-                crate::style::context_message_style()
+                crate::style::environment_style()
             }
             Self::Formatted | Self::Definitions(OutputMode::Fmt) => Self::Client
                 .style()
