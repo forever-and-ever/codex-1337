@@ -165,7 +165,10 @@ impl TextLayout {
         self.with_leading_disclosure_on_line(
             crate::render::disclosure::glyph(part.expanded).into(),
             part.line,
-            FoldTarget::Part(part.id),
+            FoldTarget::GroupedPart {
+                id: part.id,
+                group: part.group,
+            },
         )
     }
 

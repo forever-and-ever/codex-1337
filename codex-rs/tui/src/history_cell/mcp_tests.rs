@@ -1,10 +1,10 @@
 use super::*;
+use crate::history_cell::activity_parts::FoldState;
 use base64::Engine;
 use codex_protocol::mcp::CallToolResult;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use serde_json::json;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
@@ -75,7 +75,7 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
             .activity_parts(
                 /*width*/ 100,
                 /*header_reserve*/ 0,
-                &HashSet::from(["mcp-file:edit:0".into()]),
+                &FoldState::from(["mcp-file:edit:0".into()]),
             )
             .unwrap();
         snapshots.push(format!(
@@ -86,7 +86,7 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
         ));
         if label == "text and rename" {
             let input = cell.invocation_input(100);
-            let edits = cell.receipt_parts(100, &HashSet::new(), false);
+            let edits = cell.receipt_parts(100, &FoldState::new(), false);
             assert_eq!(
                 input.parts.lines[0].line.to_string().find("MCP"),
                 edits.lines[0].line.to_string().find("Edited"),
@@ -115,22 +115,22 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
                 Arc::new(direct.clone()) as Arc<dyn HistoryCell>,
                 Arc::new(output),
             ]);
-            let render = |expanded: HashSet<String>| {
+            let render = |expanded: FoldState| {
                 group
                     .activity_parts(/*width*/ 60, /*header_reserve*/ 14, &expanded)
                     .unwrap()
             };
-            let collapsed = render(HashSet::new());
+            let collapsed = render(FoldState::new());
             let expected = direct
                 .activity_parts(
                     /*width*/ 60,
                     /*header_reserve*/ 14,
-                    &HashSet::new(),
+                    &FoldState::new(),
                 )
                 .unwrap();
             assert_eq!(collapsed.lines, expected.lines);
             assert!(collapsed.lines[0].width() <= 46);
-            let expanded = render(HashSet::from([
+            let expanded = render(FoldState::from([
                 "mcp:edit".into(),
                 "output:tool-output-tokens:direct-output".into(),
                 "mcp-file:edit:0".into(),

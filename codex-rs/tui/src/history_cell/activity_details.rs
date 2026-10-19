@@ -8,6 +8,7 @@ use super::HistoryCell;
 use super::HistoryRenderMode;
 use super::ToolOutputCell;
 use super::output_provenance::OutputMode;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use std::sync::Arc;
 
@@ -88,7 +89,7 @@ impl ActivityDetails {
         &self,
         parts: &mut super::activity_parts::ActivityParts,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) {
         for (_, cell) in &self.entries {

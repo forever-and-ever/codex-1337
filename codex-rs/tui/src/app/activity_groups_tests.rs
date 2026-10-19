@@ -3,6 +3,7 @@
 use super::*;
 use crate::app::test_support::make_test_app;
 use crate::chatwidget::CompletedItem;
+use crate::history_cell::activity_parts::FoldState;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::thread_items_to_transcript_cells;
 use codex_app_server_protocol::TurnItemsView;
@@ -515,7 +516,7 @@ async fn scoped_code_mode_admission_survives_interleaving_and_page_prefixes() {
         ("Hydrated fork", hydrated_fork),
         ("Isolated sibling", partial_sibling.block),
     ] {
-        let expanded = std::collections::HashSet::from([cell.activity_ids()[0].clone()]);
+        let expanded = FoldState::from([cell.activity_ids()[0].clone()]);
         let lines = cell
             .activity_parts(90, /*header_reserve*/ 0, &expanded)
             .unwrap()
@@ -1664,7 +1665,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
         let expected = project(&app, &current.items);
         assert_eq!(expected.len(), 3);
         // A discarded child may contain anything; only returned batches are output authority.
-        let mut expanded = HashSet::from_iter(expected[0].activity_ids());
+        let mut expanded = FoldState::from_iter(expected[0].activity_ids());
         let folded = expected[0]
             .output_parts(
                 240,
@@ -2064,10 +2065,7 @@ async fn returned_batches_keep_one_disclosure_and_bill_across_live_replay_and_pa
                 .join("\n"),
             captured
         );
-        let mut expanded = wait_group
-            .activity_ids()
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let mut expanded = wait_group.activity_ids().into_iter().collect::<FoldState>();
         let parts = wait_group
             .output_parts(
                 120,

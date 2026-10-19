@@ -3,6 +3,7 @@ use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
 use crate::history_cell::ToolOutputCell;
 use crate::history_cell::ToolOutputGroup;
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Panel;
@@ -17,7 +18,6 @@ use codex_shell_command::parse_command::parse_command;
 use crossterm::event::KeyCode;
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::time::Duration;
 
 #[test]
@@ -807,7 +807,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         true,
         80,
         false,
-        &HashSet::default(),
+        &FoldState::default(),
     );
     assert_eq!(
         python
@@ -854,7 +854,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 true,
                 width,
                 full,
-                &HashSet::default(),
+                &FoldState::default(),
             )
             .lines
             .into_iter()

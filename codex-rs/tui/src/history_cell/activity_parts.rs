@@ -3,11 +3,18 @@
 use super::ActivityDisclosure;
 use crate::terminal_hyperlinks::HyperlinkLine;
 
+mod fold_state;
+pub(crate) use fold_state::{FoldGroup, FoldScope, FoldState};
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FoldTarget {
     #[default]
     Activity,
     Part(String),
+    GroupedPart {
+        id: String,
+        group: FoldGroup,
+    },
     Thought(Vec<String>),
     OutputMode(super::output_provenance::OutputMode),
     Invocation {
@@ -20,7 +27,7 @@ impl FoldTarget {
     pub(crate) fn ids(&self, activity: &[String]) -> Vec<String> {
         match self {
             Self::Activity | Self::OutputMode(_) => activity.to_vec(),
-            Self::Part(id) => vec![id.clone()],
+            Self::Part(id) | Self::GroupedPart { id, .. } => vec![id.clone()],
             Self::Thought(ids) => ids.clone(),
             Self::Invocation { call_id, .. } => vec![call_id.clone()],
         }
@@ -49,6 +56,7 @@ pub(crate) struct PartControl {
     pub(crate) id: String,
     pub(crate) line: usize,
     pub(crate) expanded: bool,
+    pub(crate) group: FoldGroup,
 }
 
 #[derive(Clone, Default)]

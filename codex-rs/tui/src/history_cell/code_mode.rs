@@ -8,6 +8,7 @@ use super::activity_parts::ActivityHeader;
 use super::output_provenance::OutputMode;
 use super::output_provenance::client_notice;
 use crate::code_mode_transcript::ScopedCodeMode;
+use crate::history_cell::activity_parts::FoldState;
 use crate::motion::MotionMode;
 use crate::motion::ReducedMotionIndicator;
 use crate::motion::activity_indicator;
@@ -376,7 +377,7 @@ impl CodeModeCell {
     fn parts(
         &self,
         width: u16,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> super::activity_parts::ActivityParts {
         let mut lines: Vec<_> = self.header().into_iter().map(HyperlinkLine::from).collect();
@@ -515,7 +516,7 @@ impl HistoryCell for CodeModeCell {
         &self,
         width: u16,
         _header_reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<super::activity_parts::ActivityParts> {
         Some(self.parts(width, expanded, OutputMode::Raw))
     }
@@ -524,7 +525,7 @@ impl HistoryCell for CodeModeCell {
         &self,
         width: u16,
         _reserve: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<super::activity_parts::ActivityParts> {
         Some(self.parts(width, expanded, mode))

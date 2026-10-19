@@ -6,7 +6,6 @@ use super::CellPresentation;
 use super::Content;
 use super::EntryKey;
 use super::Hash;
-use super::HashSet;
 use super::HistoryCell;
 use super::HistoryRenderMode;
 use super::RenderState;
@@ -22,6 +21,7 @@ use super::invocation;
 use super::rewrap;
 use super::yield_head;
 use crate::history_cell::ToolOutputGroup;
+use crate::history_cell::activity_parts::FoldState;
 use std::sync::Weak;
 
 const MAX_CACHED_TEXT_BYTES: usize = 32 * 1024 * 1024;
@@ -342,7 +342,19 @@ impl TranscriptView {
         let loose = seat.content == Content::Loose;
         let ids = cell.activity_ids();
         let disclosure = !detailed && mode == HistoryRenderMode::Rich && !ids.is_empty();
-        let manually_expanded = self.disclosure.is_expanded(&ids);
+        let manually_expanded = self.feed.activity_group(index).map_or_else(
+            || self.disclosure.is_expanded(&ids),
+            |group| {
+                ids.iter().any(|id| {
+                    self.disclosure.expanded.is_open_in(
+                        &crate::history_cell::activity_parts::FoldScope::Transcript,
+                        group,
+                        id,
+                        false,
+                    )
+                })
+            },
+        );
         let expanded = disclosure && (full_content || manually_expanded);
         let output_mode = self.disclosure.output_mode(&ids);
         // A member's figures belong to its item's header; a loose row keeps its own tokens.
@@ -412,7 +424,7 @@ impl TranscriptView {
                 )
                 .collect();
             let output_tokens = output_tokens.subset(&token_ids);
-            let expanded_parts = expanded_parts.clone();
+            let expanded_parts = expanded_parts.scoped(feed.fold_scope(index));
             let render = move |invocations: &invocation::Invocations| {
                 if cell
                     .as_any()
@@ -441,7 +453,7 @@ impl TranscriptView {
                     None
                 };
                 // The activity's rows, compact or expanded, and what controls them.
-                let activity = |expanded: bool, expanded_parts: &HashSet<String>| {
+                let activity = |expanded: bool, expanded_parts: &FoldState| {
                     let mut lines = if !full_content
                         && let Some(parts) = cell.output_parts(
                             content_width,

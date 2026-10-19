@@ -2,6 +2,7 @@
 //! Canonical cells retain all available data; presentation does not modify tool execution.
 
 use super::*;
+use crate::history_cell::activity_parts::FoldState;
 use crate::transcript_view::ActivityTranscriptLines;
 
 mod live_snapshot;
@@ -44,7 +45,7 @@ impl ChatWidget {
         &self,
         width: u16,
         expanded: bool,
-        expanded_parts: &std::collections::HashSet<String>,
+        expanded_parts: &FoldState,
         tool_output_tokens: Option<u64>,
         output_mode: history_cell::output_provenance::OutputMode,
     ) -> Option<ActivityTranscriptLines> {

@@ -2,6 +2,7 @@
 
 use super::TextLayout;
 use super::gutter;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
@@ -499,7 +500,7 @@ fn command_and_output_copy_preserve_hard_lines_across_resize() {
                 .activity_parts(
                     /*width*/ 32,
                     /*header_reserve*/ 0,
-                    &std::collections::HashSet::new(),
+                    &FoldState::new(),
                 )
                 .unwrap();
             let expanded = cell

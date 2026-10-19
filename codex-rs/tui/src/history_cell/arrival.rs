@@ -8,6 +8,7 @@ use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
 use super::activity_parts::ActivityParts;
 use super::sanitize_user_text;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
@@ -17,7 +18,6 @@ use codex_protocol::step_admission::ArrivalKind;
 use codex_utils_output_truncation::count_o200k_arrival;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use std::collections::HashSet;
 
 #[derive(Debug)]
 pub(crate) struct ArrivalCell {
@@ -116,6 +116,10 @@ impl ArrivalCell {
 }
 
 impl FeedEntry for ArrivalCell {
+    fn feed_kind(&self) -> crate::transcript_view::EntryKind {
+        use crate::transcript_view::EntryKind;
+        EntryKind::Arrival(self.item.kind)
+    }
     fn feed_id(&self) -> String {
         self.item.id.clone()
     }
@@ -134,7 +138,7 @@ impl FeedEntry for ArrivalCell {
     fn feed_body(
         &self,
         width: u16,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: super::output_provenance::OutputMode,
     ) -> ActivityParts {
         use super::activity_parts::PartControl;
@@ -154,8 +158,10 @@ impl FeedEntry for ArrivalCell {
         let mut controls = Vec::new();
         if declarations {
             let id = self.raw_fold();
-            let expanded = expanded.contains(&id);
+            let expanded =
+                expanded.is_open(super::activity_parts::FoldGroup::RawContext, &id, false);
             controls.push(PartControl {
+                group: super::activity_parts::FoldGroup::RawContext,
                 id,
                 line: 0,
                 expanded,

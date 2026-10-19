@@ -1,5 +1,7 @@
 //! Command previews and full transcripts, retaining logical text through display wrapping.
 
+use crate::history_cell::activity_parts::FoldState;
+
 mod alarm;
 pub(crate) use alarm::alarm_output_lines;
 
@@ -243,7 +245,7 @@ impl HistoryCell for ExecCell {
     fn nested_activity_parts(
         &self,
         width: u16,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
         let mut nested = self.clone();
         nested.completed_at = None;
@@ -271,7 +273,7 @@ impl HistoryCell for ExecCell {
         &self,
         width: u16,
         header_reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
     ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
         self.output_parts(width, header_reserve, expanded, OutputMode::Raw)
     }
@@ -284,7 +286,7 @@ impl HistoryCell for ExecCell {
         &self,
         width: u16,
         header_reserve: usize,
-        expanded: &std::collections::HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
     ) -> Option<crate::history_cell::activity_parts::ActivityParts> {
         self.is_agent_command_group().then(|| {
@@ -349,11 +351,9 @@ impl HistoryCell for ExecCell {
         if self.group.calls.iter().any(ExecCall::is_user_shell_command) {
             return self.display_hyperlink_lines(width);
         }
-        if let Some(parts) = self.activity_parts(
-            width,
-            /*header_reserve*/ 0,
-            &std::collections::HashSet::new(),
-        ) {
+        if let Some(parts) =
+            self.activity_parts(width, /*header_reserve*/ 0, &FoldState::new())
+        {
             parts.lines
         } else {
             self.compact_command_lines(width)
@@ -365,11 +365,9 @@ impl HistoryCell for ExecCell {
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if let Some(parts) = self.activity_parts(
-            width,
-            /*header_reserve*/ 0,
-            &std::collections::HashSet::new(),
-        ) {
+        if let Some(parts) =
+            self.activity_parts(width, /*header_reserve*/ 0, &FoldState::new())
+        {
             parts.lines
         } else {
             self.command_display_lines(width)

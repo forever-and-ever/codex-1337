@@ -14,6 +14,7 @@ use super::output_provenance::client_notice;
 use super::output_provenance::mark_lines;
 use crate::exec_cell::ExecCall;
 use crate::exec_cell::ExecCell;
+use crate::history_cell::activity_parts::FoldState;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
@@ -217,7 +218,7 @@ fn combine_parts(parts: impl IntoIterator<Item = ActivityParts>) -> ActivityPart
 fn edit_projection(
     cell: &dyn HistoryCell,
     width: u16,
-    expanded: &std::collections::HashSet<String>,
+    expanded: &FoldState,
     full: bool,
 ) -> ActivityParts {
     let any = cell.as_any();
@@ -682,12 +683,7 @@ impl Invocation<'_> {
         }
     }
 
-    pub(crate) fn edit_parts(
-        &self,
-        width: u16,
-        expanded: &std::collections::HashSet<String>,
-        full: bool,
-    ) -> ActivityParts {
+    pub(crate) fn edit_parts(&self, width: u16, expanded: &FoldState, full: bool) -> ActivityParts {
         let mut parts = match &self.source {
             Source::Code(block) => edit_projection(*block, width, expanded, full),
             Source::Cells(cells) => combine_parts(

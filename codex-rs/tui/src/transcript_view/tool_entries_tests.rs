@@ -137,11 +137,11 @@ fn completed_thought_discloses_only_readable_reasoning() {
 
 #[test]
 fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
+    use crate::history_cell::activity_parts::FoldState as HashSet;
     use crate::history_cell::activity_parts::FoldTarget;
     use crate::history_cell::output_provenance::OutputMode;
     use crate::history_cell::output_provenance::OutputProvenance;
     use crate::history_cell::output_provenance::client_notice;
-    use std::collections::HashSet;
     let json = r#"{"a":9007199254740993123456789,"a":1.2300e+04,"text":"first\nsecond\tend","literal":"\\n","key\n":"\u0061"}"#;
     let plain = "prefix {\"embedded\":true}";
     let invalid = "{\"truncated\":";
@@ -630,7 +630,10 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(view.focus_fold(
                 &cells,
                 0,
-                FoldTarget::Part("arrival-raw:provenance-definitions".into())
+                FoldTarget::GroupedPart {
+                    id: "arrival-raw:provenance-definitions".into(),
+                    group: crate::history_cell::activity_parts::FoldGroup::RawContext
+                }
             ));
             view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             tests::render(&mut view, &cells, 64, 12);
@@ -654,7 +657,10 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             assert!(view.focus_fold(
                 &cells,
                 0,
-                FoldTarget::Part("arrival-raw:provenance-definitions".into())
+                FoldTarget::GroupedPart {
+                    id: "arrival-raw:provenance-definitions".into(),
+                    group: crate::history_cell::activity_parts::FoldGroup::RawContext
+                }
             ));
             view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
             let folded = tests::render(&mut view, &cells, 32, 8);
@@ -1333,7 +1339,7 @@ fn waits_and_agent_events_preserve_captured_text_without_extra_gaps() {
             .contains("tools.inspect")
     );
     assert!(crate::history_cell::ToolOutputGroup::attach(&replay, orphan.clone()).is_none());
-    let expanded = std::collections::HashSet::from_iter(orphan.activity_ids());
+    let expanded = FoldState::from_iter(orphan.activity_ids());
     let folded = orphan
         .output_parts(
             100,

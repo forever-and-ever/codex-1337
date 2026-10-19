@@ -455,6 +455,12 @@ impl TranscriptView {
         mode: MouseMode,
     ) -> Option<ViewAction> {
         if mode == MouseMode::Interactive
+            && event.modifiers == KeyModifiers::CONTROL
+            && self.toggle_disclosure_group_at(cells, event.column, event.row)
+        {
+            return Some(ViewAction::Changed);
+        }
+        if mode == MouseMode::Interactive
             && event.modifiers.is_empty()
             && self.toggle_disclosure_at(cells, event.column, event.row)
         {

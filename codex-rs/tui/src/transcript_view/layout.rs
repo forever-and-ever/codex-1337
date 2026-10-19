@@ -12,7 +12,6 @@ use crate::history_cell::ActivityDisclosure;
 use crate::history_cell::ReasoningSummaryCell;
 use crate::history_cell::output_provenance::OutputMode;
 use crate::transcript_geometry::TokenSeat;
-use std::collections::HashSet;
 use std::hash::Hash;
 use std::hash::Hasher;
 

@@ -59,6 +59,7 @@ use crate::history_cell::PreambleCell;
 use crate::history_cell::ThoughtCell;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::activity_parts::ActivityParts;
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::activity_preview::compact_header;
 use crate::history_cell::output_provenance::OutputMode;
@@ -76,6 +77,7 @@ use std::ops::Range;
 
 /// A cell that is a Feed Item of its own: its header carries the title and its fold the body.
 pub(crate) trait FeedEntry {
+    fn feed_kind(&self) -> EntryKind;
     fn feed_id(&self) -> String;
     fn feed_disclosure(&self) -> HeaderDisclosure {
         HeaderDisclosure::Expanded
@@ -83,12 +85,7 @@ pub(crate) trait FeedEntry {
     fn feed_title(&self) -> Line<'static>;
     /// Body rows start at their local origin; the viewport owns their inset.
     /// Rows and controls share one projection of the viewer's disclosure state.
-    fn feed_body(
-        &self,
-        _width: u16,
-        _expanded: &HashSet<String>,
-        _mode: OutputMode,
-    ) -> ActivityParts {
+    fn feed_body(&self, _width: u16, _expanded: &FoldState, _mode: OutputMode) -> ActivityParts {
         ActivityParts::default()
     }
 }
@@ -111,7 +108,7 @@ pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
 pub(super) fn entry_body(
     cell: &dyn HistoryCell,
     width: u16,
-    expanded: &HashSet<String>,
+    expanded: &FoldState,
     mode: OutputMode,
 ) -> Option<ActivityParts> {
     feed_entry(cell).map(|entry| entry.feed_body(width, expanded, mode))
@@ -133,10 +130,12 @@ pub(super) struct FeedIndex {
     placed_users: HashMap<String, usize>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 enum Role {
-    #[default]
-    Loose,
+    Loose {
+        group: crate::history_cell::activity_parts::FoldGroup,
+        scope: String,
+    },
     Member(Membership),
 }
 
@@ -191,12 +190,28 @@ struct Item {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+pub(crate) enum EntryKind {
+    Arrival(codex_protocol::step_admission::ArrivalKind),
+    Preamble,
+    Alarm,
+    Compaction,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkKind {
+    CodeMode,
+    Command,
+    Response,
+}
+
+#[derive(Clone, PartialEq, Eq)]
 enum Kind {
     /// One or more steps; `calls` when any of them made a call.
-    Steps { calls: bool },
+    Steps { calls: bool, work: WorkKind },
     /// The step whose seal admitted the input, and the input's place among its user inputs.
     User { admitted: Option<(String, usize)> },
     Entry {
+        entry: EntryKind,
         initial_disclosure: HeaderDisclosure,
     },
     /// A Code Mode invocation no step claims.
@@ -205,23 +220,80 @@ enum Kind {
     Reply,
 }
 
+impl Kind {
+    fn fold_group(&self) -> crate::history_cell::activity_parts::FoldGroup {
+        use crate::history_cell::activity_parts::FoldGroup;
+        use codex_protocol::step_admission::ArrivalKind;
+        match self {
+            Self::Steps { work, .. } => work.fold_group(),
+            Self::User { .. } => FoldGroup::User,
+            Self::CodeMode => FoldGroup::CodeMode,
+            Self::Reply => FoldGroup::Response,
+            Self::Entry { entry, .. } => match entry {
+                EntryKind::Arrival(ArrivalKind::InterAgent) => FoldGroup::Message,
+                EntryKind::Arrival(ArrivalKind::Injection) => FoldGroup::Injection,
+                EntryKind::Arrival(ArrivalKind::User) => FoldGroup::User,
+                EntryKind::Preamble => FoldGroup::Preamble,
+                EntryKind::Alarm => FoldGroup::Alarm,
+                EntryKind::Compaction => FoldGroup::Compaction,
+            },
+        }
+    }
+}
+impl WorkKind {
+    fn fold_group(self) -> crate::history_cell::activity_parts::FoldGroup {
+        use crate::history_cell::activity_parts::FoldGroup;
+        match self {
+            Self::CodeMode => FoldGroup::CodeMode,
+            Self::Command => FoldGroup::Command,
+            Self::Response => FoldGroup::Response,
+        }
+    }
+
+    fn of<'a>(cells: impl Iterator<Item = &'a dyn HistoryCell>) -> Self {
+        let calls: Vec<_> = cells
+            .flat_map(crate::history_cell::invocation::collect)
+            .collect();
+        let ids: HashSet<_> = calls.iter().map(|call| call.id).collect();
+        if ids.len() > 1 {
+            Self::Command
+        } else if calls.iter().any(|call| {
+            matches!(
+                call.source,
+                crate::history_cell::invocation::Source::Code(_)
+            )
+        }) {
+            Self::CodeMode
+        } else if calls.is_empty() {
+            Self::Response
+        } else {
+            Self::Command
+        }
+    }
+}
+
 impl Item {
-    /// The saved mark toggles the entry's initial disclosure policy.
-    fn unfolded(&self, expanded: &HashSet<String>) -> bool {
-        expanded.contains(&self.fold_mark)
-            == matches!(
+    fn unfolded(&self, expanded: &FoldState) -> bool {
+        use crate::history_cell::activity_parts::FoldScope;
+        expanded.is_open_in(
+            &FoldScope::Transcript,
+            self.kind.fold_group(),
+            &self.fold_mark,
+            !matches!(
                 self.kind,
                 Kind::Entry {
-                    initial_disclosure: HeaderDisclosure::Collapsed
+                    initial_disclosure: HeaderDisclosure::Collapsed,
+                    ..
                 }
-            )
+            ),
+        )
     }
 
     /// User turns and replies stand apart.
     fn spacious(&self) -> bool {
         matches!(
             self.kind,
-            Kind::User { .. } | Kind::Reply | Kind::Steps { calls: false }
+            Kind::User { .. } | Kind::Reply | Kind::Steps { calls: false, .. }
         )
     }
 
@@ -229,7 +301,9 @@ impl Item {
     fn shows(&self, member: &Membership, unfolded: bool) -> bool {
         match member.contribution {
             Contribution::Silent | Contribution::Thought => false,
-            Contribution::Message => unfolded || self.kind == Kind::Steps { calls: true },
+            Contribution::Message => {
+                unfolded || matches!(self.kind, Kind::Steps { calls: true, .. })
+            }
             Contribution::Activity => unfolded,
         }
     }
@@ -286,7 +360,7 @@ impl HeaderPreparation {
     pub(super) fn keep_empty_code_mode_open(
         &mut self,
         invocations: &invocation::Invocations,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         full: bool,
         width: u16,
     ) -> bool {
@@ -322,7 +396,7 @@ impl HeaderPreparation {
     pub(super) fn render(
         &self,
         output_tokens: &tool_output_tokens::ToolOutputTokens,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
         invocations: &invocation::Invocations,
         full: bool,
@@ -490,7 +564,13 @@ impl FeedIndex {
             cell_nodes.push(own);
         }
 
-        let mut roles = vec![Role::Loose; cells.len()];
+        let mut roles = vec![
+            Role::Loose {
+                group: crate::history_cell::activity_parts::FoldGroup::Response,
+                scope: String::new()
+            };
+            cells.len()
+        ];
         let mut items: Vec<Item> = Vec::new();
         let mut item_of_root: HashMap<usize, usize> = HashMap::new();
         let mut placed_users: HashMap<String, usize> = HashMap::new();
@@ -514,11 +594,26 @@ impl FeedIndex {
                 continue;
             }
             let Some(first) = cell_nodes[index].first() else {
+                let identity = cell
+                    .activity_ids()
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| format!("{:x}", cell_key(cell)));
+                roles[index] = Role::Loose {
+                    group: WorkKind::of(std::iter::once(cell.as_ref())).fold_group(),
+                    scope: format!("activity:{identity}"),
+                };
                 continue;
             };
             let root = find(&mut parent, *first);
             let item = *item_of_root.entry(root).or_insert_with(|| {
-                items.push(Item::new(Kind::Steps { calls: false }, names[*first]));
+                items.push(Item::new(
+                    Kind::Steps {
+                        calls: false,
+                        work: WorkKind::Response,
+                    },
+                    names[*first],
+                ));
                 items.len() - 1
             });
             if last_item != Some(item) || items[item].segments.is_empty() {
@@ -555,7 +650,13 @@ impl FeedIndex {
         }
 
         for item in &mut items {
-            if let Kind::Steps { calls } = &mut item.kind {
+            if let Kind::Steps { calls, work } = &mut item.kind {
+                *work = WorkKind::of(
+                    item.segments
+                        .iter()
+                        .flatten()
+                        .map(|index| cells[*index].as_ref()),
+                );
                 *calls = item.steps.iter().any(|step| {
                     bills
                         .step(step)
@@ -585,7 +686,7 @@ impl FeedIndex {
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
         width: u16,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         elided: &dyn Fn(usize) -> bool,
     ) -> Seat {
         let Some(Role::Member(member)) = self.roles.get(index) else {
@@ -663,7 +764,10 @@ impl FeedIndex {
         width: u16,
         elided: &dyn Fn(usize) -> bool,
     ) -> bool {
-        if let Kind::Entry { initial_disclosure } = item.kind {
+        if let Kind::Entry {
+            initial_disclosure, ..
+        } = item.kind
+        {
             return initial_disclosure != HeaderDisclosure::FixedOpen;
         }
         if matches!(item.kind, Kind::Steps { .. })
@@ -674,7 +778,7 @@ impl FeedIndex {
         {
             return false;
         }
-        if !matches!(item.kind, Kind::Steps { calls: true }) || item.steps.len() > 1 {
+        if !matches!(item.kind, Kind::Steps { calls: true, .. }) || item.steps.len() > 1 {
             return true;
         }
         let calls: HashSet<_> = item
@@ -699,7 +803,7 @@ impl FeedIndex {
         let (title_width, _) = header_columns(width);
         // Independent source/result folds must not make the parent's affordance move or
         // force materialization of their potentially large captures during seat lookup.
-        let compact = HashSet::new();
+        let compact = FoldState::new();
         for segment in &item.segments {
             let plans = self.plans(item, cells, segment, true, elided);
             if plans.len() != self.plans(item, cells, segment, false, elided).len() {
@@ -888,19 +992,51 @@ impl FeedIndex {
         }
     }
 
-    pub(super) fn is_unfolded(&self, fold: &str, expanded: &HashSet<String>) -> Option<bool> {
+    pub(super) fn is_unfolded(&self, fold: &str, expanded: &FoldState) -> Option<bool> {
         let item = self.folds.get(fold)?;
         Some(self.items[*item].unfolded(expanded))
     }
 
     /// Fold an unfolded item, or unfold a folded one.
-    pub(super) fn toggle(&self, fold: &str, expanded: &mut HashSet<String>) -> Option<usize> {
+    pub(super) fn toggle(&self, fold: &str, expanded: &mut FoldState) -> Option<usize> {
         let index = *self.folds.get(fold)?;
         let item = &self.items[index];
-        if !expanded.remove(&item.fold_mark) {
-            expanded.insert(item.fold_mark.clone());
-        }
+        expanded.set(item.fold_mark.clone(), !item.unfolded(expanded));
         Some(index)
+    }
+
+    pub(super) fn toggle_group(&self, fold: &str, expanded: &mut FoldState) -> Option<usize> {
+        use crate::history_cell::activity_parts::FoldScope;
+        let index = *self.folds.get(fold)?;
+        let item = &self.items[index];
+        expanded.set_default(
+            FoldScope::Transcript,
+            item.kind.fold_group(),
+            !item.unfolded(expanded),
+        );
+        Some(index)
+    }
+
+    pub(super) fn fold_scope(
+        &self,
+        index: usize,
+    ) -> crate::history_cell::activity_parts::FoldScope {
+        use crate::history_cell::activity_parts::FoldScope;
+        match self.roles.get(index) {
+            Some(Role::Member(member)) => FoldScope::Item(self.items[member.item].fold.clone()),
+            Some(Role::Loose { scope, .. }) => FoldScope::Item(scope.clone()),
+            None => FoldScope::Item("live".into()),
+        }
+    }
+
+    pub(super) fn activity_group(
+        &self,
+        index: usize,
+    ) -> Option<crate::history_cell::activity_parts::FoldGroup> {
+        match self.roles.get(index) {
+            Some(Role::Loose { group, .. }) => Some(*group),
+            _ => None,
+        }
     }
 
     /// The header that remains nearest `near` in its segment of the item, else the item's
@@ -910,7 +1046,7 @@ impl FeedIndex {
         item: usize,
         cells: &[Arc<dyn HistoryCell>],
         near: usize,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         elided: &dyn Fn(usize) -> bool,
     ) -> Option<usize> {
         let entry = self.items.get(item)?;
@@ -953,7 +1089,7 @@ impl FeedIndex {
         header: &Header,
         bills: &StepBills,
         output_tokens: &tool_output_tokens::ToolOutputTokens,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         mode: OutputMode,
         invocations: &invocation::Invocations,
         full: bool,
@@ -1147,7 +1283,7 @@ impl FeedIndex {
         &self,
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
-        expanded: &HashSet<String>,
+        expanded: &FoldState,
         width: u16,
     ) -> Line<'static> {
         let item = &self.items[header.item];
@@ -1169,7 +1305,7 @@ impl FeedIndex {
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
-        if matches!(item.kind, Kind::Steps { calls: true } | Kind::CodeMode) {
+        if matches!(item.kind, Kind::Steps { calls: true, .. } | Kind::CodeMode) {
             let active = header
                 .scope
                 .iter()
@@ -1285,6 +1421,7 @@ fn entry_kind(
     if let Some(entry) = feed_entry(cell.as_ref()) {
         return Some((
             Kind::Entry {
+                entry: entry.feed_kind(),
                 initial_disclosure: entry.feed_disclosure(),
             },
             entry.feed_id(),
@@ -1416,11 +1553,7 @@ fn strip_marker(line: Line<'static>) -> Line<'static> {
 
 /// The row an activity yields to its header: its first, clipped where the activity would
 /// clip it, without its marker.
-fn title_row(
-    cell: &dyn HistoryCell,
-    expanded: &HashSet<String>,
-    width: u16,
-) -> Option<Line<'static>> {
+fn title_row(cell: &dyn HistoryCell, expanded: &FoldState, width: u16) -> Option<Line<'static>> {
     let width = crate::transcript_geometry::content_width(width, HistoryRenderMode::Rich);
     let lines = match cell.output_parts(width, /*reserve*/ 0, expanded, OutputMode::Raw) {
         Some(parts) => parts.lines,
@@ -1615,7 +1748,7 @@ impl TranscriptView {
         {
             self.disclosure
                 .expanded
-                .remove(&self.feed.items[*item].fold_mark);
+                .forget(&self.feed.items[*item].fold_mark);
         }
         seat
     }
@@ -1644,8 +1777,34 @@ impl TranscriptView {
             .feed
             .verify(cells, index, frame, self.step_bills.revision())
         {
+            let scoped = self.disclosure.expanded.has_item_defaults();
+            let prior_scopes: HashMap<_, _> = if scoped {
+                self.feed
+                    .cells
+                    .iter()
+                    .enumerate()
+                    .map(|(index, key)| (*key, self.feed.fold_scope(index)))
+                    .collect()
+            } else {
+                HashMap::new()
+            };
             self.feed.rebuild(cells, &self.step_bills, frame);
             for (index, cell) in cells.iter().enumerate() {
+                if let Some(prior) = prior_scopes.get(&cell_key(cell)) {
+                    self.disclosure
+                        .expanded
+                        .remap_scope(prior, self.feed.fold_scope(index));
+                }
+                if scoped {
+                    for id in cell.activity_ids() {
+                        self.disclosure.expanded.remap_scope(
+                            &crate::history_cell::activity_parts::FoldScope::Item(format!(
+                                "live:{id}"
+                            )),
+                            self.feed.fold_scope(index),
+                        );
+                    }
+                }
                 let Some(block) = cell.as_any().downcast_ref::<CodeModeCell>() else {
                     continue;
                 };
@@ -1658,9 +1817,13 @@ impl TranscriptView {
                 }
                 // Both forms default open; late admission moves the same closed mark and focus.
                 let prior = Item::new(Kind::CodeMode, &block.identity());
-                if self.disclosure.expanded.remove(&prior.fold_mark) {
-                    self.disclosure.expanded.insert(item.fold_mark.clone());
-                }
+                self.disclosure
+                    .expanded
+                    .remap(&prior.fold_mark, &item.fold_mark);
+                self.disclosure.expanded.remap_scope(
+                    &crate::history_cell::activity_parts::FoldScope::Item(prior.fold.clone()),
+                    self.feed.fold_scope(index),
+                );
                 if let Some(focused) = &mut self.disclosure.focused
                     && let FoldTarget::Part(fold) = &mut focused.target
                     && *fold == prior.fold
@@ -1671,21 +1834,36 @@ impl TranscriptView {
         }
     }
 
-    /// Fold or unfold a Feed Item, keeping its remaining header in view and focused.
-    #[expect(
-        clippy::cast_possible_wrap,
-        reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."
-    )]
     pub(super) fn toggle_feed(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
         fold: &str,
     ) -> bool {
+        self.toggle_feed_scoped(cells, index, fold, false)
+    }
+
+    /// Fold or unfold a Feed Item, keeping its remaining header in view and focused.
+    #[expect(
+        clippy::cast_possible_wrap,
+        reason = "Both row offsets index allocated layout vectors, whose lengths are bounded by isize::MAX."
+    )]
+    pub(super) fn toggle_feed_scoped(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        fold: &str,
+        grouped: bool,
+    ) -> bool {
         if let Some(last) = cells.len().checked_sub(/*rhs*/ 1) {
             self.refresh_feed(cells, last);
         }
-        let Some(item) = self.feed.toggle(fold, &mut self.disclosure.expanded) else {
+        let changed = if grouped {
+            self.feed.toggle_group(fold, &mut self.disclosure.expanded)
+        } else {
+            self.feed.toggle(fold, &mut self.disclosure.expanded)
+        };
+        let Some(item) = changed else {
             return false;
         };
         self.end_selection(cells);

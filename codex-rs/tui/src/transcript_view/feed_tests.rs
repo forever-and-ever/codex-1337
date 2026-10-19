@@ -741,3 +741,82 @@ fn steps_fold_under_one_header_with_their_figures() {
         },
     );
 }
+
+#[test]
+fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    fn arrival(id: &str, kind: ArrivalKind) -> Arc<dyn HistoryCell> {
+        Arc::new(ArrivalCell::new(ArrivalItem {
+            placement: None,
+            id: id.into(),
+            response_id: format!("response:{id}"),
+            announced_at_ms: CLOCK_MS,
+            kind,
+            source: codex_protocol::step_admission::ArrivalSource::Captured {
+                blocks: vec![format!("body:{id}")],
+            },
+            label: id.into(),
+            text: None,
+        }))
+    }
+    let mut cells = vec![
+        arrival("first", ArrivalKind::InterAgent),
+        arrival("second", ArrivalKind::InterAgent),
+        arrival("injected", ArrivalKind::Injection),
+        script_block("code", None, Some("result")),
+    ];
+    let mut view = TranscriptView::default();
+    let click =
+        |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index: usize, modifiers| {
+            view.jump_to_latest();
+            crate::transcript_view::tests::render(view, cells, 104, 80);
+            let layout = view.current_layout(cells, index).unwrap();
+            let target = layout
+                .fold_targets()
+                .into_iter()
+                .find(|target| matches!(target, FoldTarget::Part(_)))
+                .unwrap();
+            let (row, columns, _) = layout.fold_position(&target).unwrap();
+            let visible = view
+                .visible
+                .iter()
+                .position(|visible| visible.index == index && visible.row == row)
+                .unwrap();
+            assert!(matches!(
+                view.handle_mouse(
+                    MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: columns.start,
+                        row: u16::try_from(visible).expect("viewport row"),
+                        modifiers,
+                    },
+                    cells
+                ),
+                Some(crate::transcript_view::input::ViewAction::Changed)
+            ));
+        };
+    let body = |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index| {
+        crate::transcript_view::tests::render(view, cells, 104, 80);
+        view.current_layout(cells, index).unwrap().text().to_owned()
+    };
+    click(&mut view, &cells, 0, KeyModifiers::NONE); // Mixed state: first closed, second open.
+    click(&mut view, &cells, 0, KeyModifiers::CONTROL); // Open all Messages.
+    assert!(body(&mut view, &cells, 1).contains("body:second"));
+    assert!(!body(&mut view, &cells, 2).contains("body:injected"));
+    click(&mut view, &cells, 1, KeyModifiers::NONE); // Individual exception.
+    assert!(!body(&mut view, &cells, 1).contains("body:second"));
+    click(&mut view, &cells, 0, KeyModifiers::CONTROL); // Close all; replace exceptions.
+    assert!(!body(&mut view, &cells, 0).contains("body:first"));
+    cells.push(arrival("new", ArrivalKind::InterAgent));
+    cells.insert(0, arrival("older", ArrivalKind::InterAgent));
+    assert!(!body(&mut view, &cells, 0).contains("body:older"));
+    assert!(!body(&mut view, &cells, cells.len() - 1).contains("body:new"));
+    click(&mut view, &cells, 0, KeyModifiers::CONTROL);
+    for index in [0, 1, 2, cells.len() - 1] {
+        assert!(body(&mut view, &cells, index).contains("body:"));
+    }
+    assert!(!body(&mut view, &cells, 3).contains("body:injected"));
+    assert!(body(&mut view, &cells, 4).contains("Code Mode"));
+    let mut fresh = TranscriptView::default();
+    assert!(body(&mut fresh, &cells, 1).contains("body:first"));
+}

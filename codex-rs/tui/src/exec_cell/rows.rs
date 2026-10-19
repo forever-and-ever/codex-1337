@@ -13,6 +13,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::ToolOutputCell;
 use crate::history_cell::activity_parts::ActivityHeader;
 use crate::history_cell::activity_parts::ActivityParts;
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::PartControl;
 use crate::history_cell::activity_preview::compact_header;
 use crate::history_cell::output_provenance::OutputMode;
@@ -30,7 +31,6 @@ use codex_protocol::parse_command::ParsedCommand;
 use codex_shell_command::read_intent::ReadIntent;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -164,7 +164,7 @@ pub(crate) fn command_parts(
     batches: &[&ToolOutputCell],
     width: u16,
     header_reserve: usize,
-    expanded: &HashSet<String>,
+    expanded: &FoldState,
     activity_ids: &[String],
     mode: OutputMode,
 ) -> ActivityParts {
@@ -200,11 +200,14 @@ pub(crate) fn command_parts(
         )
     };
     let inline = calls.len() == 1
-        && calls[0]
-            .command_rows()
-            .rows
-            .iter()
-            .all(|row| row.summary.is_none() && !expanded.contains(&row_id(calls[0], row)))
+        && calls[0].command_rows().rows.iter().all(|row| {
+            row.summary.is_none()
+                && !expanded.is_open(
+                    crate::history_cell::activity_parts::FoldGroup::Command,
+                    &row_id(calls[0], row),
+                    false,
+                )
+        })
         && !calls[0].command_rows().script.contains('\n')
         && heading.width()
             + 1
@@ -227,7 +230,12 @@ pub(crate) fn command_parts(
                     continue;
                 }
                 let id = row_id(call, row);
-                let open = row.summary.is_none() && expanded.contains(&id);
+                let open = row.summary.is_none()
+                    && expanded.is_open(
+                        crate::history_cell::activity_parts::FoldGroup::Command,
+                        &id,
+                        false,
+                    );
                 let connector = row.segment.connector.map_or("", Connector::suffix);
                 let available = usize::from(width).saturating_sub(
                     usize::from(crate::transcript_geometry::CHILD_INDENT) + connector.len(),
@@ -240,6 +248,7 @@ pub(crate) fn command_parts(
                 let clipped = preview.width() > available || source_lines.len() > 1;
                 if row.summary.is_none() && (open || clipped) {
                     controls.push(PartControl {
+                        group: crate::history_cell::activity_parts::FoldGroup::Command,
                         id,
                         line: lines.len(),
                         expanded: open,

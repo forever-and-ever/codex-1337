@@ -101,7 +101,7 @@ fn file_disclosures_are_independent_and_not_copied() {
     let files: Vec<_> = layout
         .fold_targets()
         .into_iter()
-        .filter(|target| matches!(target, FoldTarget::Part(_)))
+        .filter(|target| matches!(target, FoldTarget::GroupedPart { .. }))
         .collect();
     assert_eq!(files.len(), 2);
     crate::transcript_view::tests::render(&mut view, &cells, 104, 4);
@@ -186,6 +186,130 @@ fn file_disclosures_are_independent_and_not_copied() {
     assert!(view.focus_fold(&cells, 0, files[1].clone()));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     assert!(!view.is_following());
+}
+
+#[test]
+fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
+    use crate::history_cell::activity_parts::{FoldGroup, FoldTarget};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    fn patch(id: &str) -> std::sync::Arc<dyn HistoryCell> {
+        crate::thread_transcript::thread_items_to_transcript_cells(
+            None,
+            &test_path_buf("/project").abs(),
+            [ThreadItem::FileChange {
+                id: id.into(),
+                changes: ["alpha", "beta"]
+                    .map(|file| FileUpdateChange {
+                        path: format!("{id}-{file}.rs"),
+                        kind: PatchChangeKind::Add,
+                        diff: format!("{id}-{file} body\n"),
+                    })
+                    .to_vec(),
+                status: PatchApplyStatus::Completed,
+            }],
+            crate::thread_transcript::RawReasoningVisibility::Hidden,
+            None,
+            &|_| crate::multi_agents::AgentMetadata::default(),
+        )
+        .remove(0)
+    }
+    let cells = vec![patch("a"), patch("b"), patch("other")];
+    let mut view = TranscriptView::default();
+    for (response, calls) in [("edits", vec!["a", "b"]), ("other", vec!["other"])] {
+        view.record_step_admission(codex_app_server_protocol::StepAdmissionItem {
+            id: format!("step:{response}"),
+            response_id: response.into(),
+            completed_at_ms: 1,
+            read_tokens: 0,
+            thinking_tokens: None,
+            output_tokens: 0,
+            call_ids: calls.into_iter().map(str::to_owned).collect(),
+            message_ids: vec![],
+            admission: codex_protocol::step_admission::Admission::Pending,
+        });
+    }
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 80);
+    let files = |view: &mut TranscriptView, index| {
+        view.current_layout(&cells, index)
+            .unwrap()
+            .fold_targets()
+            .into_iter()
+            .filter(|target| {
+                matches!(
+                    target,
+                    FoldTarget::GroupedPart {
+                        group: FoldGroup::Diff,
+                        ..
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = files(&mut view, 0).remove(0);
+    let click = |view: &mut TranscriptView, target: &FoldTarget| {
+        crate::transcript_view::tests::render(view, &cells, 104, 80);
+        let layout = view.current_layout(&cells, 0).unwrap();
+        let (row, columns, _) = layout.fold_position(target).unwrap();
+        let screen = view
+            .visible
+            .iter()
+            .position(|visible| visible.index == 0 && visible.row == row)
+            .unwrap();
+        assert!(matches!(
+            view.handle_mouse(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: columns.start,
+                    row: screen as u16,
+                    modifiers: KeyModifiers::CONTROL,
+                },
+                &cells
+            ),
+            Some(crate::transcript_view::input::ViewAction::Changed)
+        ));
+        crate::transcript_view::tests::render(view, &cells, 104, 80);
+    };
+    click(&mut view, &first);
+    for index in [0, 1] {
+        let layout = view.current_layout(&cells, index).unwrap();
+        assert!(layout.text().contains("alpha body"));
+        assert!(layout.text().contains("beta body"));
+    }
+    assert!(
+        !view
+            .current_layout(&cells, 2)
+            .unwrap()
+            .text()
+            .contains("alpha body")
+    );
+    let exception = files(&mut view, 1).remove(0);
+    assert!(view.focus_fold(&cells, 1, exception));
+    view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+    crate::transcript_view::tests::render(&mut view, &cells, 104, 80);
+    assert!(
+        !view
+            .current_layout(&cells, 1)
+            .unwrap()
+            .text()
+            .contains("alpha body")
+    );
+    click(&mut view, &first); // Closing replaces the individual exception too.
+    for index in [0, 1] {
+        assert!(
+            !view
+                .current_layout(&cells, index)
+                .unwrap()
+                .text()
+                .contains("beta body")
+        );
+    }
+    click(&mut view, &first);
+    assert!(
+        view.current_layout(&cells, 1)
+            .unwrap()
+            .text()
+            .contains("alpha body")
+    );
 }
 
 #[test]

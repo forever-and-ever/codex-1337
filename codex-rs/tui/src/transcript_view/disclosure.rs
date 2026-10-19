@@ -1,10 +1,10 @@
 //! Local activity disclosure keyed by retained tool identities, independent of text selection.
 //! Controls appear only while activity is focused; copied text and full-transcript search remain source based.
 
+use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::output_provenance::OutputMode;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use crate::bottom_pane::TranscriptFooter;
 use crate::key_hint::KeyBindingListExt;
@@ -15,7 +15,7 @@ use crossterm::event::KeyEvent;
 use super::*;
 
 pub(super) struct Disclosure {
-    pub(super) expanded: HashSet<String>,
+    pub(super) expanded: FoldState,
     output_modes: HashMap<String, OutputChoice>,
     output_revision: u64,
     pub(super) focused: Option<ActivityFocus>,
@@ -39,7 +39,7 @@ pub(super) struct ActivityFocus {
 impl Default for Disclosure {
     fn default() -> Self {
         Self {
-            expanded: HashSet::new(),
+            expanded: FoldState::new(),
             output_modes: HashMap::new(),
             output_revision: 0,
             focused: None,
@@ -186,8 +186,53 @@ impl TranscriptView {
         let Some(index) = self.canonical_fold_index(cells, &ids, &target) else {
             return false;
         };
-        self.toggle_activity(cells, index, target);
+        self.toggle_activity_scoped(cells, index, target, false);
         true
+    }
+
+    pub(super) fn toggle_disclosure_group_at(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        column: u16,
+        row: u16,
+    ) -> bool {
+        if self.detailed || self.mode != HistoryRenderMode::Rich {
+            return false;
+        }
+        let Some(visible) = row
+            .checked_sub(self.area.y)
+            .and_then(|row| self.visible.get(usize::from(row)))
+        else {
+            return false;
+        };
+        let Some(target) = column
+            .checked_sub(self.area.x)
+            .and_then(|column| visible.layout.fold_at(visible.row, column))
+        else {
+            return false;
+        };
+        if !matches!(
+            target,
+            FoldTarget::Activity | FoldTarget::Part(_) | FoldTarget::GroupedPart { .. }
+        ) {
+            return false;
+        }
+        let ids = Arc::clone(&visible.activity_ids);
+        let Some(index) = self.canonical_fold_index(cells, &ids, &target) else {
+            return false;
+        };
+        if target == FoldTarget::Activity && self.feed.activity_group(index).is_none() {
+            return false;
+        }
+        self.toggle_activity_scoped(cells, index, target, true);
+        true
+    }
+
+    pub(super) fn live_fold_scope(&self) -> crate::history_cell::activity_parts::FoldScope {
+        crate::history_cell::activity_parts::FoldScope::Item(format!(
+            "live:{}",
+            self.disclosure.live_ids.first().map_or("", String::as_str)
+        ))
     }
 
     pub(super) fn handle_disclosure_key(
@@ -289,6 +334,28 @@ impl TranscriptView {
                 }
                 let ids = target.ids(&self.activity_ids(cells, focused));
                 let expanded = match &target {
+                    FoldTarget::Activity => self.feed.activity_group(focused).map(|group| {
+                        ids.iter().any(|id| {
+                            self.disclosure.expanded.is_open_in(
+                                &crate::history_cell::activity_parts::FoldScope::Transcript,
+                                group,
+                                id,
+                                false,
+                            )
+                        })
+                    }),
+                    FoldTarget::GroupedPart { id, group } => {
+                        Some(self.disclosure.expanded.is_open_in(
+                            &if focused == cells.len() {
+                                self.live_fold_scope()
+                            } else {
+                                self.feed.fold_scope(focused)
+                            },
+                            *group,
+                            id,
+                            false,
+                        ))
+                    }
                     FoldTarget::Part(fold) => {
                         self.feed.is_unfolded(fold, &self.disclosure.expanded)
                     }
@@ -470,15 +537,25 @@ impl TranscriptView {
         true
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "An overflowing explicit-action sequence violates local mode ordering"
-    )]
     fn toggle_activity(
         &mut self,
         cells: &[Arc<dyn HistoryCell>],
         index: usize,
         target: FoldTarget,
+    ) {
+        self.toggle_activity_scoped(cells, index, target, false);
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "An overflowing explicit-action sequence violates local mode ordering"
+    )]
+    fn toggle_activity_scoped(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        target: FoldTarget,
+        grouped: bool,
     ) {
         if let FoldTarget::Part(fold) = &target
             && self
@@ -487,7 +564,7 @@ impl TranscriptView {
                 .is_some()
         {
             let fold = fold.clone();
-            self.toggle_feed(cells, index, &fold);
+            self.toggle_feed_scoped(cells, index, &fold, grouped);
             return;
         }
         let activity_ids = self.activity_ids(cells, index);
@@ -534,7 +611,39 @@ impl TranscriptView {
                 offset: 0,
                 row_bias: 0,
             });
-        if let FoldTarget::Invocation { call_id, action } = &target {
+        if target == FoldTarget::Activity
+            && let Some(group) = self.feed.activity_group(index)
+        {
+            let scope = crate::history_cell::activity_parts::FoldScope::Transcript;
+            let open = matched
+                || ids.iter().any(|id| {
+                    self.disclosure
+                        .expanded
+                        .is_open_in(&scope, group, id, false)
+                });
+            if grouped {
+                self.disclosure.expanded.set_default(scope, group, !open);
+            } else {
+                for id in &ids {
+                    self.disclosure.expanded.set(id.clone(), !open);
+                }
+            }
+        } else if let FoldTarget::GroupedPart { id, group } = &target {
+            let scope = if index == cells.len() {
+                self.live_fold_scope()
+            } else {
+                self.feed.fold_scope(index)
+            };
+            let open = self
+                .disclosure
+                .expanded
+                .is_open_in(&scope, *group, id, false);
+            if grouped {
+                self.disclosure.expanded.set_default(scope, *group, !open);
+            } else {
+                self.disclosure.expanded.set(id.clone(), !open);
+            }
+        } else if let FoldTarget::Invocation { call_id, action } = &target {
             self.invocations.apply(call_id, *action);
         } else if let FoldTarget::OutputMode(mode) = target {
             self.disclosure.output_revision = self
