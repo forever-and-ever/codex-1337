@@ -219,6 +219,19 @@ def integrate_staging(action: str, install_root: Path) -> None:
     systemctl("restart", STAGING_UNIT)
 
 
+def install_clipboard_keeper(install_root: Path) -> None:
+    """Install separately: ordinary Codex installs never enable clipboard ownership."""
+    keeper = install_root / "libexec/codex-clipboard-keeper"
+    keeper.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).parent / "clipboard-keeper", keeper)
+    keeper.chmod(0o755)
+    unit_dir = xdg("XDG_CONFIG_HOME", ".config") / "systemd/user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit = "codex-clipboard-keeper.service"
+    template = (Path(__file__).parent / "systemd" / unit).read_text()
+    write_unit(unit_dir, unit, template.replace("@KEEPER@", unit_path(keeper)))
+
+
 def integrate(action: str, install_root: Path) -> None:
     if not install_root.is_absolute() or any(c in str(install_root) for c in "\r\n"):
         raise ValueError("install_root must be absolute and contain no line breaks")
@@ -271,6 +284,7 @@ if __name__ == "__main__":
             "install-staging",
             "uninstall-staging",
             "prune-distributions",
+            "install-clipboard-keeper",
         ),
     )
     parser.add_argument("install_root", type=Path)
@@ -288,6 +302,8 @@ if __name__ == "__main__":
             check_launcher_ownership(args.install_root, args.launcher, "production")
         else:
             install_launcher(args.install_root, args.launcher, "production")
+    elif args.action == "install-clipboard-keeper":
+        install_clipboard_keeper(args.install_root)
     elif args.action in ("install-staging", "uninstall-staging"):
         integrate_staging(args.action, args.install_root)
     else:
