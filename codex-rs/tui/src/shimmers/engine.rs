@@ -105,6 +105,11 @@ impl Ink {
         if self.bold {
             style = style.add_modifier(Modifier::BOLD);
         }
+        if let Some(underline) = self.underline {
+            style = style
+                .add_modifier(Modifier::UNDERLINED)
+                .underline_color(color(underline));
+        }
         Span::styled(
             self.glyph.map_or_else(|| text.to_owned(), String::from),
             style,

@@ -206,6 +206,8 @@ pub(super) struct Ink {
     pub(super) fg: Option<Rgb>,
     pub(super) bg: Option<Rgb>,
     pub(super) bold: bool,
+    /// An underline in this color.
+    pub(super) underline: Option<Rgb>,
 }
 
 impl Ink {
@@ -215,6 +217,7 @@ impl Ink {
             fg: None,
             bg: None,
             bold: false,
+            underline: None,
         }
     }
 
@@ -234,6 +237,13 @@ impl Ink {
 
     pub(super) const fn bold(self, bold: bool) -> Ink {
         Ink { bold, ..self }
+    }
+
+    pub(super) const fn underline(self, color: Rgb) -> Ink {
+        Ink {
+            underline: Some(color),
+            ..self
+        }
     }
 }
 

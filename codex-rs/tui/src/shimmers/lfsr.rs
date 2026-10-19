@@ -1,7 +1,7 @@
 //! LFSR: the header is a Fibonacci shift register that the token flow clocks rightward. Each header
-//! draws a random sparse primitive polynomial over GF(2), whose taps tint their letters. The mark is
-//! the XOR gate: after each shift it flashes every tap holding a 1, inverting as the feedback's parity
-//! flips, and it pays out as more taps hit.
+//! draws a random sparse primitive polynomial over GF(2), whose taps underline their letters. The
+//! mark is the XOR gate: after each shift it flashes every tap holding a 1, inverting as the
+//! feedback's parity flips, and it pays out as more taps hit.
 
 use std::f64::consts::TAU;
 use std::ops::Range;
@@ -428,7 +428,7 @@ struct Spark {
 struct Paint<'a> {
     lfsr: &'a Lfsr,
     stage: &'a Stage,
-    /// A 1's color, a 0's, and a tap's background.
+    /// A 1's color, a 0's, and a tap's underline.
     one: Rgb,
     zero: Rgb,
     tap: Rgb,
@@ -452,14 +452,14 @@ impl<'a> Paint<'a> {
         let t = stage.t;
         let zero = stage.grey(/*alpha*/ 0.42);
         let lit = CYAN.blend(stage.fg, /*alpha*/ 0.45);
+        let wire = VIOLET.blend(stage.fg, /*alpha*/ 0.65);
         let (one, tap) = if stage.busy() {
-            (lit, VIOLET.blend(stage.bg, /*alpha*/ 0.18))
+            (lit, wire)
         } else {
-            // Waiting freezes the register: its bits dim and its taps breathe.
-            let breath = 0.06f64.mul_add((TAU * t / 2.4).sin(), 0.12);
+            // Waiting freezes the register: its bits and taps dim.
             (
                 lit.blend(zero, /*alpha*/ 0.5),
-                VIOLET.blend(stage.bg, breath),
+                wire.blend(zero, /*alpha*/ 0.5),
             )
         };
         let wired = ((t - lfsr.wired) / INTRO * f64::from(lfsr.wiring.degree())) as usize;
@@ -561,7 +561,8 @@ impl<'a> Paint<'a> {
         let blank = letter.trim().is_empty();
         let tapped = cell < self.wired && lfsr.tapped(cell);
         if tapped {
-            ink = ink.bg(self.tap);
+            // Taps stay underlined in one color, so the eye can read the bits about to land on them.
+            ink = ink.underline(self.tap);
             if blank {
                 ink.glyph = Some('·');
             }
@@ -589,10 +590,13 @@ impl<'a> Paint<'a> {
             .is_some_and(|(order, _)| order + 1 == lfsr.pass.count());
         if lfsr.jackpot() && last && tapped {
             // The jackpot's last hit lights every tap as a 1.
-            ink = Ink::of('1')
-                .fg(self.ink(PINK))
-                .bg(self.paper(PINK, /*alpha*/ 0.35))
-                .bold(true);
+            ink = Ink {
+                glyph: Some('1'),
+                ..ink
+                    .fg(self.ink(PINK))
+                    .bg(self.paper(PINK, /*alpha*/ 0.35))
+                    .bold(true)
+            };
         }
         if self.wave.contains(&cell) {
             #[expect(
