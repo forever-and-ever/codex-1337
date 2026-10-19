@@ -3355,7 +3355,7 @@ async fn slash_rollout_handles_missing_path() {
 }
 
 #[tokio::test]
-async fn fast_slash_command_updates_and_persists_local_service_tier() {
+async fn fast_slash_command_updates_conversation_service_tier() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     set_fast_mode_test_catalog(&mut chat);
     chat.set_feature_enabled(Feature::FastMode, /*enabled*/ true);
@@ -3377,12 +3377,12 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::PersistServiceTierSelection {
+            AppEvent::ServiceTierSelected {
                 service_tier: Some(service_tier),
             }
             if service_tier == ServiceTier::Fast.request_value()
         )),
-        "expected fast-mode persistence app event; events: {events:?}"
+        "expected fast-mode selection app event; events: {events:?}"
     );
 
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
@@ -3410,12 +3410,12 @@ async fn fast_keybinding_toggle_uses_same_events_as_fast_slash_command() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::PersistServiceTierSelection {
+            AppEvent::ServiceTierSelected {
                 service_tier: Some(service_tier),
             }
             if service_tier == ServiceTier::Fast.request_value()
         )),
-        "expected fast-mode persistence app event; events: {events:?}"
+        "expected fast-mode selection app event; events: {events:?}"
     );
 
     assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
@@ -3603,11 +3603,11 @@ async fn user_turn_sends_standard_override_after_fast_is_turned_off() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::PersistServiceTierSelection {
+            AppEvent::ServiceTierSelected {
                 service_tier: Some(service_tier)
             } if service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
         )),
-        "expected default service tier persistence app event; events: {events:?}"
+        "expected default service tier selection app event; events: {events:?}"
     );
 
     chat.bottom_pane

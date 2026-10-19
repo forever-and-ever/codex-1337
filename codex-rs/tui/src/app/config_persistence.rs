@@ -835,6 +835,10 @@ impl App {
     }
 
     pub(super) fn restore_runtime_theme_from_config(&self) {
+        // Random was resolved once at startup; changing folders must not reroll it.
+        if self.local_settings.tui.theme.as_deref() == Some("random") {
+            return;
+        }
         if let Some(name) = self.local_settings.tui.theme.as_deref()
             && let Some(theme) = crate::render::highlight::resolve_theme_by_name(
                 name,

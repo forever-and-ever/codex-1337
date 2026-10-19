@@ -97,38 +97,18 @@ impl App {
         );
     }
 
-    pub(super) async fn persist_selected_service_tier(
-        &mut self,
-        app_server: &AppServerSession,
-        service_tier: Option<String>,
-    ) {
-        self.refresh_status_line();
+    pub(super) async fn select_service_tier(&mut self, service_tier: Option<String>) {
         self.config.service_tier.clone_from(&service_tier);
+        self.refresh_status_line();
         self.sync_active_thread_service_tier_to_cached_session()
             .await;
-        let edits =
-            crate::config_update::build_service_tier_selection_edits(service_tier.as_deref());
-        self.queue_model_defaults(
-                                app_server,
-                                edits,
-                                "default service tier",
-                                move |app, _, result| {
-                                    match result {
-                                        Ok(()) => app.chat_widget.add_info_message(
-                                            service_tier.map_or_else(
-                                                || "Service tier cleared".to_string(),
-                                                |tier| format!("Service tier set to {tier}"),
-                                            ),
-                                            None,
-                                        ),
-                                        Err(error) => app.chat_widget.add_error_message(format!(
-                                            "Failed to save default service tier: config/batchWrite failed in TUI: {error}\n\
-                                             You can continue this task. To save the default, resolve the error above, then switch to a different tier and back to the desired tier."
-                                        )),
-                                    }
-                                    Ok(())
-                                },
-                            );
+        self.chat_widget.add_info_message(
+            service_tier.map_or_else(
+                || "Service tier cleared for this conversation".to_string(),
+                |tier| format!("Service tier set to {tier} for this conversation"),
+            ),
+            None,
+        );
     }
 
     pub(super) fn persist_plan_reasoning_effort(

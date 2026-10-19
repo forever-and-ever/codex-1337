@@ -2137,7 +2137,7 @@ impl App {
             AppEvent::PersistRealtimeVoiceSelection { voice } => {
                 self.persist_realtime_voice(app_server, voice);
             }
-            AppEvent::PersistServiceTierSelection { service_tier } => self.persist_selected_service_tier(app_server, service_tier).await,
+            AppEvent::ServiceTierSelected { service_tier } => self.select_service_tier(service_tier).await,
 
             AppEvent::UpdateAskForApprovalPolicy(policy) => {
                 if self.reject_pending_permission_change() {
@@ -2824,37 +2824,16 @@ impl App {
                 self.persist_agents_overview_grouping(grouping).await;
             }
             AppEvent::SyntaxThemeSelected { name } => {
-                let edit = crate::legacy_core::config::edit::syntax_theme_edit(&name);
-                let apply_result = ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
-                    .with_edits([edit])
-                    .apply()
-                    .await;
-                match apply_result {
-                    Ok(()) => {
-                        // Ensure the selected theme is active in the current
-                        // session.  The preview callback covers arrow-key
-                        // navigation, but if the user presses Enter without
-                        // navigating, the runtime theme must still be applied.
-                        if let Some(theme) = crate::render::highlight::resolve_theme_by_name(
-                            &name,
-                            Some(&self.local_settings.codex_home),
-                        ) {
-                            crate::render::highlight::set_syntax_theme(theme);
-                        }
-                        self.sync_tui_theme_selection(name);
-                        self.chat_widget.refresh_config_panel(/*notice*/ None);
-                        self.refresh_status_line();
-                        tui.frame_requester().schedule_frame();
-                    }
-                    Err(err) => {
-                        self.restore_runtime_theme_from_config();
-                        self.refresh_status_line();
-                        tracing::error!(error = %err, "failed to persist theme selection");
-                        self.app_event_tx.send(AppEvent::FollowTranscript);
-                        let message = format!("Failed to save theme: {err}");
-                        self.chat_widget.report_config_save_error(message);
-                    }
+                if let Some(theme) = crate::render::highlight::resolve_theme_by_name(
+                    &name,
+                    Some(&self.local_settings.codex_home),
+                ) {
+                    crate::render::highlight::set_syntax_theme(theme);
                 }
+                self.sync_tui_theme_selection(name);
+                self.chat_widget.refresh_config_panel(/*notice*/ None);
+                self.refresh_status_line();
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::SyntaxThemePreviewed => {
                 self.refresh_status_line();

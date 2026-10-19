@@ -936,10 +936,8 @@ pub struct Tui {
     #[serde(default)]
     pub terminal_title: Option<Vec<String>>,
 
-    /// Syntax highlighting theme name (kebab-case).
-    ///
-    /// When set, overrides automatic light/dark theme detection.
-    /// Use `/theme` in the TUI or see `$CODEX_HOME/themes` for custom themes.
+    /// Warpaint pack name, or `"random"` to choose a pack on each TUI launch.
+    /// `/theme` changes only the running TUI; it does not save this preference.
     #[serde(default)]
     pub theme: Option<String>,
 

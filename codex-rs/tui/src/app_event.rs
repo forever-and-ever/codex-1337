@@ -1356,8 +1356,8 @@ pub(crate) enum AppEvent {
         voice: codex_protocol::protocol::RealtimeVoice,
     },
 
-    /// Persist the selected service tier to the appropriate config.
-    PersistServiceTierSelection {
+    /// Synchronize the conversation's service tier without saving a default.
+    ServiceTierSelected {
         service_tier: Option<String>,
     },
 

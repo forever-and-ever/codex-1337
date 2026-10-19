@@ -5281,7 +5281,7 @@
         },
         "theme": {
           "default": null,
-          "description": "Syntax highlighting theme name (kebab-case).\n\nWhen set, overrides automatic light/dark theme detection. Use `/theme` in the TUI or see `$CODEX_HOME/themes` for custom themes.",
+          "description": "Warpaint pack name, or `\"random\"` to choose a pack on each TUI launch. `/theme` changes only the running TUI; it does not save this preference.",
           "type": "string"
         },
         "vim_mode_default": {

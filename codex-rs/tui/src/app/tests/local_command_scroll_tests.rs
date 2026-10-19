@@ -123,14 +123,10 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut server = start_config_write_test_app_server(&app).await?;
     tui.set_owned_screen(/*owned*/ true)?;
-    app.sync_tui_theme_selection("eclipse".to_string());
     // Break writes only after startup, as can happen when the config is edited externally.
     std::fs::write(app.local_settings.user_config_path.as_path(), "[broken")?;
 
     for event in [
-        AppEvent::SyntaxThemeSelected {
-            name: "eclipse".into(),
-        },
         AppEvent::StatusLineSetup {
             items: vec![],
             use_theme_colors: false,
@@ -164,14 +160,7 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
         hold_older_history(&mut app, &mut tui);
         while events.try_recv().is_ok() {}
         let selection = format!("{event:?}");
-        let is_theme = matches!(event, AppEvent::SyntaxThemeSelected { .. });
-        if is_theme {
-            submit_local_command(&mut app, "/theme");
-            app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(KeyCode::Enter.into()))
-                .await?;
-        } else {
-            app.handle_event(&mut tui, &mut server, event).await?;
-        }
+        app.handle_event(&mut tui, &mut server, event).await?;
         app.settle_server_ui_requests(&mut tui, &mut server).await?;
         while let Ok(event) = events.try_recv() {
             app.handle_event(&mut tui, &mut server, event).await?;
@@ -182,36 +171,6 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
             lines_to_single_string(&error.display_lines(/*width*/ 80)).contains("Failed to"),
             "{selection}"
         );
-        if is_theme {
-            let area = Rect::new(
-                /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 8,
-            );
-            let mut buffer = Buffer::empty(area);
-            app.transcript_view
-                .render(area, &mut buffer, &app.transcript_cells);
-            let visible = buffer
-                .content
-                .chunks(/*chunk_size*/ 80)
-                .map(|row| {
-                    row.iter()
-                        .map(ratatui::buffer::Cell::symbol)
-                        .collect::<String>()
-                        .trim_end()
-                        .to_owned()
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            insta::assert_snapshot!(visible, @"
-            older 4
-            older 5
-
-            ■ Failed to save theme: TOML parse error at line 1, column 8
-              |
-            1 | [broken
-              |        ^
-            unclosed table, expected `]`
-            ");
-        }
     }
     tui.set_owned_screen(/*owned*/ false)?;
     server.shutdown().await?;
@@ -419,7 +378,7 @@ async fn dynamic_service_tier_command_returns_to_latest() -> Result<()> {
     assert!(
         std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
             event,
-            AppEvent::PersistServiceTierSelection { service_tier: Some(tier) }
+            AppEvent::ServiceTierSelected { service_tier: Some(tier) }
                 if tier == ServiceTier::Fast.request_value()
         ))
     );

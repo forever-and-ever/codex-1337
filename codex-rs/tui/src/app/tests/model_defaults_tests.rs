@@ -155,9 +155,6 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
                 effort: Some(ReasoningEffortConfig::High),
             },
             AppEvent::PersistPlanModeReasoningEffort(Some(ReasoningEffortConfig::High)),
-            AppEvent::PersistServiceTierSelection {
-                service_tier: Some(ServiceTier::Fast.request_value().into()),
-            },
             AppEvent::ApplyAdvancedReasoning {
                 model: "gpt-5.5".into(),
                 effort: ReasoningEffortConfig::Ultra,
@@ -174,18 +171,9 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
             app.chat_widget.apply_external_edit(String::new());
             app.settle_server_ui_requests(&mut tui, &mut server).await?;
         }
-        let mut service_tier_error = None;
         let messages = std::iter::from_fn(|| events.try_recv().ok())
             .filter_map(|event| match event {
                 AppEvent::InsertHistoryCell(cell) => {
-                    if outcome == "rejected" {
-                        let text = lines_to_single_string(&cell.transcript_lines(/*width*/ 200));
-                        if text.contains("Failed to save default service tier") {
-                            service_tier_error = Some(
-                                text.replace(&profile_path.display().to_string(), "<config-path>"),
-                            );
-                        }
-                    }
                     Some(lines_to_single_string(&cell.transcript_lines(/*width*/ 80)))
                 }
                 _ => None,
@@ -194,21 +182,17 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
             .join("\n");
         assert_eq!(
             messages.matches("higher-priority").count(),
-            if outcome == "overridden" { 4 } else { 0 }
+            if outcome == "overridden" { 3 } else { 0 }
         );
         assert_eq!(
             messages.matches("Failed to save").count(),
-            if outcome == "rejected" { 4 } else { 0 }
+            if outcome == "rejected" { 3 } else { 0 }
         );
         if outcome == "overridden" {
             insta::assert_snapshot!("overridden_model_defaults", messages);
         }
         let persisted = std::fs::read_to_string(&profile_path)?;
         if outcome == "rejected" {
-            insta::assert_snapshot!(
-                "service_tier_default_save_error",
-                service_tier_error.expect("expected a service-tier save error")
-            );
             assert_eq!(persisted, "[broken");
             assert!(!messages.contains("Model changed"));
             assert!(!messages.contains("Service tier set"));
@@ -220,7 +204,6 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
                     model_provider = "openai"
                     model_reasoning_effort = "medium"
                     plan_mode_reasoning_effort = "high"
-                    service_tier = "fast"
                 })
             );
         }
@@ -229,6 +212,34 @@ async fn model_default_saves_report_server_outcomes_and_target_server_profile() 
             std::fs::read_to_string(&base_path)?,
             "# Base configuration stays unchanged.\n"
         );
+        // Runtime controls must work even when the defaults file cannot be parsed.
+        let profile_before = std::fs::read(&profile_path)?;
+        app.chat_widget
+            .set_service_tier(Some(ServiceTier::Fast.request_value().into()));
+        for event in [
+            AppEvent::ServiceTierSelected {
+                service_tier: Some(ServiceTier::Fast.request_value().into()),
+            },
+            AppEvent::SyntaxThemeSelected {
+                name: "eclipse".into(),
+            },
+        ] {
+            Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
+            assert!(app.server_operations.is_empty());
+        }
+        assert_eq!(
+            app.config.service_tier.as_deref(),
+            Some(ServiceTier::Fast.request_value())
+        );
+        assert_eq!(app.local_settings.tui.theme.as_deref(), Some("eclipse"));
+        assert_eq!(
+            crate::render::highlight::current_syntax_theme()
+                .name
+                .as_deref(),
+            Some("eclipse")
+        );
+        assert_eq!(std::fs::read(&profile_path)?, profile_before);
+        assert_eq!(std::fs::read(&local_config_path).ok(), local_config_before);
         server.shutdown().await?;
     }
     Ok(())
