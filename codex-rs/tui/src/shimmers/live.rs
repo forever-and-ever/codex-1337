@@ -146,7 +146,12 @@ pub(super) fn engaged() -> Option<usize> {
 /// Feeds the shimmer from a live notification of the displayed thread.
 pub(crate) fn observe(notification: &ServerNotification) {
     if let Some((thread, event)) = event(notification) {
-        live().feed.observe(thread, event, Instant::now());
+        let mut live = live();
+        if live.feed.observe(thread, event, Instant::now())
+            && let Act::Running { engine, .. } = &mut live.act
+        {
+            engine.pause();
+        }
     }
 }
 
@@ -278,7 +283,10 @@ impl Feed {
         clippy::cast_precision_loss,
         reason = "Byte counts become approximate visual token estimates, capped by RESULT_CAP; exact accounting remains upstream."
     )]
-    fn observe(&mut self, thread: &str, event: Event, now: Instant) {
+    fn observe(&mut self, thread: &str, event: Event, now: Instant) -> bool {
+        let ended = self.thread == thread
+            && !matches!(self.phase, Phase::Idle)
+            && matches!(event, Event::TurnCompleted);
         if self.thread != thread {
             *self = Feed {
                 thread: thread.to_owned(),
@@ -306,7 +314,7 @@ impl Feed {
             },
             Event::ToolCompleted { id, size } => {
                 let Phase::Wait { tools } = &mut self.phase else {
-                    return;
+                    return false;
                 };
                 if let Some(started) = tools.remove(&id) {
                     let result =
@@ -320,6 +328,7 @@ impl Feed {
             }
             Event::Usage(usage) => self.settle(usage),
         }
+        ended
     }
 
     #[expect(
@@ -540,7 +549,8 @@ mod tests {
         for _ in 0..2 {
             feed.observe(thread, Event::Usage(second), at(/*secs*/ 25.0));
         }
-        feed.observe(thread, Event::TurnCompleted, at(/*secs*/ 25.0));
+        assert!(feed.observe(thread, Event::TurnCompleted, at(/*secs*/ 25.0)));
+        assert!(!feed.observe(thread, Event::TurnCompleted, at(/*secs*/ 25.0)));
         inflow += run(&mut feed, /*secs*/ 60.0);
         // What the second report says entered: 500 tokens written and 1500 grown.
         assert!((inflow - 2_000.0).abs() < 1.0, "{inflow}");

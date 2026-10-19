@@ -37,6 +37,10 @@ impl Engine {
         self.shimmer.tick(&self.stage);
     }
 
+    pub(super) fn pause(&mut self) {
+        self.shimmer.pause(&self.stage);
+    }
+
     /// The status row's lead (mark, header and tail) and its backdrop. A still mark is dropped and
     /// still letters are plain, as `tui.effects` asks; the backdrop belongs to the letters.
     pub(super) fn status(

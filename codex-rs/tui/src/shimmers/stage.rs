@@ -28,6 +28,8 @@ pub(super) struct Recipe {
 
 /// A live-row animation, written like a shader against the [`Stage`] the engine hands it.
 pub(super) trait Shimmer: Send {
+    /// A completed or interrupted turn ended actual work, independently of paint visibility.
+    fn pause(&mut self, _stage: &Stage) {}
     /// Advances the shimmer's own state by one tick.
     fn tick(&mut self, _stage: &Stage) {}
     /// Paints the status row.
