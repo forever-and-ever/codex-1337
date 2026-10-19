@@ -26,76 +26,111 @@ use std::collections::HashMap;
 fn completed_thought_discloses_only_readable_reasoning() {
     let cwd = std::path::Path::new("/tmp");
     let mut snapshots = Vec::new();
-    for (label, tokens, summary, hidden) in [
+    for (label, tokens, summary, content) in [
         (
             "counted",
             Some(1300),
-            vec!["First block", "Second block"],
-            false,
+            vec!["Provider summary"],
+            vec!["First block Ω", "Second block"],
         ),
-        ("unknown", None, vec!["Readable summary"], false),
-        ("encrypted-only", Some(1300), Vec::new(), false),
-        ("opaque-unknown", None, Vec::new(), false),
-        ("hidden", Some(1300), vec!["Private summary"], true),
+        ("unknown", None, Vec::new(), vec!["First block Ω"]),
+        (
+            "summary-only",
+            Some(1300),
+            vec!["Summary is not raw reasoning"],
+            Vec::new(),
+        ),
+        ("encrypted-only", Some(1300), Vec::new(), Vec::new()),
+        ("opaque-unknown", None, Vec::new(), Vec::new()),
+        ("blank", None, Vec::new(), vec![" \n\t"]),
     ] {
-        let cell = Arc::new(crate::history_cell::ThoughtCell::from_item(
-            ThreadItem::Thought {
-                id: format!("thought:{label}"),
-                response_id: label.into(),
-                completed_at_ms: 1_700_000_000_000,
-                summary: summary.into_iter().map(str::to_owned).collect(),
-                content: Vec::new(),
-                reported_reasoning_tokens: tokens,
-            },
-            cwd,
-            if hidden {
-                crate::history_cell::ThoughtTextVisibility::Hidden
-            } else {
-                crate::history_cell::ThoughtTextVisibility::Summary
-            },
-        ));
-        let cells: Vec<Arc<dyn HistoryCell>> = vec![cell.clone()];
+        let readable = content.iter().any(|text| !text.trim().is_empty());
+        let cells: Vec<Arc<dyn HistoryCell>> =
+            vec![Arc::new(crate::history_cell::ThoughtCell::from_item(
+                ThreadItem::Thought {
+                    id: format!("thought:{label}"),
+                    response_id: label.into(),
+                    completed_at_ms: 1_700_000_000_000,
+                    summary: summary.into_iter().map(str::to_owned).collect(),
+                    content: content.into_iter().map(str::to_owned).collect(),
+                    reported_reasoning_tokens: tokens,
+                },
+                cwd,
+            ))];
         let mut view = TranscriptView::default();
-        let clock = crate::history_cell::HistoryTimestamp::from_millis(
-            /*timestamp*/ 1_700_000_000_000,
-        )
-        .unwrap()
-        .span()
-        .content
-        .trim()
-        .to_owned();
-        for expanded in [false, true] {
-            if expanded && cell.activity_disclosure(80).is_none() {
-                continue;
-            }
-            if expanded {
-                view.disclosure.expanded.extend(cell.activity_ids());
-            }
-            let buffer = tests::render(&mut view, &cells, /*width*/ 64, /*height*/ 6);
-            snapshots.push(format!(
-                "{label} expanded={expanded}\n{}",
-                tests::text(&buffer).replace(&clock, "HH:MM")
-            ));
-            let length = view
-                .current_layout(&cells, /*index*/ 0)
-                .unwrap()
-                .text()
-                .len();
-            view.begin_selection(&cells, /*column*/ 6, /*row*/ 0, /*clicks*/ 1);
-            let selection = view.selection.as_mut().unwrap();
-            selection.start.offset = 0;
-            selection.end.offset = length;
-            let copied = view.selected_text(&cells).unwrap();
-            assert!(copied.contains("Thought") && !copied.contains("tokens"));
-            view.end_selection(&cells);
+        let clock = crate::history_cell::HistoryTimestamp::from_millis(1_700_000_000_000)
+            .unwrap()
+            .span()
+            .content
+            .trim()
+            .to_owned();
+        let closed = tests::text(&tests::render(&mut view, &cells, 64, 6));
+        assert_eq!(closed.matches("[cot]").count(), usize::from(readable));
+        assert!(!closed.contains("Thought") && !closed.contains("First block"));
+        snapshots.push(format!(
+            "{label} closed\n{}",
+            closed.replace(&clock, "HH:MM")
+        ));
+        if !readable {
+            continue;
         }
-        if cell.activity_disclosure(20).is_none() {
-            let buffer = tests::render(&mut view, &cells, /*width*/ 20, /*height*/ 1);
-            snapshots.push(format!(
-                "{label} narrow\n{}",
-                tests::text(&buffer).replace(&clock, "HH:MM")
-            ));
-        }
+        let target = view
+            .current_layout(&cells, 0)
+            .unwrap()
+            .fold_targets()
+            .into_iter()
+            .find(|target| matches!(target, FoldTarget::Thought(_)))
+            .unwrap();
+        assert!(view.focus_fold(&cells, 0, target.clone()));
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        crate::terminal_palette::with_test_default_colors(
+            crate::terminal_probe::DefaultColors {
+                fg: (220, 220, 220),
+                bg: (20, 20, 20),
+            },
+            || {
+                for width in [64, 32, 64] {
+                    let buffer = tests::render(&mut view, &cells, width, 8);
+                    let rendered = tests::text(&buffer);
+                    assert_eq!(rendered.matches("[cot]").count(), 1);
+                    assert_eq!(rendered.matches("First block Ω").count(), 1);
+                    assert!(
+                        !rendered.contains("Provider summary") && !rendered.contains("Thought")
+                    );
+                    let (row, line) = rendered
+                        .lines()
+                        .enumerate()
+                        .find(|(_, line)| line.contains("First block"))
+                        .unwrap();
+                    let column = line.find("First block").unwrap();
+                    assert_eq!(
+                        buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].bg,
+                        crate::style::reasoning_style().bg.unwrap()
+                    );
+                    snapshots.push(format!(
+                        "{label} open width={width}\n{}",
+                        rendered.replace(&clock, "HH:MM")
+                    ));
+                    view.begin_selection(
+                        &cells,
+                        u16::try_from(column).unwrap(),
+                        u16::try_from(row).unwrap(),
+                        1,
+                    );
+                    let length = view.current_layout(&cells, 0).unwrap().text().len();
+                    let selection = view.selection.as_mut().unwrap();
+                    selection.start.offset = 0;
+                    selection.end.offset = length;
+                    let copied = view.selected_text(&cells).unwrap();
+                    assert!(copied.contains("First block Ω") && !copied.contains("[cot]"));
+                    view.end_selection(&cells);
+                }
+            },
+        );
+        assert!(view.focus_fold(&cells, 0, target));
+        view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
+        let closed = tests::text(&tests::render(&mut view, &cells, 64, 6));
+        assert!(!closed.contains("First block"));
     }
     insta::assert_snapshot!(snapshots.join("\n"));
 }
@@ -636,19 +671,18 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     id: "thought-author".into(),
                     response_id: "response".into(),
                     completed_at_ms: 0,
-                    summary: vec!["Readable reasoning.".into()],
-                    content: Vec::new(),
+                    summary: Vec::new(),
+                    content: vec!["Readable reasoning.".into()],
                     reported_reasoning_tokens: Some(12),
                 },
                 cwd,
-                crate::history_cell::ThoughtTextVisibility::Summary,
             );
             let lines = crate::history_cell::output_provenance::raw_cell_lines(&thought, 80);
             assert!(!lines.is_empty());
             assert!(lines.iter().all(|line| {
                 line.source
                     .as_ref()
-                    .is_some_and(|source| source.output_provenance == OutputProvenance::Client)
+                    .is_some_and(|source| source.output_provenance == OutputProvenance::Reasoning)
             }));
         },
     );

@@ -33,6 +33,15 @@ pub(crate) fn history_response_style() -> Style {
     })
 }
 
+pub(crate) fn reasoning_style() -> Style {
+    speaker_style(&Tint {
+        hue: (245, 150, 55),
+        dark: 0.10,
+        dark_lift: 0.108,
+        light: 0.07,
+    })
+}
+
 pub(crate) fn context_message_style() -> Style {
     speaker_style(&Tint {
         hue: (165, 105, 220),

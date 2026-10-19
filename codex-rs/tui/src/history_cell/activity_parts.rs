@@ -8,6 +8,7 @@ pub(crate) enum FoldTarget {
     #[default]
     Activity,
     Part(String),
+    Thought(Vec<String>),
     OutputMode(super::output_provenance::OutputMode),
     Invocation {
         call_id: String,
@@ -20,6 +21,7 @@ impl FoldTarget {
         match self {
             Self::Activity | Self::OutputMode(_) => activity.to_vec(),
             Self::Part(id) => vec![id.clone()],
+            Self::Thought(ids) => ids.clone(),
             Self::Invocation { call_id, .. } => vec![call_id.clone()],
         }
     }

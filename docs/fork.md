@@ -19,8 +19,9 @@ qualified forms.
   Additional-tools Injections keep their definitions behind an independent,
   initially closed Raw Context fold. Older mixed captures
   retain a legacy label rather than guessed section boundaries. User messages are
-  blue, assistant prose green, inter-agent prose yellow-green, and other incoming
-  context purple. Verbatim tool-call source also uses purple; syntax highlighting
+  blue, assistant prose green, disclosed raw reasoning orange, inter-agent prose
+  yellow-green, and other incoming context purple. Verbatim tool-call source also
+  uses purple; syntax highlighting
   alone remains Raw. Human-only headings,
   summaries, notices and diagnostic decoration
   use the terminal's default background, never grey or reverse video. Author

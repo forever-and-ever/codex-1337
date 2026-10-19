@@ -204,11 +204,14 @@ async fn plan_menu_allows_transcript_wheel_scrolling_and_keeps_keyboard_ownershi
         let bottom = app.render_owned_transcript(&mut tui, size)?;
         let latest = screen(&tui);
         let menu = render_bottom_popup(&app.chat_widget, /*width*/ 80);
+        tokio::time::pause();
         for (kind, ticks) in [
             (MouseEventKind::ScrollUp, 8),
             (MouseEventKind::ScrollDown, 8),
             (MouseEventKind::ScrollUp, 1),
         ] {
+            // Each independent gesture starts with a full wheel allowance, regardless of host load.
+            tokio::time::advance(std::time::Duration::from_millis(100)).await;
             let painted = screen(&tui);
             for _ in 0..ticks {
                 app.handle_tui_event(
@@ -230,6 +233,7 @@ async fn plan_menu_allows_transcript_wheel_scrolling_and_keeps_keyboard_ownershi
                 assert!(!app.transcript_view.is_following());
             }
         }
+        tokio::time::resume();
         let scrolled = screen(&tui);
         if close == KeyCode::Esc {
             insta::assert_snapshot!("plan_prompt_scrolled", scrolled);

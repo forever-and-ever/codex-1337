@@ -195,6 +195,7 @@ fn context_export_lines(cell: &dyn HistoryCell) -> Option<Vec<ratatui::text::Lin
             });
         let label = match provenance {
             OutputProvenance::Captured => Some("[Captured context]"),
+            OutputProvenance::Reasoning => Some("[Returned reasoning]"),
             OutputProvenance::Formatted => Some("[Context with control characters escaped]"),
             OutputProvenance::Client | OutputProvenance::ClientDiff => {
                 Some("[Client annotation or representation]")
