@@ -177,6 +177,10 @@ impl ChatWidget {
             dismiss_on_select: false,
             ..Default::default()
         });
+        if matches!(menu, ModelMenu::Current) {
+            // Model-only hotkeys address the leading model rows, never provider navigation.
+            items.extend(self.provider_choices().map(|(_, choice)| choice));
+        }
         SelectionViewParams {
             view_id: Some(VIEW),
             title: Some(menu.title().into()),

@@ -18,30 +18,36 @@ impl ChatWidget {
         items: &mut Vec<SelectionItem>,
         model_ids: &mut Vec<String>,
     ) {
-        for (index, provider) in self
-            .model_catalog
+        for (index, (provider, choice)) in self.provider_choices().enumerate() {
+            model_ids.insert(index, format!("provider:{}", provider.id));
+            items.insert(index, choice);
+        }
+    }
+
+    pub(super) fn provider_choices(
+        &self,
+    ) -> impl Iterator<Item = (&ModelProviderOption, SelectionItem)> {
+        self.model_catalog
             .providers
             .iter()
-            .filter(|provider| provider.id != self.config.model_provider_id)
-            .enumerate()
-        {
-            model_ids.insert(index, format!("provider:{}", provider.id));
-            let provider = provider.clone();
-            items.insert(
-                index,
-                SelectionItem {
-                    name: format!("{}…", provider.name),
-                    description: Some("Choose a model for a new conversation.".into()),
-                    actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::ProviderModel(ProviderModelEvent::Open(
-                            provider.clone(),
-                        )));
-                    })],
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
-            );
-        }
+            .filter(move |provider| provider.id != self.config.model_provider_id)
+            .map(|provider| {
+                let action_provider = provider.clone();
+                (
+                    provider,
+                    SelectionItem {
+                        name: format!("{}…", provider.name),
+                        description: Some("Choose a model for a new conversation.".into()),
+                        actions: vec![Box::new(move |tx| {
+                            tx.send(AppEvent::ProviderModel(ProviderModelEvent::Open(
+                                action_provider.clone(),
+                            )));
+                        })],
+                        dismiss_on_select: true,
+                        ..Default::default()
+                    },
+                )
+            })
     }
 
     pub(crate) fn show_provider_models_loading(

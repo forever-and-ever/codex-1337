@@ -17,7 +17,11 @@ use std::collections::BTreeSet;
 
 #[tokio::test]
 async fn openrouter_model_menu_snapshot() {
-    let (mut chat, _rx, _op_rx) = Box::pin(make_chatwidget_manual(None)).await;
+    use crate::app::ProviderModelEvent;
+    use crate::openrouter::Request;
+    use codex_app_server_protocol::ModelProviderOption;
+
+    let (mut chat, mut rx, _op_rx) = Box::pin(make_chatwidget_manual(None)).await;
     let mut model = chat.model_catalog.models[0].clone();
     model.model = "moonshotai/kimi-k3".into();
     model.display_name = "Kimi K3".into();
@@ -26,19 +30,86 @@ async fn openrouter_model_menu_snapshot() {
     preset.model = "@preset/research".into();
     preset.display_name = "research".into();
     preset.description = "preset for moonshotai/kimi-k3".into();
+    let models = vec![model, preset];
+    let providers = [
+        ("openai", "OpenAI"),
+        ("claude", "Claude"),
+        (
+            codex_model_provider_info::OPENROUTER_PROVIDER_ID,
+            "OpenRouter",
+        ),
+    ]
+    .map(|(id, name)| ModelProviderOption {
+        id: id.into(),
+        name: name.into(),
+    })
+    .to_vec();
+    let selected = "moonshotai/kimi-k3".parse().unwrap();
     chat.show_openrouter_models(
-        ModelMenu::New(codex_app_server_protocol::ModelProviderOption {
-            id: codex_model_provider_info::OPENROUTER_PROVIDER_ID.into(),
-            name: "OpenRouter".into(),
-        }),
+        ModelMenu::New(providers[2].clone()),
         crate::model_catalog::ModelListing {
-            models: vec![model, preset],
-            providers: Vec::new(),
+            models: models.clone(),
+            providers: providers.clone(),
         },
-        Some(&"moonshotai/kimi-k3".parse().unwrap()),
+        Some(&selected),
         None,
     );
     assert_chatwidget_snapshot!("openrouter_model_menu", render_bottom_popup(&chat, 100));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    chat.config.model_provider_id = codex_model_provider_info::OPENROUTER_PROVIDER_ID.into();
+    chat.set_model("moonshotai/kimi-k3");
+
+    for visible_models in [models, Vec::new()] {
+        // Provider rows must stay outside the model-only endpoint/forget hotkey prefix,
+        // including an empty OpenRouter catalog; entering one uses the new-thread flow.
+        for (offset, provider) in providers[..2].iter().enumerate() {
+            chat.show_openrouter_models(
+                ModelMenu::Current,
+                crate::model_catalog::ModelListing {
+                    models: visible_models.clone(),
+                    providers: providers.clone(),
+                },
+                Some(&selected),
+                None,
+            );
+            let rendered = render_bottom_popup(&chat, 100);
+            assert!(rendered.contains("OpenAI…"));
+            assert!(rendered.contains("Claude…"));
+            while rx.try_recv().is_ok() {}
+
+            if !visible_models.is_empty() {
+                chat.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+                assert!(matches!(
+                    rx.try_recv(),
+                    Ok(AppEvent::OpenRouter(Event::Request(Request::Endpoints { slug, .. })))
+                        if slug == selected
+                ));
+                chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+                assert!(matches!(
+                    rx.try_recv(),
+                    Ok(AppEvent::OpenRouter(Event::Request(Request::Forget { slug, .. })))
+                        if slug == selected
+                ));
+            }
+            for _ in 0..visible_models.len() + 1 + offset {
+                chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+            }
+            chat.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+            chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+            assert!(rx.try_recv().is_err());
+            chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(AppEvent::ProviderModel(ProviderModelEvent::Open(choice)))
+                    if choice.id == provider.id
+            ));
+            assert_eq!(chat.current_model(), selected.as_str());
+            assert_eq!(
+                chat.config.model_provider_id,
+                codex_model_provider_info::OPENROUTER_PROVIDER_ID
+            );
+        }
+    }
 }
 
 #[tokio::test]
