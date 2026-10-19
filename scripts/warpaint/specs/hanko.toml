@@ -1,0 +1,41 @@
+stance = """
+Sumi on paper and a single seal. Everything is ink and its washes; only the vermilion
+speaks loudly, and the code is brushed in indigo, moss, ochre and plum.
+"""
+
+[ground]
+hue = 70
+colorfulness = 1.2
+lightness = 14
+
+[ink]
+hue = 85
+colorfulness = 4.5
+contrast = 82
+
+[voice]
+colorfulness = 17
+lean = 0.6
+naturalism = 0.1
+
+[hues]
+accent = 38
+link = 235
+success = 162
+caution = 95
+failure = 350
+info = 240
+keyword = 38
+function = 240
+type = 150
+string = 90
+number = 325
+attribute = 0
+comment = 70
+prompt = 38
+aside = 240
+subagent = 90
+code = 150
+
+[livery]
+count = 8

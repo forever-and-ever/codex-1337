@@ -191,8 +191,9 @@ fn sparkle_fades_without_adding_dots_and_finishes_by_fifteen_seconds() {
         let (finished, _) = draw(&pane.composer, /*width*/ 80, now + IDLE_TIMEOUT);
         assert!(!dots(&fading).is_empty());
         assert!(dots(&fading).iter().all(|dot| dots(&last).contains(dot)));
-        let contrast = |cell: &ratatui::buffer::Cell| match (cell.fg, cell.bg) {
-            (Color::Rgb(fr, fg, fb), Color::Rgb(br, bg, bb)) => {
+        let contrast = |cell: &ratatui::buffer::Cell| match (cell.fg, crate::warpaint::rgb(cell.bg))
+        {
+            (Color::Rgb(fr, fg, fb), Some((br, bg, bb))) => {
                 u32::from(fr.abs_diff(br)) + u32::from(fg.abs_diff(bg)) + u32::from(fb.abs_diff(bb))
             }
             colors => panic!("expected true color: {colors:?}"),

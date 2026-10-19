@@ -1,0 +1,40 @@
+stance = """
+Stained glass in a dark chapel: a wine ground, bone ink, a cobalt voice, and the code in
+verdigris, gold leaf, malachite, vermilion and amethyst.
+"""
+
+[ground]
+hue = 8
+colorfulness = 4.5
+lightness = 14
+
+[ink]
+hue = 75
+colorfulness = 4
+contrast = 84
+
+[voice]
+colorfulness = 22
+lean = 0.3
+naturalism = 0.2
+
+[hues]
+accent = 235
+link = 215
+success = 165
+caution = 88
+failure = 20
+info = 250
+keyword = 235
+function = 185
+type = 95
+string = 140
+number = 35
+attribute = 300
+comment = 8
+prompt = 235
+aside = 95
+subagent = 185
+
+[livery]
+count = 8

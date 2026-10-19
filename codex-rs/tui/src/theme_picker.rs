@@ -1,7 +1,6 @@
 //! Builds the `/theme` picker dialog for the TUI.
 //!
-//! The picker lists all bundled themes plus any custom `.tmTheme` files found
-//! under `{CODEX_HOME}/themes/`.  It provides:
+//! The picker lists the warpaint packs, which paint the whole TUI.  It provides:
 //!
 //! - **Live preview:** the `on_selection_changed` callback swaps the runtime
 //!   syntax theme as the user navigates, giving instant visual feedback in both
@@ -26,8 +25,6 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::SideContentWidth;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
-use crate::bottom_pane::popup_content_width;
-use crate::bottom_pane::side_by_side_layout_widths;
 use crate::diff_render::DiffLineType;
 use crate::diff_render::current_diff_render_style_context;
 use crate::diff_render::line_number_width;
@@ -35,12 +32,10 @@ use crate::diff_render::push_wrapped_diff_line_with_style_context;
 use crate::diff_render::push_wrapped_diff_line_with_syntax_and_style_context;
 use crate::render::highlight;
 use crate::render::renderable::Renderable;
-use crate::status::format_directory_display;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::Widget;
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PreviewDiffKind {
@@ -266,43 +261,10 @@ impl Renderable for ThemePreviewNarrowRenderable {
     }
 }
 
-fn subtitle_available_width(terminal_width: Option<u16>) -> usize {
-    let width = terminal_width.unwrap_or(80);
-    let content_width = popup_content_width(width);
-    if let Some((list_width, _side_width)) = side_by_side_layout_widths(
-        content_width,
-        SideContentWidth::Half,
-        WIDE_PREVIEW_MIN_WIDTH,
-    ) {
-        list_width as usize
-    } else {
-        content_width as usize
-    }
-}
-
-fn theme_picker_subtitle(codex_home: Option<&Path>, terminal_width: Option<u16>) -> String {
-    let themes_dir = codex_home.map(|home| home.join("themes"));
-    let themes_dir_display = themes_dir
-        .as_deref()
-        .map(|path| format_directory_display(path, /*max_width*/ None));
-    let available_width = subtitle_available_width(terminal_width);
-
-    if let Some(path) = themes_dir_display
-        && path.starts_with('~')
-    {
-        let subtitle = format!("Custom .tmTheme files can be added to the {path} directory.");
-        if UnicodeWidthStr::width(subtitle.as_str()) <= available_width {
-            return subtitle;
-        }
-    }
-
-    PREVIEW_FALLBACK_SUBTITLE.to_string()
-}
-
 /// Builds [`SelectionViewParams`] for the `/theme` picker dialog.
 ///
-/// Lists all bundled themes plus custom `.tmTheme` files, with live preview
-/// on cursor movement and cancel-restore.
+/// Lists the warpaint packs, with live preview on cursor movement and
+/// cancel-restore.
 ///
 /// `current_name` should be the value of `Config::tui_theme` (the persisted
 /// preference).  When it names a theme that is currently available the picker
@@ -312,7 +274,7 @@ fn theme_picker_subtitle(codex_home: Option<&Path>, terminal_width: Option<u16>)
 pub(crate) fn build_theme_picker_params(
     current_name: Option<&str>,
     codex_home: Option<&Path>,
-    terminal_width: Option<u16>,
+    _terminal_width: Option<u16>,
 ) -> SelectionViewParams {
     // Snapshot the current theme so we can restore on cancel.
     let original_theme = highlight::current_syntax_theme();
@@ -367,7 +329,7 @@ pub(crate) fn build_theme_picker_params(
     // so preview ordering stays aligned if item construction/sorting changes.
     let preview_theme_names: Vec<Option<String>> =
         items.iter().map(|item| item.search_value.clone()).collect();
-    let preview_home = codex_home_owned.clone();
+    let preview_home = codex_home_owned;
     let on_selection_changed = Some(Box::new(
         move |idx: usize, tx: &crate::app_event_sender::AppEventSender| {
             if let Some(Some(name)) = preview_theme_names.get(idx)
@@ -389,11 +351,8 @@ pub(crate) fn build_theme_picker_params(
     );
     SelectionViewParams {
         allow_input_when_disconnected: true,
-        title: Some("Select Syntax Theme".to_string()),
-        subtitle: Some(theme_picker_subtitle(
-            codex_home_owned.as_deref(),
-            terminal_width,
-        )),
+        title: Some("Select Theme".to_string()),
+        subtitle: Some(PREVIEW_FALLBACK_SUBTITLE.to_string()),
         footer_hint: Some(standard_popup_hint_line()),
         items,
         is_searchable: true,
@@ -568,45 +527,6 @@ mod tests {
     }
 
     #[test]
-    fn subtitle_uses_tilde_path_when_codex_home_under_home_directory() {
-        let home = dirs::home_dir().expect("home directory should be available");
-        let codex_home = home.join(".codex");
-
-        let subtitle = theme_picker_subtitle(Some(&codex_home), Some(200));
-
-        assert!(subtitle.contains("~"));
-        assert!(subtitle.contains("directory"));
-    }
-
-    #[test]
-    fn subtitle_falls_back_when_tilde_path_subtitle_is_too_wide() {
-        let home = dirs::home_dir().expect("home directory should be available");
-        let long_segment = "a".repeat(120);
-        let codex_home = home.join(long_segment).join(".codex");
-
-        let subtitle = theme_picker_subtitle(Some(&codex_home), Some(140));
-
-        assert_eq!(subtitle, PREVIEW_FALLBACK_SUBTITLE);
-    }
-
-    #[test]
-    fn subtitle_falls_back_to_preview_instructions_without_tilde_path() {
-        let subtitle =
-            theme_picker_subtitle(/*codex_home*/ None, /*terminal_width*/ None);
-        assert_eq!(subtitle, PREVIEW_FALLBACK_SUBTITLE);
-    }
-
-    #[test]
-    fn subtitle_falls_back_for_94_column_terminal_side_by_side_layout() {
-        let home = dirs::home_dir().expect("home directory should be available");
-        let codex_home = home.join(".codex");
-
-        let subtitle = theme_picker_subtitle(Some(&codex_home), Some(94));
-
-        assert_eq!(subtitle, PREVIEW_FALLBACK_SUBTITLE);
-    }
-
-    #[test]
     fn unavailable_configured_theme_falls_back_to_configured_or_default_selection() {
         let configured_or_default_theme = highlight::configured_theme_name();
         let params = build_theme_picker_params(
@@ -625,7 +545,3 @@ mod tests {
         assert_eq!(selected_name, configured_or_default_theme);
     }
 }
-
-#[cfg(test)]
-#[path = "theme_picker_model_tests.rs"]
-mod model_tests;

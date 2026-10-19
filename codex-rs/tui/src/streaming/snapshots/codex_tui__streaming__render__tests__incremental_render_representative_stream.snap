@@ -1,6 +1,5 @@
 ---
 source: tui/src/streaming/render_tests.rs
-assertion_line: 115
 expression: render.lines
 ---
 [
@@ -18,7 +17,7 @@ expression: render.lines
     HyperlinkLine {
         line: Line::from_iter([
             Span::from("First paragraph with a "),
-            Span::from("link").fg(Color::Rgb(99, 168, 248)).underlined(),
+            Span::from("link").fg(Color::Indexed(69)).underlined(),
         ]),
         hyperlinks: [
             TerminalHyperlink {
@@ -31,7 +30,7 @@ expression: render.lines
     HyperlinkLine {
         line: Line::from_iter([
             Span::from("("),
-            Span::from("https://example.com").fg(Color::Rgb(99, 168, 248)).underlined(),
+            Span::from("https://example.com").fg(Color::Indexed(69)).underlined(),
             Span::from(")"),
             Span::from("."),
         ]),
@@ -83,14 +82,14 @@ expression: render.lines
     HyperlinkLine {
         line: Line::from_iter([
             Span::default(),
-            Span::from("fn").fg(Color::Rgb(203, 166, 247)),
-            Span::from(" ").fg(Color::Rgb(205, 214, 244)),
-            Span::from("main").fg(Color::Rgb(137, 180, 250)),
-            Span::from("(").fg(Color::Rgb(147, 153, 178)),
-            Span::from(")").fg(Color::Rgb(147, 153, 178)),
-            Span::from(" ").fg(Color::Rgb(205, 214, 244)),
-            Span::from("{").fg(Color::Rgb(147, 153, 178)),
-            Span::from("}").fg(Color::Rgb(147, 153, 178)),
+            Span::from("fn").fg(Color::Indexed(96)),
+            Span::from(" "),
+            Span::from("main").fg(Color::Indexed(97)),
+            Span::from("(").fg(Color::Indexed(102)),
+            Span::from(")").fg(Color::Indexed(102)),
+            Span::from(" "),
+            Span::from("{").fg(Color::Indexed(102)),
+            Span::from("}").fg(Color::Indexed(102)),
         ]),
         hyperlinks: [],
     },
@@ -107,7 +106,7 @@ expression: render.lines
             Span::from("  "),
             Span::from(" "),
             Span::from("Value"),
-        ]).fg(Color::Rgb(249, 226, 175)).bold(),
+        ]).fg(Color::Indexed(98)).bold(),
         hyperlinks: [],
     },
     HyperlinkLine {

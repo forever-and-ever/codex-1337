@@ -1,0 +1,319 @@
+{
+  "ground": [
+    "canvas",
+    "trough",
+    "dais",
+    "selection",
+    "prompt",
+    "response",
+    "reasoning",
+    "aside",
+    "subagent",
+    "added",
+    "removed"
+  ],
+  "figure": [
+    "ink",
+    "ink_muted",
+    "ink_faint",
+    "ink_selected",
+    "rule",
+    "accent",
+    "link",
+    "code",
+    "success",
+    "caution",
+    "failure",
+    "info",
+    "added",
+    "removed"
+  ],
+  "syntax": [
+    "keyword",
+    "function",
+    "type",
+    "string",
+    "number",
+    "comment",
+    "punctuation",
+    "variable",
+    "constant",
+    "attribute"
+  ],
+  "ramps": {
+    "livery": {
+      "min": 1,
+      "max": 32
+    },
+    "heat": {
+      "len": 4
+    },
+    "terminal": {
+      "len": 16
+    }
+  },
+  "pairs": {
+    "figure": {
+      "ink": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "ink_muted": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "ink_faint": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "ink_selected": [
+        "selection"
+      ],
+      "rule": [
+        "canvas",
+        "dais",
+        "response",
+        "reasoning",
+        "subagent"
+      ],
+      "accent": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent"
+      ],
+      "link": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "code": [
+        "canvas",
+        "trough",
+        "dais",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "success": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent"
+      ],
+      "caution": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "failure": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "info": [
+        "canvas",
+        "trough",
+        "dais",
+        "selection",
+        "prompt",
+        "response",
+        "reasoning",
+        "aside",
+        "subagent"
+      ],
+      "added": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "removed": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ]
+    },
+    "syntax": {
+      "keyword": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "function": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "type": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "string": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "number": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "comment": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "punctuation": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "variable": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "constant": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ],
+      "attribute": [
+        "canvas",
+        "trough",
+        "response",
+        "reasoning",
+        "subagent",
+        "added",
+        "removed"
+      ]
+    },
+    "ramp": {
+      "livery": [
+        "canvas",
+        "trough",
+        "dais"
+      ],
+      "heat": [
+        "canvas"
+      ],
+      "terminal": [
+        "canvas",
+        "prompt",
+        "response",
+        "aside",
+        "subagent"
+      ]
+    }
+  }
+}

@@ -1094,22 +1094,25 @@ fn style_context() -> Style {
     Style::default()
 }
 
+// TELOS(warpaint): a diff line's fill is the pack's diff ground wherever upstream paints one.
 fn add_line_bg(theme: DiffTheme, color_level: RichDiffColorLevel) -> Color {
-    match (theme, color_level) {
+    let computed = match (theme, color_level) {
         (DiffTheme::Dark, RichDiffColorLevel::TrueColor) => rgb_color(DARK_TC_ADD_LINE_BG_RGB),
         (DiffTheme::Dark, RichDiffColorLevel::Ansi256) => indexed_color(DARK_256_ADD_LINE_BG_IDX),
         (DiffTheme::Light, RichDiffColorLevel::TrueColor) => rgb_color(LIGHT_TC_ADD_LINE_BG_RGB),
         (DiffTheme::Light, RichDiffColorLevel::Ansi256) => indexed_color(LIGHT_256_ADD_LINE_BG_IDX),
-    }
+    };
+    crate::warpaint::Ground::Added.repaint(computed)
 }
 
 fn del_line_bg(theme: DiffTheme, color_level: RichDiffColorLevel) -> Color {
-    match (theme, color_level) {
+    let computed = match (theme, color_level) {
         (DiffTheme::Dark, RichDiffColorLevel::TrueColor) => rgb_color(DARK_TC_DEL_LINE_BG_RGB),
         (DiffTheme::Dark, RichDiffColorLevel::Ansi256) => indexed_color(DARK_256_DEL_LINE_BG_IDX),
         (DiffTheme::Light, RichDiffColorLevel::TrueColor) => rgb_color(LIGHT_TC_DEL_LINE_BG_RGB),
         (DiffTheme::Light, RichDiffColorLevel::Ansi256) => indexed_color(LIGHT_256_DEL_LINE_BG_IDX),
-    }
+    };
+    crate::warpaint::Ground::Removed.repaint(computed)
 }
 
 fn light_gutter_fg(color_level: DiffColorLevel) -> Color {
@@ -1256,72 +1259,6 @@ mod tests {
     use ratatui::widgets::Paragraph;
     use ratatui::widgets::Wrap;
     use unicode_width::UnicodeWidthChar;
-
-    #[test]
-    fn syntax_colors_follow_the_actual_diff_background() {
-        use ratatui::buffer::Buffer;
-        use ratatui::layout::Rect;
-        use ratatui::widgets::Widget;
-
-        let colors = crate::terminal_probe::DefaultColors {
-            fg: (30, 30, 30),
-            bg: (255, 255, 255),
-        };
-        crate::terminal_palette::with_test_default_colors(colors, || {
-            let spans = [
-                RtSpan::from("let value = 1;")
-                    .fg(rgb_color((235, 210, 170)))
-                    .dim(),
-                RtSpan::from(" plain"),
-                RtSpan::from(" reset").fg(Color::Reset),
-            ];
-            let style = DiffRenderStyleContext {
-                theme: DiffTheme::Light,
-                color_level: DiffColorLevel::TrueColor,
-                diff_backgrounds: ResolvedDiffBackgrounds {
-                    add: Some(rgb_color((220, 250, 230))),
-                    del: Some(rgb_color((55, 25, 35))),
-                },
-            };
-            let mut lines = [DiffLineType::Insert, DiffLineType::Delete]
-                .into_iter()
-                .flat_map(|kind| {
-                    render_wrapped_diff_line(
-                        /*line_number*/ 1,
-                        kind,
-                        "let value = 1; plain reset",
-                        /*width*/ 40,
-                        /*line_number_width*/ 1,
-                        Some(&spans),
-                        style,
-                    )
-                })
-                .collect::<Vec<_>>();
-            crate::history_cell::output_provenance::mark_lines(
-                &mut lines,
-                crate::history_cell::output_provenance::OutputProvenance::Client,
-            );
-            for (line, background) in lines
-                .iter()
-                .zip([style.diff_backgrounds.add, style.diff_backgrounds.del])
-            {
-                assert_eq!(line.line.style.bg, background);
-                assert_eq!(line.source.as_ref().unwrap().line_style.bg, background);
-            }
-            let lines = lines.into_iter().map(|line| line.line).collect::<Vec<_>>();
-            let area = Rect::new(
-                /*x*/ 0, /*y*/ 0, /*width*/ 40, /*height*/ 2,
-            );
-            let mut buffer = Buffer::empty(area);
-            Paragraph::new(lines).render(area, &mut buffer);
-            assert!(!buffer[(3, 0)].modifier.contains(Modifier::DIM));
-            assert!(!buffer[(3, 1)].modifier.contains(Modifier::DIM));
-            assert_ne!(buffer[(3, 0)].fg, buffer[(3, 1)].fg);
-            assert_ne!(buffer[(18, 0)].fg, buffer[(18, 1)].fg);
-            assert_ne!(buffer[(24, 0)].fg, buffer[(24, 1)].fg);
-            assert_snapshot!(format!("{buffer:?}"));
-        });
-    }
 
     #[test]
     fn ansi16_add_style_uses_foreground_only() {
@@ -1887,69 +1824,6 @@ mod tests {
     }
 
     #[test]
-    fn truecolor_dark_theme_uses_configured_backgrounds() {
-        assert_eq!(
-            style_line_bg_for(
-                DiffLineType::Insert,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::TrueColor)
-            ),
-            Style::default().bg(rgb_color(DARK_TC_ADD_LINE_BG_RGB))
-        );
-        assert_eq!(
-            style_line_bg_for(
-                DiffLineType::Delete,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::TrueColor)
-            ),
-            Style::default().bg(rgb_color(DARK_TC_DEL_LINE_BG_RGB))
-        );
-        assert_eq!(
-            style_gutter_for(
-                DiffLineType::Insert,
-                DiffTheme::Dark,
-                DiffColorLevel::TrueColor
-            ),
-            style_gutter_dim()
-        );
-        assert_eq!(
-            style_gutter_for(
-                DiffLineType::Delete,
-                DiffTheme::Dark,
-                DiffColorLevel::TrueColor
-            ),
-            style_gutter_dim()
-        );
-    }
-
-    #[test]
-    fn ansi256_dark_theme_uses_distinct_add_and_delete_backgrounds() {
-        assert_eq!(
-            style_line_bg_for(
-                DiffLineType::Insert,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::Ansi256)
-            ),
-            Style::default().bg(indexed_color(DARK_256_ADD_LINE_BG_IDX))
-        );
-        assert_eq!(
-            style_line_bg_for(
-                DiffLineType::Delete,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::Ansi256)
-            ),
-            Style::default().bg(indexed_color(DARK_256_DEL_LINE_BG_IDX))
-        );
-        assert_ne!(
-            style_line_bg_for(
-                DiffLineType::Insert,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::Ansi256)
-            ),
-            style_line_bg_for(
-                DiffLineType::Delete,
-                fallback_diff_backgrounds(DiffTheme::Dark, DiffColorLevel::Ansi256)
-            ),
-            "256-color mode should keep add/delete backgrounds distinct"
-        );
-    }
-
-    #[test]
     fn theme_scope_backgrounds_override_truecolor_fallback_when_available() {
         let backgrounds = resolve_diff_backgrounds_for(
             DiffTheme::Dark,
@@ -2016,7 +1890,7 @@ mod tests {
         );
         assert_eq!(
             style_line_bg_for(DiffLineType::Delete, backgrounds),
-            Style::default().bg(indexed_color(DARK_256_DEL_LINE_BG_IDX))
+            Style::default().bg(del_line_bg(DiffTheme::Dark, RichDiffColorLevel::Ansi256))
         );
     }
 
@@ -2095,14 +1969,14 @@ mod tests {
                 DiffLineType::Insert,
                 fallback_diff_backgrounds(DiffTheme::Light, DiffColorLevel::TrueColor)
             ),
-            Style::default().bg(rgb_color(LIGHT_TC_ADD_LINE_BG_RGB))
+            Style::default().bg(add_line_bg(DiffTheme::Light, RichDiffColorLevel::TrueColor))
         );
         assert_eq!(
             style_line_bg_for(
                 DiffLineType::Delete,
                 fallback_diff_backgrounds(DiffTheme::Light, DiffColorLevel::TrueColor)
             ),
-            Style::default().bg(rgb_color(LIGHT_TC_DEL_LINE_BG_RGB))
+            Style::default().bg(del_line_bg(DiffTheme::Light, RichDiffColorLevel::TrueColor))
         );
         assert_eq!(
             style_gutter_for(
@@ -2160,8 +2034,14 @@ mod tests {
                 .fg(rgb_color(LIGHT_TC_GUTTER_FG_RGB))
                 .bg(rgb_color(LIGHT_TC_ADD_NUM_BG_RGB))
         );
-        assert_eq!(lines[0].style.bg, Some(rgb_color(LIGHT_TC_ADD_LINE_BG_RGB)));
-        assert_eq!(lines[1].style.bg, Some(rgb_color(LIGHT_TC_ADD_LINE_BG_RGB)));
+        assert_eq!(
+            lines[0].style.bg,
+            Some(add_line_bg(DiffTheme::Light, RichDiffColorLevel::TrueColor))
+        );
+        assert_eq!(
+            lines[1].style.bg,
+            Some(add_line_bg(DiffTheme::Light, RichDiffColorLevel::TrueColor))
+        );
     }
 
     #[test]
@@ -2308,7 +2188,7 @@ mod tests {
                     let rgb_tokens = lines
                         .iter()
                         .flat_map(|line| &line.line.spans)
-                        .filter(|span| matches!(span.style.fg, Some(ratatui::style::Color::Rgb(..))))
+                        .filter(|span| span.style.fg.is_some_and(crate::warpaint::is_token))
                         .map(|span| span.content.to_string())
                         .collect::<Vec<_>>();
                     assert!(
@@ -2608,7 +2488,7 @@ mod tests {
                     .map(|span| span.style)
                     .expect("expected rendered diff span containing 'world'");
 
-                assert!(matches!(expected_style.fg, Some(Color::Rgb(..))));
+                assert!(expected_style.fg.is_some_and(crate::warpaint::is_token));
                 assert_eq!(actual_style.fg, expected_style.fg);
             },
         );

@@ -1,4 +1,3 @@
-use crate::color::perceptual_distance;
 use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
 use ratatui::style::Color;
@@ -77,13 +76,8 @@ fn stdout_color_level_for_terminal(
 fn best_color_for_color_level(target: (u8, u8, u8), color_level: StdoutColorLevel) -> Color {
     match color_level {
         StdoutColorLevel::TrueColor => rgb_color(target),
-        StdoutColorLevel::Ansi256 => xterm_fixed_colors()
-            .min_by(|(_, a), (_, b)| {
-                perceptual_distance(*a, target)
-                    .partial_cmp(&perceptual_distance(*b, target))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .map_or_else(Color::default, |(i, _)| indexed_color(i as u8)),
+        // TELOS(warpaint): an indexed color would read as a token; the binder quantizes.
+        StdoutColorLevel::Ansi256 => rgb_color(target),
         StdoutColorLevel::Ansi16 | StdoutColorLevel::Unknown => Color::default(),
     }
 }
@@ -145,69 +139,21 @@ pub(crate) fn set_default_colors_from_startup_probe(
 #[cfg(any(all(unix, not(test)), windows))]
 mod imp {
     use super::DefaultColors;
-    use std::sync::Mutex;
-    use std::sync::OnceLock;
 
-    struct Cache<T> {
-        attempted: bool,
-        value: Option<T>,
-    }
-
-    impl<T> Default for Cache<T> {
-        fn default() -> Self {
-            Self {
-                attempted: false,
-                value: None,
-            }
-        }
-    }
-
-    impl<T: Copy> Cache<T> {
-        fn get_or_init_with(&mut self, mut init: impl FnMut() -> Option<T>) -> Option<T> {
-            if !self.attempted {
-                self.value = init();
-                self.attempted = true;
-            }
-            self.value
-        }
-    }
-
-    fn default_colors_cache() -> &'static Mutex<Cache<DefaultColors>> {
-        static CACHE: OnceLock<Mutex<Cache<DefaultColors>>> = OnceLock::new();
-        CACHE.get_or_init(|| Mutex::new(Cache::default()))
-    }
-
+    /// Warpaint's pack paints the page, so where packs are shown its ink and canvas are the
+    /// default colors.
     pub(super) fn default_colors() -> Option<DefaultColors> {
-        let cache = default_colors_cache();
-        let mut cache = cache.lock().ok()?;
-        cache.get_or_init_with(query_default_colors)
+        crate::warpaint::default_colors().map(|colors| DefaultColors {
+            fg: colors.fg,
+            bg: colors.bg,
+        })
     }
 
+    /// The terminal's own colors are the ones warpaint restores when it lets go of the screen.
     pub(super) fn set_default_colors_from_startup_probe(
         colors: Option<crate::terminal_probe::DefaultColors>,
     ) {
-        if let Ok(mut cache) = default_colors_cache().lock() {
-            cache.value = colors.map(|colors| DefaultColors {
-                fg: colors.fg,
-                bg: colors.bg,
-            });
-            cache.attempted = true;
-        }
-    }
-
-    /// Queries terminal default colors through the bounded startup probe path.
-    ///
-    /// The palette cache treats `None` as an attempted-but-unavailable result, so this function
-    /// collapses I/O errors and missing responses into the same fallback path used for terminals
-    /// that simply do not support OSC 10/11 queries.
-    fn query_default_colors() -> Option<DefaultColors> {
-        crate::terminal_probe::default_colors(crate::terminal_probe::DEFAULT_TIMEOUT)
-            .ok()
-            .flatten()
-            .map(|colors| DefaultColors {
-                fg: colors.fg,
-                bg: colors.bg,
-            })
+        crate::warpaint::note_terminal_colors(colors);
     }
 }
 
@@ -227,7 +173,7 @@ mod imp {
 }
 
 /// The subset of Xterm colors that are usually consistent across terminals.
-fn xterm_fixed_colors() -> impl Iterator<Item = (usize, (u8, u8, u8))> {
+pub(crate) fn xterm_fixed_colors() -> impl Iterator<Item = (usize, (u8, u8, u8))> {
     XTERM_COLORS.into_iter().enumerate().skip(16)
 }
 

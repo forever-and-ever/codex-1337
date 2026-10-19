@@ -45,6 +45,10 @@ impl<S: Subscriber> Layer<S> for CaptureLayer {
 }
 
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "quarantined tool output spells its palette colors as indices"
+)]
 fn multiline_warning_contains_counts_and_preserves_the_styled_first_line() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let subscriber = tracing_subscriber::registry().with(CaptureLayer(Arc::clone(&events)));
@@ -54,7 +58,10 @@ fn multiline_warning_contains_counts_and_preserves_the_styled_first_line() {
         for tail_bytes in [8, 128 * 1024] {
             let tail = "x".repeat(tail_bytes);
             let input = format!("\x1b[31mfirst\x1b[0m\n{tail}\nlast");
-            assert_eq!(ansi_escape_line(&input), Line::from("first".red()));
+            assert_eq!(
+                ansi_escape_line(&input),
+                Line::from("first".fg(ratatui::style::Color::Indexed(1)))
+            );
             expected_events.push(CapturedEvent {
                 level: Level::WARN,
                 fields: BTreeMap::from([

@@ -8,7 +8,7 @@ expression: presentations
             Span::from("plain "),
             Span::from("plain").fg(Color::Reset).underlined(),
             Span::from(" "),
-            Span::from("code").fg(Color::Rgb(166, 227, 161)),
+            Span::from("code").fg(Color::Indexed(71)),
             Span::from(" "),
             Span::from("code").fg(Color::Reset).underlined(),
         ]),
@@ -16,7 +16,7 @@ expression: presentations
         Line::from_iter([
             Span::from(" "),
             Span::from("Resource"),
-        ]).fg(Color::Rgb(249, 226, 175)).bold(),
+        ]).fg(Color::Indexed(98)).bold(),
         Line::from(Span::from("━━━━━━━━━━").dim()),
         Line::from_iter([
             Span::from(" "),
@@ -31,7 +31,7 @@ expression: presentations
             Span::from("https://example.com").fg(Color::Reset).underlined(),
             Span::from(")"),
             Span::from(" "),
-            Span::from("code").fg(Color::Rgb(166, 227, 161)),
+            Span::from("code").fg(Color::Indexed(71)),
         ]),
         Line::from_iter([
             Span::from("code").fg(Color::Reset).underlined(),
@@ -43,7 +43,7 @@ expression: presentations
         Line::from_iter([
             Span::from(" "),
             Span::from("Resource"),
-        ]).fg(Color::Rgb(249, 226, 175)).bold(),
+        ]).fg(Color::Indexed(98)).bold(),
         Line::from(Span::from("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━").dim()),
         Line::from_iter([
             Span::from(" "),

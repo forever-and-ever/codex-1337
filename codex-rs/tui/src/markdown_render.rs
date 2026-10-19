@@ -2735,7 +2735,7 @@ mod tests {
             let has_rgb = rendered.lines.iter().any(|line| {
                 line.spans
                     .iter()
-                    .any(|s| matches!(s.style.fg, Some(ratatui::style::Color::Rgb(..))))
+                    .any(|s| s.style.fg.is_some_and(crate::warpaint::is_token))
             });
             assert!(
                 has_rgb,

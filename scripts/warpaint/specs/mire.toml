@@ -1,0 +1,40 @@
+stance = """
+Peat water at dusk and the corpse-candle over it: an olive-brown ground, cream ink, a
+pale blue flame for the voice, and the code in lantern amber, moss, rust and berry.
+"""
+
+[ground]
+hue = 98
+colorfulness = 2.8
+lightness = 15
+
+[ink]
+hue = 90
+colorfulness = 5
+contrast = 82
+
+[voice]
+colorfulness = 22
+lean = 0.25
+naturalism = 0.2
+
+[hues]
+accent = 200
+link = 215
+success = 165
+caution = 82
+failure = 20
+info = 240
+keyword = 200
+function = 75
+type = 130
+string = 40
+number = 340
+attribute = 260
+comment = 98
+prompt = 200
+aside = 40
+subagent = 130
+
+[livery]
+count = 8

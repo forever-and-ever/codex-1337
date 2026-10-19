@@ -5,38 +5,38 @@ expression: highlighted_tokens
 [
     (
         "cpp",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "cu",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "cuh",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "cppm",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "CPPM",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "cxxm",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "CxXm",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "ixx",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
     (
         "IXX",
-        "export| module math|;|export| |int| |sum|(|int| |a|,| |int| |b|)| |{| |return| a |+| b|;| |}",
+        "export|;|export|int|sum|(|int|a|,|int|b|)|{|return|+|;|}",
     ),
 ]

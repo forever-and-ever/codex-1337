@@ -139,7 +139,7 @@ fn prompt_accent_degrades_with_terminal_color_support() {
             Some(bg),
             StdoutColorLevel::Ansi256,
         ),
-        Some(Color::Indexed(_))
+        Some(Color::Rgb(..))
     ));
     for (tier, color_level, expected) in [
         (

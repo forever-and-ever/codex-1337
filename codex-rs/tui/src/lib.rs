@@ -244,6 +244,8 @@ mod terminal_visualization_instructions;
 mod text_formatting;
 mod text_selection;
 mod theme_picker;
+// TELOS(warpaint): thread colors are livery slots the pack paints.
+#[path = "warpaint/livery.rs"]
 mod thread_color;
 mod thread_transcript;
 mod token_usage;
@@ -269,6 +271,7 @@ mod updates;
 mod updates_cache;
 mod version;
 mod vim_search;
+mod warpaint;
 mod width;
 mod windows_sandbox;
 mod workspace_command;

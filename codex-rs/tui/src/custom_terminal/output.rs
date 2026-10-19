@@ -803,6 +803,37 @@ where
         false
     }
 
+    /// Repaints a frame bound when it was drawn, as the editor handoff repaints the screen it
+    /// leaves. Binding is not idempotent: at 256 colors a bound cell holds a fixed xterm index
+    /// that may equal a token, so the frame reaches the screen as it is, never bound again. It
+    /// was bound under the pack's default colors, which the handoff has given back to the
+    /// terminal, so they are published again first, ahead of the frame in the writer's order.
+    pub(crate) fn replay(&mut self, frame: &Buffer) -> io::Result<()> {
+        crate::warpaint::invest(&mut self.backend)?;
+        let screen_size = self.size()?;
+        if screen_size != self.last_known_screen_size {
+            self.resize(screen_size)?;
+        }
+        let area = self.viewport_area.intersection(frame.area);
+        let buffer = self.current_buffer_mut();
+        for position in area.positions() {
+            buffer[position] = frame[position].clone();
+        }
+        if self.capture_output_frame(
+            screen_size,
+            /*cursor_position*/ None,
+            SetCursorStyle::DefaultUserShape,
+        ) {
+            return Ok(());
+        }
+        if !self.hidden_cursor {
+            self.hide_cursor()?;
+        }
+        self.flush()?;
+        self.swap_buffers();
+        Backend::flush(&mut self.backend)
+    }
+
     pub(super) fn output_cursor_position(&mut self) -> io::Result<Position> {
         if is_active() {
             return crate::terminal_probe::cursor_position(crate::terminal_probe::DEFAULT_TIMEOUT)?
@@ -887,29 +918,38 @@ mod tests {
             size: Size,
         ) -> io::Result<Snapshot> {
             ui.set_viewport_area(buffer.area);
+            let operations = captured(ui, |ui| {
+                ui.draw_with_size(size, |frame| {
+                    *frame.buffer_mut() = buffer;
+                })
+            })?;
+            let mut frames = operations
+                .into_iter()
+                .filter_map(|operation| match operation {
+                    Operation::Frame(frame) => Some(frame),
+                    Operation::Bytes(_) => None,
+                });
+            let snapshot = frames.next().expect("one frame");
+            assert!(frames.next().is_none());
+            Ok(snapshot)
+        }
+
+        /// What `present` hands the writer, in order.
+        fn captured<B: Backend<Error = io::Error> + Write>(
+            ui: &mut Terminal<B>,
+            present: impl FnOnce(&mut Terminal<B>) -> io::Result<()>,
+        ) -> io::Result<Vec<Operation>> {
             CAPTURE.with_borrow_mut(|capture| {
                 *capture = Some(Capture {
                     id: FrameId(0),
                     operations: Vec::new(),
                 });
             });
-            ui.draw_with_size(size, |frame| {
-                *frame.buffer_mut() = buffer;
-            })?;
+            present(ui)?;
             let capture = CAPTURE
                 .with_borrow_mut(Option::take)
                 .expect("captured draw");
-            let mut frames =
-                capture
-                    .operations
-                    .into_iter()
-                    .filter_map(|operation| match operation {
-                        Operation::Frame(frame) => Some(frame),
-                        Operation::Bytes(_) => None,
-                    });
-            let snapshot = frames.next().expect("one frame");
-            assert!(frames.next().is_none());
-            Ok(snapshot)
+            Ok(capture.operations)
         }
 
         fn rule(area: Rect) -> Buffer {
@@ -1153,6 +1193,56 @@ mod tests {
             );
         }
 
-        Ok(())
+        // The editor handoff gives the terminal its own default colors back, then repaints the
+        // frame on screen as it was bound. At 256 colors a bound cell holds a fixed xterm index
+        // that may equal a token, here the canvas's, so the frame reaches the writer as it is,
+        // never bound again; and an invested frame paints the pack's ink and canvas as `Reset`,
+        // so the UI's terminal publishes the pack's colors again, ahead of the frame.
+        let own = crate::terminal_probe::DefaultColors {
+            fg: (0xe0, 0xe1, 0xe2),
+            bg: (0x10, 0x11, 0x12),
+        };
+        let published = |fg: (u8, u8, u8), bg: (u8, u8, u8)| {
+            [(10, fg), (11, bg)]
+                .map(|(slot, (r, g, b))| format!("\x1b]{slot};rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\"))
+                .concat()
+        };
+        crate::warpaint::note_terminal_colors(Some(own));
+        crate::terminal_palette::with_test_default_colors(own, || -> io::Result<()> {
+            let ink = crate::warpaint::rgb(crate::warpaint::Figure::Ink.color()).expect("ink");
+            let canvas = crate::warpaint::ground_rgb(crate::warpaint::Ground::Canvas);
+            assert_ne!((ink, canvas), (own.fg, own.bg));
+            let mut ui = Terminal::with_screen_size_and_cursor_position_for_test(
+                CrosstermBackend::new(stdout()),
+                screen,
+                Position::ORIGIN,
+            );
+            ui.set_viewport_area(area);
+            let drawn = captured(&mut ui, |ui| {
+                ui.draw_with_size(screen, |frame| *frame.buffer_mut() = rule(area))
+            })?;
+            let [Operation::Bytes(invested), Operation::Frame(frame)] = drawn.as_slice() else {
+                panic!("a drawn frame publishes the pack's colors, then reaches the writer");
+            };
+            assert_eq!(String::from_utf8_lossy(invested), published(ink, canvas));
+            let mut bound = frame.buffer.clone();
+            bound.set_string(
+                area.x,
+                area.y,
+                "x",
+                Style::default().fg(crate::warpaint::Ground::Canvas.color()),
+            );
+            let mut handoff = Vec::new();
+            crate::warpaint::revoke(&mut handoff)?;
+            assert_eq!(String::from_utf8_lossy(&handoff), published(own.fg, own.bg));
+            let replayed = captured(&mut ui, |ui| ui.replay(&bound))?;
+            let [Operation::Bytes(republished), Operation::Frame(frame)] = replayed.as_slice()
+            else {
+                panic!("a replay publishes the pack's colors, then hands the writer one frame");
+            };
+            assert_eq!(String::from_utf8_lossy(republished), published(ink, canvas));
+            assert_eq!(frame.buffer, bound);
+            Ok(())
+        })
     }
 }

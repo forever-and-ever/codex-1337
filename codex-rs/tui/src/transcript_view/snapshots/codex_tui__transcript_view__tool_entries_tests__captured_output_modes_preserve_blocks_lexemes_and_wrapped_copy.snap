@@ -185,7 +185,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 5, fg: Reset, bg: Rgb(43, 40, 45), underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Reset, bg: Indexed(39), underline: Reset, modifier: NONE,
         x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -214,7 +214,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 0, y: 5, fg: Rgb(195, 213, 217), bg: Reset, underline: Reset, modifier: NONE,
+        x: 0, y: 5, fg: Indexed(75), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 15, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

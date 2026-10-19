@@ -1,0 +1,40 @@
+stance = """
+Candlelight in an indigo room: bone ink on a cold ground, a violet voice, and the code in
+acid green, spectral cyan, candle amber and blood.
+"""
+
+[ground]
+hue = 275
+colorfulness = 4
+lightness = 13
+
+[ink]
+hue = 95
+colorfulness = 3.5
+contrast = 82
+
+[voice]
+colorfulness = 26
+lean = 0.3
+naturalism = 0.2
+
+[hues]
+accent = 305
+link = 215
+success = 165
+caution = 88
+failure = 20
+info = 235
+keyword = 305
+function = 130
+type = 205
+string = 80
+number = 345
+attribute = 255
+comment = 275
+prompt = 305
+aside = 80
+subagent = 130
+
+[livery]
+count = 8

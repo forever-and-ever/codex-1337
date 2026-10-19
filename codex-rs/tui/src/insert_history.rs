@@ -297,6 +297,8 @@ fn write_history_line<W: Write>(
     line: &HyperlinkLine,
     wrap_width: usize,
 ) -> io::Result<()> {
+    // TELOS(warpaint): scrollback receives the pack's colors, never its tokens.
+    let line = &crate::warpaint::bind_history_line(line, writer)?;
     let physical_rows = line.width().max(1).div_ceil(wrap_width) as u16;
     if physical_rows > 1 {
         queue!(writer, SavePosition)?;

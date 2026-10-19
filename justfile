@@ -53,6 +53,15 @@ fmt-check:
 fix *args:
     cargo clippy --fix --tests --allow-dirty {args}
 
+# Fail when a generated warpaint pack has drifted from the spec it was smelted from.
+warpaint-check:
+    @uv run {{ justfile_directory() }}/scripts/warpaint/smelt.py --check
+
+# Re-export the live captures warpaint's packs are judged on: one clock, locale and color depth.
+[unix]
+warpaint-capture:
+    TZ=UTC LC_ALL=C.UTF-8 FORCE_COLOR=3 just test -p codex-tui --lib --run-ignored only -E 'test(=app::warpaint_capture::conversation)'
+
 clippy *args:
     cargo clippy --tests {args}
 

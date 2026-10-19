@@ -255,10 +255,7 @@ async fn external_writer_view_shows_notice_instead_of_composer() {
     assert_eq!(frame[(0, 1)].bg, frame[(59, 4)].bg);
     assert_eq!(
         (frame[(3, 5)].fg, frame[(3, 5)].modifier),
-        (
-            crate::terminal_palette::rgb_color((230, 230, 230)),
-            ratatui::style::Modifier::BOLD
-        ),
+        (ratatui::style::Color::Reset, ratatui::style::Modifier::BOLD),
     );
     assert_eq!(frame[(5, 5)].modifier, ratatui::style::Modifier::empty());
     assert!(!widget.bottom_pane.composer_input_enabled());

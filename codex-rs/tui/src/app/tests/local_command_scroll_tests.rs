@@ -57,7 +57,7 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
         ThreadId::new(),
         app.config.cwd.to_path_buf(),
     ));
-    app.sync_tui_theme_selection("base16-ocean-dark".to_string());
+    app.sync_tui_theme_selection("rime".to_string());
     hold_older_history(&mut app, &mut tui);
     let held = transcript_buffer(&mut app);
 
@@ -88,7 +88,7 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
             app.handle_event(&mut tui, &mut server, event).await?;
         }
         if command == "/theme" {
-            assert_eq!(selected_theme, Some("base16-ocean-dark".to_string()));
+            assert_eq!(selected_theme, Some("rime".to_string()));
         }
         assert!(!app.chat_widget.has_active_view(), "{command}");
         assert!(!app.transcript_view.is_following(), "{command} closed");
@@ -123,13 +123,13 @@ async fn settings_picker_save_failures_reveal_their_errors() -> Result<()> {
     let mut tui = crate::tui::test_support::make_test_tui()?;
     let mut server = start_config_write_test_app_server(&app).await?;
     tui.set_owned_screen(/*owned*/ true)?;
-    app.sync_tui_theme_selection("base16-ocean-dark".to_string());
+    app.sync_tui_theme_selection("rime".to_string());
     // Break writes only after startup, as can happen when the config is edited externally.
     std::fs::write(app.local_settings.user_config_path.as_path(), "[broken")?;
 
     for event in [
         AppEvent::SyntaxThemeSelected {
-            name: "base16-ocean-dark".into(),
+            name: "rime".into(),
         },
         AppEvent::StatusLineSetup {
             items: vec![],

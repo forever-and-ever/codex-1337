@@ -1,0 +1,40 @@
+stance = """
+A field strong enough to light the sky: a blue-black ground, a cold aurora for the voice,
+and the code in auroral magenta, nitrogen violet, flare orange and ice.
+"""
+
+[ground]
+hue = 225
+colorfulness = 3
+lightness = 12
+
+[ink]
+hue = 230
+colorfulness = 2.5
+contrast = 86
+
+[voice]
+colorfulness = 30
+lean = 0.2
+naturalism = 0.25
+
+[hues]
+accent = 185
+link = 210
+success = 160
+caution = 92
+failure = 20
+info = 240
+keyword = 185
+function = 320
+type = 270
+string = 110
+number = 30
+attribute = 215
+comment = 230
+prompt = 185
+aside = 320
+subagent = 270
+
+[livery]
+count = 8

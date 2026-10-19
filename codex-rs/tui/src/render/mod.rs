@@ -5,7 +5,6 @@ pub(crate) mod header;
 pub(crate) mod highlight;
 pub(crate) mod line_utils;
 pub(crate) mod live_section;
-mod model_themes;
 pub(crate) mod renderable;
 pub(crate) mod ruled_sections;
 

@@ -513,6 +513,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: upstream's async-question integration replaced the fork's implementation at the 0.154.0 merge (06ae488041); the retained async editor is now fork-owned, while 0.162 #51449 and #49804 edit the upstream `request_user_input/mod.rs`.
 - Evidence: 193bbc9b49.
 
+### warpaint
+
+- Telos: one pack paints every color the TUI shows, and wearing another repaints everything, committed transcript cells included.
+- Holds: cells hold warpaint tokens (`Color::Indexed` in reserved ranges) or upstream's named colors, never a pack color, and the binder resolves them at flush against the pack the active syntax theme was resolved from. A bound frame never meets the binder again; the editor handoff repaints it through `Terminal::replay` (`custom_terminal/output.rs`). No upstream code paints an extended index; `best_color` and contrast correction return RGB at 256 colors. Upstream's palette helpers still decide whether to paint, and wherever they settle on a color of their own, that role's token replaces it. Tool output is quarantined at ingestion into indices below 16 and RGB. Every painted pair is declared in `warpaint/pairs.rs` and proven by `scripts/warpaint`. The terminal's own default colors return whenever the TUI lets go of the screen.
+- Owners: `codex-rs/tui/src/warpaint.rs`, `codex-rs/tui/src/warpaint/` (`paint.rs`, `pairs.rs`, `bind.rs`, `pack.rs`, `investiture.rs`, `scopes.rs`, `livery.rs`), `codex-rs/tui/src/style/speaker_backgrounds.rs`, `codex-rs/ansi-escape/src/quarantine.rs`, `codex-rs/tui/src/app/warpaint_capture.rs`, `scripts/warpaint/`.
+- Tripwire: `roles_json_matches_the_declaration` (`codex-rs/tui/src/warpaint/pairs.rs`), `embedded_packs_are_the_pack_directory` (`codex-rs/tui/src/warpaint/pack.rs`), `revoke_returns_the_colors_the_terminal_reported` (`codex-rs/tui/src/warpaint/investiture.rs`), `blocked_writer_keeps_ui_live_and_preserves_latest_frame_and_barrier_order` (`codex-rs/tui/src/custom_terminal/output.rs`) for the replay, `just warpaint-check`. Token painting at seams: noisy (snapshots showing `Indexed(..)`).
+- Pressure: upstream palette helpers in `style.rs`, `style/contrast.rs`, `diff_render.rs`, the activity chart and the composer sparkle derive colors from the terminal's default colors. A new helper that paints its own RGB escapes the pack until it is repainted; one that paints `Color::Indexed` collides with the token ranges. `render/highlight.rs` lost two-face's bundled theme registry and custom `.tmTheme` loading: upstream edits to either conflict as modify/delete, and both stay deleted.
+- Evidence: 6898f632bc.
+
 ## Merge hygiene
 
 ### minimal-upstream-delta
@@ -626,7 +635,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/app/startup.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
-- `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread
+- `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread
 - `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
@@ -650,11 +659,11 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/exec_cell/compact.rs`: fullscreen-only
 - `codex-rs/tui/src/keymap.rs`: key-doctrine
 - `codex-rs/tui/src/keymap/bindings.rs`: key-doctrine
-- `codex-rs/tui/src/lib.rs`: shared-daemon
+- `codex-rs/tui/src/lib.rs`: shared-daemon, warpaint
 - `codex-rs/tui/src/transcript_view/selection.rs`: key-doctrine
 - `codex-rs/tui/src/tui/frame_requester.rs`: attention-gated-painting, fast-ui-thread
 - `codex-rs/windows-sandbox-rs/Cargo.toml`: removed-stacks
-- `justfile`: hermetic-test-runs
+- `justfile`: hermetic-test-runs, warpaint
 - `codex-rs/protocol/src/tool_name.rs`: canonical-tool-identity
 - `codex-rs/core/src/tools/registry.rs`: startup-tool-ceiling
 - `codex-rs/tui/src/temporary_structured_request.rs`: startup-tool-ceiling
@@ -662,14 +671,45 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/compact.rs`: compaction-is-not-input
 - `codex-rs/thread-store/src/local/revert_thread.rs`: accepted-agent-mail
 - `codex-rs/core/src/session/handlers.rs`: accepted-agent-mail
-- `codex-rs/tui/src/bottom_pane/chat_composer.rs`: client-only-shell
+- `codex-rs/tui/src/bottom_pane/chat_composer.rs`: client-only-shell, warpaint
 - `codex-rs/app-server/src/lib.rs`: managed-process-visibility, startup-tool-ceiling
+- `codex-rs/ansi-escape/src/lib.rs`: warpaint
+- `codex-rs/ansi-escape/src/ansi_escape_tests.rs`: warpaint
+- `codex-rs/tui/src/insert_history.rs`: warpaint
+- `codex-rs/tui/src/terminal_palette.rs`: warpaint
+- `codex-rs/tui/src/style.rs`: warpaint
+- `codex-rs/tui/src/style/contrast.rs`: warpaint
+- `codex-rs/tui/src/diff_render.rs`: warpaint
+- `codex-rs/tui/src/render/highlight.rs`: warpaint
+- `codex-rs/tui/src/render/mod.rs`: warpaint
+- `codex-rs/tui/src/theme_picker.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/mod.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/chat_composer/sparkle_field.rs`: warpaint
+- `codex-rs/tui/src/analytics/activity_chart/palette.rs`: warpaint
+- `codex-rs/tui/src/analytics/activity_chart/palette_tests.rs`: warpaint
+- `codex-rs/tui/src/thread_color.rs` (deleted): warpaint
+- `codex-rs/tui/src/thread_color_tests.rs` (deleted): warpaint
+- `codex-rs/tui/src/render/model_themes.rs` (deleted): warpaint
+- `codex-rs/tui/src/render/highlight_model_tests.rs` (deleted): warpaint
+- `codex-rs/tui/src/theme_picker_model_tests.rs` (deleted): warpaint
+- `codex-rs/tui/assets/themes/*.tmTheme` (deleted): warpaint
+- `codex-rs/tui/src/app/tests/local_command_scroll_tests.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/chat_composer/history_search.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/chat_composer/sparkle_tests.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/effort_ignition_tests.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/status_line_style.rs`: warpaint
+- `codex-rs/tui/src/chatwidget/rendering_tests.rs`: warpaint
+- `codex-rs/tui/src/key_hint_label_tests.rs`: warpaint
+- `codex-rs/tui/src/markdown_render.rs`: warpaint
+- `codex-rs/tui/src/markdown_render_tests.rs`: warpaint
+- `codex-rs/tui/src/resume_picker_color_tests.rs`: warpaint
+- `codex-rs/tui/src/app.rs`: warpaint
 
 - `codex-rs/tui/src/chatwidget/streaming.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view.rs`: fast-ui-thread
-- `codex-rs/tui/src/terminal_probe.rs`: fast-ui-thread
+- `codex-rs/tui/src/terminal_probe.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/tui/event_stream.rs`: fast-ui-thread
-- `codex-rs/tui/src/tui.rs`: fast-ui-thread
+- `codex-rs/tui/src/tui.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/transcript_view/layout_tests.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/input.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/disclosure.rs`: fast-ui-thread
@@ -833,7 +873,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/history_cell/code_mode_projection.rs`: fullscreen-only
 - `codex-rs/tui/src/history_cell/preamble.rs`: token-bills
 - `codex-rs/tui/src/history_cell/thought.rs`: token-bills
-- `codex-rs/tui/src/style/speaker_backgrounds.rs`: token-bills
+- `codex-rs/tui/src/style/speaker_backgrounds.rs`: token-bills, warpaint
 - `codex-rs/tui/src/transcript_view/feed.rs`: token-bills
 - `codex-rs/tui/src/reload/admission.rs`: reload-host
 - `codex-rs/tui/src/reload/deadline.rs`: reload-host
@@ -903,3 +943,8 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/terminal_probe/bracketed_paste.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/responding.rs`: stable-feed-publication
 - `codex-rs/tui/src/render/header.rs`: stable-feed-publication
+- `codex-rs/tui/src/warpaint.rs`: warpaint
+- `codex-rs/tui/src/warpaint/`: warpaint
+- `codex-rs/ansi-escape/src/quarantine.rs`: warpaint
+- `codex-rs/tui/src/app/warpaint_capture.rs`: warpaint
+- `scripts/warpaint/`: warpaint

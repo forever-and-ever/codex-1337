@@ -8,7 +8,6 @@ use crate::color::perceptual_distance;
 use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::XTERM_COLORS;
 use crate::terminal_palette::best_color_for_level;
-use crate::terminal_palette::indexed_color;
 use crate::terminal_palette::rgb_color;
 use ratatui::style::Color;
 use ratatui::style::Style;
@@ -121,7 +120,8 @@ pub(super) fn foreground(
                     perceptual_distance(**a, preferred)
                         .total_cmp(&perceptual_distance(**b, preferred))
                 })
-                .map_or(Color::Reset, |(index, _)| indexed_color(index as u8)),
+                // TELOS(warpaint): an extended index would read as a token; the binder quantizes.
+                .map_or(Color::Reset, |(_, rgb)| rgb_color(*rgb)),
             (Some(_), StdoutColorLevel::Ansi16 | StdoutColorLevel::Unknown) => Color::Reset,
         };
         if cache.len() >= MAX_CACHED_FOREGROUNDS {

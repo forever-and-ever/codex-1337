@@ -1,0 +1,40 @@
+stance = """
+The floor of the trench: navy-black water lit by its own animals. Cyan is the light that
+moves; gold, coral and violet are the lures.
+"""
+
+[ground]
+hue = 255
+colorfulness = 4.5
+lightness = 15
+
+[ink]
+hue = 225
+colorfulness = 3
+contrast = 84
+
+[voice]
+colorfulness = 25
+lean = 0.3
+naturalism = 0.15
+
+[hues]
+accent = 205
+link = 222
+success = 165
+caution = 88
+failure = 20
+info = 245
+keyword = 290
+function = 205
+type = 172
+string = 95
+number = 30
+attribute = 330
+comment = 250
+prompt = 205
+aside = 290
+subagent = 172
+
+[livery]
+count = 8

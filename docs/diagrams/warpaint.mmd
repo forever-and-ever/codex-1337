@@ -1,0 +1,40 @@
+flowchart TB
+  subgraph authoring["authoring · python, outside the binary"]
+    roles["roles.json<br/>grounds · figures · syntax · ramps<br/>every painted pair"]
+    spec["specs/NAME.toml<br/>ground · ink · voice<br/>authored hues · livery"]
+    smelt["smelt.py · laws.py · appearance.py<br/>CAM16 Hellwig 2022 + HK · APCA-W3 0.98G<br/>floors · rings · dichromat distinctness · ramps"]
+    proof["proof.py → proofs/NAME.md<br/>Lc per declared pair · 256 projection · distinctness"]
+    eye["swatch.py · flip.py<br/>captures/*.json"]
+    roles --> smelt
+    spec --> smelt --> proof
+  end
+
+  pack["warpaint/packs/NAME.toml<br/>ground · figure · syntax tables<br/>livery · heat · terminal ramps"]
+  smelt --> pack
+  pack --> eye
+
+  subgraph binary["codex-tui"]
+    paint["paint.rs<br/>Ground · Figure · Syntax · heat · livery<br/>tokens: Color::Indexed in reserved ranges"]
+    pairs["pairs.rs<br/>every ground each foreground lands on"]
+    widgets["widgets and transcript cells<br/>paint tokens and upstream's named colors"]
+    seams["upstream seams<br/>repaint: style.rs · diff_render · activity chart<br/>thread_color · sparkle"]
+    scopes["scope theme<br/>TextMate scopes → tokens"]
+    tool["codex-ansi-escape quarantine<br/>tool output → indices 0..16 · RGB"]
+    worn["pack worn<br/>the active syntax theme's · tui.theme · /theme preview"]
+    binder["binder at flush<br/>tokens · named chrome · dim ink · terminal ramp<br/>truecolor · 256 · sixteen colors"]
+    osc["investiture<br/>OSC 10 ink · OSC 11 canvas · restored on exit"]
+
+    paint --> seams --> widgets
+    paint --> scopes --> widgets
+    tool --> widgets
+    widgets --> binder
+    worn --> binder
+    worn --> osc
+  end
+
+  paint --> pairs
+  pairs -->|roles_json test| roles
+  pack -->|include_str!| worn
+  widgets -->|warpaint-capture| eye
+  binder --> term["the terminal"]
+  osc --> term

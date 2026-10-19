@@ -37,12 +37,25 @@ pub(super) struct TokenActivityPalette {
 
 impl TokenActivityPalette {
     pub(super) fn current() -> Self {
-        Self::from_parts(
+        let mut palette = Self::from_parts(
             default_fg(),
             default_bg(),
             effective_stdout_color_level(),
             theme_activity_style(),
-        )
+        );
+        // TELOS(warpaint): where a gradient is shown, it is the pack's: an empty day wears the
+        // rule and activity climbs the heat ramp.
+        if palette.uses_color {
+            palette.styles = std::array::from_fn(|level| {
+                Style::default().fg(match level {
+                    0 => crate::warpaint::Figure::Rule.color(),
+                    level => crate::warpaint::heat(level - 1),
+                })
+            });
+            palette.bar_style =
+                Style::default().fg(crate::warpaint::heat(crate::warpaint::HEAT_STEPS - 1));
+        }
+        palette
     }
 
     fn from_parts(
@@ -142,7 +155,7 @@ fn theme_activity_style() -> Style {
 fn activity_anchor_rgb(style: Style) -> Option<(u8, u8, u8)> {
     match style.fg? {
         Color::Rgb(r, g, b) => Some((r, g, b)),
-        _ => None,
+        token => crate::warpaint::rgb(token),
     }
 }
 

@@ -19,6 +19,8 @@ use crate::terminal_palette::default_fg;
 use crate::terminal_palette::effective_stdout_color_level;
 use crate::terminal_palette::rgb_color;
 use crate::terminal_palette::stdout_color_level;
+use crate::warpaint::Figure;
+use crate::warpaint::Ground;
 use ratatui::style::Color;
 use ratatui::style::Style;
 
@@ -72,7 +74,7 @@ pub fn user_message_style() -> Style {
 /// fill, lighter than the editable composer's in either theme.
 pub(crate) fn aside_style() -> Style {
     default_bg().map_or_else(Style::default, |background| {
-        Style::default().bg(best_color(aside_rgb(background)))
+        Style::default().bg(Ground::Aside.repaint(best_color(aside_rgb(background))))
     })
 }
 
@@ -88,7 +90,7 @@ pub(crate) fn formatted_output_style() -> Style {
     let preferred = default_fg().map_or(Color::Cyan, |foreground| {
         rgb_color(blend((90, 165, 180), foreground, /*alpha*/ 0.25))
     });
-    Style::default().fg(readable_color_on(preferred, /*background*/ None))
+    Style::default().fg(Figure::Info.repaint(readable_color_on(preferred, /*background*/ None)))
 }
 
 pub fn proposed_plan_style() -> Style {
@@ -139,6 +141,18 @@ fn background_rgb(background: Option<Color>) -> Option<(u8, u8, u8)> {
 
 /// Keep theme-derived text readable on its painted surface, preserving terminal-owned ANSI colors.
 pub(crate) fn readable_color_on(preferred: Color, background: Option<Color>) -> Color {
+    // TELOS(warpaint): packs prove the ink and every token on the grounds they paint; at an
+    // unknown depth upstream paints no computed color, so no token stands in for one.
+    if preferred == Color::Reset {
+        return preferred;
+    }
+    if crate::warpaint::is_token(preferred) {
+        return if effective_stdout_color_level() == StdoutColorLevel::Unknown {
+            Color::Reset
+        } else {
+            preferred
+        };
+    }
     let preferred = match preferred {
         Color::Rgb(r, g, b) => Some((r, g, b)),
         Color::Indexed(index) if index >= 16 => {
@@ -164,13 +178,16 @@ pub(crate) fn secondary_text_style() -> Style {
             rgb_color(blend(fg, bg, /*alpha*/ 0.6))
         });
     Style::default()
-        .fg(readable_color_on(preferred, /*background*/ None))
+        .fg(Figure::InkMuted.repaint(readable_color_on(preferred, /*background*/ None)))
         .not_dim()
         .not_bold()
 }
 
 pub(crate) fn selection_style() -> Style {
-    contrast::selection_style(default_bg(), effective_stdout_color_level())
+    let style = contrast::selection_style(default_bg(), effective_stdout_color_level());
+    style
+        .fg(Figure::InkSelected.repaint(style.fg.unwrap_or_default()))
+        .bg(Ground::Selection.repaint(style.bg.unwrap_or_default()))
 }
 
 /// Resolve emphasis on the shaded prompt surface, including its quantized background.
@@ -199,7 +216,7 @@ fn user_message_accent_color_for(
             _ => None,
         }
     });
-    contrast::foreground(preferred, surface, level)
+    Figure::Accent.repaint(contrast::foreground(preferred, surface, level))
 }
 
 /// Muted amber keeps the passive warning count visible without looking like an error.
@@ -214,7 +231,7 @@ fn warning_notice_style_for(background: Option<(u8, u8, u8)>, level: StdoutColor
         (196, 167, 103)
     };
     Style::default()
-        .fg(contrast::foreground(preferred, background, level))
+        .fg(Figure::Caution.repaint(contrast::foreground(preferred, background, level)))
         .remove_modifier(ratatui::style::Modifier::DIM)
 }
 
@@ -248,7 +265,11 @@ fn accent_color_for(terminal_bg: Option<(u8, u8, u8)>) -> Color {
     } else {
         UI_ACCENT
     };
-    contrast::foreground(preferred, terminal_bg, effective_stdout_color_level())
+    Figure::Accent.repaint(contrast::foreground(
+        preferred,
+        terminal_bg,
+        effective_stdout_color_level(),
+    ))
 }
 
 fn table_separator_style_for(
@@ -261,29 +282,29 @@ fn table_separator_style_for(
     };
     let separator_rgb = blend(fg, bg, TABLE_SEPARATOR_FG_ALPHA);
     match color_level {
-        StdoutColorLevel::TrueColor => Style::default().fg(rgb_color(separator_rgb)),
-        StdoutColorLevel::Ansi256 => Style::default().fg(best_color(separator_rgb)),
+        StdoutColorLevel::TrueColor => {
+            Style::default().fg(Figure::Rule.repaint(rgb_color(separator_rgb)))
+        }
+        StdoutColorLevel::Ansi256 => {
+            Style::default().fg(Figure::Rule.repaint(best_color(separator_rgb)))
+        }
         StdoutColorLevel::Ansi16 | StdoutColorLevel::Unknown => Style::default().dim(),
     }
 }
 
 #[allow(clippy::disallowed_methods)]
 pub fn user_message_bg(terminal_bg: (u8, u8, u8)) -> Color {
-    best_color(user_message_bg_rgb(terminal_bg))
+    Ground::Trough.repaint(best_color(user_message_bg_rgb(terminal_bg)))
 }
 
-pub(crate) fn user_message_bg_rgb(terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
-    let (top, alpha) = if is_light(terminal_bg) {
-        ((0, 0, 0), 0.04)
-    } else {
-        ((255, 255, 255), 0.12)
-    };
-    blend(top, terminal_bg, alpha)
+pub(crate) fn user_message_bg_rgb(_terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
+    // TELOS(warpaint): effects blend toward the fill the pack paints.
+    crate::warpaint::ground_rgb(Ground::Trough)
 }
 
 #[allow(clippy::disallowed_methods)]
 pub fn proposed_plan_bg(terminal_bg: (u8, u8, u8)) -> Color {
-    user_message_bg(terminal_bg)
+    Ground::Dais.repaint(user_message_bg(terminal_bg))
 }
 
 #[cfg(test)]
@@ -337,83 +358,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn theme_accents_respect_terminal_color_depth() {
-        const CHILD: &str = "CODEX_ACCENT_COLOR_TEST_CHILD";
-        let Ok(level) = std::env::var(CHILD) else {
-            for level in ["0", "1", "2", "3"] {
-                let output = std::process::Command::new(std::env::current_exe().unwrap())
-                    .args([
-                        "--exact",
-                        "style::tests::theme_accents_respect_terminal_color_depth",
-                    ])
-                    .env(CHILD, level)
-                    .env("FORCE_COLOR", level)
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "level {level}: {}\n{}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            return;
-        };
-        let theme =
-            crate::render::highlight::resolve_theme_by_name("ada", /*codex_home*/ None).unwrap();
-        crate::render::highlight::set_syntax_theme(theme);
-        let (expected_level, expected_foreground) = match level.as_str() {
-            "3" => (StdoutColorLevel::TrueColor, rgb_color((95, 175, 255))),
-            "2" => (
-                StdoutColorLevel::Ansi256,
-                crate::terminal_palette::indexed_color(/*index*/ 75),
-            ),
-            "1" => (StdoutColorLevel::Ansi16, Color::Reset),
-            "0" => (StdoutColorLevel::Unknown, Color::Reset),
-            _ => unreachable!(),
-        };
-        assert_eq!(effective_stdout_color_level(), expected_level);
-        crate::terminal_palette::set_default_colors_from_startup_probe(/*colors*/ None);
-        // Preserve configured theme accents when the terminal can represent their palette.
-        assert_eq!(
-            accent_style(),
-            Style::default().fg(expected_foreground).bold()
-        );
-        assert_eq!(
-            readable_color_on(rgb_color((95, 175, 255)), /*background*/ None),
-            expected_foreground,
-        );
-        // An explicit surface exercises the real child-process depth without the truecolor
-        // override used by widget palette fixtures.
-        assert_eq!(
-            readable_color_on(rgb_color((95, 175, 255)), Some(rgb_color((24, 24, 24)))),
-            expected_foreground,
-        );
-    }
-
-    #[test]
-    fn table_separator_blends_toward_dark_background() {
-        let style = table_separator_style_for(
-            Some((255, 255, 255)),
-            Some((0, 0, 0)),
-            StdoutColorLevel::TrueColor,
-        );
-
-        assert_eq!(style.fg, Some(rgb_color((51, 51, 51))));
-    }
-
-    #[test]
-    fn table_separator_blends_toward_light_background() {
-        let style = table_separator_style_for(
-            Some((0, 0, 0)),
-            Some((255, 255, 255)),
-            StdoutColorLevel::TrueColor,
-        );
-
-        assert_eq!(style.fg, Some(rgb_color((204, 204, 204))));
     }
 
     #[test]

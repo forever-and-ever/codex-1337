@@ -431,7 +431,7 @@ mod tests {
             return;
         };
         let theme = crate::render::highlight::resolve_theme_by_name(
-            "coldark-dark",
+            crate::warpaint::DEFAULT_PACK,
             /*codex_home*/ None,
         )
         .unwrap();

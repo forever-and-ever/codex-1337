@@ -1,0 +1,40 @@
+stance = """
+A discharge tube in a dark room: violet-black glass, magenta arcs and a cold cyan
+afterimage. The loudest pack, and still one voice rather than noise.
+"""
+
+[ground]
+hue = 292
+colorfulness = 5
+lightness = 13
+
+[ink]
+hue = 290
+colorfulness = 3
+contrast = 86
+
+[voice]
+colorfulness = 32
+lean = 0.2
+naturalism = 0.2
+
+[hues]
+accent = 330
+link = 200
+success = 165
+caution = 88
+failure = 20
+info = 240
+keyword = 320
+function = 200
+type = 165
+string = 110
+number = 50
+attribute = 275
+comment = 290
+prompt = 330
+aside = 200
+subagent = 275
+
+[livery]
+count = 8

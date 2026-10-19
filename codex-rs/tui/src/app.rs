@@ -317,6 +317,9 @@ mod warming;
 #[cfg(test)]
 #[path = "app/warnings_tests.rs"]
 mod warnings_tests;
+// TELOS(warpaint): packs are judged on frames this App draws.
+#[cfg(test)]
+mod warpaint_capture;
 mod working_directory;
 
 use self::agent_navigation::AgentNavigationDirection;

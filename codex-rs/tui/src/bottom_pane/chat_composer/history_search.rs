@@ -937,10 +937,7 @@ mod tests {
                 assert_eq!(query_style.fg, Some(ratatui::style::Color::Cyan));
 
                 let enter_style = line.spans[3].style;
-                assert_eq!(
-                    enter_style.fg,
-                    Some(crate::terminal_palette::rgb_color((240, 240, 240)))
-                );
+                assert_eq!(enter_style.fg, Some(ratatui::style::Color::Reset));
                 assert!(enter_style.add_modifier.contains(Modifier::BOLD));
                 assert!(enter_style.sub_modifier.contains(Modifier::DIM));
 
@@ -951,10 +948,7 @@ mod tests {
                 assert!(separator_style.add_modifier.contains(Modifier::DIM));
 
                 let esc_style = line.spans[6].style;
-                assert_eq!(
-                    esc_style.fg,
-                    Some(crate::terminal_palette::rgb_color((240, 240, 240)))
-                );
+                assert_eq!(esc_style.fg, Some(ratatui::style::Color::Reset));
                 assert!(esc_style.add_modifier.contains(Modifier::BOLD));
                 assert!(esc_style.sub_modifier.contains(Modifier::DIM));
 

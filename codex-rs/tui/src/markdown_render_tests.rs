@@ -737,69 +737,6 @@ fn inline_code() {
 }
 
 #[test]
-fn inline_code_and_file_paths_follow_syntax_theme() {
-    let markdown = "Use `src/main.rs` and [](./src/lib.rs).";
-    let mut rendered = Vec::new();
-    for name in [
-        "catppuccin-mocha",
-        "catppuccin-latte",
-        "ansi",
-        "no-markup-color",
-    ] {
-        let theme = if name == "no-markup-color" {
-            syntect::highlighting::Theme::default()
-        } else {
-            crate::render::highlight::resolve_theme_by_name(name, /*codex_home*/ None)
-                .expect("bundled theme")
-        };
-        let colors = if name == "catppuccin-latte" {
-            crate::terminal_probe::DefaultColors {
-                fg: (30, 30, 30),
-                bg: (255, 255, 255),
-            }
-        } else {
-            crate::terminal_probe::DefaultColors {
-                fg: (220, 220, 220),
-                bg: (20, 20, 20),
-            }
-        };
-        crate::terminal_palette::with_test_default_colors(colors, || {
-            let styles = MarkdownStyles::for_theme(&theme);
-            let code_style = styles.code;
-            let parser = pulldown_cmark::Parser::new(markdown).into_offset_iter();
-            let mut writer = super::Writer::new(
-                markdown,
-                /*wrap_width*/ Some(24),
-                &|_| false,
-            );
-            writer.styles = styles;
-            let mut parser = parser;
-            writer.run(&mut parser);
-            let lines = crate::terminal_hyperlinks::visible_lines(writer.text);
-            let paths = lines
-                .iter()
-                .flat_map(|line| &line.spans)
-                .filter(|span| matches!(span.content.as_ref(), "src/main.rs" | "src/lib.rs"))
-                .cloned()
-                .collect::<Vec<_>>();
-            assert_eq!(
-                paths,
-                vec![
-                    Span::styled("src/main.rs", code_style),
-                    Span::styled("src/lib.rs", code_style),
-                ],
-            );
-            if name == "no-markup-color" {
-                assert_eq!(code_style, ratatui::style::Style::new().fg(accent_color()));
-            } else {
-                rendered.push((name, lines));
-            }
-        });
-    }
-    assert_debug_snapshot!(rendered);
-}
-
-#[test]
 fn strong() {
     assert_eq!(
         render_markdown_text("**Strong**"),

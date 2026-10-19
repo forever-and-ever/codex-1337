@@ -18,11 +18,11 @@ qualified forms.
   internal rendering. Its body is model-bound; its heading is human-only.
   Additional-tools Injections keep their definitions behind an independent,
   initially closed Raw Context fold. Older mixed captures
-  retain a legacy label rather than guessed section boundaries. User messages are
-  blue, assistant prose green, disclosed raw reasoning orange, inter-agent prose
-  yellow-green, and other incoming context purple. Verbatim tool-call source also
-  uses purple; syntax highlighting
-  alone remains Raw. Human-only headings,
+  retain a legacy label rather than guessed section boundaries. User messages,
+  assistant prose, disclosed raw reasoning, inter-agent prose and other incoming
+  context lie on the worn pack's prompt, response, reasoning, subagent and aside
+  grounds. Verbatim tool-call source also lies on the aside ground; syntax
+  highlighting alone remains Raw. Human-only headings,
   summaries, notices and diagnostic decoration
   use the terminal's default background, never grey or reverse video. Author
   color does not determine context inclusion. `/context` opens a read-only Context
@@ -286,3 +286,15 @@ OpenRouter bills per token. Codex sends it only requests for models the user
 chose, as a conversation's model or a subagent's. Work Codex starts on its own
 (approval review, web search, memories, titles, scoring) runs on the ChatGPT
 login or not at all.
+
+## Warpaint
+
+`[tui] theme` names a warpaint pack, which paints chrome, syntax and tool output alike;
+`/theme` previews packs and cancel restores the prior one. An unknown pack warns and the
+default, `hadal`, is worn. `docs/warpaint.md` describes the engine.
+
+Removed: foreign `.tmTheme` selection, the embedded `two_face` theme list,
+`$CODEX_HOME/themes/*.tmTheme` loading, model themes, adaptive light/dark theme choice,
+contrast-corrected colors (upstream's correction still decides whether a color is painted;
+the pack decides which), the `codex.accent` scope convention, and unsmelted packs from
+`$CODEX_HOME`. `two_face` remains solely for its extended syntax grammars.

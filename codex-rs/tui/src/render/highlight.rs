@@ -1,7 +1,7 @@
 //! Syntax highlighting engine for the TUI.
 //!
-//! Wraps [syntect] with the [two_face] grammar and theme bundles to provide
-//! ~250-language syntax highlighting and bundled color themes.  The module
+//! Wraps [syntect] with the [two_face] grammar bundle to provide ~250-language
+//! syntax highlighting; the themes are the fork's warpaint packs.  The module
 //! owns five process-global singletons:
 //!
 //! | Singleton | Type | Purpose |
@@ -27,7 +27,6 @@
 //! prevent pathological CPU/memory usage.  Callers must fall back to plain
 //! unstyled text.
 
-use super::model_themes;
 use ratatui::style::Color as RtColor;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
@@ -47,12 +46,10 @@ use syntect::highlighting::FontStyle;
 use syntect::highlighting::Highlighter;
 use syntect::highlighting::Style as SyntectStyle;
 use syntect::highlighting::Theme;
-use syntect::highlighting::ThemeSet;
 use syntect::parsing::Scope;
 use syntect::parsing::SyntaxReference;
 use syntect::parsing::SyntaxSet;
 use syntect::util::LinesWithEndings;
-use two_face::theme::EmbeddedThemeName;
 
 #[path = "highlight_streaming.rs"]
 mod streaming;
@@ -129,107 +126,26 @@ pub(crate) fn set_theme_override(
     warning
 }
 
-/// Check whether a theme name resolves to a bundled theme or a custom
-/// `.tmTheme` file.  Returns a user-facing warning when it does not.
+/// Check whether a theme name resolves to a warpaint pack. Returns a user-facing warning when it
+/// does not.
 pub(crate) fn validate_theme_name(name: Option<&str>, codex_home: Option<&Path>) -> Option<String> {
     let name = name?;
-    let custom_theme_path_display = codex_home
-        .map(|home| custom_theme_path(name, home).display().to_string())
-        .unwrap_or_else(|| format!("$CODEX_HOME/themes/{name}.tmTheme"));
     if resolve_theme_by_name(name, codex_home).is_some() {
         return None;
     }
-    // Custom themes must parse successfully; an unreadable/invalid file should
-    // still surface a startup warning so users can diagnose configuration issues.
-    if let Some(home) = codex_home {
-        let custom_path = custom_theme_path(name, home);
-        if custom_path.try_exists().unwrap_or(/*default*/ true) {
-            return Some(format!(
-                "Custom theme \"{name}\" at {custom_theme_path_display} could not \
-                 be loaded (invalid .tmTheme format). Falling back to the default theme."
-            ));
-        }
-    }
     Some(format!(
-        "Theme \"{name}\" not found. Using the default theme. \
-         To use a custom theme, place a .tmTheme file at \
-         {custom_theme_path_display}."
+        "Theme \"{name}\" not found. Using the default theme."
     ))
 }
 
-/// Map a kebab-case theme name to the corresponding `EmbeddedThemeName`.
-fn parse_theme_name(name: &str) -> Option<EmbeddedThemeName> {
-    match name {
-        "ansi" => Some(EmbeddedThemeName::Ansi),
-        "base16" => Some(EmbeddedThemeName::Base16),
-        "base16-eighties-dark" => Some(EmbeddedThemeName::Base16EightiesDark),
-        "base16-mocha-dark" => Some(EmbeddedThemeName::Base16MochaDark),
-        "base16-ocean-dark" => Some(EmbeddedThemeName::Base16OceanDark),
-        "base16-ocean-light" => Some(EmbeddedThemeName::Base16OceanLight),
-        "base16-256" => Some(EmbeddedThemeName::Base16_256),
-        "catppuccin-frappe" => Some(EmbeddedThemeName::CatppuccinFrappe),
-        "catppuccin-latte" => Some(EmbeddedThemeName::CatppuccinLatte),
-        "catppuccin-macchiato" => Some(EmbeddedThemeName::CatppuccinMacchiato),
-        "catppuccin-mocha" => Some(EmbeddedThemeName::CatppuccinMocha),
-        "coldark-cold" => Some(EmbeddedThemeName::ColdarkCold),
-        "coldark-dark" => Some(EmbeddedThemeName::ColdarkDark),
-        "dark-neon" => Some(EmbeddedThemeName::DarkNeon),
-        "dracula" => Some(EmbeddedThemeName::Dracula),
-        "github" => Some(EmbeddedThemeName::Github),
-        "gruvbox-dark" => Some(EmbeddedThemeName::GruvboxDark),
-        "gruvbox-light" => Some(EmbeddedThemeName::GruvboxLight),
-        "inspired-github" => Some(EmbeddedThemeName::InspiredGithub),
-        "1337" => Some(EmbeddedThemeName::Leet),
-        "monokai-extended" => Some(EmbeddedThemeName::MonokaiExtended),
-        "monokai-extended-bright" => Some(EmbeddedThemeName::MonokaiExtendedBright),
-        "monokai-extended-light" => Some(EmbeddedThemeName::MonokaiExtendedLight),
-        "monokai-extended-origin" => Some(EmbeddedThemeName::MonokaiExtendedOrigin),
-        "nord" => Some(EmbeddedThemeName::Nord),
-        "one-half-dark" => Some(EmbeddedThemeName::OneHalfDark),
-        "one-half-light" => Some(EmbeddedThemeName::OneHalfLight),
-        "solarized-dark" => Some(EmbeddedThemeName::SolarizedDark),
-        "solarized-light" => Some(EmbeddedThemeName::SolarizedLight),
-        "sublime-snazzy" => Some(EmbeddedThemeName::SublimeSnazzy),
-        "two-dark" => Some(EmbeddedThemeName::TwoDark),
-        "zenburn" => Some(EmbeddedThemeName::Zenburn),
-        _ => None,
-    }
-}
-
-/// Build the expected path for a custom theme file.
-fn custom_theme_path(name: &str, codex_home: &Path) -> PathBuf {
-    codex_home.join("themes").join(format!("{name}.tmTheme"))
-}
-
-/// Try to load a custom `.tmTheme` file from `{codex_home}/themes/{name}.tmTheme`.
-fn load_custom_theme(name: &str, codex_home: &Path) -> Option<Theme> {
-    ThemeSet::get_theme(custom_theme_path(name, codex_home)).ok()
-}
-
-fn adaptive_default_theme_selection() -> (EmbeddedThemeName, &'static str) {
-    match crate::terminal_palette::default_bg() {
-        Some(bg) if crate::color::is_light(bg) => {
-            (EmbeddedThemeName::CatppuccinLatte, "catppuccin-latte")
-        }
-        _ => (EmbeddedThemeName::CatppuccinMocha, "catppuccin-mocha"),
-    }
-}
-
-fn adaptive_default_embedded_theme_name() -> EmbeddedThemeName {
-    adaptive_default_theme_selection().0
-}
-
-/// Return the kebab-case name of the adaptive default syntax theme selected
-/// from terminal background lightness.
+/// Return the name of the default theme: warpaint's default pack.
 pub(crate) fn adaptive_default_theme_name() -> &'static str {
-    adaptive_default_theme_selection().1
+    crate::warpaint::DEFAULT_PACK
 }
 
 /// Build the theme from current override/default-theme settings.
 /// Extracted from the old `theme()` init closure so it can be reused.
 fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) -> Theme {
-    let ts = two_face::theme::extra();
-
     // Honor user-configured theme if valid.
     if let Some(name) = name {
         if let Some(theme) = resolve_theme_by_name(name, codex_home) {
@@ -238,7 +154,7 @@ fn resolve_theme_with_override(name: Option<&str>, codex_home: Option<&Path>) ->
         tracing::debug!("Theme \"{name}\" not recognized; using default theme");
     }
 
-    ts.get(adaptive_default_embedded_theme_name()).clone()
+    crate::warpaint::default_theme()
 }
 
 /// Build the theme from current override/default-theme settings.
@@ -390,23 +306,10 @@ pub(crate) fn configured_theme_name() -> String {
     adaptive_default_theme_name().to_string()
 }
 
-/// Resolve a theme name to a `Theme` (bundled or custom). Returns `None`
-/// when the name is unknown and no matching `.tmTheme` file exists.
-pub(crate) fn resolve_theme_by_name(name: &str, codex_home: Option<&Path>) -> Option<Theme> {
-    let ts = two_face::theme::extra();
-    // Bundled theme?
-    if let Some(embedded) = parse_theme_name(name) {
-        return Some(ts.get(embedded).clone());
-    }
-    // Custom .tmTheme file?
-    if let Some(home) = codex_home
-        && custom_theme_path(name, home)
-            .try_exists()
-            .unwrap_or(/*default*/ true)
-    {
-        return load_custom_theme(name, home);
-    }
-    model_themes::resolve(name)
+/// Resolve a theme name to the scope theme of the warpaint pack it names. Returns `None` when
+/// no pack has that name.
+pub(crate) fn resolve_theme_by_name(name: &str, _codex_home: Option<&Path>) -> Option<Theme> {
+    crate::warpaint::theme(name)
 }
 
 /// A theme available in the picker, either bundled or loaded from a custom
@@ -419,93 +322,15 @@ pub(crate) struct ThemeEntry {
     pub is_custom: bool,
 }
 
-/// List all available theme names: bundled themes + custom `.tmTheme` files
-/// found in `{codex_home}/themes/`.
-pub(crate) fn list_available_themes(codex_home: Option<&Path>) -> Vec<ThemeEntry> {
-    let mut entries: Vec<ThemeEntry> = BUILTIN_THEME_NAMES
-        .iter()
+/// List all available theme names: the warpaint packs.
+pub(crate) fn list_available_themes(_codex_home: Option<&Path>) -> Vec<ThemeEntry> {
+    crate::warpaint::pack_names()
         .map(|name| ThemeEntry {
             name: name.to_string(),
             is_custom: false,
         })
-        .collect();
-
-    // Discover custom themes on disk, deduplicating against builtins.
-    if let Some(home) = codex_home {
-        let themes_dir = home.join("themes");
-        if let Ok(read_dir) = std::fs::read_dir(&themes_dir) {
-            for entry in read_dir.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("tmTheme")
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                {
-                    let name = stem.to_string();
-                    let is_valid_theme = ThemeSet::get_theme(&path).is_ok();
-                    if is_valid_theme && !entries.iter().any(|e| e.name == name) {
-                        entries.push(ThemeEntry {
-                            name,
-                            is_custom: true,
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    // Existing custom files take precedence over the new bundled names.
-    for (name, _) in model_themes::THEMES {
-        if !entries.iter().any(|entry| entry.name == *name)
-            && resolve_theme_by_name(name, codex_home).is_some()
-        {
-            entries.push(ThemeEntry {
-                name: (*name).to_string(),
-                is_custom: codex_home.is_some_and(|home| custom_theme_path(name, home).exists()),
-            });
-        }
-    }
-
-    // Keep picker ordering stable across platforms/filesystems while sorting
-    // custom and bundled themes together, case-insensitively.
-    entries.sort_by_cached_key(|entry| (entry.name.to_ascii_lowercase(), entry.name.clone()));
-
-    entries
+        .collect()
 }
-
-/// All 32 bundled theme names in kebab-case, ordered alphabetically.
-const BUILTIN_THEME_NAMES: &[&str] = &[
-    "1337",
-    "ansi",
-    "base16",
-    "base16-256",
-    "base16-eighties-dark",
-    "base16-mocha-dark",
-    "base16-ocean-dark",
-    "base16-ocean-light",
-    "catppuccin-frappe",
-    "catppuccin-latte",
-    "catppuccin-macchiato",
-    "catppuccin-mocha",
-    "coldark-cold",
-    "coldark-dark",
-    "dark-neon",
-    "dracula",
-    "github",
-    "gruvbox-dark",
-    "gruvbox-light",
-    "inspired-github",
-    "monokai-extended",
-    "monokai-extended-bright",
-    "monokai-extended-light",
-    "monokai-extended-origin",
-    "nord",
-    "one-half-dark",
-    "one-half-light",
-    "solarized-dark",
-    "solarized-light",
-    "sublime-snazzy",
-    "two-dark",
-    "zenburn",
-];
 
 // -- Style conversion (syntect -> ratatui) ------------------------------------
 
@@ -777,7 +602,6 @@ pub(crate) fn highlight_code_to_styled_spans(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use std::str::FromStr;
     use syntect::highlighting::Color as SyntectColor;
@@ -795,61 +619,6 @@ mod tests {
         assert_eq!((current_syntax_theme(), syntax_theme_revision()), original);
     }
 
-    fn write_minimal_tmtheme(path: &Path) {
-        // Minimal valid .tmTheme plist (enough for syntect to parse).
-        std::fs::write(
-            path,
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>name</key><string>Test</string>
-<key>settings</key><array><dict>
-<key>settings</key><dict>
-<key>foreground</key><string>#FFFFFF</string>
-<key>background</key><string>#000000</string>
-</dict></dict></array>
-</dict></plist>"#,
-        )
-        .unwrap();
-    }
-
-    fn write_tmtheme_with_diff_backgrounds(
-        path: &Path,
-        inserted_scope: &str,
-        inserted_background: &str,
-        deleted_scope: &str,
-        deleted_background: &str,
-    ) {
-        let contents = format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>name</key><string>Custom Diff Theme</string>
-<key>settings</key><array>
-<dict>
-<key>settings</key><dict>
-<key>foreground</key><string>#FFFFFF</string>
-<key>background</key><string>#000000</string>
-</dict>
-</dict>
-<dict>
-<key>scope</key><string>{inserted_scope}</string>
-<key>settings</key><dict>
-<key>background</key><string>{inserted_background}</string>
-</dict>
-</dict>
-<dict>
-<key>scope</key><string>{deleted_scope}</string>
-<key>settings</key><dict>
-<key>background</key><string>{deleted_background}</string>
-</dict>
-</dict>
-</array>
-</dict></plist>"#
-        );
-        std::fs::write(path, contents).unwrap();
-    }
-
     /// Reconstruct plain text from highlighted Lines.
     fn reconstructed(lines: &[Line<'static>]) -> String {
         lines
@@ -862,25 +631,6 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
-    }
-
-    fn unique_foreground_colors_for_theme(theme_name: &str) -> Vec<String> {
-        let theme = resolve_theme_by_name(theme_name, /*codex_home*/ None)
-            .unwrap_or_else(|| panic!("expected built-in theme {theme_name} to resolve"));
-        let lines = highlight_to_line_spans_with_theme(
-            "fn main() { let answer = 42; println!(\"hello\"); }\n",
-            "rust",
-            &theme,
-        )
-        .expect("expected highlighted spans");
-        let mut colors: Vec<String> = lines
-            .iter()
-            .flat_map(|line| line.iter().filter_map(|span| span.style.fg))
-            .map(|fg| format!("{fg:?}"))
-            .collect();
-        colors.sort();
-        colors.dedup();
-        colors
     }
 
     fn theme_item(scope: &str, background: Option<(u8, u8, u8)>) -> ThemeItem {
@@ -1143,49 +893,6 @@ mod tests {
     }
 
     #[test]
-    fn ansi_family_themes_use_terminal_palette_colors_not_rgb() {
-        for theme_name in ["ansi", "base16", "base16-256"] {
-            let theme = resolve_theme_by_name(theme_name, /*codex_home*/ None)
-                .unwrap_or_else(|| panic!("expected built-in theme {theme_name} to resolve"));
-            let lines = highlight_to_line_spans_with_theme(
-                "fn main() { let answer = 42; println!(\"hello\"); }\n",
-                "rust",
-                &theme,
-            )
-            .expect("expected highlighted spans");
-            let mut has_non_default_fg = false;
-            for line in &lines {
-                for span in line {
-                    match span.style.fg {
-                        Some(RtColor::Rgb(..)) => {
-                            panic!("theme {theme_name} produced RGB foreground: {span:?}")
-                        }
-                        Some(_) => has_non_default_fg = true,
-                        None => {}
-                    }
-                }
-            }
-            assert!(
-                has_non_default_fg,
-                "theme {theme_name} should produce at least one non-default foreground color"
-            );
-        }
-    }
-
-    #[test]
-    fn ansi_family_foreground_palette_snapshot() {
-        let mut out = String::new();
-        for theme_name in ["ansi", "base16", "base16-256"] {
-            let colors = unique_foreground_colors_for_theme(theme_name);
-            out.push_str(&format!("{theme_name}:\n"));
-            for color in colors {
-                out.push_str(&format!("  {color}\n"));
-            }
-        }
-        assert_snapshot!("ansi_family_foreground_palette", out);
-    }
-
-    #[test]
     fn highlight_multiline_python() {
         let code = "def hello():\n    print(\"hi\")\n    return 42";
         let lines = highlight_code_to_lines(code, "python");
@@ -1399,290 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_theme_can_provide_diff_scope_backgrounds() {
-        let theme = resolve_theme_by_name("github", /*codex_home*/ None)
-            .expect("expected built-in GitHub theme to load");
-        let rgbs = diff_scope_backgrounds_for_theme(&theme);
-        assert!(
-            rgbs.inserted.is_some() && rgbs.deleted.is_some(),
-            "expected built-in theme to provide insert/delete backgrounds, got {rgbs:?}"
-        );
-    }
-
-    #[test]
-    fn custom_tmtheme_diff_scope_backgrounds_are_resolved() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        write_tmtheme_with_diff_backgrounds(
-            &themes_dir.join("custom-diff.tmTheme"),
-            "diff.inserted",
-            "#102030",
-            "markup.deleted",
-            "#405060",
-        );
-
-        let theme = resolve_theme_by_name("custom-diff", Some(dir.path()))
-            .expect("expected custom theme to resolve");
-        let rgbs = diff_scope_backgrounds_for_theme(&theme);
-        assert_eq!(
-            rgbs,
-            DiffScopeBackgrounds {
-                inserted: Some(DiffScopeBackground::Rgb((16, 32, 48))),
-                deleted: Some(DiffScopeBackground::Rgb((64, 80, 96))),
-            }
-        );
-    }
-
-    #[test]
-    fn parse_theme_name_covers_all_variants() {
-        let known = [
-            ("ansi", EmbeddedThemeName::Ansi),
-            ("base16", EmbeddedThemeName::Base16),
-            (
-                "base16-eighties-dark",
-                EmbeddedThemeName::Base16EightiesDark,
-            ),
-            ("base16-mocha-dark", EmbeddedThemeName::Base16MochaDark),
-            ("base16-ocean-dark", EmbeddedThemeName::Base16OceanDark),
-            ("base16-ocean-light", EmbeddedThemeName::Base16OceanLight),
-            ("base16-256", EmbeddedThemeName::Base16_256),
-            ("catppuccin-frappe", EmbeddedThemeName::CatppuccinFrappe),
-            ("catppuccin-latte", EmbeddedThemeName::CatppuccinLatte),
-            (
-                "catppuccin-macchiato",
-                EmbeddedThemeName::CatppuccinMacchiato,
-            ),
-            ("catppuccin-mocha", EmbeddedThemeName::CatppuccinMocha),
-            ("coldark-cold", EmbeddedThemeName::ColdarkCold),
-            ("coldark-dark", EmbeddedThemeName::ColdarkDark),
-            ("dark-neon", EmbeddedThemeName::DarkNeon),
-            ("dracula", EmbeddedThemeName::Dracula),
-            ("github", EmbeddedThemeName::Github),
-            ("gruvbox-dark", EmbeddedThemeName::GruvboxDark),
-            ("gruvbox-light", EmbeddedThemeName::GruvboxLight),
-            ("inspired-github", EmbeddedThemeName::InspiredGithub),
-            ("1337", EmbeddedThemeName::Leet),
-            ("monokai-extended", EmbeddedThemeName::MonokaiExtended),
-            (
-                "monokai-extended-bright",
-                EmbeddedThemeName::MonokaiExtendedBright,
-            ),
-            (
-                "monokai-extended-light",
-                EmbeddedThemeName::MonokaiExtendedLight,
-            ),
-            (
-                "monokai-extended-origin",
-                EmbeddedThemeName::MonokaiExtendedOrigin,
-            ),
-            ("nord", EmbeddedThemeName::Nord),
-            ("one-half-dark", EmbeddedThemeName::OneHalfDark),
-            ("one-half-light", EmbeddedThemeName::OneHalfLight),
-            ("solarized-dark", EmbeddedThemeName::SolarizedDark),
-            ("solarized-light", EmbeddedThemeName::SolarizedLight),
-            ("sublime-snazzy", EmbeddedThemeName::SublimeSnazzy),
-            ("two-dark", EmbeddedThemeName::TwoDark),
-            ("zenburn", EmbeddedThemeName::Zenburn),
-        ];
-        for (kebab, expected) in &known {
-            assert_eq!(
-                parse_theme_name(kebab),
-                Some(*expected),
-                "parse_theme_name({kebab:?}) did not return expected variant"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_theme_name_returns_none_for_unknown() {
-        assert_eq!(parse_theme_name("nonexistent-theme"), None);
-        assert_eq!(parse_theme_name(""), None);
-    }
-
-    #[test]
-    fn load_custom_theme_from_tmtheme_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        write_minimal_tmtheme(&themes_dir.join("test-custom.tmTheme"));
-        let theme = load_custom_theme("test-custom", dir.path());
-        assert!(theme.is_some(), "should load .tmTheme from themes dir");
-    }
-
-    #[test]
-    fn load_custom_theme_returns_none_for_missing() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(load_custom_theme("nonexistent", dir.path()).is_none());
-    }
-
-    #[test]
-    fn validate_theme_name_none_for_bundled() {
-        // Bundled themes should never produce a warning.
-        assert!(validate_theme_name(Some("dracula"), /*codex_home*/ None).is_none());
-        assert!(validate_theme_name(Some("nord"), Some(Path::new("/nonexistent"))).is_none());
-    }
-
-    #[test]
     fn validate_theme_name_none_when_no_override() {
         assert!(validate_theme_name(/*name*/ None, /*codex_home*/ None).is_none());
     }
-
-    #[test]
-    fn validate_theme_name_warns_for_missing_custom() {
-        let dir = tempfile::tempdir().unwrap();
-        let warning = validate_theme_name(Some("my-fancy"), Some(dir.path()));
-        assert!(warning.is_some(), "should warn when theme file is absent");
-        let msg = warning.unwrap();
-        assert!(
-            msg.contains("my-fancy"),
-            "warning should mention the theme name"
-        );
-    }
-
-    #[test]
-    fn validate_theme_name_none_when_custom_file_is_valid() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        write_minimal_tmtheme(&themes_dir.join("my-fancy.tmTheme"));
-        assert!(
-            validate_theme_name(Some("my-fancy"), Some(dir.path())).is_none(),
-            "should not warn when custom .tmTheme file parses successfully"
-        );
-    }
-
-    #[test]
-    fn validate_theme_name_warns_when_custom_file_is_invalid() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        std::fs::write(themes_dir.join("my-fancy.tmTheme"), "placeholder").unwrap();
-        let warning = validate_theme_name(Some("my-fancy"), Some(dir.path()));
-        assert!(
-            warning.is_some(),
-            "should warn when custom .tmTheme exists but cannot be parsed"
-        );
-        assert!(
-            warning
-                .as_deref()
-                .is_some_and(|msg| msg.contains("could not be loaded")),
-            "warning should explain that the theme file is invalid"
-        );
-    }
-
-    #[test]
-    fn list_available_themes_excludes_invalid_custom_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        write_minimal_tmtheme(&themes_dir.join("valid-custom.tmTheme"));
-        std::fs::write(themes_dir.join("broken-custom.tmTheme"), "not a plist").unwrap();
-
-        let entries = list_available_themes(Some(dir.path()));
-
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry.name == "valid-custom" && entry.is_custom),
-            "expected valid custom theme to be listed"
-        );
-        assert!(
-            !entries
-                .iter()
-                .any(|entry| entry.name == "broken-custom" && entry.is_custom),
-            "expected invalid custom theme to be excluded from list"
-        );
-    }
-
-    #[test]
-    fn list_available_themes_returns_stable_sorted_order() {
-        let dir = tempfile::tempdir().unwrap();
-        let themes_dir = dir.path().join("themes");
-        std::fs::create_dir(&themes_dir).unwrap();
-        write_minimal_tmtheme(&themes_dir.join("zzz-custom.tmTheme"));
-        write_minimal_tmtheme(&themes_dir.join("Aaa-custom.tmTheme"));
-        write_minimal_tmtheme(&themes_dir.join("mmm-custom.tmTheme"));
-
-        let entries = list_available_themes(Some(dir.path()));
-        let actual: Vec<(bool, String)> = entries
-            .iter()
-            .map(|entry| (entry.is_custom, entry.name.clone()))
-            .collect();
-
-        let mut expected = actual.clone();
-        expected.sort_by_cached_key(|entry| (entry.1.to_ascii_lowercase(), entry.1.clone()));
-
-        assert_eq!(
-            actual, expected,
-            "theme entries should be stable and sorted case-insensitively across built-in and custom themes"
-        );
-    }
-
-    #[test]
-    fn parse_theme_name_is_exhaustive() {
-        use two_face::theme::EmbeddedLazyThemeSet;
-
-        // Every variant in the embedded set must be reachable via parse_theme_name.
-        let all_variants = EmbeddedLazyThemeSet::theme_names();
-
-        // Guard: if two-face adds themes, this test forces us to update the mapping.
-        assert_eq!(
-            all_variants.len(),
-            32,
-            "two-face theme count changed — update parse_theme_name"
-        );
-
-        // Build the set of variants reachable through our kebab-case mapping.
-        let kebab_names = [
-            "ansi",
-            "base16",
-            "base16-eighties-dark",
-            "base16-mocha-dark",
-            "base16-ocean-dark",
-            "base16-ocean-light",
-            "base16-256",
-            "catppuccin-frappe",
-            "catppuccin-latte",
-            "catppuccin-macchiato",
-            "catppuccin-mocha",
-            "coldark-cold",
-            "coldark-dark",
-            "dark-neon",
-            "dracula",
-            "github",
-            "gruvbox-dark",
-            "gruvbox-light",
-            "inspired-github",
-            "1337",
-            "monokai-extended",
-            "monokai-extended-bright",
-            "monokai-extended-light",
-            "monokai-extended-origin",
-            "nord",
-            "one-half-dark",
-            "one-half-light",
-            "solarized-dark",
-            "solarized-light",
-            "sublime-snazzy",
-            "two-dark",
-            "zenburn",
-        ];
-        let mapped: Vec<EmbeddedThemeName> = kebab_names
-            .iter()
-            .map(|k| parse_theme_name(k).unwrap_or_else(|| panic!("unmapped kebab name: {k}")))
-            .collect();
-
-        // Every variant from two-face must appear in our mapped set.
-        for variant in all_variants {
-            assert!(
-                mapped.contains(variant),
-                "EmbeddedThemeName::{variant:?} has no kebab-case mapping in parse_theme_name"
-            );
-        }
-    }
 }
-
-#[cfg(test)]
-#[path = "highlight_model_tests.rs"]
-mod model_tests;

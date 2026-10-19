@@ -9,7 +9,6 @@ use ratatui::buffer::Buffer;
 use ratatui::buffer::CellDiffOption;
 use ratatui::layout::Position;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use unicode_width::UnicodeWidthStr;
 
 use crate::color::blend;
@@ -45,7 +44,7 @@ pub(super) fn render_stars(
             {
                 continue;
             }
-            let Color::Rgb(r, g, b) = cell.bg else {
+            let Some((r, g, b)) = crate::warpaint::rgb(cell.bg) else {
                 continue;
             };
             let mut hash = u64::from(y - area.y) * 65537 + u64::from(x - area.x);

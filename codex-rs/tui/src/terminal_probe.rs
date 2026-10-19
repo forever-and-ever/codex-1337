@@ -247,21 +247,6 @@ mod imp {
         Ok(unsafe { File::from_raw_fd(duplicated) })
     }
 
-    /// Queries OSC 10 and OSC 11 default colors under one shared deadline.
-    ///
-    /// Foreground and background are only useful as a pair for palette calculations, so a missing
-    /// response from either slot returns `Ok(None)`. Both queries are sent before reading so a
-    /// terminal that supports palette replies gets the full bounded window to return both values,
-    /// while unsupported terminals still pay one bounded wait instead of one wait per slot.
-    pub(crate) fn default_colors(timeout: Duration) -> io::Result<Option<DefaultColors>> {
-        let mut tty = Tty::open()?;
-        tty.write_all(b"\x1B]10;?\x1B\\\x1B]11;?\x1B\\")?;
-        let Some(colors) = read_until(&mut tty, timeout, parse_default_colors)? else {
-            return Ok(None);
-        };
-        Ok(Some(colors))
-    }
-
     /// Queries the terminal cursor position while normal input polling is paused.
     ///
     /// Resume can emit a focus report immediately before the cursor-position response. Reusing

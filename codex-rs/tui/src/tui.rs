@@ -331,6 +331,12 @@ fn restore_common(
     handoff: TerminalHandoff,
 ) -> Result<()> {
     let mut first_error = output::begin_restoration(ensure_virtual_terminal_processing);
+    // TELOS(warpaint): the terminal gets its own default colors back with the screen.
+    if matches!(handoff, TerminalHandoff::Restore)
+        && let Err(err) = crate::warpaint::revoke(&mut stdout())
+    {
+        first_error.get_or_insert(err);
+    }
 
     let screen_result = match handoff {
         TerminalHandoff::KeepScreen if ALTERNATE_SCREEN.is_active() => {
@@ -979,14 +985,8 @@ impl Tui {
                         return leave_result.and(main_result).and(enter_result);
                     }
                     let draw_result = if enter_result.is_ok() {
-                        self.terminal.draw(|frame| {
-                            let area = frame.area().intersection(visible_frame.area);
-                            for y in area.top()..area.bottom() {
-                                for x in area.left()..area.right() {
-                                    frame.buffer_mut()[(x, y)] = visible_frame[(x, y)].clone();
-                                }
-                            }
-                        })
+                        // TELOS(warpaint): the frame on screen is bound; it must not bind again.
+                        self.terminal.replay(&visible_frame)
                     } else {
                         Ok(())
                     };

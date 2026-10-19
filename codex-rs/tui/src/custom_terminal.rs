@@ -377,6 +377,8 @@ where
         // Buffer. Thus, we're taking the important data out of the Frame and dropping it.
         let cursor_position = frame.cursor_position;
         let cursor_style = frame.cursor_style;
+        // TELOS(warpaint): cells hold tokens; the frame binds to the pack worn before diffing.
+        crate::warpaint::bind_frame(&mut self.buffers[self.current], &mut self.backend)?;
 
         if self.capture_output_frame(screen_size, cursor_position, cursor_style) {
             return Ok(());
