@@ -3,7 +3,6 @@ use crate::exec_cell::CommandOutput;
 use crate::exec_cell::new_active_exec_command;
 use crate::history_cell::ToolOutputCell;
 use crate::history_cell::ToolOutputGroup;
-use crate::history_cell::activity_parts::FoldState;
 use crate::history_cell::activity_parts::FoldTarget;
 use crate::history_cell::invocation::Action;
 use crate::history_cell::invocation::Panel;
@@ -807,7 +806,6 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         true,
         80,
         false,
-        &FoldState::default(),
     );
     assert_eq!(
         python
@@ -854,7 +852,6 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 true,
                 width,
                 full,
-                &FoldState::default(),
             )
             .lines
             .into_iter()

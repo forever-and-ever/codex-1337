@@ -103,6 +103,7 @@ impl McpToolCallCell {
         width: u16,
         expanded: &FoldState,
         full: bool,
+        heading: bool,
     ) -> super::activity_parts::ActivityParts {
         let Some(Ok(result)) = &self.result else {
             return Default::default();
@@ -111,22 +112,52 @@ impl McpToolCallCell {
             return Default::default();
         };
         let width = width.saturating_sub(crate::transcript_geometry::MARKER_COLUMNS);
-        let (mut lines, mut controls) =
-            receipt.lines(width, FileChangeDetail::Disclosed, &self.call_id, expanded);
+        let (mut lines, mut controls) = receipt.lines(
+            width,
+            FileChangeDetail::Disclosed,
+            &self.call_id,
+            expanded,
+            heading,
+        );
         if full && !controls.is_empty() {
             let expanded = expanded
                 .iter()
                 .cloned()
                 .chain(controls.iter().map(|control| control.id.clone()))
                 .collect();
-            (lines, controls) =
-                receipt.lines(width, FileChangeDetail::Disclosed, &self.call_id, &expanded);
+            (lines, controls) = receipt.lines(
+                width,
+                FileChangeDetail::Disclosed,
+                &self.call_id,
+                &expanded,
+                heading,
+            );
         }
         super::activity_parts::ActivityParts {
-            lines: prefix_hyperlink_lines(lines, "• ".dim(), "  ".into()),
+            lines: prefix_hyperlink_lines(
+                lines,
+                if heading { "• ".dim() } else { "  ".into() },
+                "  ".into(),
+            ),
             controls,
             ..Default::default()
         }
+    }
+
+    pub(super) fn edit_parts(
+        &self,
+        width: u16,
+        expanded: &FoldState,
+        full: bool,
+    ) -> Option<super::invocation::EditProjection> {
+        let receipt = self.result.as_ref()?.as_ref().ok()?.file_changes.as_ref()?;
+        let applied = receipt.is_applied();
+        let parts = self.receipt_parts(width, expanded, full, !applied);
+        Some(if applied {
+            super::invocation::EditProjection::Applied(parts)
+        } else {
+            super::invocation::EditProjection::Other(parts)
+        })
     }
 
     pub(super) fn stored_output_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -159,6 +190,7 @@ impl McpToolCallCell {
             width.saturating_sub(crate::transcript_geometry::CHILD_INDENT),
             expanded,
             false,
+            true,
         );
         for control in &mut receipt.controls {
             control.line += lines.len();
@@ -188,6 +220,7 @@ impl McpToolCallCell {
             detail,
             &self.call_id,
             &Default::default(),
+            true,
         );
         prefix_hyperlink_lines(
             lines,
@@ -621,6 +654,7 @@ impl HistoryCell for McpToolCallCell {
             FileChangeDetail::Disclosed,
             &self.call_id,
             expanded,
+            true,
         );
         for control in &mut controls {
             control.line += offset;

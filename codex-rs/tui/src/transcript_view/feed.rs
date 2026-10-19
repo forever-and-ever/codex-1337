@@ -404,10 +404,14 @@ impl HeaderPreparation {
         if prepared
             .input(&call, invocations.input(call.id), input_width, false)
             .0
-            || !call
-                .edit_parts(input_width, expanded, full)
-                .lines
-                .is_empty()
+            || !crate::history_cell::invocation::edit_parts(
+                std::iter::once(cell.as_ref()),
+                input_width,
+                expanded,
+                full,
+            )
+            .lines
+            .is_empty()
         {
             return false;
         }
@@ -1057,6 +1061,31 @@ impl FeedIndex {
             Some(Role::Loose { scope, .. }) => FoldScope::Item(scope.clone()),
             None => FoldScope::Item("live".into()),
         }
+    }
+
+    /// The first invocation-bearing member owns the item's single edit census.
+    /// Source cells remain immutable and retain their individual I/O ports.
+    pub(super) fn edit_sources(
+        &self,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+    ) -> Vec<Arc<dyn HistoryCell>> {
+        let Some(Role::Member(member)) = self.roles.get(index) else {
+            return cells.get(index).cloned().into_iter().collect();
+        };
+        let item = &self.items[member.item];
+        let mut members = item.segments.iter().flatten().copied().filter(|index| {
+            crate::history_cell::invocation::collect(cells[*index].as_ref())
+                .iter()
+                .any(|call| !matches!(call.source, crate::history_cell::invocation::Source::Output))
+        });
+        if members.next() != Some(index) {
+            return Vec::new();
+        }
+        std::iter::once(index)
+            .chain(members)
+            .map(|index| Arc::clone(&cells[index]))
+            .collect()
     }
 
     pub(super) fn activity_group(

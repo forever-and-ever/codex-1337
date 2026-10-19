@@ -134,6 +134,38 @@ impl PatchHistoryCell {
         ));
         lines
     }
+
+    pub(super) fn edit_parts(
+        &self,
+        width: u16,
+        expanded: &FoldState,
+        full: bool,
+    ) -> super::invocation::EditProjection {
+        let all;
+        let expanded = if full {
+            all = expanded
+                .iter()
+                .cloned()
+                .chain(self.activity_ids())
+                .collect();
+            &all
+        } else {
+            expanded
+        };
+        let mut parts = self.nested_summary_parts(width, expanded);
+        if self.state != PatchState::Applied {
+            return super::invocation::EditProjection::Other(parts);
+        }
+        // Native patch headers occupy exactly one line; continuations already omit it.
+        if !self.continuation {
+            parts.lines.remove(0);
+            for control in &mut parts.controls {
+                control.line -= 1;
+            }
+        }
+        parts.header = None;
+        super::invocation::EditProjection::Applied(parts)
+    }
 }
 
 impl HistoryCell for PatchHistoryCell {

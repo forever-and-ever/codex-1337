@@ -403,6 +403,7 @@ impl TranscriptView {
         let background = self.cache.frames.is_some();
         self.cache.get(cell, width, presentation, || {
             let cell = Arc::clone(cell);
+            let edits = feed.edit_sources(cells, index);
             let header = seat
                 .header
                 .as_ref()
@@ -512,8 +513,9 @@ impl TranscriptView {
                 let invocation =
                     (mode == HistoryRenderMode::Rich && !detailed && content != Content::Hidden)
                         .then(|| {
-                            invocations.layout(
+                            invocations.layout_scoped(
                                 cell.as_ref(),
+                                edits.iter().map(AsRef::as_ref),
                                 invocation::PreparationSource::Retained(&cell),
                                 width,
                                 input_open,

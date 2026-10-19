@@ -215,32 +215,57 @@ fn combine_parts(parts: impl IntoIterator<Item = ActivityParts>) -> ActivityPart
     combined
 }
 
+pub(super) enum EditProjection {
+    Applied(ActivityParts),
+    Other(ActivityParts),
+}
+
+/// Render one receipt census for the owning feed item, not one heading per call.
+pub(crate) fn edit_parts<'a>(
+    cells: impl IntoIterator<Item = &'a dyn HistoryCell>,
+    width: u16,
+    expanded: &FoldState,
+    full: bool,
+) -> ActivityParts {
+    use ratatui::style::Stylize as _;
+
+    let mut applied = Vec::new();
+    let mut other = Vec::new();
+    for projection in cells
+        .into_iter()
+        .flat_map(|cell| edit_projection(cell, width, expanded, full))
+    {
+        match projection {
+            EditProjection::Applied(parts) => applied.push(parts),
+            EditProjection::Other(parts) => other.push(parts),
+        }
+    }
+    let heading = (!applied.is_empty()).then(|| ActivityParts {
+        lines: vec![
+            crate::render::header::paint(Line::from(vec!["• ".dim(), "Edited".bold()])).into(),
+        ],
+        ..Default::default()
+    });
+    let mut parts = combine_parts(heading.into_iter().chain(applied).chain(other));
+    mark_lines(&mut parts.lines, OutputProvenance::Client);
+    parts
+}
+
 fn edit_projection(
     cell: &dyn HistoryCell,
     width: u16,
     expanded: &FoldState,
     full: bool,
-) -> ActivityParts {
+) -> Vec<EditProjection> {
     let any = cell.as_any();
     if let Some(wrapper) = any.downcast_ref::<ToolItemCell>() {
         return edit_projection(wrapper.inner.as_ref(), width, expanded, full);
     }
     if let Some(mcp) = any.downcast_ref::<super::McpToolCallCell>() {
-        return mcp.receipt_parts(width, expanded, full);
+        return mcp.edit_parts(width, expanded, full).into_iter().collect();
     }
     if let Some(patch) = any.downcast_ref::<super::PatchHistoryCell>() {
-        let all;
-        let expanded = if full {
-            all = expanded
-                .iter()
-                .cloned()
-                .chain(patch.activity_ids())
-                .collect();
-            &all
-        } else {
-            expanded
-        };
-        return patch.nested_summary_parts(width, expanded);
+        return vec![patch.edit_parts(width, expanded, full)];
     }
     let members: Vec<&dyn HistoryCell> = if let Some(group) = any.downcast_ref::<ToolOutputGroup>()
     {
@@ -260,11 +285,10 @@ fn edit_projection(
     } else {
         Vec::new()
     };
-    combine_parts(
-        members
-            .into_iter()
-            .map(|member| edit_projection(member, width, expanded, full)),
-    )
+    members
+        .into_iter()
+        .flat_map(|member| edit_projection(member, width, expanded, full))
+        .collect()
 }
 
 fn has_patch(cell: &dyn HistoryCell) -> bool {
@@ -681,20 +705,6 @@ impl Invocation<'_> {
                 .flat_map(|output| output.activity_ids())
                 .collect()
         }
-    }
-
-    pub(crate) fn edit_parts(&self, width: u16, expanded: &FoldState, full: bool) -> ActivityParts {
-        let mut parts = match &self.source {
-            Source::Code(block) => edit_projection(*block, width, expanded, full),
-            Source::Cells(cells) => combine_parts(
-                cells
-                    .iter()
-                    .map(|cell| edit_projection(*cell, width, expanded, full)),
-            ),
-            Source::Command(_) | Source::Output => ActivityParts::default(),
-        };
-        mark_lines(&mut parts.lines, OutputProvenance::Client);
-        parts
     }
 
     pub(crate) fn has_formatted_output(&self, width: u16) -> bool {

@@ -664,7 +664,6 @@ impl Invocations {
         open: bool,
         width: u16,
         full: bool,
-        expanded: &FoldState,
     ) -> ActivityParts {
         let input = self.input(call.id);
         let formatted = prepared.input(call, input, width, false).0;
@@ -701,14 +700,6 @@ impl Invocations {
                 .lines
                 .extend(prepared.output(call, width, ports.output.mode()));
         }
-        let mut edits = call.edit_parts(width, expanded, full);
-        if !edits.lines.is_empty() {
-            for control in &mut edits.controls {
-                control.line += parts.lines.len();
-            }
-            parts.controls.extend(edits.controls);
-            parts.lines.extend(edits.lines);
-        }
         parts
     }
 
@@ -724,8 +715,17 @@ impl Invocations {
         expanded: &FoldState,
         auxiliary: Vec<HyperlinkLine>,
     ) -> Option<TextLayout> {
-        self.layout_inner(
-            cell, source, width, open, placement, full, tokens, expanded, auxiliary,
+        self.layout_scoped(
+            cell,
+            std::iter::once(cell),
+            source,
+            width,
+            open,
+            placement,
+            full,
+            tokens,
+            expanded,
+            auxiliary,
         )
     }
 
@@ -733,9 +733,10 @@ impl Invocations {
         clippy::cast_possible_truncation,
         reason = "The header lane is explicitly capped by body_width, a u16, immediately before conversion."
     )]
-    fn layout_inner(
+    pub(super) fn layout_scoped<'a>(
         &self,
         cell: &dyn HistoryCell,
+        edit_sources: impl IntoIterator<Item = &'a dyn HistoryCell>,
         source: PreparationSource<'_>,
         width: u16,
         open: bool,
@@ -795,7 +796,6 @@ impl Invocations {
                 open && calls.len() == 1,
                 body_width.saturating_sub(body_indent).max(1),
                 full,
-                expanded,
             );
 
             body.lines = crate::transcript_geometry::gutter_lines(body.lines, body_indent);
@@ -805,6 +805,21 @@ impl Invocations {
             parts.extend(body.controls);
             lines.extend(body.lines);
         }
+        let body_indent = crate::transcript_geometry::ENTRY_INDENT;
+        let mut edits = crate::history_cell::invocation::edit_parts(
+            edit_sources,
+            body_width.saturating_sub(body_indent).max(1),
+            expanded,
+            full,
+        );
+        for control in &mut edits.controls {
+            control.line += lines.len();
+        }
+        parts.extend(edits.controls);
+        lines.extend(crate::transcript_geometry::gutter_lines(
+            edits.lines,
+            body_indent,
+        ));
         let clock = (placement == super::feed::Content::Loose)
             .then(|| cell.transcript_timestamp())
             .flatten();

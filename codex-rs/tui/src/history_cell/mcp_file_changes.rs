@@ -102,12 +102,18 @@ impl ReceiptView {
         }
     }
 
+    pub(super) fn is_applied(&self) -> bool {
+        self.outcome == PublicationOutcome::Applied
+            && (!self.files.is_empty() || self.omitted_files > 0)
+    }
+
     pub(super) fn lines(
         &self,
         width: u16,
         detail: FileChangeDetail,
         call_id: &str,
         expanded: &FoldState,
+        heading: bool,
     ) -> (Vec<HyperlinkLine>, Vec<PartControl>) {
         let outcome = match self.outcome {
             PublicationOutcome::Applied if self.files.is_empty() && self.omitted_files == 0 => {
@@ -120,13 +126,17 @@ impl ReceiptView {
             PublicationOutcome::Unknown => "Changes uncertain",
         };
         let options = crate::wrapping::RtOptions::new(usize::from(width).max(/*other*/ 1));
-        let mut lines = crate::wrapping::word_wrap_lines(
-            [crate::render::header::leading(outcome, Line::default())],
-            options.clone(),
-        )
-        .into_iter()
-        .map(HyperlinkLine::from)
-        .collect::<Vec<_>>();
+        let mut lines = if heading {
+            crate::wrapping::word_wrap_lines(
+                [crate::render::header::leading(outcome, Line::default())],
+                options.clone(),
+            )
+            .into_iter()
+            .map(HyperlinkLine::from)
+            .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let mut controls = Vec::new();
         let file_width = usize::from(width)
             .saturating_sub(usize::from(crate::transcript_geometry::ENTRY_INDENT));

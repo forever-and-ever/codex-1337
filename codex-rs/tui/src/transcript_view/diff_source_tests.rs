@@ -246,6 +246,18 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
             .collect::<Vec<_>>()
     };
     let first = files(&mut view, 0).remove(0);
+    assert_eq!(files(&mut view, 0).len(), 4);
+    assert!(files(&mut view, 1).is_empty());
+    for (index, headings) in [(0, 1), (1, 0), (2, 1)] {
+        assert_eq!(
+            view.current_layout(&cells, index)
+                .unwrap()
+                .text()
+                .matches("Edited")
+                .count(),
+            headings,
+        );
+    }
     let click = |view: &mut TranscriptView, target: &FoldTarget| {
         crate::transcript_view::tests::render(view, &cells, 104, 80);
         let layout = view.current_layout(&cells, 0).unwrap();
@@ -270,10 +282,10 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
         crate::transcript_view::tests::render(view, &cells, 104, 80);
     };
     click(&mut view, &first);
-    for index in [0, 1] {
-        let layout = view.current_layout(&cells, index).unwrap();
-        assert!(layout.text().contains("alpha body"));
-        assert!(layout.text().contains("beta body"));
+    let layout = view.current_layout(&cells, 0).unwrap();
+    for call in ["a", "b"] {
+        assert!(layout.text().contains(&format!("{call}-alpha body")));
+        assert!(layout.text().contains(&format!("{call}-beta body")));
     }
     assert!(
         !view
@@ -282,16 +294,16 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
             .text()
             .contains("alpha body")
     );
-    let exception = files(&mut view, 1).remove(0);
-    assert!(view.focus_fold(&cells, 1, exception));
+    let exception = files(&mut view, 0).remove(2);
+    assert!(view.focus_fold(&cells, 0, exception));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     crate::transcript_view::tests::render(&mut view, &cells, 104, 80);
     assert!(
         !view
-            .current_layout(&cells, 1)
+            .current_layout(&cells, 0)
             .unwrap()
             .text()
-            .contains("alpha body")
+            .contains("b-alpha body")
     );
     click(&mut view, &first); // Closing replaces the individual exception too.
     for index in [0, 1] {
@@ -311,10 +323,10 @@ fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
     };
     assert!(!closed_snapshot.is_open(*group, id, false));
     assert!(
-        view.current_layout(&cells, 1)
+        view.current_layout(&cells, 0)
             .unwrap()
             .text()
-            .contains("alpha body")
+            .contains("b-alpha body")
     );
 }
 

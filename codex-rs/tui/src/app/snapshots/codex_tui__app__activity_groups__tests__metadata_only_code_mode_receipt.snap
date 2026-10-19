@@ -7,7 +7,6 @@ Painted collapsed
               • MCP semedit.edit({})
               • Edited
         [+]       /workspace/receipt.rs (+1, -1)
-              • Edited
         [+]       alpha.rs (+1, -0)
         [+]       beta.rs (+0, -1)
 Clicked native file
@@ -15,7 +14,6 @@ Clicked native file
               • MCP semedit.edit({})
               • Edited
         [+]       /workspace/receipt.rs (+1, -1)
-              • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)
@@ -26,7 +24,6 @@ Receipt expanded
         [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-              • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)
@@ -36,7 +33,6 @@ Both ports hidden
         [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-              • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)
@@ -47,7 +43,6 @@ Output open
         [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-              • Edited
         [-]       alpha.rs (+1, -0)
                   1 +created body
         [+]       beta.rs (+0, -1)

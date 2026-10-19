@@ -64,6 +64,20 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
             /*animations_enabled*/ false,
         );
         cell.complete(Duration::ZERO, Ok(replayed));
+        let census = crate::history_cell::invocation::edit_parts(
+            std::iter::once(&cell as &dyn HistoryCell),
+            100,
+            &FoldState::new(),
+            false,
+        );
+        assert_eq!(
+            Text::from(visible_lines(census.lines))
+                .to_string()
+                .matches("Edited")
+                .count(),
+            usize::from(outcome == "applied"),
+            "{label}",
+        );
         let closed = cell
             .activity_parts(
                 /*width*/ 100,
@@ -86,7 +100,7 @@ fn mcp_file_receipts_share_native_hunks_and_independent_disclosures() {
         ));
         if label == "text and rename" {
             let input = cell.invocation_input(100);
-            let edits = cell.receipt_parts(100, &FoldState::new(), false);
+            let edits = cell.receipt_parts(100, &FoldState::new(), false, true);
             assert_eq!(
                 input.parts.lines[0].line.to_string().find("MCP"),
                 edits.lines[0].line.to_string().find("Edited"),
