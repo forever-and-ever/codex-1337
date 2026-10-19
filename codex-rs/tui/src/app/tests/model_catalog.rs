@@ -200,6 +200,106 @@ async fn model_picker_refresh_updates_app_catalog_from_app_server() -> Result<()
         let started = app_server.start_thread(&config).await?;
         assert_eq!(started.session.service_tier.as_deref(), expected_tier);
     }
+    // A resumed model can be absent from the previous provider's cached catalog.
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+    let current_model = app.chat_widget.current_model().to_string();
+    app.chat_widget.open_model_popup();
+    let request_id = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::FetchModels { request_id } => Some(request_id),
+            _ => None,
+        })
+        .last()
+        .expect("catalog replacement request");
+    Box::pin(
+        app.handle_event(
+            &mut tui,
+            &mut app_server,
+            AppEvent::ModelsLoaded {
+                request_id,
+                result: Ok(crate::model_catalog::ModelListing {
+                    models: all_model_presets()
+                        .into_iter()
+                        .filter(|preset| preset.model != current_model)
+                        .collect(),
+                    providers: Vec::new(),
+                }),
+            },
+        ),
+    )
+    .await?;
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(
+        !app.chat_widget
+            .model_catalog()
+            .models
+            .iter()
+            .any(|preset| preset.model == current_model)
+    );
+    app.chat_widget.open_effort_popup();
+    let request = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|event| matches!(event, AppEvent::FetchModels { .. }))
+        .last()
+        .expect("effort model catalog request");
+    Box::pin(app.handle_event(&mut tui, &mut app_server, request)).await?;
+    let loaded = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(event @ AppEvent::ModelsLoaded { .. }) = rx.recv().await {
+                break event;
+            }
+        }
+    })
+    .await?;
+    let AppEvent::ModelsLoaded {
+        result: Ok(listing),
+        ..
+    } = &loaded
+    else {
+        panic!("effort model/list should succeed: {loaded:?}");
+    };
+    assert!(
+        listing
+            .models
+            .iter()
+            .any(|preset| preset.model == current_model)
+    );
+    Box::pin(app.handle_event(&mut tui, &mut app_server, loaded)).await?;
+    assert_eq!(app.chat_widget.current_model(), current_model);
+    assert!(!app.chat_widget.no_modal_or_popup_active());
+
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+    app.chat_widget.open_effort_popup();
+    let request_id = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            AppEvent::FetchModels { request_id } => Some(request_id),
+            _ => None,
+        })
+        .last()
+        .expect("cancellable effort request");
+    app.chat_widget
+        .handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert!(!app.chat_widget.model_popup_request_is_current(request_id));
+    let cancellation = std::iter::from_fn(|| rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::CancelModelRequest { .. }))
+        .expect("effort cancellation");
+    Box::pin(app.handle_event(&mut tui, &mut app_server, cancellation)).await?;
+    Box::pin(app.handle_event(
+        &mut tui,
+        &mut app_server,
+        AppEvent::ModelsLoaded {
+            request_id,
+            result: Ok(crate::model_catalog::ModelListing {
+                models: all_model_presets(),
+                providers: Vec::new(),
+            }),
+        },
+    ))
+    .await?;
+    assert!(app.chat_widget.no_modal_or_popup_active());
+    assert_eq!(app.chat_widget.current_model(), current_model);
     app_server.shutdown().await?;
     Ok(())
 }

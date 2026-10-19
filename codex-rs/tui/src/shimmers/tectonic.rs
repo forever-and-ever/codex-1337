@@ -6,6 +6,7 @@ use super::kit::GOLD;
 use super::kit::STEEL;
 use super::kit::WHITE;
 use super::kit::bump;
+use super::kit::chance;
 use super::stage::Ink;
 use super::stage::Recipe;
 use super::stage::Row;
@@ -30,7 +31,7 @@ struct Tectonic {
     stress: f64,
     seen: u64,
     quake: f64,
-    slip: usize,
+    fault: usize,
 }
 
 impl Default for Tectonic {
@@ -39,7 +40,7 @@ impl Default for Tectonic {
             stress: 0.0,
             seen: 0,
             quake: -SLIP,
-            slip: 0,
+            fault: 0,
         }
     }
 }
@@ -60,7 +61,15 @@ impl Shimmer for Tectonic {
         if self.stress >= 1.0 {
             self.stress = 0.0;
             self.quake = stage.t;
-            self.slip ^= 1;
+            let gaps = stage.header.len().saturating_sub(1);
+            if gaps > 0 {
+                self.fault %= gaps;
+                self.fault = if chance(i64::try_from(self.seen).unwrap_or(i64::MAX), 0.5) {
+                    (self.fault + 1) % gaps
+                } else {
+                    self.fault.checked_sub(1).unwrap_or(gaps - 1)
+                };
+            }
         }
     }
 
@@ -73,45 +82,49 @@ impl Shimmer for Tectonic {
         let busy = stage.busy();
         let rest = stage.grey(/*alpha*/ 0.6);
         let width = stage.header.len();
-        let fault = if width == 0 {
-            0
+        let fault = if width > 1 {
+            1 + self.fault % (width - 1)
         } else {
-            (width / 2 + self.slip).min(width - 1)
+            width
         };
         let age = stage.t - self.quake;
         let wave = busy && (0.0..SLIP).contains(&age);
-        row.header = stage.letters(|i, _| {
-            let side = if i < fault { CORAL } else { AZURE };
-            let lit = if wave {
+        let light = |column: usize| {
+            if wave {
                 bump(
-                    (f64::from(u32::try_from(i).unwrap_or(u32::MAX))
-                        - f64::from(u32::try_from(fault).unwrap_or(u32::MAX)))
-                    .abs()
+                    f64::from(u32::try_from(column.abs_diff(fault)).unwrap_or(u32::MAX))
                         - age * WAVE,
                     /*width*/ 3.1,
                 )
             } else {
                 0.0
-            };
+            }
+        };
+        row.header = stage.letters(|i, _| {
+            let side = if i < fault { CORAL } else { AZURE };
+            let lit = light(i + usize::from(i >= fault));
             let mut ink = Ink::default().fg(if busy {
                 side.blend(STEEL, /*alpha*/ 0.38 - 0.18 * self.stress + 0.1 * lit)
             } else {
                 rest
             });
             if busy {
-                let alpha = if i == fault {
-                    0.11 + 0.3 * lit
-                } else {
-                    0.035 + 0.04 * self.stress + 0.3 * lit
-                };
+                let alpha = 0.035 + 0.04 * self.stress + 0.3 * lit;
                 ink = ink.bg(if lit > 0.25 { WHITE } else { side }.blend(stage.bg, alpha));
                 ink = ink.bold(lit > 0.48);
-                if i == fault {
-                    ink.glyph = Some('│');
-                }
             }
             ink
         });
+        if busy && width > 1 {
+            let lit = light(fault);
+            row.header_insert = Some((
+                fault,
+                Ink::of('│')
+                    .fg(AZURE.blend(STEEL, 0.38 - 0.18 * self.stress + 0.1 * lit))
+                    .bg(if lit > 0.25 { WHITE } else { AZURE }.blend(stage.bg, 0.11 + 0.3 * lit))
+                    .bold(lit > 0.48),
+            ));
+        }
         row.mark = (0..3)
             .map(|gauge| {
                 let level = (self.stress * 3.0 - f64::from(gauge)).clamp(0.0, 1.0);

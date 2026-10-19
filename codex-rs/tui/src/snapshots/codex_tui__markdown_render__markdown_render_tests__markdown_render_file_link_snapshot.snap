@@ -2,11 +2,11 @@
 source: tui/src/markdown_render_tests.rs
 expression: "plain_lines(&text).join(\"\\n\")"
 ---
-analysis.md (analysis/021_all_experiments_best_per_group/analysis.md)
+analysis.md (/tmp/codex-link-repro/analysis/021_all_experiments_best_per_group/analysis.md)
 
-analysis .md (analysis.md:12)
+analysis .md (/tmp/codex-link-repro/analysis.md:12)
 
-analysis.md:12:3
+/tmp/codex-link-repro/analysis.md:12:3
 
 ../analysis.md
 
@@ -15,7 +15,7 @@ file://[
 broken (file://[)
 
  File
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
- analysis.md (analysis.md)
-───────────────────────────
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ analysis.md (/tmp/codex-link-repro/analysis.md)
+─────────────────────────────────────────────────
  ./empty.md

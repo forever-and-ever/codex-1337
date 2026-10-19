@@ -148,6 +148,39 @@ impl ChatWidget {
         true
     }
 
+    pub(crate) fn open_effort_popup(&mut self) {
+        if !self.is_session_configured() && self.session_draft != Some(super::SessionDraft::Editing)
+        {
+            self.add_info_message(
+                "Reasoning selection is disabled until startup completes.".to_string(),
+                None,
+            );
+            return;
+        }
+        let request_id = uuid::Uuid::new_v4();
+        self.model_popup_request = Some(super::model_popup_state::ModelPopupRequest::Effort {
+            id: request_id,
+            provider: self.config.model_provider_id.clone(),
+            thread: self.thread_id,
+            model: self.current_model().to_string(),
+        });
+        self.bottom_pane
+            .show_selection_view(crate::bottom_pane::SelectionViewParams {
+                view_id: Some(super::model_popup_state::EFFORT_LOADING_VIEW),
+                title: Some("Reasoning effort".into()),
+                items: vec![crate::bottom_pane::SelectionItem {
+                    name: "Loading reasoning choices…".into(),
+                    is_disabled: true,
+                    ..Default::default()
+                }],
+                on_cancel: Some(Box::new(move |tx| {
+                    tx.send(AppEvent::CancelModelRequest { request_id });
+                })),
+                ..crate::bottom_pane::SelectionViewParams::picker()
+            });
+        self.app_event_tx.send(AppEvent::FetchModels { request_id });
+    }
+
     fn current_model_preset(&self) -> Option<ModelPreset> {
         let current_model = self.current_model();
         self.model_catalog

@@ -410,6 +410,10 @@ impl ChatWidget {
                 self.open_model_popup();
                 self.defer_input_until_settings_applied();
             }
+            SlashCommand::Effort => {
+                self.open_effort_popup();
+                self.defer_input_until_settings_applied();
+            }
             SlashCommand::Account => {
                 if let Some(thread_id) = self.thread_id {
                     self.app_event_tx
@@ -1269,6 +1273,7 @@ impl ChatWidget {
             | SlashCommand::Compact
             | SlashCommand::Review
             | SlashCommand::Model
+            | SlashCommand::Effort
             | SlashCommand::Account
             | SlashCommand::Plan
             | SlashCommand::Alarms

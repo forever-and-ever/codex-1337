@@ -37,7 +37,7 @@ impl AppServerSession {
                 .request_typed::<ModelListResponse>(ClientRequest::ModelList {
                     request_id: RequestId::String(format!("model-list-{request_id}")),
                     params: ModelListParams {
-                        model_provider: Some(provider),
+                        model_provider: Some(provider.clone()),
                         cursor: None,
                         limit: None,
                         include_hidden: Some(true),
@@ -46,15 +46,20 @@ impl AppServerSession {
                     },
                 })
                 .await
-                .map(|response| ModelListing {
-                    providers: response.providers,
-                    models: response
-                        .data
-                        .into_iter()
-                        .map(model_preset_from_api_model)
-                        .collect(),
-                })
-                .map_err(|err| err.to_string());
+                .map_err(|err| err.to_string())
+                .and_then(|response| {
+                    if response.model_provider.as_deref() != Some(provider.as_str()) {
+                        return Err("The server does not support selecting this provider.".into());
+                    }
+                    Ok(ModelListing {
+                        providers: response.providers,
+                        models: response
+                            .data
+                            .into_iter()
+                            .map(model_preset_from_api_model)
+                            .collect(),
+                    })
+                });
             app_event_tx.send(AppEvent::ModelsLoaded { request_id, result });
         });
     }

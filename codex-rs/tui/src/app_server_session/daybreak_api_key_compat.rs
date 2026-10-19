@@ -42,6 +42,12 @@ impl AppServerSession {
         let handle = self.request_handle();
         let lookup = Arc::clone(&self.daybreak_api_key_compat);
         async move {
+            if models
+                .iter()
+                .all(|model| model.available_access_programs.is_none())
+            {
+                return models;
+            }
             // Serialize the reserved ID. This semaphore is never closed.
             let _permit = lookup.acquire().await;
             const ID: &str = "tui-daybreak-forwarding";

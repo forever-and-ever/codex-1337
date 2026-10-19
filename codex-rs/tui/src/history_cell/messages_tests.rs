@@ -232,7 +232,7 @@ fn finalized_markdown_reuses_rendered_transcript_lines() {
 
 #[test]
 fn finalized_assistant_file_citation_renders_as_local_path_snapshot() {
-    let cwd = std::env::temp_dir();
+    let cwd = PathBuf::from("/workspace");
     let output = cwd.join("Quarterly Report.xlsx").display().to_string();
     let cell = AgentMarkdownCell::new(
         format!(
@@ -243,7 +243,7 @@ fn finalized_assistant_file_citation_renders_as_local_path_snapshot() {
 
     let rendered = ratatui::text::Text::from(cell.display_lines(/*width*/ 80));
 
-    insta::assert_snapshot!(rendered, @"• Generated Quarterly Report.xlsx.");
+    insta::assert_snapshot!(rendered, @"• Generated /workspace/Quarterly Report.xlsx.");
 }
 
 #[test]

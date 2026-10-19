@@ -49,7 +49,7 @@ impl ChatWidget {
         request_id: uuid::Uuid,
         provider: &ModelProviderOption,
     ) {
-        self.model_popup_request_id = Some(request_id);
+        self.set_model_refresh_request(request_id);
         self.bottom_pane.show_selection_view(SelectionViewParams {
             view_id: Some(PROVIDER_MODELS_VIEW),
             title: Some(format!("New {} conversation", provider.name)),
@@ -71,7 +71,7 @@ impl ChatWidget {
         if !self.model_popup_request_is_current(request_id) {
             return;
         }
-        self.model_popup_request_id = None;
+        self.model_popup_request = None;
         // Escape or navigation during discovery must not reopen a dismissed picker.
         let (models, error) = match result {
             Ok(listing) if !listing.models.is_empty() => (listing.models, None),

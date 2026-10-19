@@ -3453,7 +3453,11 @@ async fn model_selection_popup_snapshot() {
 }
 
 fn apply_model_list_response(chat: &mut ChatWidget, presets: Vec<ModelPreset>) {
-    let request_id = chat.model_popup_request_id.expect("pending model request");
+    let request_id = chat
+        .model_popup_request
+        .as_ref()
+        .expect("pending model request")
+        .id();
     assert!(chat.on_models_loaded(
         request_id,
         Ok(crate::model_catalog::ModelListing {
@@ -3471,10 +3475,10 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
     let mut refreshed = initial.clone();
     refreshed[0].description = "Updated model details".to_string();
     chat.open_model_popup();
-    let old_request = chat.model_popup_request_id.unwrap();
+    let old_request = chat.model_popup_request.as_ref().unwrap().id();
     chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
     chat.open_model_popup();
-    let current_request = chat.model_popup_request_id.unwrap();
+    let current_request = chat.model_popup_request.as_ref().unwrap().id();
     assert!(!chat.on_models_loaded(
         old_request,
         Ok(crate::model_catalog::ModelListing {
@@ -3506,7 +3510,7 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
     ] {
         chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
         chat.open_model_popup();
-        let request_id = chat.model_popup_request_id.unwrap();
+        let request_id = chat.model_popup_request.as_ref().unwrap().id();
         let before = render_bottom_popup(&chat, /*width*/ 80);
         assert!(!chat.on_models_loaded(
             request_id,
@@ -3523,6 +3527,34 @@ async fn model_picker_refresh_rejects_obsolete_and_unusable_replies() {
     chat.open_model_popup();
     apply_model_list_response(&mut chat, refreshed.clone());
     assert_eq!(chat.model_catalog.try_list_models().unwrap(), refreshed);
+
+    // An effort reply belongs to the provider, thread, model, and still-open request.
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    for boundary in 0..3 {
+        let provider = chat.config.model_provider_id.clone();
+        let thread = chat.thread_id;
+        let model = chat.current_model().to_string();
+        chat.open_effort_popup();
+        let request_id = chat.model_popup_request.as_ref().unwrap().id();
+        match boundary {
+            0 => chat.config.model_provider_id = "different-provider".into(),
+            1 => chat.thread_id = Some(ThreadId::new()),
+            _ => chat.set_model("different-model"),
+        }
+        assert!(!chat.on_models_loaded(
+            request_id,
+            Ok(crate::model_catalog::ModelListing {
+                models: initial.clone(),
+                providers: Vec::new(),
+            }),
+        ));
+        assert!(chat.model_popup_request.is_none());
+        assert!(chat.no_modal_or_popup_active());
+        assert_eq!(chat.model_catalog.try_list_models().unwrap(), refreshed);
+        chat.config.model_provider_id = provider;
+        chat.thread_id = thread;
+        chat.set_model(&model);
+    }
 }
 
 #[tokio::test]
@@ -3904,6 +3936,7 @@ async fn model_advanced_reasoning_selection_popup_snapshot() {
 #[tokio::test]
 async fn model_reasoning_selection_popup_applies_custom_effort() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    chat.thread_id = Some(ThreadId::new());
     let custom_effort = ReasoningEffortConfig::Custom("future".to_string());
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
 
@@ -3914,7 +3947,10 @@ async fn model_reasoning_selection_popup_applies_custom_effort() {
             effort: custom_effort.clone(),
             description: "Maximum available reasoning".to_string(),
         });
-    chat.open_reasoning_popup(preset);
+    // Resumed threads may not have their provider's current model in the startup catalog.
+    Arc::make_mut(&mut chat.model_catalog).models.clear();
+    chat.dispatch_command(SlashCommand::Effort);
+    apply_model_list_response(&mut chat, vec![preset]);
     while rx.try_recv().is_ok() {}
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));

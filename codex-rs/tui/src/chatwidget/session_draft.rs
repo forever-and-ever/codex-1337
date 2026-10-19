@@ -87,7 +87,7 @@ impl ChatWidget {
         self.set_reasoning_effort(Some(choice.effort.clone()));
         // Invalidate any request for the previous provider before refreshing this catalog.
         let request_id = uuid::Uuid::new_v4();
-        self.model_popup_request_id = Some(request_id);
+        self.set_model_refresh_request(request_id);
         self.app_event_tx.send(AppEvent::FetchModels { request_id });
         Ok(())
     }

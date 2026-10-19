@@ -9,7 +9,6 @@ use super::Arc;
 use super::ClientRequest;
 use super::Duration;
 use super::HistoryCell;
-use super::Line;
 use super::Result;
 use super::ThreadBufferedEvent;
 use super::ThreadId;
@@ -19,6 +18,7 @@ use super::VecDeque;
 use super::transcript_splice::TranscriptSplice;
 use super::tui;
 use crate::chatwidget::FarmSubmission;
+use crate::history_cell::FarmReceipt;
 use codex_app_server_protocol::ThreadFarmMode;
 use codex_app_server_protocol::ThreadFarmParams;
 use codex_app_server_protocol::ThreadFarmResponse;
@@ -60,26 +60,6 @@ impl FarmRequestState {
 pub(super) struct FarmUi {
     pub(super) state: FarmRequestState,
     receipts: VecDeque<FarmReceipt>,
-}
-
-#[derive(Debug, Clone)]
-struct FarmReceipt {
-    thread_id: ThreadId,
-    request_id: String,
-    message: String,
-}
-
-impl HistoryCell for FarmReceipt {
-    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
-        vec![Line::styled(
-            self.message.clone(),
-            crate::render::header::style(),
-        )]
-    }
-
-    fn raw_lines(&self) -> Vec<Line<'static>> {
-        vec![self.message.clone().into()]
-    }
 }
 
 impl App {

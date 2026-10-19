@@ -495,6 +495,15 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #50389 (configured keybindings before transcript navigation), #49517 (fork shortcut) and #51500 (task pinning) edit `keymap.rs` and `tui_keymap.rs`; #50467 edits `clipboard_copy.rs`.
 - Evidence: 86600d9708, d174f70315, 39fba99ad1, f36947b64a.
 
+### literal-local-paths
+
+- Telos: a local-file reference is useful as copyable path text, without a navigation policy to maintain.
+- Holds: ordinary local Markdown links preserve their labels and show their full target. Absolute targets are never shortened relative to the session cwd or frontend home. No tooltip, opener, extension allowlist, or new mouse binding is required; web links remain unchanged.
+- Owners: `codex-rs/tui/src/markdown_render/local_links.rs`, `codex-rs/tui/src/markdown_render.rs`.
+- Tripwire: `file_link_preserves_label_and_decodes_fallback_destination` and `file_link_keeps_unrelated_relative_label_with_matching_suffix` (`codex-rs/tui/src/markdown_render_tests.rs`).
+- Pressure: upstream local-link formatting shortens targets under the session cwd; do not restore it during a merge.
+- Evidence: owner decision, 2026-10-18.
+
 ### async-questions-never-auto-answered
 
 - Telos: an agent's question is answered only by the human.
@@ -539,6 +548,8 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 Upstream files, where merge conflicts arise:
 
+- `codex-rs/tui/src/markdown_render/local_links.rs`: literal-local-paths
+- `codex-rs/tui/src/markdown_render.rs`: literal-local-paths
 - `codex-rs/clippy.toml`: fork-lint-posture
 - `codex-rs/tui/src/app/transcript_export.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/thread_settings.rs`: fast-ui-thread

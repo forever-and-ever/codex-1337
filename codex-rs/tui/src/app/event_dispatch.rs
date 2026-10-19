@@ -1817,6 +1817,9 @@ impl App {
             AppEvent::PermissionProfilesLoaded { request_id, result } => {
                 self.chat_widget.on_permission_profiles_loaded(request_id, result);
             }
+            AppEvent::CancelModelRequest { request_id } => {
+                self.chat_widget.cancel_model_request(request_id);
+            }
             AppEvent::FetchModels { request_id } => {
                 if self.chat_widget.model_popup_request_is_current(request_id) {
                     app_server.fetch_models(

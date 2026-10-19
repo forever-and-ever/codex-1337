@@ -64,13 +64,14 @@ impl Engine {
             spans.push(header.to_owned().into());
             return (spans, Vec::new());
         }
-        spans.extend(
-            self.stage
-                .header
-                .iter()
-                .enumerate()
-                .map(|(i, letter)| row.header.get(i).copied().unwrap_or_default().span(letter)),
-        );
+        for i in 0..=self.stage.header.len() {
+            if let Some((_, ink)) = row.header_insert.filter(|(at, _)| *at == i) {
+                spans.push(ink.span(" "));
+            }
+            if let Some(letter) = self.stage.header.get(i) {
+                spans.push(row.header.get(i).copied().unwrap_or_default().span(letter));
+            }
+        }
         spans.extend(row.tail.iter().map(|ink| ink.span(" ")));
         (spans, row.backdrop)
     }
@@ -149,6 +150,60 @@ mod tests {
                 assert!(!spans.is_empty(), "{recipe} rendered no status");
                 assert!(backdrop.len() <= 80, "{recipe} overflowed the row");
                 engine.tool(palette);
+            }
+        }
+    }
+
+    #[test]
+    fn tectonic_preserves_graphemes_across_wrapped_faults() {
+        use unicode_segmentation::UnicodeSegmentation;
+        use unicode_width::UnicodeWidthStr;
+
+        let palette = Palette {
+            fg: Rgb(208.0, 208.0, 208.0),
+            bg: Rgb(21.0, 21.0, 21.0),
+        };
+        let recipe = ROSTER
+            .iter()
+            .position(|entry| entry.recipe.name == "Tectonic")
+            .unwrap();
+        for header in ["", "X", "Working", "e\u{301}界👩‍💻ing"] {
+            let mut engine = Engine::new(recipe, palette);
+            engine.stage.show(header);
+            let gaps = header.graphemes(true).count().saturating_sub(1);
+            let mut previous = None;
+            let mut visited = 0_u64;
+            for _ in 0..256 {
+                // Enough paced tokens for one quake per tick, without changing its production cadence.
+                engine.step(240, Spell::Busy);
+                let (spans, _) = engine.status(header, 0, palette, false, true);
+                let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+                assert_eq!(text.replace('│', ""), header);
+                assert_eq!(
+                    spans.iter().map(Span::width).sum::<usize>(),
+                    header.width() + usize::from(gaps > 0)
+                );
+                let fault = spans.iter().position(|span| span.content == "│");
+                if gaps == 0 {
+                    assert_eq!(fault, None);
+                    continue;
+                }
+                let fault = fault.unwrap() - 1;
+                assert!(fault < gaps);
+                if let Some(previous) = previous {
+                    assert!((previous + 1) % gaps == fault || (fault + 1) % gaps == previous);
+                }
+                previous = Some(fault);
+                visited |= 1 << fault;
+            }
+            if gaps > 2 {
+                assert!(visited.count_ones() > 2, "fault stayed near the centre");
+            }
+            for (spell, letters) in [(Spell::Wait, true), (Spell::Busy, false)] {
+                engine.step(0, spell);
+                let (spans, _) = engine.status(header, 0, palette, false, letters);
+                let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+                assert_eq!(text, header);
             }
         }
     }

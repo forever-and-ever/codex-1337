@@ -36,7 +36,7 @@ impl ChatWidget {
             }
         };
         let request_id = uuid::Uuid::new_v4();
-        self.model_popup_request_id = Some(request_id);
+        self.set_model_refresh_request(request_id);
         self.open_model_popup_with_presets(presets);
         // Show cached choices immediately and update any still-present picker when the reply arrives.
         self.app_event_tx.send(AppEvent::FetchModels { request_id });

@@ -2,4 +2,4 @@
 source: tui/src/markdown_render_tests.rs
 expression: "plain_lines(&text).join(\"\\n\")"
 ---
-other/src/lib.rs (src/lib.rs)
+other/src/lib.rs (/repo/src/lib.rs)

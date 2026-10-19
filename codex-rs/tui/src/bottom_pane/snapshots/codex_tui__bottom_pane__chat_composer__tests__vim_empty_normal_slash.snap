@@ -4,9 +4,9 @@ expression: terminal.backend()
 ---
 "› /model          choose what model and reasoning effort to "
 "                  use                                       "
+"  /effort         choose this model's reasoning effort      "
 "  /account        choose this conversation's account; /     "
 "                  account <alias> also works                "
-"  /permissions    choose what Codex is allowed to do        "
 "                                                            "
 "› /                                                         "
 "                                                          󰜗 "

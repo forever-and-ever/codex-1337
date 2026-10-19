@@ -83,7 +83,7 @@ pub(crate) fn render_with_copy_sources(
         first_is_html: false,
         mutable_fence_start: None,
     };
-    let mut writer = Writer::new(input, width, cwd, is_hidden_link_destination);
+    let mut writer = Writer::new(input, width, is_hidden_link_destination);
     // Drop the consumed parser before the rendering state, including on unwind.
     let mut parser = parser;
     writer.list_spacing = list_spacing;

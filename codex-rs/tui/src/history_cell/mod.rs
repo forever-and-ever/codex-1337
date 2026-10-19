@@ -15,6 +15,9 @@ use crate::history_cell::activity_parts::FoldState;
 mod alarm;
 pub(crate) use alarm::AlarmSoundingCell;
 
+mod farm;
+pub(crate) use farm::FarmReceipt;
+
 mod compaction;
 pub(crate) use compaction::CompactionCell;
 
