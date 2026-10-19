@@ -23,6 +23,10 @@ impl HistoryCell for FarmReceipt {
 
 // A human-started farm is independent of the model step running when its RPC completes.
 impl FeedEntry for FarmReceipt {
+    fn feed_kind(&self) -> crate::transcript_view::EntryKind {
+        crate::transcript_view::EntryKind::Farm
+    }
+
     fn feed_id(&self) -> String {
         format!("farm:{}", self.request_id)
     }

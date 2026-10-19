@@ -198,6 +198,7 @@ pub(crate) enum EntryKind {
     Preamble,
     Alarm,
     Compaction,
+    Farm,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -239,6 +240,7 @@ impl Kind {
                 EntryKind::Preamble => FoldGroup::Preamble,
                 EntryKind::Alarm => FoldGroup::Alarm,
                 EntryKind::Compaction => FoldGroup::Compaction,
+                EntryKind::Farm => FoldGroup::Farm,
             },
         }
     }
