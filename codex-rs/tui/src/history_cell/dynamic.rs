@@ -69,6 +69,7 @@ impl DynamicToolCallCell {
             &mut arguments,
             super::output_provenance::OutputProvenance::Formatted,
         );
+        super::output_provenance::hang(&mut arguments, crate::warpaint::Bracket::Call);
         lines.extend(adaptive_wrap_hyperlink_lines(
             &arguments,
             RtOptions::new(usize::from(width).max(/*other*/ 1))
@@ -208,7 +209,13 @@ impl DynamicToolCallData {
             || self.interrupted
             || self.status == DynamicToolCallStatus::Failed;
         if keep_verb {
-            line.push_span(verb.bold());
+            line.push_span(
+                if self.interrupted || self.status == DynamicToolCallStatus::Failed {
+                    verb.red().bold()
+                } else {
+                    verb.bold()
+                },
+            );
         }
         let header = super::activity_parts::ActivityHeader::at_end(&line);
         if keep_verb {

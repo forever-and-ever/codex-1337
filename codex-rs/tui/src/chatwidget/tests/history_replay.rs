@@ -357,10 +357,17 @@ async fn replayed_delegated_tool_output_is_attributed_without_seeding_composer_h
             let cells: Vec<std::sync::Arc<dyn history_cell::HistoryCell>> =
                 projected.into_iter().collect();
             crate::transcript_view::TranscriptView::default().render(area, &mut buffer, &cells);
-            let background = crate::style::message_style()
-                .bg
-                .expect("message background");
-            assert!(buffer.content.iter().all(|cell| cell.bg == background));
+            // The message lies on the page and hangs from the message bracket.
+            assert!(
+                buffer
+                    .content
+                    .iter()
+                    .all(|cell| cell.bg == ratatui::style::Color::Reset)
+            );
+            assert!((0..area.height).any(|row| {
+                buffer[(crate::transcript_geometry::CONTROL_COLUMN, row)].fg
+                    == crate::warpaint::Bracket::Message.color()
+            }));
         },
     );
 

@@ -3,21 +3,21 @@
 use super::AgentMarkdownCell;
 use super::AgentMessageCell;
 use super::UserHistoryCell;
-use super::message_band;
 use super::normalize_whitespace_only_hyperlink_lines;
 use super::sanitize_user_text;
+use super::spoken;
 use super::wrap_user_message;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::agent_prefix;
 use crate::markdown_render::ListSpacing;
 use crate::style::accent_color_on;
-use crate::style::history_prompt_style;
-use crate::style::history_response_style;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::plain_hyperlink_lines;
 use crate::terminal_hyperlinks::prefix_hyperlink_lines;
+use crate::warpaint::Bracket;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_lines;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 
@@ -60,7 +60,7 @@ pub(super) fn user_lines(
         &[]
     };
     let wrap_width = width.saturating_sub(surface.marker_columns() + 1).max(1);
-    let style = history_prompt_style();
+    let style = Style::default();
     let element_style = style.fg(accent_color_on(style.bg));
     let mut lines = plain_hyperlink_lines(adaptive_wrap_lines(
         cell.image_labels_not_in_message()
@@ -99,7 +99,7 @@ pub(super) fn user_lines(
             source.copy_as_prose = true;
         }
     }
-    message_band(lines, style)
+    spoken(lines, Bracket::Prompt)
 }
 
 pub(super) fn agent_lines(
@@ -129,7 +129,7 @@ pub(super) fn agent_lines(
                 .subsequent_indent(subsequent),
         ));
     }
-    message_band(wrapped, history_response_style())
+    spoken(wrapped, Bracket::Response)
 }
 
 pub(super) fn markdown_lines(
@@ -142,13 +142,13 @@ pub(super) fn markdown_lines(
         let Some(wrap_width) =
             crate::width::usable_content_width_u16(width, surface.marker_columns())
         else {
-            return message_band(
+            return spoken(
                 prefix_hyperlink_lines(
                     vec![HyperlinkLine::new(Line::default())],
                     agent_prefix(true),
                     agent_prefix(false),
                 ),
-                history_response_style(),
+                Bracket::Response,
             );
         };
         let mut lines = crate::markdown::render_markdown_agent_with_list_spacing(
@@ -164,9 +164,9 @@ pub(super) fn markdown_lines(
         if surface == Surface::Inline {
             lines = prefix_hyperlink_lines(lines, agent_prefix(true), agent_prefix(false));
         }
-        message_band(
+        spoken(
             normalize_whitespace_only_hyperlink_lines(lines),
-            history_response_style(),
+            Bracket::Response,
         )
     };
     // The surfaces use different list-spacing keys as well as different markers.

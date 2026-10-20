@@ -397,13 +397,13 @@ fn clicking_and_clearing_selection_preserves_the_separator_row() {
     insta::assert_snapshot!(frames.join("\n\n"), @"
     prepend=false
 
-                alpha beta gamma
-                second line
+            ╓   alpha beta gamma
+            ║   second line
 
     prepend=true
 
-                alpha beta gamma
-                second line
+            ╓   alpha beta gamma
+            ║   second line
     ");
 }
 
@@ -450,8 +450,8 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
     );
     live(&mut view, &unrelated, /*revision*/ 2);
     insta::assert_snapshot!(render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 28, /*height*/ 4), @"
-    first
-        tail selected
+    [   first
+            tail selected
     ");
     render(
         &mut view,

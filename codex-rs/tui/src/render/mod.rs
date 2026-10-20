@@ -1,5 +1,6 @@
 use ratatui::layout::Rect;
 
+pub(crate) mod bracket;
 pub(crate) mod disclosure;
 pub(crate) mod header;
 pub(crate) mod highlight;

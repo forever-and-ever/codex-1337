@@ -18,7 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _DECLARED = json.loads((Path(__file__).resolve().parent / "roles.json").read_text())
-FAMILIES: dict[str, tuple[str, ...]] = {family: tuple(_DECLARED[family]) for family in ("ground", "figure", "syntax")}
+FAMILIES: dict[str, tuple[str, ...]] = {
+    family: tuple(_DECLARED[family])
+    for family in ("ground", "figure", "syntax", "bracket")
+}
 RAMPS = ("livery", "heat", "terminal")
 STYLES = ("bold", "italic")
 
@@ -46,16 +49,28 @@ class Pack:
         raw = tomllib.loads(path.read_text())
         style = raw.pop("style", {})
         if set(raw) != {*FAMILIES, *RAMPS}:
-            raise SystemExit(f"{path}: expected {sorted({*FAMILIES, *RAMPS})}, found {sorted(raw)}")
+            raise SystemExit(
+                f"{path}: expected {sorted({*FAMILIES, *RAMPS})}, found {sorted(raw)}"
+            )
         for family, keys in FAMILIES.items():
             if set(raw[family]) != set(keys):
                 raise SystemExit(f"{path}: [{family}] differs from roles.json")
         for key, modifiers in style.items():
-            if key not in FAMILIES["syntax"] or not modifiers or not set(modifiers) <= set(STYLES):
-                raise SystemExit(f"{path}: [style] {key} must be a syntax class given some of {list(STYLES)}")
+            if (
+                key not in FAMILIES["syntax"]
+                or not modifiers
+                or not set(modifiers) <= set(STYLES)
+            ):
+                raise SystemExit(
+                    f"{path}: [style] {key} must be a syntax class given some of {list(STYLES)}"
+                )
         return cls(
             path.stem,
-            {f"{family}:{key}": raw[family][key] for family, keys in FAMILIES.items() for key in keys},
+            {
+                f"{family}:{key}": raw[family][key]
+                for family, keys in FAMILIES.items()
+                for key in keys
+            },
             {ramp: tuple(raw[ramp]) for ramp in RAMPS},
             {f"syntax:{key}": frozenset(modifiers) for key, modifiers in style.items()},
         )

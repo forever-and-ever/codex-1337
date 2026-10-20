@@ -6,11 +6,15 @@ Buffer {
     area: Rect { x: 0, y: 0, width: 34, height: 3 },
     content: [
         "                                  ",
-        "              newer explanation   ",
-        "              with needle in a    ",
+        "        ╭     newer explanation   ",
+        "        ┊     with needle in a    ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 19, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
         x: 25, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]

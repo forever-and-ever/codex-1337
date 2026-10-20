@@ -5,10 +5,10 @@ expression: "normalize_snapshot_paths(frames.join(\"\\n\\n\"))"
 Following caret
 
 ────────────────────────────────────────────────────────────
-              History 37
-              History 38
-              History 39
-              History 40
+        ┊     History 37
+        ┊     History 38
+        ┊     History 39
+        ╰     History 40
 ────────────────────────────────────────────────────────────
 
 
@@ -31,10 +31,10 @@ Following caret
 Wheel up
 
 ────────────────────────────────────────────────────────────
-              History 37
-              History 38
-              History 39
-              History 40
+        ┊     History 37
+        ┊     History 38
+        ┊     History 39
+        ╰     History 40
 ────────────────────────────────────────────────────────────
 
 
@@ -57,10 +57,10 @@ Wheel up
 Edit at caret
 
 ────────────────────────────────────────────────────────────
-              History 37
-              History 38
-              History 39
-              History 40
+        ┊     History 37
+        ┊     History 38
+        ┊     History 39
+        ╰     History 40
 ────────────────────────────────────────────────────────────
 
 
@@ -83,10 +83,10 @@ Edit at caret
 Paste at caret
 
 ────────────────────────────────────────────────────────────
-              History 37
-              History 38
-              History 39
-              History 40
+        ┊     History 37
+        ┊     History 38
+        ┊     History 39
+        ╰     History 40
 ────────────────────────────────────────────────────────────
 
 

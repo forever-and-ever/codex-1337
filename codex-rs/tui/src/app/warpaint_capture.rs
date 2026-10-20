@@ -124,7 +124,7 @@ async fn drive() -> Result<()> {
         }
     }
     // Open the patch, and the answer's reasoning from its response header, as a reader would.
-    session.click("[+]").await?;
+    session.open_fold("src/parser.rs").await?;
     session.click("[cot]").await?;
     // Escape returns focus to the composer.
     session.input(TuiEvent::Key(KeyCode::Esc.into())).await?;
@@ -204,6 +204,18 @@ impl Session<'_> {
     async fn click(&mut self, text: &str) -> Result<()> {
         self.draw()?;
         let (column, row) = self.find(text);
+        self.click_at(column, row).await
+    }
+
+    /// Clicks the fold on the row where `text` first starts: its bracket's stroke in the gutter.
+    async fn open_fold(&mut self, text: &str) -> Result<()> {
+        self.draw()?;
+        let (_, row) = self.find(text);
+        self.click_at(crate::transcript_geometry::CONTROL_COLUMN, row)
+            .await
+    }
+
+    async fn click_at(&mut self, column: u16, row: u16) -> Result<()> {
         for kind in [
             MouseEventKind::Down(MouseButton::Left),
             MouseEventKind::Up(MouseButton::Left),

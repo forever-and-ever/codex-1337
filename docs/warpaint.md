@@ -5,9 +5,9 @@ pack colors; the binder resolves every cell as the frame is flushed.
 
 ## Vocabulary
 
-`codex-rs/tui/src/warpaint/paint.rs` declares three families: grounds, what a cell is
-painted on; figures, text and glyphs painted over a ground; and syntax classes, which only the
-scope theme names. One macro per family emits the enum, the table a pack must fill and the
+`codex-rs/tui/src/warpaint/paint.rs` declares four families: grounds, what a cell is
+painted on; figures, text and glyphs painted over a ground; brackets, the strokes in the
+transcript's gutter that say who speaks; and syntax classes, which only the scope theme names. One macro per family emits the enum, the table a pack must fill and the
 family's token range. Three ramps complete a pack: `livery` for thread identities, `heat` for
 activity, and `terminal`, tool output's sixteen colors in xterm order.
 
@@ -31,13 +31,14 @@ the pack's ink and canvas again over the default colors the handoff gave back. T
 - tokens to the pack's colors, exact in truecolor and the nearest fixed xterm color at 256;
 - upstream's named chrome colors to the figures they stand for: red to failure, green to
   success, yellow to caution, blue to link, magenta to accent, cyan to info, gray, dark gray
-  and white to the ink ladder; a black background to the trough;
+  and white to the ink ladder; a named background to the terminal ramp's color;
 - green and red text over a diff line's ground to the diff figures, which are proven there,
   rather than to success and failure;
 - dimmed ink to the faint ink, so the proof rather than the terminal decides how faint;
-- bold default ink on the client's grounds, the canvas, trough and dais, to the label: upstream's
-  titles, keys and emphasis there. Lines the client quotes, such as tool output, carry the ink
-  itself, so a quoted bold is never taken for a label;
+- bold default ink on the client's grounds, the canvas, dais and prompt, to the label: upstream's
+  titles, keys and emphasis there. Lines the client quotes, such as tool output and every
+  speaker's words in the transcript, carry the ink itself, so a quoted bold is never taken for a
+  label;
 - tool output, which `codex-ansi-escape` quarantines at ingestion: its palette colors become
   indices below 16, resolved through the terminal ramp, and its extended colors become RGB;
 - RGB literals, unchanged in truecolor and quantized at 256;
@@ -82,8 +83,8 @@ repaints its fills, accent, secondary and selection; `diff_render.rs` its two li
 the pickers their active tab and the resume picker its rows; the activity chart replaces a
 gradient it would show with the heat ramp; and `readable_color_on` passes tokens and the ink
 through, since packs prove both, except that at an unknown color depth, where upstream paints no
-computed color, it paints no token either. Markdown headings, which lie on the speakers'
-grounds, name the label themselves. Thread colors come from `warpaint/livery.rs`, mounted as
+computed color, it paints no token either. Markdown headings, whose lines carry their speaker's
+ink, name the label themselves. Thread colors come from `warpaint/livery.rs`, mounted as
 `thread_color`.
 
 Animated flourishes are aesthetic isolates: the shimmers, the composer's sparkle and effort
@@ -112,8 +113,8 @@ draws a smaller flowchart grammar than Mermaid's and rejects `subgraph`, so rend
 
 A spec makes the decisions that give a palette its character and nothing else: the ground's
 hue, colorfulness and lightness; the ink's hue, tint and contrast; the voice's colorfulness,
-`lean` and `naturalism`; and the hue of each authored role, a speaker's ground among them,
-which may be `"grey"`. Every color is derived from them by law.
+`lean` and `naturalism`; and the hue of each authored role. Every color is derived from them
+by law.
 
 A spec may restate how its code speaks and how its surfaces are built, and its proof states
 each restatement beside the doctrine's value:
@@ -123,7 +124,7 @@ each restatement beside the doctrine's value:
 | `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
 | `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
-| `[surfaces]` | the elevations `trough`, `dais` and `selection_rise` (-3, 5, 9 J'), the tints `selection_tint` and `diff_tint` (9, 7 M), and the speaker grounds' rises `response`, `message`, `prompt`, `reasoning` and `environment` (2, 2.5, 9.5, 3, 9.5 J') |
+| `[surfaces]` | the elevations `dais`, `selection_rise` and `prompt_rise` (5, 9, 9.5 J') and the tints `selection_tint`, `diff_tint` and `prompt_tint` (9, 7, 2.25 M) |
 | `[label]` | the label's `hue`, `colorfulness` and `contrast` |
 | `[tab]` | the open tab's `hue`, `colorfulness` and `contrast` |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
@@ -139,24 +140,27 @@ light text on a dark ground correctly.
 - Surfaces are the canvas's material raised or recessed in equal perceptual steps at constant
   hue and saturation. The selection bar is that material tinted toward the accent; diff bands
   take their ink's hue outright. Every surface stands 2 dE from every other.
-- A speaker's ground means the model sees what lies on it, and its corner says who said it: the
-  agent's corner holds this thread's responses and other agents' messages, the user's the
-  prompt, the chain of thought's the reasoning, and the environment's tool output, the verbatim
-  input of tool calls and injected context. The canvas holds only what the client says. Each
-  ground rises by its own amount and takes the least tint toward its hue that stands it 6.5
-  dE off the canvas (the response 6), 6.5 dE from every other corner's ground and 3 to 5 from
-  its own corner's; the grounds take their tints quietest first, response, message, environment,
-  reasoning, prompt, so the louder pays for distinctness, and the response stands quietest, the
-  prompt loudest. A grey ground is untinted and seen by its rise alone. A spec may author the
-  reasoning hue; otherwise the law takes the hue inside caution's window that needs the least
-  tint, the farthest from every surface among equals.
+- The transcript lies on the canvas, and a bracket in its gutter says who speaks: the response,
+  this thread's words to the user; a message, other agents' words; a call, the verbatim input of
+  a tool call; the reasoning; the prompt, the user's words; and the harness, tool output,
+  injected context and whatever else the harness says in the user's stead. The brackets keep
+  that order round the hue circle, nearest 30, 95, 125, 150, 240 and 300 degrees from reasoning
+  to harness, and wear the livery's colors, so a palette marks its speakers only in colors it
+  already has: of the identities at 12 M or more, they take the assignment that keeps their
+  order and strays least, summed, from those hues. A speaker's color is also a thread's.
+- The prompt ground, beneath the composer and the panels that open in its place, is the
+  canvas's material raised 9.5 J' and tinted 2.25 M toward the prompt bracket's hue: the user's
+  own surface.
 - Labels, the chrome's bold words (the feed's headings, titles, the keys a hint names, Markdown
   headings), speak in a pale tint of the accent: its hue at 9 M, 3 Lc beneath the ink's
   contrast, unless a spec's `[label]` states otherwise. Bold carries the rest of their
   prominence, and no label reads above Lc 95 over the canvas. An open disclosure tab reads
   between the faint ink of the tabs beside it and the label above it: the accent's hue at
   15 M, halfway between their contrasts, underlined rather than bold, unless a spec's `[tab]`
-  states otherwise.
+  states otherwise. Neither may take a hue between 105 and 180 degrees, green from its yellow
+  edge to teal, which the active thread's dot wears: a finished feed would read as one still at
+  work. A heading's verb that reports a failure or an interruption wears the failure figure,
+  not the label.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A

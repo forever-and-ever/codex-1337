@@ -13,6 +13,7 @@ use ratatui::style::Style;
 
 use super::pack::Pack;
 use super::pack::Rgb;
+use super::paint::Bracket;
 use super::paint::Figure;
 use super::paint::Ground;
 use super::paint::HEAT_STEPS;
@@ -77,12 +78,6 @@ const CHROME_FIGURES: [Option<Figure>; 16] = [
     Some(Figure::Info),
     Some(Figure::Ink),
 ];
-/// Upstream's only named chrome background is black: the recessed board of the split-flap.
-const CHROME_GROUNDS: [Option<Ground>; 16] = {
-    let mut grounds = [None; 16];
-    grounds[0] = Some(Ground::Trough);
-    grounds
-};
 const LIVERY_ANSI: [Color; 6] = [
     Color::Cyan,
     Color::Magenta,
@@ -174,17 +169,13 @@ impl Binder {
                 shown
             };
         }
-        for index in 0..16 {
-            binder.named_fg[index] = CHROME_FIGURES[index]
+        for (index, chrome) in CHROME_FIGURES.iter().enumerate() {
+            binder.named_fg[index] = chrome
                 .map_or(binder.fg[index], |figure| {
                     binder.fg[usize::from(figure.token())]
                 })
                 .color;
-            binder.named_bg[index] = CHROME_GROUNDS[index]
-                .map_or(binder.bg[index], |ground| {
-                    binder.bg[usize::from(ground.token())]
-                })
-                .color;
+            binder.named_bg[index] = binder.bg[index].color;
         }
         binder.reset_fg = binder.fg[usize::from(Figure::Ink.token())].color;
         binder.reset_bg = binder.bg[usize::from(Ground::Canvas.token())].color;
@@ -337,7 +328,7 @@ fn diff_figure(fg: Color, bg: Color) -> Color {
 /// labels, which the pack paints. Words the client quotes carry the ink itself and keep it.
 fn label_figure(fg: Color, bg: Color, modifier: Modifier) -> Color {
     let client = matches!(bg, Color::Reset | Color::Black)
-        || [Ground::Canvas, Ground::Trough, Ground::Dais]
+        || [Ground::Canvas, Ground::Dais, Ground::Prompt]
             .iter()
             .any(|ground| bg == ground.color());
     let emphasized = modifier.contains(Modifier::BOLD) && !modifier.contains(Modifier::DIM);
@@ -390,6 +381,14 @@ fn ansi(paint: Paint) -> Bound {
             Syntax::Comment => dim(Color::Reset),
             Syntax::Punctuation | Syntax::Variable => Bound::plain(Color::Reset),
         },
+        Paint::Bracket(bracket) => Bound::plain(match bracket {
+            Bracket::Response => Color::Green,
+            Bracket::Message => Color::Cyan,
+            Bracket::Call => Color::Yellow,
+            Bracket::Reasoning => Color::Red,
+            Bracket::Prompt => Color::Blue,
+            Bracket::Harness => Color::Magenta,
+        }),
         Paint::Heat(step) if step < HEAT_STEPS / 2 => dim(Color::Magenta),
         Paint::Heat(_) => Bound::plain(Color::Magenta),
         Paint::Livery(slot) => Bound::plain(LIVERY_ANSI[slot % LIVERY_ANSI.len()]),
@@ -415,7 +414,7 @@ pub(super) enum Source {
 impl Source {
     /// A cell's foreground, background and modifiers as [`Binder::bind`] resolves them.
     pub(super) fn of_cell(fg: Color, bg: Color, modifier: Modifier) -> (Self, Self, Modifier) {
-        let ground = Self::of(bg, CHROME_GROUNDS.map(|ground| ground.map(Paint::Ground)));
+        let ground = Self::of(bg, [None; 16]);
         if modifier.contains(Modifier::DIM) && is_ink(fg) {
             let faint = Self::Paint(Paint::Figure(Figure::InkFaint));
             return (faint, ground, modifier.difference(Modifier::DIM));

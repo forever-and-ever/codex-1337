@@ -89,11 +89,14 @@ impl HistoryCell for RequestUserInputResultCell {
                     }
                 }
             }
+            super::output_provenance::hang(&mut question_lines, crate::warpaint::Bracket::Response);
             lines.extend(question_lines);
 
             let Some(answer) = answer.filter(|answer| !answer.answers.is_empty()) else {
                 continue;
             };
+            // The user answers on the user's bracket, beneath the model's question.
+            let answered_from = lines.len();
             if question.is_secret {
                 lines.extend(wrap_with_prefix(
                     "••••••",
@@ -102,6 +105,10 @@ impl HistoryCell for RequestUserInputResultCell {
                     "            ".dim(),
                     Style::default().fg(accent_color()),
                 ));
+                super::output_provenance::hang(
+                    &mut lines[answered_from..],
+                    crate::warpaint::Bracket::Prompt,
+                );
                 continue;
             }
 
@@ -132,6 +139,10 @@ impl HistoryCell for RequestUserInputResultCell {
                 };
                 lines.extend(wrap_with_prefix(&note, width, label, continuation, style));
             }
+            super::output_provenance::hang(
+                &mut lines[answered_from..],
+                crate::warpaint::Bracket::Prompt,
+            );
         }
 
         if self.interrupted && unanswered > 0 {

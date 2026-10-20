@@ -3,49 +3,49 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\")"
 ---
 counted closed
-  HH:MM     Response                                [cot]
+  HH:MM [   Response                                [cot]
 
 
 
 
 
 counted open width=64
-  HH:MM     Response                                [cot]
-              First block Ω
-
-              Second block
+  HH:MM [   Response                                [cot]
+        ┌     First block Ω
+        ┆
+        └     Second block
 
 
 
 
 counted open width=32
-  HH:MM     Respon… [cot]
-              First block Ω
-
-              Second block
+  HH:MM [   Respon… [cot]
+        ┌     First block Ω
+        ┆
+        └     Second block
 
 
 
 
 counted open width=64
-  HH:MM     Response                                [cot]
-              First block Ω
-
-              Second block
+  HH:MM [   Response                                [cot]
+        ┌     First block Ω
+        ┆
+        └     Second block
 
 
 
 
 unknown closed
-  HH:MM     Response                                [cot]
+  HH:MM [   Response                                [cot]
 
 
 
 
 
 unknown open width=64
-  HH:MM     Response                                [cot]
-              First block Ω
+  HH:MM [   Response                                [cot]
+        [     First block Ω
 
 
 
@@ -53,8 +53,8 @@ unknown open width=64
 
 
 unknown open width=32
-  HH:MM     Respon… [cot]
-              First block Ω
+  HH:MM [   Respon… [cot]
+        [     First block Ω
 
 
 
@@ -62,8 +62,8 @@ unknown open width=32
 
 
 unknown open width=64
-  HH:MM     Response                                [cot]
-              First block Ω
+  HH:MM [   Response                                [cot]
+        [     First block Ω
 
 
 

@@ -27,6 +27,7 @@ use ratatui::style::Style;
 use syntect::highlighting::Theme;
 
 pub(crate) use pack::DEFAULT as DEFAULT_PACK;
+pub(crate) use paint::Bracket;
 pub(crate) use paint::Figure;
 pub(crate) use paint::Ground;
 pub(crate) use paint::HEAT_STEPS;

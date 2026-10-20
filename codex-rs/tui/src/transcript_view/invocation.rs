@@ -654,6 +654,7 @@ impl Invocations {
                 .collect(),
             fold: None,
             controls,
+            speaker: call.caller(),
         }
     }
 
@@ -691,11 +692,9 @@ impl Invocations {
                 lines: vec![client_notice("Exact input is unavailable in this record")],
                 ..Default::default()
             });
+            crate::history_cell::output_provenance::hang(&mut parts.lines, call.caller());
         }
         if ports.output.visible() {
-            if !parts.lines.is_empty() {
-                parts.lines.push(client_notice(""));
-            }
             parts
                 .lines
                 .extend(prepared.output(call, width, ports.output.mode()));
@@ -831,7 +830,8 @@ impl Invocations {
             lines.push(client_notice(""));
             lines.extend(crate::transcript_geometry::rich_lines(auxiliary));
         }
-        let mut layout = TextLayout::with_invocation_rows(lines, width, controls);
+        let mut layout = TextLayout::with_invocation_rows(lines, width, controls)
+            .with_bracket(super::brackets::of_cell(cell));
         for part in parts {
             layout = layout.with_part_control(part);
         }

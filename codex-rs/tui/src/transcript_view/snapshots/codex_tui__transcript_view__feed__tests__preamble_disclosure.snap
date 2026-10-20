@@ -3,161 +3,161 @@ source: tui/src/transcript_view/feed_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 fresh
-  HH:MM [+] Preamble                                                        1000
-  HH:MM [+] Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
 
 summary
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
-  HH:MM [+] Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
+  HH:MM ╓   Preamble                                                        1000
 
 summary reopened
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
-  HH:MM [+] Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
+  HH:MM ╓   Preamble                                                        1000
 
 raw explicitly opened
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [-]   Raw Context [Raw] [Fmt]
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</context>
-  HH:MM [+] Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context [Raw] [Fmt]
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ╰     <context>needle Ω</context>
+  HH:MM ╓   Preamble                                                        1000
 
 narrow raw
-                    700  Instructions
-                    700    Base
-              instructions
-                    300  Context
-                    300    AGENTS.md /
-              repo
-
-        [-]   Raw Context [Raw] [Fmt]
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</
-              context>
-  HH:MM [-] Preamble                1000
-                    700  Instructions
-                    700    Base
-              instructions
-                    300  Context
-                    300    AGENTS.md /
-              repo
-
-        [+]   Raw Context
+        ║           700  Instructions
+        ║           700    Base
+        ║     instructions
+        ║           300  Context
+        ║           300    AGENTS.md /
+        ║     repo
+        ║
+        ╟     Raw Context [Raw] [Fmt]
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ┊     <context>needle Ω</
+        ╰     context>
+  HH:MM ╓   Preamble                1000
+        ║           700  Instructions
+        ║           700    Base
+        ║     instructions
+        ║           300  Context
+        ║           300    AGENTS.md /
+        ║     repo
+        ║
+        ╟     Raw Context
 
 wide raw
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [-]   Raw Context [Raw] [Fmt]
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</context>
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context [Raw] [Fmt]
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ╰     <context>needle Ω</context>
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
 
 raw retained across parent fold
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [-]   Raw Context [Raw] [Fmt]
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</context>
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context [Raw] [Fmt]
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ╰     <context>needle Ω</context>
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
 
 same item replayed
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [-]   Raw Context [Raw] [Fmt]
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</context>
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context [Raw] [Fmt]
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ╰     <context>needle Ω</context>
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
 
 search raw match
-                    300    AGENTS.md /repo
-
-              Raw Context
-              instructions
-              <instructions>
-                Be exact.
-              </instructions>
-              <tools>exec</tools>
-              <context>needle Ω</context>
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
+        ║           300    AGENTS.md /repo
+        ║
+        ║     Raw Context
+        ╙     instructions
+        ╭     <instructions>
+        ┊       Be exact.
+        ┊     </instructions>
+        ┊     <tools>exec</tools>
+        ╰     <context>needle Ω</context>
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context
 
 search cancelled
-  HH:MM [+] Preamble                                                        1000
-  HH:MM [-] Preamble                                                        1000
-                    700  Instructions
-                    700    Base instructions
-                    300  Context
-                    300    AGENTS.md /repo
-
-        [+]   Raw Context
+  HH:MM ╓   Preamble                                                        1000
+  HH:MM ╓   Preamble                                                        1000
+        ║           700  Instructions
+        ║           700    Base instructions
+        ║           300  Context
+        ║           300    AGENTS.md /repo
+        ║
+        ╟     Raw Context

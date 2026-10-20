@@ -6,6 +6,11 @@ use super::*;
 use crate::history_cell::UserHistoryCell;
 use crate::history_cell::sanitize_user_text;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::transcript_geometry::CONTROL_COLUMN;
+use crate::transcript_geometry::TITLE_COLUMN;
+use crate::warpaint::Bracket;
+use ratatui::style::Style;
+use ratatui::text::Span;
 
 /// Remember only a header canceled at a turn boundary, not a missing preceding prompt.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -53,11 +58,16 @@ pub(super) fn line(
     Some((
         truncate_line_with_ellipsis_if_overflow(
             Line::from(vec![
-                " ".repeat(usize::from(crate::transcript_geometry::TITLE_COLUMN))
+                " ".repeat(usize::from(CONTROL_COLUMN)).into(),
+                // The prompt, folded to its first words: its bracket opens and the rest lies above.
+                Span::styled(
+                    crate::render::bracket::Strokes::of(Bracket::Prompt).top,
+                    Style::new().fg(Bracket::Prompt.color()),
+                ),
+                " ".repeat(usize::from(TITLE_COLUMN - CONTROL_COLUMN - 1))
                     .into(),
                 message.into(),
-            ])
-            .style(crate::style::history_prompt_style()),
+            ]),
             usize::from(width.saturating_sub(1)),
         ),
         EntryKey::cell(&cells[index]),

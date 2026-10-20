@@ -32,7 +32,10 @@ from proof import xterm
 type RGB = tuple[int, int, int]
 
 FAMILIES = {
-    **{family: tuple(f"{family}:{key}" for key in keys) for family, keys in packs.FAMILIES.items()},
+    **{
+        family: tuple(f"{family}:{key}" for key in keys)
+        for family, keys in packs.FAMILIES.items()
+    },
 }
 
 
@@ -78,8 +81,14 @@ class Pack:
         source = packs.Pack.load(path)
         return cls(
             source.name,
-            {name: rgb(value, f"{path}: {name}") for name, value in source.colors.items()},
-            tuple(rgb(value, f"{path}: livery {i}") for i, value in enumerate(source.ramps["livery"])),
+            {
+                name: rgb(value, f"{path}: {name}")
+                for name, value in source.colors.items()
+            },
+            tuple(
+                rgb(value, f"{path}: livery {i}")
+                for i, value in enumerate(source.ramps["livery"])
+            ),
             source,
         )
 
@@ -198,7 +207,13 @@ class Capture:
                         cells,
                         pack.resolve(raw["fg"], True, f"{at} fg"),
                         pack.resolve(raw["bg"], False, f"{at} bg"),
-                        frozenset(Mod(m) for m in (*raw["mods"], *pack.source.style.get(raw["fg"], ()))),
+                        frozenset(
+                            Mod(m)
+                            for m in (
+                                *raw["mods"],
+                                *pack.source.style.get(raw["fg"], ()),
+                            )
+                        ),
                     )
                 )
             actual = sum(run.width for run in runs)
@@ -386,10 +401,15 @@ def chips(pack: Pack, fonts: Fonts) -> Image.Image:
     column_width = fonts.width * 53
     groups = [
         *FAMILIES.items(),
-        *((ramp, tuple(f"{ramp}:{i}" for i in range(len(pack.source.ramps[ramp])))) for ramp in packs.RAMPS),
+        *(
+            (ramp, tuple(f"{ramp}:{i}" for i in range(len(pack.source.ramps[ramp]))))
+            for ramp in packs.RAMPS
+        ),
     ]
     height = (max(len(roles) for _, roles in groups) + 3) * row_height
-    image = Image.new("RGB", (column_width * 4, height * 2), pack.roles["ground:canvas"])
+    image = Image.new(
+        "RGB", (column_width * 4, height * 2), pack.roles["ground:canvas"]
+    )
     draw = ImageDraw.Draw(image)
     for index, (family, roles) in enumerate(groups):
         x, y = index % 4 * column_width + 18, index // 4 * height + 15

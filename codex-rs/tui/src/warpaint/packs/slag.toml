@@ -38,14 +38,9 @@ terminal = [
 
 [ground]
 canvas = "#0a0503"
-trough = "#030100"
 dais = "#140d0a"
 selection = "#271300"
-prompt = "#19191b"
-response = "#160701"
-reasoning = "#140e01"
-environment = "#211815"
-message = "#170604"
+prompt = "#19191c"
 added = "#070a00"
 removed = "#0f0009"
 
@@ -74,10 +69,18 @@ type = "#a59188"
 string = "#a59188"
 number = "#a59487"
 comment = "#a59188"
-punctuation = "#b8aba2"
+punctuation = "#b9ada4"
 variable = "#c3a48a"
 constant = "#ffcc9c"
 attribute = "#c4a18b"
+
+[bracket]
+response = "#67bc79"
+message = "#9ebd3b"
+call = "#cfab21"
+reasoning = "#feaf5e"
+prompt = "#65bfff"
+harness = "#d8b7ff"
 
 [style]
 constant = ["bold"]

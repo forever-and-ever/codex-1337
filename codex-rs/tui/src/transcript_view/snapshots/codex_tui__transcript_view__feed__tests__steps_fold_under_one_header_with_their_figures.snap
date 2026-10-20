@@ -1,32 +1,31 @@
 ---
 source: tui/src/transcript_view/feed_tests.rs
-assertion_line: 503
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 unfolded
-        [-] User
-            Fix the failing test
+        ╭   User
+        ╰   Fix the failing test
 
-  HH:MM     Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
-            I'll run the tests first.
-              Stored execution · exact input unavailable
-              cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [+] Injection · environment_context                                   ≈84
+  HH:MM [   Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
+        [   I'll run the tests first.
+        ┏     Stored execution · exact input unavailable
+        ┗     cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM ╭   Injection · environment_context                                   ≈84
 
-  HH:MM [-] Response                                                 [cot]    154    120     34
-            Fixed the parser.
+  HH:MM ╓   Response                                                 [cot]    154    120     34
+        ╙   Fixed the parser.
 
-        [-] User                                                                3
-            Thanks
+        ╭   User                                                                3
+        ╰   Thanks
 
-  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
+  HH:MM [   Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
-        [-] Response
-            No step billed this reply.
+        ╓   Response
+        ╙   No step billed this reply.
 
-          • Context compacted · 1m 23s
-  HH:MM [-] Alarm check-layout · time reached
-              Check the header alignment
+        ( • Context compacted · 1m 23s
+  HH:MM ╭   Alarm check-layout · time reached
+        ╰     Check the header alignment
 
 
 
@@ -40,30 +39,30 @@ unfolded
 
 
 reasoning opened
-        [-] User
-            Fix the failing test
+        ╭   User
+        ╰   Fix the failing test
 
-  HH:MM     Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
-              Considering the failure
-            I'll run the tests first.
-              Stored execution · exact input unavailable
-              cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [+] Injection · environment_context                                   ≈84
+  HH:MM [   Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
+        [     Considering the failure
+        [   I'll run the tests first.
+        ┏     Stored execution · exact input unavailable
+        ┗     cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM ╭   Injection · environment_context                                   ≈84
 
-  HH:MM [-] Response                                                 [cot]    154    120     34
-            Fixed the parser.
+  HH:MM ╓   Response                                                 [cot]    154    120     34
+        ╙   Fixed the parser.
 
-        [-] User                                                                3
-            Thanks
+        ╭   User                                                                3
+        ╰   Thanks
 
-  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
+  HH:MM [   Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
-        [-] Response
-            No step billed this reply.
+        ╓   Response
+        ╙   No step billed this reply.
 
-          • Context compacted · 1m 23s
-  HH:MM [-] Alarm check-layout · time reached
-              Check the header alignment
+        ( • Context compacted · 1m 23s
+  HH:MM ╭   Alarm check-layout · time reached
+        ╰     Check the header alignment
 
 
 
@@ -76,31 +75,31 @@ reasoning opened
 
 
 injection opened
-        [-] User
-            Fix the failing test
+        ╭   User
+        ╰   Fix the failing test
 
-  HH:MM     Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
-            I'll run the tests first.
-              Stored execution · exact input unavailable
-              cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [-] Injection · environment_context                                   ≈84
-              Context [Raw] [Fmt]
-              <environment_context>cwd</environment_context>
+  HH:MM [   Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
+        [   I'll run the tests first.
+        ┏     Stored execution · exact input unavailable
+        ┗     cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM ╭   Injection · environment_context                                   ≈84
+        ┊     Context [Raw] [Fmt]
+        ╰     <environment_context>cwd</environment_context>
 
-  HH:MM [-] Response                                                 [cot]    154    120     34
-            Fixed the parser.
+  HH:MM ╓   Response                                                 [cot]    154    120     34
+        ╙   Fixed the parser.
 
-        [-] User                                                                3
-            Thanks
+        ╭   User                                                                3
+        ╰   Thanks
 
-  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
+  HH:MM [   Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
-        [-] Response
-            No step billed this reply.
+        ╓   Response
+        ╙   No step billed this reply.
 
-          • Context compacted · 1m 23s
-  HH:MM [-] Alarm check-layout · time reached
-              Check the header alignment
+        ( • Context compacted · 1m 23s
+  HH:MM ╭   Alarm check-layout · time reached
+        ╰     Check the header alignment
 
 
 
@@ -112,31 +111,31 @@ injection opened
 
 
 script
-        [-] User
-            Fix the failing test
+        ╭   User
+        ╰   Fix the failing test
 
-  HH:MM     Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
-            I'll run the tests first.
-              Stored execution · exact input unavailable
-              cargo test -p codex-tui --lib transcript_view::feed
-  HH:MM [+] Injection · environment_context                                   ≈84
+  HH:MM [   Command · failed (1)  [in [raw] [fmt]] [out]             [cot]   1342    120     34    ≈1188
+        [   I'll run the tests first.
+        ┏     Stored execution · exact input unavailable
+        ┗     cargo test -p codex-tui --lib transcript_view::feed
+  HH:MM ╭   Injection · environment_context                                   ≈84
 
-  HH:MM [-] Response                                                 [cot]    154    120     34
-            Fixed the parser.
+  HH:MM ╓   Response                                                 [cot]    154    120     34
+        ╙   Fixed the parser.
 
-        [-] User                                                                3
-            Thanks
+        ╭   User                                                                3
+        ╰   Thanks
 
-  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
-              const status = await tools.exec_command({ cmd: "git status" });
-              text(status.output);
+  HH:MM ┏   Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
+        ┇     const status = await tools.exec_command({ cmd: "git status" });
+        ┗     text(status.output);
 
-        [-] Response
-            No step billed this reply.
+        ╓   Response
+        ╙   No step billed this reply.
 
-          • Context compacted · 1m 23s
-  HH:MM [-] Alarm check-layout · time reached
-              Check the header alignment
+        ( • Context compacted · 1m 23s
+  HH:MM ╭   Alarm check-layout · time reached
+        ╰     Check the header alignment
 
 
 
@@ -148,24 +147,24 @@ script
 
 
 folded
-        [-] User
-            Fix the failing test
+        ╭   User
+        ╰   Fix the failing test
 
-  HH:MM     Command · failed (1)  [in]             [out]             [cot]   1342    120     34    ≈1188
-            I'll run the tests first.
-  HH:MM [+] Injection · environment_context                                   ≈84
+  HH:MM [   Command · failed (1)  [in]             [out]             [cot]   1342    120     34    ≈1188
+        [   I'll run the tests first.
+  HH:MM ╭   Injection · environment_context                                   ≈84
 
-  HH:MM [-] Response                                                 [cot]    154    120     34
-            Fixed the parser.
+  HH:MM ╓   Response                                                 [cot]    154    120     34
+        ╙   Fixed the parser.
 
-        [-] User                                                                3
-            Thanks
+        ╭   User                                                                3
+        ╰   Thanks
 
-  HH:MM     Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
+  HH:MM [   Code Mode (ζσξζ)            [in [raw]      ] [out]                154    120     34        …
 
-        [-] Response
-            No step billed this reply.
+        ╓   Response
+        ╙   No step billed this reply.
 
-          • Context compacted · 1m 23s
-  HH:MM [-] Alarm check-layout · time reached
-              Check the header alignment
+        ( • Context compacted · 1m 23s
+  HH:MM ╭   Alarm check-layout · time reached
+        ╰     Check the header alignment

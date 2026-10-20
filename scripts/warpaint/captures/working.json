@@ -14,25 +14,31 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "╭", "fg": "bracket:prompt", "bg": "reset", "mods": []},
+      {"text": "   ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "User", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "            cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "ground:prompt", "mods": []}
+      {"text": "        ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "╰", "fg": "bracket:prompt", "bg": "reset", "mods": []},
+      {"text": "   cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "    ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┏", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "   ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "Command (exec_command)", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " · failed (101)", "fg": "figure:failure", "bg": "reset", "mods": []},
       {"text": "                                                   ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┇", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "   [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "[raw]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
@@ -41,10 +47,14 @@
       {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "ground:environment", "mods": []}
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┗", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "     {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "            ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┏", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "   ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "Command", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                 [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "in", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
@@ -53,28 +63,34 @@
       {"text": "]                                          ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┇", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "     ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "Edited", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                              ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
       {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "[+]", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "       src/parser.rs (", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┣", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "         src/parser.rs (", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "+1", "fg": "figure:success", "bg": "reset", "mods": []},
       {"text": ", ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "-1", "fg": "figure:failure", "bg": "reset", "mods": []},
       {"text": ")                                                            ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "            ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┏", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "   ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "Command (exec_command)", "fg": "figure:accent", "bg": "reset", "mods": ["bold"]},
       {"text": " · running", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "            [", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┇", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "   [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": " ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "[raw]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
@@ -83,7 +99,9 @@
       {"text": "]                                                                  ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "              {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "ground:environment", "mods": []}
+      {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "┗", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "     {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
       {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
@@ -213,18 +231,18 @@
       {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                                                                                                    ", "fg": "reset", "bg": "ground:trough", "mods": []}
+      {"text": "                                                                                                    ", "fg": "reset", "bg": "ground:prompt", "mods": []}
     ],
     [
-      {"text": "›", "fg": "figure:label", "bg": "ground:trough", "mods": ["bold"]},
-      {"text": " ", "fg": "reset", "bg": "ground:trough", "mods": []},
-      {"text": "Ask Codex to do anything", "fg": "figure:ink_faint", "bg": "ground:trough", "mods": []},
-      {"text": "                                                                          ", "fg": "reset", "bg": "ground:trough", "mods": []}
+      {"text": "›", "fg": "figure:label", "bg": "ground:prompt", "mods": ["bold"]},
+      {"text": " ", "fg": "reset", "bg": "ground:prompt", "mods": []},
+      {"text": "Ask Codex to do anything", "fg": "figure:ink_faint", "bg": "ground:prompt", "mods": []},
+      {"text": "                                                                          ", "fg": "reset", "bg": "ground:prompt", "mods": []}
     ],
     [
-      {"text": "                                                                                                  ", "fg": "reset", "bg": "ground:trough", "mods": []},
-      {"text": "󰜗", "fg": "figure:info", "bg": "ground:trough", "mods": []},
-      {"text": " ", "fg": "reset", "bg": "ground:trough", "mods": []}
+      {"text": "                                                                                                  ", "fg": "reset", "bg": "ground:prompt", "mods": []},
+      {"text": "󰜗", "fg": "figure:info", "bg": "ground:prompt", "mods": []},
+      {"text": " ", "fg": "reset", "bg": "ground:prompt", "mods": []}
     ],
     [
       {"text": "────────────────────────────────────────────────────────────────────────────────────────────────────", "fg": "figure:ink_faint", "bg": "reset", "mods": []}

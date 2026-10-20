@@ -10,6 +10,7 @@ use ratatui::style::Modifier;
 use serde::Deserialize;
 use serde::Deserializer;
 
+use super::paint::Brackets;
 use super::paint::Figures;
 use super::paint::Grounds;
 use super::paint::HEAT_STEPS;
@@ -63,6 +64,7 @@ pub(crate) struct Pack {
     pub(crate) ground: Grounds,
     pub(crate) figure: Figures,
     pub(crate) syntax: Syntaxes,
+    pub(crate) bracket: Brackets,
     /// Thread identities, in slot order; never empty.
     pub(crate) livery: Box<[Rgb]>,
     pub(crate) heat: [Rgb; HEAT_STEPS],
@@ -98,6 +100,7 @@ struct PackFile {
     ground: Grounds,
     figure: Figures,
     syntax: Syntaxes,
+    bracket: Brackets,
     #[serde(default)]
     style: HashMap<Syntax, Vec<Emphasis>>,
 }
@@ -124,6 +127,7 @@ impl Pack {
             Paint::Ground(ground) => self.ground[ground],
             Paint::Figure(figure) => self.figure[figure],
             Paint::Syntax(syntax) => self.syntax[syntax],
+            Paint::Bracket(bracket) => self.bracket[bracket],
             Paint::Heat(step) => self.heat[step],
             Paint::Livery(slot) => self.livery[slot % self.livery.len()],
         }
@@ -139,6 +143,7 @@ impl Pack {
             ground: file.ground,
             figure: file.figure,
             syntax: file.syntax,
+            bracket: file.bracket,
             livery: file.livery.into_boxed_slice(),
             heat: file.heat,
             terminal: file.terminal,

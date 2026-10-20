@@ -1,14 +1,9 @@
 {
   "ground": [
     "canvas",
-    "trough",
     "dais",
     "selection",
     "prompt",
-    "response",
-    "reasoning",
-    "environment",
-    "message",
     "added",
     "removed"
   ],
@@ -42,6 +37,14 @@
     "constant",
     "attribute"
   ],
+  "bracket": [
+    "response",
+    "message",
+    "call",
+    "reasoning",
+    "prompt",
+    "harness"
+  ],
   "ramps": {
     "livery": {
       "min": 1,
@@ -58,40 +61,25 @@
     "figure": {
       "ink": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "ink_muted": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "ink_faint": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
@@ -100,123 +88,74 @@
       ],
       "rule": [
         "canvas",
-        "dais",
-        "response",
-        "reasoning",
-        "message"
+        "dais"
       ],
       "accent": [
         "canvas",
-        "trough",
         "dais",
         "selection",
-        "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message"
+        "prompt"
       ],
       "link": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "code": [
         "canvas",
-        "trough",
         "dais",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "success": [
         "canvas",
-        "trough",
         "dais",
         "selection",
-        "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message"
+        "prompt"
       ],
       "caution": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "failure": [
         "canvas",
-        "trough",
         "dais",
         "selection",
         "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message",
         "added",
         "removed"
       ],
       "info": [
         "canvas",
-        "trough",
         "dais",
         "selection",
-        "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message"
+        "prompt"
       ],
       "added": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "removed": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "label": [
         "canvas",
-        "trough",
         "dais",
         "selection",
-        "prompt",
-        "response",
-        "reasoning",
-        "environment",
-        "message"
+        "prompt"
       ],
       "tab": [
         "canvas"
@@ -225,110 +164,96 @@
     "syntax": {
       "keyword": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "function": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "type": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "string": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "number": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "comment": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "punctuation": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "variable": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "constant": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
       ],
       "attribute": [
         "canvas",
-        "trough",
-        "response",
-        "reasoning",
-        "message",
+        "prompt",
         "added",
         "removed"
+      ]
+    },
+    "bracket": {
+      "response": [
+        "canvas"
+      ],
+      "message": [
+        "canvas"
+      ],
+      "call": [
+        "canvas"
+      ],
+      "reasoning": [
+        "canvas"
+      ],
+      "prompt": [
+        "canvas"
+      ],
+      "harness": [
+        "canvas"
       ]
     },
     "ramp": {
       "livery": [
         "canvas",
-        "trough",
-        "dais"
+        "dais",
+        "prompt"
       ],
       "heat": [
         "canvas"
       ],
       "terminal": [
-        "canvas",
-        "prompt",
-        "response",
-        "environment",
-        "message"
+        "canvas"
       ]
     }
   }

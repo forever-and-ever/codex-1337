@@ -104,8 +104,12 @@ fn completed_thought_discloses_only_readable_reasoning() {
                         .unwrap();
                     let column = line.find("First block").unwrap();
                     assert_eq!(
-                        buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].bg,
-                        crate::style::reasoning_style().bg.unwrap()
+                        buffer[(
+                            crate::transcript_geometry::CONTROL_COLUMN,
+                            u16::try_from(row).unwrap()
+                        )]
+                            .fg,
+                        crate::warpaint::Bracket::Reasoning.color()
                     );
                     snapshots.push(format!(
                         "{label} open width={width}\n{}",
@@ -297,7 +301,11 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         tests::render(&mut view, &cells, /*width*/ 24, /*height*/ 16);
         assert_eq!(view.selected_text(&cells).as_deref(), Some(safe.as_str()));
         view.end_selection(&cells);
-        let buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        let mut buffer = tests::render(&mut view, &cells, /*width*/ 32, /*height*/ 12);
+        // The words wrap beside the bracket's stroke; read them without it.
+        for row in 0..buffer.area.height {
+            buffer[(crate::transcript_geometry::CONTROL_COLUMN, row)].set_symbol(" ");
+        }
         assert!(
             tests::text(&buffer)
                 .split_whitespace()
@@ -379,12 +387,12 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
             .unwrap();
         assert_eq!(body.source.as_ref().unwrap().output_provenance, expected);
         if matches!(source, ArrivalSource::Captured { .. }) {
-            let style = if kind == ArrivalKind::InterAgent {
-                crate::style::message_style()
+            let bracket = if kind == ArrivalKind::InterAgent {
+                crate::warpaint::Bracket::Message
             } else {
-                crate::style::environment_style()
+                crate::warpaint::Bracket::Harness
             };
-            assert_eq!(body.line.style.bg, style.bg);
+            assert_eq!(body.source.as_ref().unwrap().bracket, Some(bracket));
         }
         for mode in [OutputMode::Raw, OutputMode::Fmt] {
             let body = FeedEntry::feed_body(
@@ -515,7 +523,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
         || {
             use crate::history_cell::output_provenance::ContextAuthor;
             use crate::history_cell::output_provenance::captured_lines;
-            let mut backgrounds = Vec::new();
+            let mut brackets = Vec::new();
             for author in [
                 ContextAuthor::User,
                 ContextAuthor::Assistant,
@@ -536,11 +544,15 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     "Fmt must use the default background"
                 );
                 assert_ne!(styles[0].0, styles[1].0, "Fmt must announce repainting");
+                let bracket = captured_lines("source", author, OutputMode::Raw)[0]
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.bracket);
                 assert!(
-                    !backgrounds.contains(&styles[0].1),
-                    "Authors have distinct fills"
+                    !brackets.contains(&bracket),
+                    "Authors hang distinct brackets"
                 );
-                backgrounds.push(styles[0].1);
+                brackets.push(bracket);
             }
             // A renderer's span-level background/reverse must not leak through Client provenance.
             let mut decorated = vec![HyperlinkLine::from(Line::from(
@@ -600,13 +612,9 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     crate::history_cell::output_provenance::raw_cell_lines(cell.as_ref(), 80);
                 assert!(!lines.is_empty());
                 for line in lines {
-                    assert_eq!(
-                        line.line.style.bg,
-                        crate::style::history_response_style().bg
-                    );
-                    assert!(line.source.as_ref().is_none_or(
-                        |source| source.output_provenance == OutputProvenance::Unspecified
-                    ));
+                    let source = line.source.as_ref().unwrap();
+                    assert_eq!(source.bracket, Some(crate::warpaint::Bracket::Response));
+                    assert_eq!(source.output_provenance, OutputProvenance::Unspecified);
                 }
             }
             // The same submitted definitions cross Preamble, /context and Injection surfaces.
@@ -675,7 +683,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     assert!(definitions.iter().all(|line| {
                         line.line.style.bg
                             == match mode {
-                                OutputMode::Raw => crate::style::environment_style().bg,
+                                OutputMode::Raw => None,
                                 OutputMode::Fmt => Some(ratatui::style::Color::Reset),
                             }
                     }));

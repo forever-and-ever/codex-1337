@@ -190,8 +190,12 @@ fn file_disclosures_are_independent_and_not_copied() {
 
 #[test]
 fn grouped_file_disclosures_span_receipts_but_not_feed_items_or_ports() {
-    use crate::history_cell::activity_parts::{FoldGroup, FoldTarget};
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crate::history_cell::activity_parts::FoldGroup;
+    use crate::history_cell::activity_parts::FoldTarget;
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
     fn patch(id: &str) -> std::sync::Arc<dyn HistoryCell> {
         crate::thread_transcript::thread_items_to_transcript_cells(
             None,

@@ -1329,7 +1329,9 @@ mod tests {
             .content()
             .chunks(usize::from(width))
             .map(|row| {
+                // The bracket hangs beside the words; the URL lies right of it.
                 row.iter()
+                    .skip(usize::from(crate::transcript_geometry::CONTROL_COLUMN) + 1)
                     .map(ratatui::buffer::Cell::symbol)
                     .collect::<String>()
                     .trim()

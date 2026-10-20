@@ -307,13 +307,13 @@ fn steps_fold_under_one_header_with_their_figures() {
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
         for (row, line) in text.lines().enumerate() {
-            for glyph in ["[+]", "[-]"] {
-                for (column, _) in line.match_indices(glyph) {
-                    let cell =
-                        &buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())];
-                    assert_eq!(cell.fg, ratatui::style::Color::Reset);
-                    assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
-                }
+            // A bracket's stroke keeps its own paint, never the heading's bold.
+            let stroke = &buffer[(
+                crate::transcript_geometry::CONTROL_COLUMN,
+                u16::try_from(row).unwrap(),
+            )];
+            if stroke.symbol() != " " {
+                assert!(!stroke.modifier.contains(ratatui::style::Modifier::BOLD));
             }
             for label in [
                 "User",
@@ -345,7 +345,8 @@ fn steps_fold_under_one_header_with_their_figures() {
                 }
             }
             for label in ["Stored execution", "Check the header alignment"] {
-                if let Some(column) = line.find(label) {
+                if let Some(offset) = line.find(label) {
+                    let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
                     assert_eq!(
                         column,
                         usize::from(crate::transcript_geometry::GUTTER_COLUMNS),
@@ -358,7 +359,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         text
     };
     let fresh = screen(&mut view, "unfolded");
-    assert!(fresh.contains("[+] Injection"));
+    assert!(fresh.contains("╭   Injection"), "{fresh}");
     assert_eq!(fresh.matches("[cot]").count(), 2);
     assert!(!fresh.contains("Thought") && !fresh.contains("Considering the failure"));
     // Reasoning belongs to its response, not the tool it called. Opening it must not
@@ -428,13 +429,19 @@ fn steps_fold_under_one_header_with_their_figures() {
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
     let opened = screen(&mut view, "injection opened");
     assert!(opened.contains("<environment_context>"));
+    // The words start right of the bracket's stroke, in the body's column.
+    let context = opened
+        .lines()
+        .find(|line| {
+            line.trim_start_matches(|c: char| {
+                c.is_whitespace() || ('\u{2500}'..='\u{257f}').contains(&c)
+            })
+            .starts_with("Context")
+        })
+        .unwrap();
     assert_eq!(
-        opened
-            .lines()
-            .find(|line| line.trim_start().starts_with("Context"))
-            .unwrap()
-            .find("Context"),
-        Some(usize::from(crate::transcript_geometry::GUTTER_COLUMNS))
+        unicode_width::UnicodeWidthStr::width(&context[..context.find("Context").unwrap()]),
+        usize::from(crate::transcript_geometry::GUTTER_COLUMNS)
     );
     assert!(view.focus_fold(&cells, injection, fold));
     view.handle_key(crossterm::event::KeyCode::Enter.into(), &cells);
@@ -778,15 +785,18 @@ fn steps_fold_under_one_header_with_their_figures() {
             for width in [104, 40, 80] {
                 let buffer = crate::transcript_view::tests::render(&mut view, &cells, width, 24);
                 let shown = crate::transcript_view::tests::text(&buffer);
-                let (row, line) = shown
+                let (row, _) = shown
                     .lines()
                     .enumerate()
                     .find(|(_, line)| line.contains("text("))
                     .unwrap();
-                let column = line.find("text(").unwrap();
                 assert_eq!(
-                    buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())].bg,
-                    crate::style::environment_style().bg.unwrap()
+                    buffer[(
+                        crate::transcript_geometry::CONTROL_COLUMN,
+                        u16::try_from(row).unwrap()
+                    )]
+                        .fg,
+                    Bracket::Call.color()
                 );
                 assert!(
                     view.current_layout(&cells, 0)
@@ -871,7 +881,10 @@ fn steps_fold_under_one_header_with_their_figures() {
 
 #[test]
 fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
     fn arrival(id: &str, kind: ArrivalKind) -> Arc<dyn HistoryCell> {
         Arc::new(ArrivalCell::new(ArrivalItem {
             placement: None,

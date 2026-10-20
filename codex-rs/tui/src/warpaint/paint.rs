@@ -80,29 +80,18 @@ macro_rules! family {
 }
 
 family! {
-    /// What a cell is painted on. A speaker's ground means the model sees what lies on it; the
-    /// canvas holds only what the client says.
+    /// What a cell is painted on. The transcript lies on the canvas; who said each block is its
+    /// bracket's to tell.
     Ground, table Grounds, tokens from 0x20 {
-        /// The page: headings, notices, summaries and every other word the client says. The
-        /// terminal's default background while a pack is worn.
+        /// The page: the transcript and every word on it. The terminal's default background while
+        /// a pack is worn.
         Canvas => canvas,
-        /// Recessed: the composer and other inert panels.
-        Trough => trough,
         /// Raised: proposed plans and other blocks lifted off the page.
         Dais => dais,
         /// The selected row.
         Selection => selection,
-        /// What the user says: prompts.
+        /// The user's own surface: the composer and the panels that open in its place.
         Prompt => prompt,
-        /// What this thread's assistant says: its responses.
-        Response => response,
-        /// The assistant's reasoning, disclosed from its response's header.
-        Reasoning => reasoning,
-        /// What the environment tells the model: tool output, the verbatim input of tool calls,
-        /// injected context and submitted definitions.
-        Environment => environment,
-        /// What an agent in another thread says here: inter-agent prose and delivered messages.
-        Message => message,
         /// An added diff line.
         Added => added,
         /// A removed diff line.
@@ -166,6 +155,25 @@ family! {
     }
 }
 
+family! {
+    /// Who speaks in a transcript block, as the bracket hung beside it says: each speaker wears an
+    /// identity the pack already has.
+    Bracket, table Brackets, tokens from 0x6a {
+        /// The model to the user: responses, preambles, proposed plans and questions.
+        Response => response,
+        /// The model to other agents, and other agents to it: inter-agent messages.
+        Message => message,
+        /// The model to its tools: the calls it writes, the diffs it proposes, the plans it ticks.
+        Call => call,
+        /// The model to itself: its reasoning.
+        Reasoning => reasoning,
+        /// The user: prompts, answers, queued messages and shell commands.
+        Prompt => prompt,
+        /// The harness: tool output, injected context, instructions, notices and errors.
+        Harness => harness,
+    }
+}
+
 impl Ground {
     /// The ground's token as a color, resolved against the pack in force at flush.
     pub(crate) fn color(self) -> Color {
@@ -187,6 +195,13 @@ impl Figure {
     /// A color upstream computed for this figure, repainted; see [`repainted`].
     pub(crate) fn repaint(self, computed: Color) -> Color {
         repainted(self.color(), computed)
+    }
+}
+
+impl Bracket {
+    /// The bracket's token as a color, resolved against the pack in force at flush.
+    pub(crate) fn color(self) -> Color {
+        indexed_color(self.token())
     }
 }
 
@@ -219,6 +234,7 @@ pub(crate) enum Paint {
     Ground(Ground),
     Figure(Figure),
     Syntax(Syntax),
+    Bracket(Bracket),
     /// A heat step, `0..HEAT_STEPS`.
     Heat(usize),
     /// A livery slot, `0..LIVERY_SLOTS`.
@@ -231,6 +247,7 @@ impl Paint {
             .map(Self::Ground)
             .or_else(|| Figure::from_token(token).map(Self::Figure))
             .or_else(|| Syntax::from_token(token).map(Self::Syntax))
+            .or_else(|| Bracket::from_token(token).map(Self::Bracket))
             .or_else(|| HEAT_TOKENS.binary_search(&token).ok().map(Self::Heat))
             .or_else(|| LIVERY_TOKENS.binary_search(&token).ok().map(Self::Livery))
     }

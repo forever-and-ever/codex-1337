@@ -3,6 +3,7 @@
 use super::DisclosureControl;
 use super::DisclosurePlacement;
 use super::FoldTarget;
+use super::Hang;
 use super::HeaderControl;
 use super::HeaderRows;
 use super::HyperlinkLine;
@@ -114,10 +115,10 @@ impl TextLayout {
     }
     pub(in crate::transcript_view) fn with_leading_disclosure_control(
         self,
-        label: String,
+        expanded: bool,
         source_line: usize,
     ) -> Self {
-        self.with_leading_disclosure_on_line(label, source_line, FoldTarget::Activity)
+        self.with_leading_disclosure_on_line(expanded, source_line, FoldTarget::Activity)
     }
 
     /// Selectable-source offset of an input row.
@@ -138,7 +139,7 @@ impl TextLayout {
 
     pub(super) fn with_leading_disclosure_on_line(
         mut self,
-        label: String,
+        expanded: bool,
         line: usize,
         target: FoldTarget,
     ) -> Self {
@@ -150,10 +151,10 @@ impl TextLayout {
         self.disclosure = true;
         self.disclosure_controls.push(DisclosureControl {
             target,
-            label,
+            label: String::new(),
             source_offset: self.rows[row].source.start,
             row,
-            placement: DisclosurePlacement::Leading { line },
+            placement: DisclosurePlacement::Leading { line, expanded },
         });
         self
     }
@@ -163,7 +164,7 @@ impl TextLayout {
         part: crate::history_cell::activity_parts::PartControl,
     ) -> Self {
         self.with_leading_disclosure_on_line(
-            crate::render::disclosure::glyph(part.expanded).into(),
+            part.expanded,
             part.line,
             FoldTarget::GroupedPart {
                 id: part.id,
@@ -204,6 +205,7 @@ impl TextLayout {
         }
         for row in &mut header.rows {
             row.content_width = layout.width;
+            row.hang = Hang::Speaker(rows.speaker);
         }
         for row in &mut layout.rows {
             row.source.start += prefix;
@@ -236,10 +238,12 @@ impl TextLayout {
             layout.disclosure = true;
             layout.disclosure_controls.push(DisclosureControl {
                 target: target.clone(),
-                label: crate::render::disclosure::glyph(*unfolded).into(),
+                label: String::new(),
                 source_offset: 0,
                 row: 0,
-                placement: DisclosurePlacement::Fold,
+                placement: DisclosurePlacement::Fold {
+                    expanded: *unfolded,
+                },
             });
         }
         for control in &rows.controls {

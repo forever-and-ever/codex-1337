@@ -158,6 +158,7 @@ fn name_of(source: Source) -> String {
         Source::Paint(Paint::Ground(ground)) => format!("ground:{}", ground.key()),
         Source::Paint(Paint::Figure(figure)) => format!("figure:{}", figure.key()),
         Source::Paint(Paint::Syntax(syntax)) => format!("syntax:{}", syntax.key()),
+        Source::Paint(Paint::Bracket(bracket)) => format!("bracket:{}", bracket.key()),
         Source::Paint(Paint::Heat(step)) => format!("heat:{step}"),
         Source::Paint(Paint::Livery(slot)) => format!("livery:{slot}"),
         Source::Terminal(index) => format!("terminal:{index}"),

@@ -6,7 +6,7 @@ width=90, expanded=false, tokens=Some(82)
 Buffer {
     area: Rect { x: 0, y: 0, width: 90, height: 8 },
     content: [
-        "        [+]   • Called server.search(query="页面 👩‍💻 é a long query", path="页面 👩‍💻/...  82", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " "), (76, " "), (78, " "), (81, " ")]
+        "        ┏     • Called server.search(query="页面 👩‍💻 é a long query", path="页面 👩‍💻/...  82", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " "), (76, " "), (78, " "), (81, " ")]
         "                                                                                          ",
         "                                                                                          ",
         "                                                                                          ",
@@ -17,6 +17,8 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -44,7 +46,7 @@ width=58, expanded=false, tokens=Some(82)
 Buffer {
     area: Rect { x: 0, y: 0, width: 58, height: 8 },
     content: [
-        "        [+]   • Called server.search(query="页面 👩‍💻...  82", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " ")]
+        "        ┏     • Called server.search(query="页面 👩‍💻...  82", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " ")]
         "                                                          ",
         "                                                          ",
         "                                                          ",
@@ -55,6 +57,8 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -74,17 +78,19 @@ width=90, expanded=true, tokens=Some(82)
 Buffer {
     area: Rect { x: 0, y: 0, width: 90, height: 8 },
     content: [
-        "        [-]   • Called  82                                                                ",
-        "                └ MCP server.search({"query":"页面 👩‍💻 é a long query","path":"页面 👩‍💻/    ", // hidden by multi-width symbols: [(47, " "), (49, " "), (52, " "), (79, " "), (81, " "), (84, " ")]
-        "                  lib.rs"})                                                               ",
-        "                  Stored result · exact capture unavailable                               ",
-        "                  retained result                                                         ",
-        "                  second result line                                                      ",
+        "        ┏     • Called  82                                                                ",
+        "        ┇       └ MCP server.search({"query":"页面 👩‍💻 é a long query","path":"页面 👩‍💻/    ", // hidden by multi-width symbols: [(47, " "), (49, " "), (52, " "), (79, " "), (81, " "), (84, " ")]
+        "        ┇         lib.rs"})                                                               ",
+        "        ┇         Stored result · exact capture unavailable                               ",
+        "        ┇         retained result                                                         ",
+        "        ┗         second result line                                                      ",
         "                                                                                          ",
         "                                                                                          ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,
@@ -92,6 +98,8 @@ Buffer {
         x: 24, y: 0, fg: Indexed(66), bg: Reset, underline: Reset, modifier: NONE,
         x: 26, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: DIM,
         x: 18, y: 1, fg: White, bg: Reset, underline: Reset, modifier: BOLD,
         x: 22, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
@@ -112,11 +120,19 @@ Buffer {
         x: 84, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
         x: 85, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: DIM,
         x: 86, y: 1, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
         x: 18, y: 2, fg: Cyan, bg: Reset, underline: Reset, modifier: DIM,
         x: 26, y: 2, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 3, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 3, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 3, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 4, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 4, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 18, y: 4, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 33, y: 4, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 5, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 5, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 18, y: 5, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 36, y: 5, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 6, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
@@ -127,7 +143,7 @@ width=58, expanded=false, tokens=None
 Buffer {
     area: Rect { x: 0, y: 0, width: 58, height: 8 },
     content: [
-        "        [+]   • Called server.search(query="页面 👩‍💻 é a...", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " ")]
+        "        ┏     • Called server.search(query="页面 👩‍💻 é a...", // hidden by multi-width symbols: [(45, " "), (47, " "), (50, " ")]
         "                                                          ",
         "                                                          ",
         "                                                          ",
@@ -138,6 +154,8 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 0, fg: Green, bg: Reset, underline: Reset, modifier: BOLD,
         x: 15, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 16, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD,

@@ -29,7 +29,9 @@ type Rgb = tuple[int, int, int]
 
 
 WHITE = (
-    colour.xy_to_XYZ(colour.CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["D65"])
+    colour.xy_to_XYZ(
+        colour.CCS_ILLUMINANTS["CIE 1931 2 Degree Standard Observer"]["D65"]
+    )
     * 100
 )
 ADAPTING = 8.0
@@ -59,14 +61,18 @@ def _decode(rgb: np.ndarray) -> np.ndarray:
 
 def _encode(linear: np.ndarray) -> np.ndarray:
     v = np.clip(linear, 0, 1)
-    return np.round(255 * np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)).astype(int)
+    return np.round(
+        255 * np.where(v <= 0.0031308, v * 12.92, 1.055 * v ** (1 / 2.4) - 0.055)
+    ).astype(int)
 
 
 def _shown(rgb: np.ndarray) -> np.ndarray:
     return (1 - FLARE) * (_decode(rgb) @ _SRGB_TO_XYZ.T) * 100 + FLARE * WHITE
 
 
-_PROBE = colour.XYZ_to_Hellwig2022(np.array([30.0, 20.0, 10.0]), WHITE, ADAPTING, BACKGROUND, SURROUND)
+_PROBE = colour.XYZ_to_Hellwig2022(
+    np.array([30.0, 20.0, 10.0]), WHITE, ADAPTING, BACKGROUND, SURROUND
+)
 _C_PER_M = float(_PROBE.C / _PROBE.M)
 """C = 35 M / A_w is fixed by the frame. colour 0.4.7's inverse derives J from J_HK before it
 derives C from M, so it treats J_HK as J whenever only M is given; render removes the HK term
@@ -85,20 +91,34 @@ def ucs(rgb: np.ndarray) -> np.ndarray:
     return colour.JMh_CAM16_to_CAM16UCS(np.stack([s.J, s.M, s.h], -1))
 
 
-def render(lightness: object, colorfulness: object, hue: object) -> tuple[np.ndarray, np.ndarray]:
+def render(
+    lightness: object, colorfulness: object, hue: object
+) -> tuple[np.ndarray, np.ndarray]:
     """[J_HK, M, h] to sRGB, and whether the panel can show it."""
-    j_hk, m, h = np.broadcast_arrays(*(np.asarray(v, float) for v in (lightness, colorfulness, hue)))
+    j_hk, m, h = np.broadcast_arrays(
+        *(np.asarray(v, float) for v in (lightness, colorfulness, hue))
+    )
     j = j_hk - hue_angle_dependency_Hellwig2022(h) * (_C_PER_M * m) ** 0.587
     xyz = colour.Hellwig2022_to_XYZ(
-        colour.CAM_Specification_Hellwig2022(J=j, M=m, h=h), WHITE, ADAPTING, BACKGROUND, SURROUND
+        colour.CAM_Specification_Hellwig2022(J=j, M=m, h=h),
+        WHITE,
+        ADAPTING,
+        BACKGROUND,
+        SURROUND,
     )
     linear = (xyz - FLARE * WHITE) / (1 - FLARE) / 100 @ _XYZ_TO_SRGB.T
-    return _encode(linear), np.all((linear >= -1e-4) & (linear <= 1 + 1e-4), -1) & (j > 0)
+    return _encode(linear), np.all((linear >= -1e-4) & (linear <= 1 + 1e-4), -1) & (
+        j > 0
+    )
 
 
-def yielding(lightness: object, colorfulness: object, hue: object) -> tuple[np.ndarray, np.ndarray]:
+def yielding(
+    lightness: object, colorfulness: object, hue: object
+) -> tuple[np.ndarray, np.ndarray]:
     """sRGB and the M granted: colorfulness yields to the gamut; lightness and hue are intent."""
-    j, asked, h = np.broadcast_arrays(*(np.asarray(v, float) for v in (lightness, colorfulness, hue)))
+    j, asked, h = np.broadcast_arrays(
+        *(np.asarray(v, float) for v in (lightness, colorfulness, hue))
+    )
     whole = render(j, asked, h)[1]
     low, high = np.zeros_like(asked), asked.copy()
     for _ in range(20):
@@ -114,7 +134,11 @@ def apca(text: np.ndarray, ground: np.ndarray) -> np.ndarray:
 
     def luminance(rgb: np.ndarray) -> np.ndarray:
         v = np.asarray(rgb, float) / 255
-        y = v[..., 0] ** 2.4 * 0.2126729 + v[..., 1] ** 2.4 * 0.7151522 + v[..., 2] ** 2.4 * 0.0721750
+        y = (
+            v[..., 0] ** 2.4 * 0.2126729
+            + v[..., 1] ** 2.4 * 0.7151522
+            + v[..., 2] ** 2.4 * 0.0721750
+        )
         return np.where(y > 0.022, y, y + np.clip(0.022 - y, 0, None) ** 1.414)
 
     t, g = luminance(text), luminance(ground)
@@ -148,7 +172,9 @@ def distance(left: Rgb, right: Rgb, vision: Vision = Vision.TRICHROMAT) -> float
     return float(np.linalg.norm(a - b))
 
 
-def least_lightness(reach: Callable[[np.ndarray], np.ndarray], low: float, high: float) -> float:
+def least_lightness(
+    reach: Callable[[np.ndarray], np.ndarray], low: float, high: float
+) -> float:
     """Least lightness in [low, high] at which reach, rising with lightness, turns non-negative."""
     for _ in range(3):
         grid = np.linspace(low, high, 41)
@@ -172,7 +198,13 @@ class Swatch:
     @classmethod
     def of(cls, rgb: np.ndarray, asked: float) -> Swatch:
         j, m, h = appearance(rgb)
-        return cls((int(rgb[0]), int(rgb[1]), int(rgb[2])), float(j), float(m), float(h), float(asked))
+        return cls(
+            (int(rgb[0]), int(rgb[1]), int(rgb[2])),
+            float(j),
+            float(m),
+            float(h),
+            float(asked),
+        )
 
     @property
     def hex(self) -> str:
@@ -194,7 +226,9 @@ def elevated(ground: Swatch, rise: float) -> tuple[float, float]:
     return j, ground.colorfulness * j / ground.lightness
 
 
-def tinted(m: float, hue: float, toward: object, strength: object) -> tuple[np.ndarray, np.ndarray]:
+def tinted(
+    m: float, hue: float, toward: object, strength: object
+) -> tuple[np.ndarray, np.ndarray]:
     """M and h of a surface's own appearance vector plus strength colorfulness toward a hue, for
     one target or arrays of them."""
     a = m * np.cos(np.radians(hue)) + np.multiply(strength, np.cos(np.radians(toward)))

@@ -247,11 +247,11 @@ fn hidden_initial_entries_do_not_add_a_separator_but_visible_entries_do() {
         /*height*/ 5,
     );
     insta::assert_snapshot!(text(&frame), @"
-    First
+    (     First
 
-    Second
+    (     Second
 
-    Live
+          Live
     ");
     // Scrolling past the first visible entry must stop at its content, not its separator.
     view.scroll(&cells, /*rows*/ -100);
@@ -296,9 +296,9 @@ fn reading_survives_prepend_and_new_output_then_returns_to_latest() {
     );
     view.jump_to_latest();
     insta::assert_snapshot!(text(&render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 16, /*height*/ 3)), @"
-    last line
+    ╰     last line
 
-    new output
+    (     new output
     ");
 }
 
@@ -455,8 +455,8 @@ fn returning_to_latest_cancels_beginning_intent_while_retaining_the_loaded_page(
         assert!(!view.needs_history(&cells));
         insta::allow_duplicates! {
             insta::assert_snapshot!(text(&render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 16, /*height*/ 2)), @"
-            newest answer
-            last line
+            ╭     newest answer
+            ╰     last line
             ");
         }
         view.handle_key(beginning, &cells);
@@ -576,7 +576,14 @@ fn single_row_scrolling_crosses_an_entry_separator_in_both_directions() {
             /*height*/ 1,
         )));
     }
-    let indent = " ".repeat(usize::from(GUTTER_COLUMNS));
+    // Each one-row entry hangs a closed bracket beside its words.
+    let indent = format!(
+        "{}({}",
+        " ".repeat(usize::from(crate::transcript_geometry::CONTROL_COLUMN)),
+        " ".repeat(usize::from(
+            GUTTER_COLUMNS - crate::transcript_geometry::CONTROL_COLUMN - 1
+        ))
+    );
     assert_eq!(
         frames,
         [
@@ -926,7 +933,13 @@ fn resize_keeps_the_logical_reading_anchor() {
             /*width*/ GUTTER_COLUMNS + 16,
             /*height*/ 2
         )),
-        format!("{}final answer\n", " ".repeat(usize::from(GUTTER_COLUMNS)))
+        format!(
+            "{}({}final answer\n",
+            " ".repeat(usize::from(crate::transcript_geometry::CONTROL_COLUMN)),
+            " ".repeat(usize::from(
+                GUTTER_COLUMNS - crate::transcript_geometry::CONTROL_COLUMN - 1
+            ))
+        )
     );
     assert!(!view.is_following());
     assert!(!view.unseen_activity);
@@ -999,11 +1012,11 @@ fn mutable_history_formats_once_per_frame_and_refreshes_the_next_frame() {
     assert_eq!(renders.load(Ordering::Relaxed), 2);
     assert!(text(&first).contains("version 1 row 3"));
     insta::assert_snapshot!(text(&second), @"
-    version 2 row 3
-    version 2 row 4
-    version 2 row 5
-    version 2 row 6
-    version 2 row 7
+    ┊     version 2 row 3
+    ┊     version 2 row 4
+    ┊     version 2 row 5
+    ┊     version 2 row 6
+    ╰     version 2 row 7
     ");
     view.begin_search();
     view.paste_search("version 2");
@@ -1272,8 +1285,8 @@ fn resizing_repeated_lines_keeps_the_same_occurrence() {
         /*height*/ 2,
     );
     insta::assert_snapshot!(text(&wide), @"
-        alpha beta gamma delta
-        second occurrence ends
+    ┊     alpha beta gamma delta
+    ┊     second occurrence ends
     ");
     let narrow = render(
         &mut view,
@@ -1282,8 +1295,8 @@ fn resizing_repeated_lines_keeps_the_same_occurrence() {
         /*height*/ 2,
     );
     insta::assert_snapshot!(text(&narrow), @"
-        gamma delta
-        second
+    ┊     gamma delta
+    ┊     second
     ");
 }
 

@@ -4,7 +4,9 @@ use super::ActivityDisclosure;
 use crate::terminal_hyperlinks::HyperlinkLine;
 
 mod fold_state;
-pub(crate) use fold_state::{FoldGroup, FoldScope, FoldState};
+pub(crate) use fold_state::FoldGroup;
+pub(crate) use fold_state::FoldScope;
+pub(crate) use fold_state::FoldState;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum FoldTarget {
