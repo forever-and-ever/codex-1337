@@ -366,9 +366,10 @@ impl LiveWorkView {
                         if let Some(source) = &line.source
                             && source.range.start == 0
                         {
-                            let indent = source
-                                .prefix_bytes
-                                .saturating_sub(crate::render::disclosure::columns() + 1);
+                            // The prefix is counted in bytes: the indent, the glyph and a space.
+                            let indent = source.prefix_bytes.saturating_sub(
+                                crate::render::disclosure::glyph(/*expanded*/ false).len() + 1,
+                            );
                             if let Ok(indent) = u16::try_from(indent)
                                 && let Ok(columns) =
                                     u16::try_from(crate::render::disclosure::columns())
@@ -944,7 +945,10 @@ mod tests {
             let glyph: String = (hit.x..hit.x + 3)
                 .map(|x| buf[(x, hit.y)].symbol())
                 .collect();
-            assert_eq!(glyph, if group == Group::Work { "[-]" } else { "[+]" });
+            assert_eq!(
+                glyph,
+                crate::render::disclosure::glyph(group == Group::Work)
+            );
             let title = &buf[(hit.x + 4, hit.y)];
             assert_eq!(title.fg, crate::render::header::style().fg.unwrap());
             assert!(title.modifier.contains(ratatui::style::Modifier::BOLD));

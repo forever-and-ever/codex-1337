@@ -6,13 +6,19 @@ paused
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 4 },
     content: [
-        "              one                                                               ",
-        "              two                                                               ",
-        "              three                                                             ",
+        "        ╭     one                                                               ",
+        "        ┊     two                                                               ",
+        "        ┊     three                                                             ",
         "                             ↓ Back to bottom · esc                             ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
@@ -20,13 +26,19 @@ activity at 80
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 4 },
     content: [
-        "              one                                                               ",
-        "              two                                                               ",
-        "              three                                                             ",
+        "        ╭     one                                                               ",
+        "        ┊     two                                                               ",
+        "        ┊     three                                                             ",
         "                     New activity · ↓ Back to bottom · esc                      ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 
@@ -34,13 +46,19 @@ hover
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 4 },
     content: [
-        "              one                                                               ",
-        "              two                                                               ",
-        "              three                                                             ",
+        "        ╭     one                                                               ",
+        "        ┊     two                                                               ",
+        "        ┊     three                                                             ",
         "                     New activity · ↓ Back to bottom · esc                      ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 20, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: BOLD | REVERSED,
         x: 59, y: 3, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
@@ -50,12 +68,18 @@ activity at 20
 Buffer {
     area: Rect { x: 0, y: 0, width: 20, height: 4 },
     content: [
-        "              one   ",
-        "              two   ",
-        "              three ",
+        "        ╭     one   ",
+        "        ┊     two   ",
+        "        ┊     three ",
         "   New · ↓ Bottom   ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
+        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

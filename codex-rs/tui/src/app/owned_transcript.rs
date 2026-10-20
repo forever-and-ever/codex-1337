@@ -60,6 +60,7 @@ impl App {
         view.set_keymap_bindings(&self.keymap);
         view.set_presentation(view.is_detailed(), chat_widget.history_render_mode());
         let active_key = chat_widget.active_cell_transcript_key();
+        view.set_live_cell(chat_widget.active_invocation_cell());
         let detailed = view.is_detailed();
         let active_ids = chat_widget.active_activity_ids();
         let tool_output_tokens = view.activity_output_tokens(&active_ids);

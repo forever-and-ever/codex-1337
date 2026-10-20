@@ -125,9 +125,20 @@ fn pinned_prompt_matches_the_original_prompt_style() {
         let mut view = TranscriptView::default();
         let actual = render(&mut view, &cells, width, /*height*/ 7);
 
+        // The pinned prompt wears the prompt's paint; its bracket opens, the rest folded above.
+        let glyph = usize::from(crate::transcript_geometry::CONTROL_COLUMN);
+        let row = |buffer: &Buffer| {
+            let mut cells = buffer.content[..usize::from(width)].to_vec();
+            cells.remove(glyph);
+            cells
+        };
+        assert_eq!(row(&actual), row(&expected));
         assert_eq!(
-            &actual.content[..usize::from(width)],
-            &expected.content[..usize::from(width)]
+            (actual.content[glyph].symbol(), actual.content[glyph].fg),
+            (
+                crate::render::bracket::Strokes::of(crate::warpaint::Bracket::Prompt).top,
+                crate::warpaint::Bracket::Prompt.color()
+            )
         );
         assert_eq!(view.area.y, 1);
     }

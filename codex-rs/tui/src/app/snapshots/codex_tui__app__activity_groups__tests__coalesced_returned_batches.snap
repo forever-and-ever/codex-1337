@@ -3,71 +3,70 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out]               1280
-              Read first.rs (whole file)
-              Read nested.rs (whole file)
-        [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
-              Read second.rs (whole file)
+┏   Code Mode (εμογ)        [in [raw] [fmt]] [out]               1280
+        ┇     Read first.rs (whole file)
+        ┗     Read nested.rs (whole file)
+        ┏   Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
+        ┗     Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
-              Read first.rs (whole file)
-              Read nested.rs (whole file)
-
-              Script running with cell ID reused-runtime-cell
-              Wall time 0.1 seconds
-              Output:
-
-                chosen porcelain:  exact
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-              Returned b
-              Script completed
-              Wall time 0.0 seconds
-              Output:
-              Only model-visible text.
-        [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
-              Read second.rs (whole file)
+┏   Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
+        ┇     Read first.rs (whole file)
+        ┗     Read nested.rs (whole file)
+        ╭     Script running with cell ID reused-runtime-cell
+        ┊     Wall time 0.1 seconds
+        ┊     Output:
+        ┊
+        ┊       chosen porcelain:  exact
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊
+        ┊     Returned b
+        ┊     Script completed
+        ┊     Wall time 0.0 seconds
+        ┊     Output:
+        ╰     Only model-visible text.
+        ┏   Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
+        ┗     Read second.rs (whole file)
 
 Computer ordinary=false expanded=false
-Code Mode (εμογ)        [in [raw]      ] [out]               1280
-            Code Mode (τνμβ)        [in [raw]      ] [out]                 20
+[   Code Mode (εμογ)        [in [raw]      ] [out]               1280
+        [   Code Mode (τνμβ)        [in [raw]      ] [out]                 20
 
 Computer ordinary=false expanded=true
-Code Mode (εμογ)        [in [raw]      ] [out [raw]      ]   1280
-              Script running with cell ID reused-runtime-cell
-              Wall time 0.1 seconds
-              Output:
-
-                chosen porcelain:  exact
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-              Returned b
-              Script completed
-              Wall time 0.0 seconds
-              Output:
-              Only model-visible text.
-            Code Mode (τνμβ)        [in [raw]      ] [out]                 20
+[   Code Mode (εμογ)        [in [raw]      ] [out [raw]      ]   1280
+        ╭     Script running with cell ID reused-runtime-cell
+        ┊     Wall time 0.1 seconds
+        ┊     Output:
+        ┊
+        ┊       chosen porcelain:  exact
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊
+        ┊     Returned b
+        ┊     Script completed
+        ┊     Wall time 0.0 seconds
+        ┊     Output:
+        ╰     Only model-visible text.
+        [   Code Mode (τνμβ)        [in [raw]      ] [out]                 20
 
 Exploration ordinary=true expanded=false
-Code Mode (εμογ)        [in [raw]      ] [out]               1280
-            Code Mode (τνμβ)        [in [raw]      ] [out]                 20
+[   Code Mode (εμογ)        [in [raw]      ] [out]               1280
+        [   Code Mode (τνμβ)        [in [raw]      ] [out]                 20
 
 Exploration ordinary=true expanded=true
-Code Mode (εμογ)        [in [raw]      ] [out [raw]      ]   1280
-              Script running with cell ID reused-runtime-cell
-              Wall time 0.1 seconds
-              Output:
-
-                chosen porcelain:  exact
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-              {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
-
-              Returned b
-              Script completed
-              Wall time 0.0 seconds
-              Output:
-              Only model-visible text.
-            Code Mode (τνμβ)        [in [raw]      ] [out]                 20
+[   Code Mode (εμογ)        [in [raw]      ] [out [raw]      ]   1280
+        ╭     Script running with cell ID reused-runtime-cell
+        ┊     Wall time 0.1 seconds
+        ┊     Output:
+        ┊
+        ┊       chosen porcelain:  exact
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊     {"content":[{"type":"text","text":"repeat"}],"structuredContent":"repeat"}
+        ┊
+        ┊     Returned b
+        ┊     Script completed
+        ┊     Wall time 0.0 seconds
+        ┊     Output:
+        ╰     Only model-visible text.
+        [   Code Mode (τνμβ)        [in [raw]      ] [out]                 20

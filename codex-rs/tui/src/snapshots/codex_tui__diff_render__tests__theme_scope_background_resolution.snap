@@ -3,4 +3,4 @@ source: tui/src/diff_render.rs
 expression: snapshot
 ---
 insert=Some(Rgb(12, 34, 56))
-delete=Some(Indexed(42))
+delete=Some(Indexed(37))

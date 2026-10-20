@@ -397,12 +397,16 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let buffer = tests::render(&mut view, &code, 104, 26);
         let shown = tests::text(&buffer);
         assert_title_color(&buffer, "Code Mode", admitted);
-        let header_column = shown
-            .lines()
-            .find(|line| line.contains("Code Mode"))
-            .unwrap()
-            .find("Code Mode")
-            .unwrap();
+        let column_of = |line: &str, needle: &str| {
+            unicode_width::UnicodeWidthStr::width(&line[..line.find(needle).unwrap()])
+        };
+        let header_column = column_of(
+            shown
+                .lines()
+                .find(|line| line.contains("Code Mode"))
+                .unwrap(),
+            "Code Mode",
+        );
         let pending = view.current_layout(&code, 0).unwrap();
         assert!(pending.text().starts_with("Code Mode"));
         assert!(!shown.contains("const answer"));
@@ -672,7 +676,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .enumerate()
             .find(|(_, line)| line.contains("const answer"))
             .unwrap();
-        let source_column = source_line.find("const answer").unwrap();
+        let source_column = column_of(source_line, "const answer");
         assert_eq!(source_column, header_column + 2);
         assert_ne!(
             buffer[(

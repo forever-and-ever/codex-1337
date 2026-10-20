@@ -21,7 +21,6 @@ sys.dont_write_bytecode = True  # sibling modules stay uncompiled in the worktre
 from packs import Pack as PackFile
 
 
-
 class Pack(PackFile):
     def background(self, color: str) -> str:
         return self.resolve(color, foreground=False)
@@ -88,13 +87,13 @@ PAGE = """<!doctype html>
          font: 13px/1.4 "JetBrains Mono", ui-monospace, monospace; }}
   header {{ display: flex; flex-wrap: wrap; gap: .5rem 2rem; align-items: baseline;
             padding: .6rem 1rem; border-bottom: 1px solid var(--rule); position: sticky; top: 0;
-            background: var(--trough); }}
+            background: var(--prompt); }}
   .group {{ display: flex; gap: .75rem; }}
   .tab {{ cursor: pointer; padding: .1rem .4rem; border-radius: 2px; }}
   .tab[data-on="1"] {{ background: var(--selection); color: var(--ink); }}
   select {{ font: inherit; color: var(--ink); background: var(--selection); border: 0;
             border-radius: 2px; padding: .1rem .4rem; cursor: pointer; }}
-  option {{ color: var(--ink); background: var(--trough); }}
+  option {{ color: var(--ink); background: var(--prompt); }}
   .hint {{ margin-left: auto; opacity: .55; font-size: 12px; }}
   main {{ position: relative; padding: 1.5rem; display: flex; }}
   .stack {{ position: relative; margin: 0 auto; }}
@@ -214,7 +213,7 @@ def main() -> int:
                         name: pack.colors[key]
                         for name, key in (
                             ("canvas", "ground:canvas"),
-                            ("trough", "ground:trough"),
+                            ("prompt", "ground:prompt"),
                             ("rule", "figure:rule"),
                             ("selection", "ground:selection"),
                             ("ink", "figure:ink"),

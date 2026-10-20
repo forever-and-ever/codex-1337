@@ -12,6 +12,9 @@ hue = 110
 colorfulness = 2.0
 contrast = 84
 
+[label]
+hue = 60
+
 [voice]
 colorfulness = 34
 lean = 0.9
@@ -32,11 +35,6 @@ string = 80
 number = 345
 attribute = 215
 comment = 150
-response = 185
-message = 210
-prompt = 35
-reasoning = 320
-environment = "grey"
 added = 150
 removed = 350
 code = 120
@@ -61,5 +59,4 @@ diff = 0.5
 terminal = 0.5
 
 [surfaces]
-response = 4.5
 diff_tint = 8.5

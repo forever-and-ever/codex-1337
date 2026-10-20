@@ -148,9 +148,9 @@ fn copying_selection_at_bottom_does_not_show_back_to_bottom() {
     assert!(view.follow_control.area.is_none());
     assert_eq!(after, before);
     insta::assert_snapshot!(crate::transcript_view::tests::text(&after), @"
-    three
-    four
-    needle
+    ┊     three
+    ┊     four
+    ╰     needle
     ");
 }
 
@@ -205,11 +205,11 @@ fn enlarging_paused_view_hides_back_to_bottom_when_tail_fits() {
     assert!(view.tail_visible);
     assert!(view.follow_control.area.is_none());
     insta::assert_snapshot!(crate::transcript_view::tests::text(&buffer), @"
-    one
-    two
-    three
-    four
-    five
+    ╭     one
+    ┊     two
+    ┊     three
+    ┊     four
+    ╰     five
     ");
 }
 

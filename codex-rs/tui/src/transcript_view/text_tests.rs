@@ -354,6 +354,7 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
                 ),
             },
         ],
+        speaker: crate::warpaint::Bracket::Call,
     });
     let expected = format!("界 Command\n{source}");
     for width in [12, 48, 12] {

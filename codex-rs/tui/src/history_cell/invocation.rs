@@ -70,6 +70,19 @@ pub(crate) struct Invocation<'a> {
     pub(crate) outputs: Vec<&'a ToolOutputCell>,
 }
 
+impl Invocation<'_> {
+    /// Who wrote the call: the user, for a shell command run from the composer; the model,
+    /// speaking to its tools, for everything else.
+    pub(crate) fn caller(&self) -> crate::warpaint::Bracket {
+        match self.source {
+            Source::Command(call) if call.is_user_shell_command() => {
+                crate::warpaint::Bracket::Prompt
+            }
+            _ => crate::warpaint::Bracket::Call,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ActivityIndicator {
     pub(crate) line: usize,

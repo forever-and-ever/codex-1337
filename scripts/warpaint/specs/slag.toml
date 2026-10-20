@@ -31,11 +31,6 @@ string = 45
 number = 65
 attribute = 55
 comment = 45
-response = 45
-message = 20
-prompt = 235
-reasoning = 115
-environment = "grey"
 constant = 65
 
 [livery]

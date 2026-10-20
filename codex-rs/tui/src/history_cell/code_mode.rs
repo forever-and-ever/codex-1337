@@ -366,11 +366,12 @@ impl CodeModeCell {
             ),
             None => ("•".dim(), "Execution"),
         };
+        let verb = match terminal {
+            Some((CodeModeStatus::Failed | CodeModeStatus::Interrupted, _)) => verb.red().bold(),
+            _ => verb.bold(),
+        };
         let mut spans = vec![bullet, " ".into()];
-        spans.extend([
-            verb.bold(),
-            format!(" (Code Mode {})", self.tetrad()).into(),
-        ]);
+        spans.extend([verb, format!(" (Code Mode {})", self.tetrad()).into()]);
         Some(spans.into())
     }
 

@@ -4,8 +4,8 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 ---
 80 columns, 12 rows
 ────────────────────────────────────────────────────────────────────────────────
-  [-] Work (1)
-    [+] Running (ζσξζ)
+   ▾  Work (1)
+     ▸  Running (ζσξζ)
                                               Copied 24 chars to host clipboard
   • Working (0s • ⌃c to interrupt)
 
@@ -18,8 +18,8 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 18 columns, 14 rows
 ──────────────────
-  [-] Work (1)
-    [+] Running
+   ▾  Work (1)
+     ▸  Running
         (ζσξζ)
   Copied 24 chars
   • Working (0s •…
@@ -34,7 +34,7 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(snapsho
 
 6 columns, 18 rows
 ──────
-  [-]
+   ▾
 
   … 18
 

@@ -4,9 +4,9 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 ---
   esc latest
 ────────────────────────────────────────
-              transcript row 27
-              transcript row 28
-              transcript row 29
+        ┊     transcript row 27
+        ┊     transcript row 28
+        ┊     transcript row 29
 ────────────────────────────────────────
          ↓ Back to bottom · esc
 

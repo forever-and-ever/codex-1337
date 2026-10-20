@@ -2,13 +2,6 @@
 //! Informative accents meet minimum contrast on known backgrounds and supported palettes.
 
 mod contrast;
-mod speaker_backgrounds;
-
-pub(crate) use speaker_backgrounds::environment_style;
-pub(crate) use speaker_backgrounds::history_prompt_style;
-pub(crate) use speaker_backgrounds::history_response_style;
-pub(crate) use speaker_backgrounds::message_style;
-pub(crate) use speaker_backgrounds::reasoning_style;
 
 use crate::color::blend;
 use crate::color::is_light;
@@ -278,12 +271,12 @@ fn table_separator_style_for(
 
 #[allow(clippy::disallowed_methods)]
 pub fn user_message_bg(terminal_bg: (u8, u8, u8)) -> Color {
-    Ground::Trough.repaint(best_color(user_message_bg_rgb(terminal_bg)))
+    Ground::Prompt.repaint(best_color(user_message_bg_rgb(terminal_bg)))
 }
 
 pub(crate) fn user_message_bg_rgb(_terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
     // TELOS(warpaint): effects blend toward the fill the pack paints.
-    crate::warpaint::ground_rgb(Ground::Trough)
+    crate::warpaint::ground_rgb(Ground::Prompt)
 }
 
 #[allow(clippy::disallowed_methods)]

@@ -372,9 +372,9 @@ fn paging_below_a_live_find_result_resumes_current_output() {
         (true, true, "needle"),
     );
     insta::assert_snapshot!(crate::transcript_view::tests::text(&buffer), @"
-    earlier context
+    (     earlier context
 
-    updated live output
+          updated live output
     ");
 }
 

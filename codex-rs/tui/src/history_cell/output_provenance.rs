@@ -1,6 +1,9 @@
 //! Display projections never replace captured tool text.
 
 use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::terminal_hyperlinks::LogicalLineSource;
+use crate::warpaint::Bracket;
+use crate::warpaint::Figure;
 use ratatui::style::Style;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -35,12 +38,12 @@ pub(crate) enum ContextAuthor {
 }
 
 impl ContextAuthor {
-    pub(crate) fn style(self) -> Style {
+    pub(crate) fn bracket(self) -> Bracket {
         match self {
-            Self::User => crate::style::history_prompt_style(),
-            Self::Assistant => crate::style::history_response_style(),
-            Self::Subagent => crate::style::message_style(),
-            Self::Environment => crate::style::environment_style(),
+            Self::User => Bracket::Prompt,
+            Self::Assistant => Bracket::Response,
+            Self::Subagent => Bracket::Message,
+            Self::Environment => Bracket::Harness,
         }
     }
 }
@@ -78,13 +81,7 @@ pub(crate) fn captured_lines(
     };
     mark_lines(&mut lines, provenance);
     if provenance == OutputProvenance::Captured {
-        for line in &mut lines {
-            let style = author.style();
-            line.line.style = line.line.style.patch(style);
-            if let Some(source) = &mut line.source {
-                source.line_style = source.line_style.patch(style);
-            }
-        }
+        hang(&mut lines, author.bracket());
     }
     if escaped.is_some() {
         lines.push(client_notice("Control characters escaped for display"));
@@ -114,6 +111,7 @@ pub(crate) fn client_lines(text: &str, mode: OutputMode) -> Vec<HyperlinkLine> {
         line.line.style = Style::default();
         if let Some(source) = &mut line.source {
             source.line_style = Style::default();
+            source.bracket = None;
         }
     }
     mark_lines(&mut lines, OutputProvenance::Client);
@@ -220,12 +218,7 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
     };
     let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.live_raw_lines());
     if let Some(author) = author {
-        for line in &mut lines {
-            line.line.style = line.line.style.patch(author.style());
-            if let Some(source) = &mut line.source {
-                source.line_style = source.line_style.patch(author.style());
-            }
-        }
+        hang(&mut lines, author.bracket());
     } else {
         mark_lines(&mut lines, OutputProvenance::Client);
     }
@@ -233,13 +226,24 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
 }
 
 impl OutputProvenance {
+    /// The speaker a line of this provenance hangs from unless its producer names another. The
+    /// client's own words name none: they hang from whoever spoke before them.
+    pub(crate) fn bracket(self) -> Option<Bracket> {
+        match self {
+            Self::Reasoning => Some(Bracket::Reasoning),
+            Self::Captured | Self::Formatted | Self::Definitions(_) => Some(Bracket::Harness),
+            Self::ClientDiff => Some(Bracket::Call),
+            Self::Unspecified | Self::Client => None,
+        }
+    }
+
     fn style(self) -> Style {
         match self {
-            Self::Unspecified | Self::ClientDiff => Style::default(),
-            Self::Reasoning => crate::style::reasoning_style(),
-            Self::Captured | Self::Definitions(OutputMode::Raw) => {
-                crate::style::environment_style()
-            }
+            Self::Unspecified
+            | Self::ClientDiff
+            | Self::Reasoning
+            | Self::Captured
+            | Self::Definitions(OutputMode::Raw) => Style::default(),
             Self::Formatted | Self::Definitions(OutputMode::Fmt) => Self::Client
                 .style()
                 .patch(crate::style::formatted_output_style()),
@@ -250,10 +254,35 @@ impl OutputProvenance {
     }
 }
 
+/// Hang `lines` from `bracket` whatever their block's own speaker. The words are that speaker's,
+/// so their bold is theirs too: bold words keep the page's ink rather than read as the client's
+/// label.
+pub(crate) fn hang(lines: &mut [HyperlinkLine], bracket: Bracket) {
+    fn ink(style: &mut Style, under: Style) {
+        let seen = under.patch(*style);
+        if seen.fg.is_none() && seen.add_modifier.contains(ratatui::style::Modifier::BOLD) {
+            style.fg = Some(Figure::Ink.color());
+        }
+    }
+    for line in lines {
+        for span in &mut line.line.spans {
+            ink(&mut span.style, line.line.style);
+        }
+        let source = line
+            .source
+            .get_or_insert_with(|| LogicalLineSource::from_line(&line.line));
+        let under = source.line_style;
+        for (_, style) in std::sync::Arc::make_mut(&mut source.styles) {
+            ink(style, under);
+        }
+        source.bracket = Some(bracket);
+    }
+}
+
 pub(crate) fn client_notice(text: &str) -> HyperlinkLine {
     let indent = text.len() - text.trim_start_matches(' ').len();
     let mut line = HyperlinkLine::from(ratatui::text::Line::from(text.to_owned()));
-    let mut source = crate::terminal_hyperlinks::LogicalLineSource::new(text[indent..].to_owned());
+    let mut source = LogicalLineSource::new(text[indent..].to_owned());
     source.prefix_bytes = indent;
     source.continuation_indent = text[..indent].to_owned().into();
     line.source = Some(source);
@@ -274,13 +303,10 @@ pub(crate) fn mark_lines(lines: &mut [HyperlinkLine], provenance: OutputProvenan
         let style = provenance.style();
         line.line.style = line.line.style.patch(style);
         // Quoted words keep the page's ink: their bold is their speaker's, not a label.
-        line.line
-            .style
-            .fg
-            .get_or_insert(crate::warpaint::Figure::Ink.color());
-        let source = line.source.get_or_insert_with(|| {
-            crate::terminal_hyperlinks::LogicalLineSource::from_line(&line.line)
-        });
+        line.line.style.fg.get_or_insert(Figure::Ink.color());
+        let source = line
+            .source
+            .get_or_insert_with(|| LogicalLineSource::from_line(&line.line));
         let clear_client_background = source.output_provenance == OutputProvenance::Client
             && provenance != OutputProvenance::Client;
         source.output_provenance = provenance;

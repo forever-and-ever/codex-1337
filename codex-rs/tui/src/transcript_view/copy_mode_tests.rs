@@ -77,13 +77,13 @@ fn navigate_copy_resize_and_exit() {
             .any(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
     );
     insta::assert_snapshot!(text(&buffer), @"
-    User text > user quote ``` user code…
-
-        Latest plan
-
-        > assistant quote
-
-        assistant code
+    ╭   User text > user quote ``` user code…
+    ║
+    ║       Latest plan
+    ║
+    ║       > assistant quote
+    ║
+    ╙       assistant code
     ");
     insta::assert_snapshot!(
         view.footer_with_navigation(/*width*/ 50, crate::motion::MotionMode::Reduced, "")
@@ -150,10 +150,10 @@ fn copy_reveals_offscreen_block_with_context() {
     view.move_copy_target(&cells, KeyCode::Up);
     let after = render(&mut view, &cells, /*width*/ 50, /*height*/ 5);
     insta::assert_snapshot!(text(&after), @"
-    line
-    line
-
-    last code
+    ║   line
+    ║   line
+    ║
+    ╙   last code
     ");
 }
 

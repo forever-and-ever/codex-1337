@@ -30,18 +30,27 @@ def _family(name: str) -> type[Paint]:
 Ground = _family("ground")
 Figure = _family("figure")
 Syntax = _family("syntax")
+Bracket = _family("bracket")
 
 HEAT_STEPS: int = _DECLARED["ramps"]["heat"]["len"]
 TERMINAL_SLOTS: int = _DECLARED["ramps"]["terminal"]["len"]
-LIVERY_COUNT: tuple[int, int] = (_DECLARED["ramps"]["livery"]["min"], _DECLARED["ramps"]["livery"]["max"])
+LIVERY_COUNT: tuple[int, int] = (
+    _DECLARED["ramps"]["livery"]["min"],
+    _DECLARED["ramps"]["livery"]["max"],
+)
 
 PAIRS: dict[Paint, tuple[Paint, ...]] = {
     family(key): tuple(Ground(ground) for ground in grounds)
-    for family, table in ((Figure, _DECLARED["pairs"]["figure"]), (Syntax, _DECLARED["pairs"]["syntax"]))
+    for family, table in (
+        (Figure, _DECLARED["pairs"]["figure"]),
+        (Syntax, _DECLARED["pairs"]["syntax"]),
+        (Bracket, _DECLARED["pairs"]["bracket"]),
+    )
     for key, grounds in table.items()
 }
-"""Every ground each figure and syntax class is painted on."""
+"""Every ground each figure, syntax class and bracket is painted on."""
 RAMP_PAIRS: dict[str, tuple[Paint, ...]] = {
-    ramp: tuple(Ground(ground) for ground in grounds) for ramp, grounds in _DECLARED["pairs"]["ramp"].items()
+    ramp: tuple(Ground(ground) for ground in grounds)
+    for ramp, grounds in _DECLARED["pairs"]["ramp"].items()
 }
 """Every ground each ramp is painted on."""

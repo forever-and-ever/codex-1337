@@ -108,9 +108,9 @@ async fn settings_pickers_preserve_the_reading_anchor_through_open_and_close() -
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(visible, @"
-    older 0
-    older 1
-    older 2
+    ╭     older 0
+    ┊     older 1
+    ┊     older 2
     ");
     tui.set_owned_screen(/*owned*/ false)?;
     server.shutdown().await?;
@@ -290,9 +290,9 @@ async fn local_command_and_inline_error_reveal_their_history_output() -> Result<
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(visible, @"
-    older 5
+    ╰     older 5
 
-    ■ Usage: /keymap [debug]
+    (     ■ Usage: /keymap [debug]
     ");
     tui.set_owned_screen(/*owned*/ false)?;
     server.shutdown().await?;
@@ -347,9 +347,9 @@ async fn copy_shortcut_reveals_its_feedback_without_changing_the_draft() -> Resu
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(visible, @"
-    older 5
+    ╰     older 5
 
-    ■ No agent response to copy
+    (     ■ No agent response to copy
     ");
     tui.set_owned_screen(/*owned*/ false)?;
     server.shutdown().await?;

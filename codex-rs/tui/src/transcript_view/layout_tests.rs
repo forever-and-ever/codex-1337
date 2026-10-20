@@ -122,7 +122,8 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
             crate::transcript_geometry::GUTTER_COLUMNS,
             width,
             expanded,
-        );
+        )
+        .with_bracket(Some(crate::warpaint::Bracket::Call));
         let area = Rect::new(/*x*/ 0, /*y*/ 0, width, /*height*/ 8);
         let mut buffer = Buffer::empty(area);
         layout.render(area, &mut buffer, /*start_row*/ 0);
@@ -136,7 +137,8 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
         assert!(layout.text().starts_with("Called"));
         if tokens.is_some() {
             let text = crate::transcript_view::tests::text(&buffer);
-            assert!(text.contains("[+]   • Called") || text.contains("[-]   • Called"));
+            // The call's bracket opens on its heading, where its fold is drawn.
+            assert!(text.contains("┏     • Called"), "{text}");
             assert!(text.lines().next().is_some_and(|row| row.ends_with("  82")));
         }
         assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);

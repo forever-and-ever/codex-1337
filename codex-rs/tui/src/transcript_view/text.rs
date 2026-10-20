@@ -23,6 +23,11 @@ mod activity;
 #[path = "text_gutter.rs"]
 mod gutter;
 
+#[path = "text_bracket.rs"]
+mod bracket;
+
+use bracket::Hang;
+pub(super) use bracket::Joins;
 pub(super) use gutter::token_figure;
 pub(super) use gutter::token_label;
 
@@ -64,14 +69,19 @@ pub(super) struct TextLayout {
     heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
     feed_header: Option<HeaderRows>,
+    /// The bracket a rich entry hangs in its gutter, which its rows hang from until a line names
+    /// another speaker; none for an entry that hangs none.
+    bracket: Option<crate::warpaint::Bracket>,
 }
 
-/// A Feed Item's synthetic header rows: its fold on the first, and a control their text draws.
+/// A Feed Item's synthetic header rows: its fold on the first, the controls their text draws, and
+/// the speaker their title names, whom they hang from.
 #[derive(Clone)]
 pub(super) struct HeaderRows {
     pub(super) lines: Vec<HyperlinkLine>,
     pub(super) fold: Option<(FoldTarget, bool)>,
     pub(super) controls: Vec<HeaderControl>,
+    pub(super) speaker: crate::warpaint::Bracket,
 }
 
 /// A control drawn in a header row's own text.
@@ -113,9 +123,12 @@ enum DisclosurePlacement {
     },
     Leading {
         line: usize,
+        expanded: bool,
     },
     /// A Feed Item's fold, after the clock on its header row.
-    Fold,
+    Fold {
+        expanded: bool,
+    },
     Output {
         start: usize,
         end: usize,
@@ -138,6 +151,7 @@ struct TextRow {
     prefix_columns: usize,
     tabs: tabs::TabStops,
     inline_decoration: Option<(usize, usize)>,
+    hang: Hang,
 }
 
 impl TextLayout {
@@ -248,13 +262,11 @@ impl TextLayout {
                     control.label.clone(),
                     control.source_offset.saturating_sub(prefix),
                 ),
-                DisclosurePlacement::Leading { line } => layout.with_leading_disclosure_on_line(
-                    control.label.clone(),
-                    line,
-                    control.target.clone(),
-                ),
+                DisclosurePlacement::Leading { line, expanded } => {
+                    layout.with_leading_disclosure_on_line(expanded, line, control.target.clone())
+                }
                 // The header row is synthetic and returns with its line below.
-                DisclosurePlacement::Fold | DisclosurePlacement::Inline { .. } => layout,
+                DisclosurePlacement::Fold { .. } | DisclosurePlacement::Inline { .. } => layout,
                 DisclosurePlacement::Output { start, end } => {
                     if let FoldTarget::OutputMode(mode) = control.target {
                         layout.with_output_target(
@@ -270,6 +282,7 @@ impl TextLayout {
             };
         }
         layout.output_mode = self.output_mode;
+        layout.bracket = self.bracket;
         if let Some(rows) = &self.feed_header {
             layout = layout.with_fold_header(rows.clone());
         }
@@ -307,6 +320,9 @@ impl TextLayout {
             Line::from(format!("{}{label}", " ".repeat(indent))).dim(),
             usize::from(self.width),
         );
+        let hang = control_row
+            .checked_sub(1)
+            .map_or(Hang::Block, |row| self.rows[row].hang);
         self.rows.insert(
             control_row,
             TextRow {
@@ -319,6 +335,7 @@ impl TextLayout {
                 prefix_columns: indent,
                 tabs: tabs::TabStops::default(),
                 inline_decoration: None,
+                hang,
             },
         );
         self.disclosure = true;
@@ -363,6 +380,7 @@ impl TextLayout {
                 prefix_columns: 0,
                 tabs: tabs::TabStops::default(),
                 inline_decoration: None,
+                hang: Hang::Outside,
             },
         );
         for control in &mut self.disclosure_controls {
@@ -433,7 +451,7 @@ impl TextLayout {
                 row.first_column as u16
                     ..line_width(&row.line.line).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold => {
+            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold { .. } => {
                 crate::transcript_geometry::CONTROL_COLUMN.min(self.width)
                     ..(crate::transcript_geometry::CONTROL_COLUMN
                         + crate::transcript_geometry::CONTROL_COLUMNS)
@@ -489,21 +507,11 @@ impl TextLayout {
                 }
             }
             for control in self.disclosure_controls.iter().filter(|control| {
-                matches!(
-                    control.placement,
-                    DisclosurePlacement::Leading { .. }
-                        | DisclosurePlacement::Fold
-                        | DisclosurePlacement::Output { .. }
-                ) && control.row == start_row + usize::from(screen_row)
+                matches!(control.placement, DisclosurePlacement::Output { .. })
+                    && control.row == start_row + usize::from(screen_row)
             }) {
                 let columns = self.control_columns(control);
-                let mut label = Line::from(control.label.as_str()).style(
-                    if matches!(control.target, FoldTarget::OutputMode(_)) {
-                        Style::default().dim()
-                    } else {
-                        crate::render::disclosure::style(false)
-                    },
-                );
+                let mut label = Line::from(control.label.as_str()).style(Style::default().dim());
                 if let FoldTarget::OutputMode(mode) = control.target
                     && self.output_mode == Some(mode)
                 {
@@ -517,6 +525,7 @@ impl TextLayout {
                 );
             }
         }
+        self.paint_brackets(area, buf, start_row);
     }
 
     pub(super) fn selection_position_at(&self, row: usize, column: u16) -> usize {
@@ -735,7 +744,9 @@ impl TextLayout {
         let mut text = String::new();
         let mut rows = Vec::new();
         let mut source_seen = false;
+        let mut hang = Hang::Block;
         for (index, line) in logical.iter().enumerate() {
+            hang = hang.after(&line.origin);
             if !line.is_decoration() {
                 if source_seen {
                     text.push('\n');
@@ -767,7 +778,14 @@ impl TextLayout {
                     next.origin.output_provenance != line.origin.output_provenance
                 });
             if !copy_only {
-                rows.extend(layout_line(line, start, width, index, preserve_indent));
+                rows.extend(layout_line(
+                    line,
+                    start,
+                    width,
+                    index,
+                    preserve_indent,
+                    hang,
+                ));
             }
             if let Some(row) = rows.last_mut() {
                 row.line_end = Some(text.len());
@@ -785,6 +803,7 @@ impl TextLayout {
             output_mode: None,
             heading: HeadingDecorations::default(),
             feed_header: None,
+            bracket: None,
         }
     }
 }
@@ -795,6 +814,7 @@ fn layout_line(
     width: u16,
     logical_line: usize,
     preserve_indent: bool,
+    hang: Hang,
 ) -> Vec<TextRow> {
     let content_width = width.saturating_sub(logical.right_reserve).max(/*other*/ 1);
     let mut logical = Cow::Borrowed(logical);
@@ -874,6 +894,7 @@ fn layout_line(
                 prefix_columns,
                 tabs,
                 inline_decoration: None,
+                hang,
             }
         })
         .collect()

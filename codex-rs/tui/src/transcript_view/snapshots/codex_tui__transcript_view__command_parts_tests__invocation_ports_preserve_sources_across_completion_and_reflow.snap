@@ -3,91 +3,90 @@ source: tui/src/transcript_view/command_parts_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 running input
-            Script (bash) · running    [in [raw] [fmt]] [out]
-              Search TODO in src;
+        ┏   Script (bash) · running    [in [raw] [fmt]] [out]
+        ┗     Search TODO in src;
 
 raw source
-            Script (bash) · running    [in [raw] [fmt]] [out]
-              # @exec: {"max_output_tokens": 3000}
-              sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
+        ┏   Script (bash) · running    [in [raw] [fmt]] [out]
+        ┇     # @exec: {"max_output_tokens": 3000}
+        ┗     sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
 
 completed, output hidden
-            Script (bash)              [in [raw] [fmt]] [out]
-              # @exec: {"max_output_tokens": 3000}
-              sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
+        ┏   Script (bash)              [in [raw] [fmt]] [out]
+        ┇     # @exec: {"max_output_tokens": 3000}
+        ┗     sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
 
 both ports
-            Script (bash)              [in [raw] [fmt]] [out [raw] [fmt]]
-              # @exec: {"max_output_tokens": 3000}
-              sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
-
-              {
-                "n": 1e+02,
-                "n": 2,
-                "output": "combined output
-              last"
-              }
-
-output only, reflowed
-            Script (bash)
-            [in]
-            [out [raw] [fmt]]
-              {
-                "n": 1e+02,
-                "n": 2,
-                "output": "combined
-              output
-              last"
-              }
+        ┏   Script (bash)              [in [raw] [fmt]] [out [raw] [fmt]]
+        ┇     # @exec: {"max_output_tokens": 3000}
+        ┗     sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
+        ╭     {
+        ┊       "n": 1e+02,
+        ┊       "n": 2,
+        ┊       "output": "combined output
+        ┊     last"
+        ╰     }
 
 output only, reflowed
-            Script (bash)               [in]             [out [raw] [fmt]]
-              {
-                "n": 1e+02,
-                "n": 2,
-                "output": "combined output
-              last"
-              }
+        ┏   Script (bash)
+        ┇   [in]
+        ┗   [out [raw] [fmt]]
+        ╭     {
+        ┊       "n": 1e+02,
+        ┊       "n": 2,
+        ┊       "output": "combined
+        ┊     output
+        ┊     last"
+        ╰     }
 
 output only, reflowed
-            Script (bash)              [in]             [out [raw] [fmt]]
-              {
-                "n": 1e+02,
-                "n": 2,
-                "output": "combined output
-              last"
-              }
+        [   Script (bash)               [in]             [out [raw] [fmt]]
+        ╭     {
+        ┊       "n": 1e+02,
+        ┊       "n": 2,
+        ┊       "output": "combined output
+        ┊     last"
+        ╰     }
+
+output only, reflowed
+        [   Script (bash)              [in]             [out [raw] [fmt]]
+        ╭     {
+        ┊       "n": 1e+02,
+        ┊       "n": 2,
+        ┊       "output": "combined output
+        ┊     last"
+        ╰     }
 
 raw output
-            Script (bash)              [in]             [out [raw] [fmt]]
-              {"n":1e+02,"n":2,"output":"combined output\nlast"}
+        [   Script (bash)              [in]             [out [raw] [fmt]]
+        (     {"n":1e+02,"n":2,"output":"combined output\nlast"}
 
 neither port
-            Script (bash)               [in]             [out]
+        [   Script (bash)               [in]             [out]
 
 compound batch
-        [-] Command                                                            10      2      8        …
-              Script (bash)             [in]             [out]              31
-              Script (python)           [in]             [out]              79
-              Fence · no output         [in]             [out]              0
+        ┏   Command                                                            10      2      8        …
+        ┗     Script (bash)             [in]             [out]              31
+        [     Script (python)           [in]             [out]              79
+        [     Fence · no output         [in]             [out]              0
 
 one child input
-        [-] Command                                                            10      2      8        …
-              Script (bash)             [in]             [out]              31
-              Script (python)           [in [raw]      ] [out]              79
-                print('beta')
-              Fence · no output         [in]             [out]              0
+        ┏   Command                                                            10      2      8        …
+        ┗     Script (bash)             [in]             [out]              31
+        ┏     Script (python)           [in [raw]      ] [out]              79
+        ┗       print('beta')
+        [     Fence · no output         [in]             [out]              0
 
 outer fold
-        [+] Command                                                            10      2      8        …
+        ┏   Command                                                            10      2      8        …
 
 outer fold
-        [-] Command                                                            10      2      8        …
-              Script (bash)             [in]             [out]              31
-              Script (python)           [in [raw]      ] [out]              79
-                print('beta')
-              Fence · no output         [in]             [out]              0
+        ┏   Command                                                            10      2      8        …
+        ┗     Script (bash)             [in]             [out]              31
+        ┏     Script (python)           [in [raw]      ] [out]              79
+        ┗       print('beta')
+        [     Fence · no output         [in]             [out]              0
 
 regrouped singleton
-            Script (python)             [in [raw]      ] [out]                 10      2      8        …
-              print('beta')
+        ┏   Script (python)             [in [raw]      ] [out]                 10      2      8        …
+        ┗     print('beta')

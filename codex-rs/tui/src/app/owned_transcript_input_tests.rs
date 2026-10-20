@@ -319,8 +319,10 @@ async fn plan_menu_allows_transcript_selection_and_copy_but_respects_popup_bound
         .lines()
         .enumerate()
         .find_map(|(row, line)| {
-            line.find("Plan step")
-                .map(|column| (row as u16, column as u16))
+            line.find("Plan step").map(|offset| {
+                let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
+                (row as u16, column as u16)
+            })
         })
         .expect("visible plan step");
     for event in [

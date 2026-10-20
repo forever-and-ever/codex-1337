@@ -349,7 +349,12 @@ impl McpToolCallCell {
         invocation_line.spans.insert(0, "MCP ".white().bold());
         let mut compact_spans = vec![bullet.clone(), " ".into()];
         if !nested || status == Some(false) {
-            compact_spans.extend([header_text.bold(), " ".into()]);
+            let verb = if status == Some(false) {
+                header_text.red().bold()
+            } else {
+                header_text.bold()
+            };
+            compact_spans.extend([verb, " ".into()]);
         }
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
@@ -394,6 +399,7 @@ impl McpToolCallCell {
                     super::output_provenance::OutputProvenance::Formatted,
                 );
             }
+            super::output_provenance::hang(&mut invocation, crate::warpaint::Bracket::Call);
             let body_lines = adaptive_wrap_hyperlink_lines(&invocation, opts);
             lines.extend(prefix_hyperlink_lines(
                 body_lines,

@@ -32,6 +32,14 @@ impl ExecCell {
             let highlighted_script = highlight_bash_to_lines(&script);
             let mut invocation = plain_hyperlink_lines(highlighted_script);
             mark_lines(&mut invocation, OutputProvenance::Formatted);
+            crate::history_cell::output_provenance::hang(
+                &mut invocation,
+                if call.is_user_shell_command() {
+                    crate::warpaint::Bracket::Prompt
+                } else {
+                    crate::warpaint::Bracket::Call
+                },
+            );
             let cmd_display = adaptive_wrap_hyperlink_lines(
                 &invocation,
                 RtOptions::new(width as usize)
@@ -50,6 +58,10 @@ impl ExecCell {
                     {
                         let mut detail = HyperlinkLine::from(unwrapped);
                         mark_lines(std::slice::from_mut(&mut detail), provenance);
+                        crate::history_cell::output_provenance::hang(
+                            std::slice::from_mut(&mut detail),
+                            crate::warpaint::Bracket::Harness,
+                        );
                         lines.extend(adaptive_wrap_hyperlink_lines(&[detail], wrap_opts.clone()));
                     }
                 }

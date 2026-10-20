@@ -12,6 +12,7 @@ use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
 
+use super::paint::Bracket;
 use super::paint::Figure;
 use super::paint::Ground;
 use super::paint::HEAT_STEPS;
@@ -19,66 +20,39 @@ use super::paint::LIVERY_SLOTS;
 use super::paint::Syntax;
 use super::scopes;
 
-/// Where prose lands: the page, panels, every band, and a selected row.
+/// Where prose lands: the page, raised blocks, a selected row and the prompt's panels.
 const SURFACES: &[Ground] = &[
     Ground::Canvas,
-    Ground::Trough,
     Ground::Dais,
     Ground::Selection,
     Ground::Prompt,
-    Ground::Response,
-    Ground::Reasoning,
-    Ground::Environment,
-    Ground::Message,
 ];
 /// Where ink lands: prose's grounds and diff lines.
 const TEXT: &[Ground] = &[
     Ground::Canvas,
-    Ground::Trough,
     Ground::Dais,
     Ground::Selection,
     Ground::Prompt,
-    Ground::Response,
-    Ground::Reasoning,
-    Ground::Environment,
-    Ground::Message,
     Ground::Added,
     Ground::Removed,
 ];
 /// Inline code: prose's grounds but a selected row.
-const INLINE: &[Ground] = &[
-    Ground::Canvas,
-    Ground::Trough,
-    Ground::Dais,
-    Ground::Prompt,
-    Ground::Response,
-    Ground::Reasoning,
-    Ground::Environment,
-    Ground::Message,
-];
-/// Where code is highlighted: blocks on the page, in panels, on the agents' grounds and the
-/// reasoning they disclose, and diffs.
+const INLINE: &[Ground] = &[Ground::Canvas, Ground::Dais, Ground::Prompt];
+/// Where code is highlighted: blocks on the page, commands in the prompt's panels, and diffs.
 const CODE: &[Ground] = &[
     Ground::Canvas,
-    Ground::Trough,
-    Ground::Response,
-    Ground::Reasoning,
-    Ground::Message,
+    Ground::Prompt,
     Ground::Added,
     Ground::Removed,
 ];
-/// Thread livery marks rows on the page, in panels and on raised blocks.
-const LIVERY: &[Ground] = &[Ground::Canvas, Ground::Trough, Ground::Dais];
+/// Thread livery marks rows on the page, on raised blocks and in the prompt's panels.
+const LIVERY: &[Ground] = &[Ground::Canvas, Ground::Dais, Ground::Prompt];
 /// The activity heat map is drawn on the page.
 const HEAT: &[Ground] = &[Ground::Canvas];
-/// Tool output sits on the page or on the ground of whoever ran it.
-const TERMINAL: &[Ground] = &[
-    Ground::Canvas,
-    Ground::Prompt,
-    Ground::Response,
-    Ground::Environment,
-    Ground::Message,
-];
+/// Tool output sits on the page.
+const TERMINAL: &[Ground] = &[Ground::Canvas];
+/// Brackets hang in the page's gutter.
+const BRACKETS: &[Ground] = &[Ground::Canvas];
 
 /// Every ground a call site paints `figure` on.
 fn painted(figure: Figure) -> &'static [Ground] {
@@ -86,13 +60,7 @@ fn painted(figure: Figure) -> &'static [Ground] {
         Figure::Ink | Figure::InkMuted | Figure::InkFaint => TEXT,
         Figure::InkSelected => &[Ground::Selection],
         Figure::Tab => &[Ground::Canvas],
-        Figure::Rule => &[
-            Ground::Canvas,
-            Ground::Dais,
-            Ground::Response,
-            Ground::Reasoning,
-            Ground::Message,
-        ],
+        Figure::Rule => &[Ground::Canvas, Ground::Dais],
         Figure::Code => INLINE,
         Figure::Label
         | Figure::Accent
@@ -145,11 +113,21 @@ fn roles_json() -> Value {
             )
         })
         .collect();
+    let bracket: Map<String, Value> = Bracket::ALL
+        .iter()
+        .map(|bracket| {
+            (
+                bracket.key().to_owned(),
+                grounds(|ground| BRACKETS.contains(ground)),
+            )
+        })
+        .collect();
     let ramp = |on: &[Ground]| grounds(|ground| on.contains(ground));
     json!({
         "ground": keys(Ground::ALL.iter().map(|member| member.key())),
         "figure": keys(Figure::ALL.iter().map(|member| member.key())),
         "syntax": keys(Syntax::ALL.iter().map(|member| member.key())),
+        "bracket": keys(Bracket::ALL.iter().map(|member| member.key())),
         "ramps": {
             "livery": {"min": 1, "max": LIVERY_SLOTS},
             "heat": {"len": HEAT_STEPS},
@@ -158,6 +136,7 @@ fn roles_json() -> Value {
         "pairs": {
             "figure": figure,
             "syntax": syntax,
+            "bracket": bracket,
             "ramp": {
                 "livery": ramp(LIVERY),
                 "heat": ramp(HEAT),

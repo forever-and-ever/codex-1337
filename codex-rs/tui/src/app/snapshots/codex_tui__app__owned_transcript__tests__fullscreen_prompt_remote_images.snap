@@ -3,7 +3,7 @@ source: tui/src/app/owned_transcript_tests.rs
 expression: "normalize_snapshot_paths(frames.join(\"\\n\\n\"))"
 ---
 Draft
-              History stays visible
+        (     History stays visible
 
 ────────────────────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ Draft
   GPT-5.6-Sol default · /tmp/project
 
 Up
-              History stays visible
+        (     History stays visible
 
 ────────────────────────────────────────────────────────────
 
@@ -31,7 +31,7 @@ Up
   GPT-5.6-Sol default · /tmp/project
 
 Up
-              History stays visible
+        (     History stays visible
 
 ────────────────────────────────────────────────────────────
 
@@ -45,7 +45,7 @@ Up
   GPT-5.6-Sol default · /tmp/project
 
 Delete
-              History stays visible
+        (     History stays visible
 
 ────────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ Delete
   GPT-5.6-Sol default · /tmp/project
 
 Down
-              History stays visible
+        (     History stays visible
 
 ────────────────────────────────────────────────────────────
 

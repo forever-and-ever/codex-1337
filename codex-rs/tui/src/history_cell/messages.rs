@@ -4,10 +4,10 @@
 use super::markdown_render_cache::MarkdownRenderCache;
 use super::*;
 use crate::style::accent_color_on;
-use crate::style::history_response_style;
 use crate::terminal_hyperlinks::annotate_web_urls;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
 use crate::terminal_hyperlinks::remap_source_wrapped_line;
+use crate::warpaint::Bracket;
 use crate::wrapping::url_preserving_wrap_options;
 use crate::wrapping::word_wrap_line_with_source;
 use std::borrow::Cow;
@@ -525,14 +525,9 @@ fn normalize_whitespace_only_hyperlink_lines(mut lines: Vec<HyperlinkLine>) -> V
     lines
 }
 
-/// Both speakers share a compact band. A row that brings its own background keeps it.
-fn message_band(mut lines: Vec<HyperlinkLine>, band: Style) -> Vec<HyperlinkLine> {
-    for line in &mut lines {
-        line.line.style = band.patch(line.line.style);
-        if let Some(source) = &mut line.source {
-            source.line_style = band.patch(source.line_style);
-        }
-    }
+/// A message's words hang from its speaker's bracket.
+fn spoken(mut lines: Vec<HyperlinkLine>, bracket: Bracket) -> Vec<HyperlinkLine> {
+    super::output_provenance::hang(&mut lines, bracket);
     lines
 }
 
@@ -618,13 +613,13 @@ impl HistoryCell for StreamingAgentTailCell {
     fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
         // Tail lines are already rendered at the controller's current stream width.
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
-        message_band(
+        spoken(
             normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
                 self.lines.clone(),
                 agent_prefix(self.is_first_line),
                 agent_prefix(/*first*/ false),
             )),
-            history_response_style(),
+            Bracket::Response,
         )
     }
 

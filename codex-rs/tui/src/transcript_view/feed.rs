@@ -34,6 +34,7 @@ use super::Line;
 use super::Position;
 use super::Stylize;
 use super::TranscriptView;
+use super::brackets;
 use super::disclosure;
 use super::invocation;
 use super::step_bills::Figures;
@@ -65,6 +66,7 @@ use crate::history_cell::activity_preview::compact_header;
 use crate::history_cell::output_provenance::OutputMode;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::warpaint::Bracket;
 use codex_app_server_protocol::StepAdmissionItem;
 use codex_protocol::code_mode::CodeModeEvent;
 use ratatui::text::Span;
@@ -484,6 +486,11 @@ impl Seat {
 
     pub(super) fn is_visible(&self) -> bool {
         self.header.is_some() || self.content != Content::Hidden
+    }
+
+    /// Whether the cell shows its item's header and nothing else.
+    pub(super) fn header_only(&self) -> bool {
+        self.header.is_some() && self.content == Content::Hidden
     }
 }
 
@@ -1185,22 +1192,20 @@ impl FeedIndex {
         let invocation = match header.title {
             Title::Owned(index) => cells.get(index).and_then(|cell| {
                 let mut calls = crate::history_cell::invocation::collect(cell.as_ref());
-                (calls.len() == 1).then(|| calls.remove(0))
+                (calls.len() == 1).then(|| (calls.remove(0), cell))
             }),
             _ => None,
         };
-        let (mut titles, mut controls) = if let Some(call) = &invocation {
+        let (mut titles, mut controls, speaker) = if let Some((call, cell)) = invocation {
+            let speaker = call.caller();
             if header.disclosure.unfolded() {
-                let source = match header.title {
-                    Title::Owned(index) => invocation::PreparationSource::Retained(&cells[index]),
-                    _ => unreachable!("invocation header requires an owned source"),
-                };
-                let prepared = invocations.prepared(call, source);
+                let prepared =
+                    invocations.prepared(&call, invocation::PreparationSource::Retained(cell));
                 let input_width = width
                     .saturating_sub(TITLE_COLUMN + crate::transcript_geometry::ENTRY_INDENT)
                     .max(1);
                 let rows = invocations.header(
-                    call,
+                    &call,
                     &prepared,
                     input_width,
                     true,
@@ -1208,7 +1213,7 @@ impl FeedIndex {
                     None,
                     full,
                 );
-                (rows.lines, rows.controls)
+                (rows.lines, rows.controls, speaker)
             } else {
                 (
                     vec![{
@@ -1223,10 +1228,11 @@ impl FeedIndex {
                         HeaderRows::label(title, 0..end)
                     }],
                     Vec::new(),
+                    speaker,
                 )
             }
         } else {
-            let mut title = self.title(cells, header, expanded, width);
+            let (mut title, speaker) = self.title(cells, header, expanded, width);
             let label_end = title.width().min(title_width);
             let mut controls = Vec::new();
             if let Title::Owned(index) = header.title
@@ -1259,6 +1265,7 @@ impl FeedIndex {
                     0..label_end,
                 )],
                 controls,
+                speaker,
             )
         };
         if cot {
@@ -1347,36 +1354,42 @@ impl FeedIndex {
             fold: (header.disclosure != HeaderDisclosure::FixedOpen)
                 .then(|| (self.fold_target(header), header.disclosure.unfolded())),
             controls,
+            speaker,
         }
     }
 
+    /// A header's title, and the speaker it names, whom the header's rows hang from.
     fn title(
         &self,
         cells: &[Arc<dyn HistoryCell>],
         header: &Header,
         expanded: &FoldState,
         width: u16,
-    ) -> Line<'static> {
+    ) -> (Line<'static>, Bracket) {
         let item = &self.items[header.item];
         let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
-        let response = || Line::from("Response".bold());
-        let title = match (&item.kind, header.title) {
-            (_, Title::Command) => Line::from("Command".bold()),
-            (Kind::User { .. }, _) => Line::from("User".bold()),
+        let response = || (Line::from("Response".bold()), Bracket::Response);
+        let (title, speaker) = match (&item.kind, header.title) {
+            (_, Title::Command) => (Line::from("Command".bold()), Bracket::Call),
+            (Kind::User { .. }, _) => (Line::from("User".bold()), Bracket::Prompt),
             (Kind::Entry { .. }, _) => header
                 .scope
                 .first()
-                .and_then(|index| feed_entry(cell(*index)?))
-                .map(FeedEntry::feed_title)
-                .unwrap_or_default(),
+                .and_then(|index| {
+                    let cell = cell(*index)?;
+                    Some((feed_entry(cell)?.feed_title(), brackets::of_cell(cell)?))
+                })
+                .unwrap_or((Line::default(), Bracket::Harness)),
             (Kind::Steps { .. } | Kind::CodeMode, Title::Owned(index) | Title::Borrowed(index)) => {
                 cell(index)
-                    .and_then(|cell| title_row(cell, expanded, width))
+                    .and_then(|cell| {
+                        Some((title_row(cell, expanded, width)?, brackets::of_cell(cell)?))
+                    })
                     .unwrap_or_else(response)
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
-        if matches!(
+        let title = if matches!(
             item.kind,
             Kind::Steps {
                 sealed_calls: true,
@@ -1391,7 +1404,8 @@ impl FeedIndex {
             crate::render::header::paint_work(title, active)
         } else {
             crate::render::header::paint(title)
-        }
+        };
+        (title, speaker)
     }
 
     fn figures(
