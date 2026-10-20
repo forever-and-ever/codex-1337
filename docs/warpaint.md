@@ -154,16 +154,16 @@ light text on a dark ground correctly.
 - The prompt ground, beneath the composer and the panels that open in its place, is the
   canvas's material raised 9.5 J' and tinted 2.25 M toward the prompt bracket's hue: the user's
   own surface.
-- Labels, the chrome's bold words (the feed's headings, titles, the keys a hint names, Markdown
-  headings), speak in a pale tint of the accent: its hue at 9 M, 3 Lc beneath the ink's
-  contrast, unless a spec's `[label]` states otherwise. Bold carries the rest of their
-  prominence, and no label reads above Lc 95 over the canvas. An open disclosure tab reads
-  between the faint ink of the tabs beside it and the label above it: the accent's hue at
-  15 M, halfway between their contrasts, underlined rather than bold, unless a spec's `[tab]`
-  states otherwise. Neither may take a hue between 105 and 180 degrees, green from its yellow
-  edge to teal, which the active thread's dot wears: a finished feed would read as one still at
-  work. A heading's verb that reports a failure or an interruption wears the failure figure,
-  not the label.
+- Labels, the chrome's bold words (titles, the keys a hint names, Markdown headings), speak in
+  a pale tint of the accent: its hue at 9 M, 3 Lc beneath the ink's contrast, unless a spec's
+  `[label]` states otherwise. Bold carries the rest of their prominence, and no label reads
+  above Lc 95 over the canvas. The feed's headings are the ink, bold, since a hue would claim a
+  meaning they lack: only work still running wears the accent, and a verb that reports a
+  failure or an interruption the failure figure. An open disclosure tab reads between the faint
+  ink of the tabs beside it and the label: the accent's hue at 15 M, halfway between their
+  contrasts, underlined rather than bold, unless a spec's `[tab]` states otherwise. Neither
+  label nor tab may take a hue between 105 and 180 degrees, green from its yellow edge to teal,
+  which the active thread's dot wears: a finished feed would read as one still at work.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A

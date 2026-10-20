@@ -93,10 +93,10 @@ LABEL_DROP = 3.0
 the rest of its prominence."""
 TAB_TINT = 15.0
 """An open disclosure tab's colorfulness unless its spec states one: deeper than the label's tint,
-so the tab reads as its heading's hue rather than as a second label."""
+so the tab reads as the accent's hue rather than as a second label."""
 TAB_LEVEL = 0.5
 """Where an open tab's contrast falls between the faint ink of the tabs beside it (0) and the label
-of the heading above it (1), unless its spec states its contrast."""
+(1), unless its spec states its contrast."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""

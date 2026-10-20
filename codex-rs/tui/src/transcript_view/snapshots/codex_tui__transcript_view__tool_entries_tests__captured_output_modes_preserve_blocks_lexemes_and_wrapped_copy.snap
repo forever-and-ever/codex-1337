@@ -23,7 +23,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 12, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 42, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
@@ -80,7 +80,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 12, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 42, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
@@ -124,7 +124,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 12, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 42, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
@@ -204,7 +204,7 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 12, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: BOLD,
         x: 25, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 13, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 15, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
@@ -297,7 +297,7 @@ Buffer {
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 12, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: BOLD,
         x: 21, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
         x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 58, y: 0, fg: Indexed(66), bg: Reset, underline: Reset, modifier: NONE,

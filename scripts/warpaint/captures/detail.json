@@ -46,7 +46,7 @@
     [
       {"text": "              ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "• ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "Edited", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
+      {"text": "Edited", "fg": "figure:ink", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                              ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [

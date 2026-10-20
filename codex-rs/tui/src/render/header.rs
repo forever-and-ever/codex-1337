@@ -1,6 +1,7 @@
-//! Feed headings: entry titles speak in the pack's label, bold; active work speaks in its accent,
-//! the pack's signature, as heat does. An open tab beneath them takes the pack's tab. Words that
-//! carry a meaning of their own keep its color: a failure stays red in any heading.
+//! Feed headings: entry titles speak in the page's ink, bold, since a hue would claim a meaning
+//! they lack; active work speaks in its accent, the pack's signature, as heat does. An open tab
+//! beneath them takes the pack's tab. Words that carry a meaning of their own keep its color: a
+//! failure stays red in any heading.
 
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -12,7 +13,7 @@ use crate::warpaint::Figure;
 
 pub(crate) fn style() -> Style {
     Style::default()
-        .fg(Figure::Label.color())
+        .fg(Figure::Ink.color())
         .add_modifier(Modifier::BOLD)
         .remove_modifier(Modifier::DIM)
 }
