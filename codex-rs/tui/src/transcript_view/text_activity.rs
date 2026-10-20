@@ -126,7 +126,7 @@ impl TextLayout {
             .map_or(self.text.len(), |row| self.rows[row].source.start)
     }
 
-    fn row_for_input_line(&self, line: usize) -> Option<usize> {
+    pub(super) fn row_for_input_line(&self, line: usize) -> Option<usize> {
         let logical = self
             .logical
             .iter()
@@ -224,6 +224,12 @@ impl TextLayout {
             if let InlineAnchor::Source(offset) = anchor {
                 *offset += prefix;
             }
+        }
+        for mark in &mut layout.heading.tool_marks {
+            mark.row += rows.lines.len();
+        }
+        if let Some(mark) = rows.tool_mark {
+            layout.heading.tool_marks.push(mark);
         }
         for control in &mut layout.disclosure_controls {
             control.row += rows.lines.len();

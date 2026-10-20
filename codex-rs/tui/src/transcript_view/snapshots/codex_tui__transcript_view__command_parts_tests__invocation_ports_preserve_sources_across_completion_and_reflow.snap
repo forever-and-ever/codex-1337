@@ -3,11 +3,11 @@ source: tui/src/transcript_view/command_parts_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 running input
-            Script (bash) · running    [in [raw] [fmt]] [out]
+            Script (bash) · running •  [in [raw] [fmt]] [out]
               Search TODO in src;
 
 raw source
-            Script (bash) · running    [in [raw] [fmt]] [out]
+            Script (bash) · running •  [in [raw] [fmt]] [out]
         ┏     # @exec: {"max_output_tokens": 3000}
         ┗     sed -n '10,20p' src/main.rs; rg 'TODO' src; echo 'not;a&&boundary'
 

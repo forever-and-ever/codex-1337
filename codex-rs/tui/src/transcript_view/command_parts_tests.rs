@@ -61,6 +61,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
             .find(|(_, line)| line.contains(title))
             .unwrap_or_else(|| panic!("missing {title} (active={active}) in {text}"));
         let column = line.find(title).unwrap();
+        assert_eq!(line[column..].contains('•'), active, "{line}");
         let expected = if active {
             crate::render::header::work_style()
         } else {
@@ -409,6 +410,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         );
         let pending = view.current_layout(&code, 0).unwrap();
         assert!(pending.text().starts_with("Code Mode"));
+        assert!(!pending.text().contains('•'));
         assert!(!shown.contains("const answer"));
         for status_only in [false, true] {
             if status_only {
@@ -832,6 +834,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         80,
         None,
         false,
+        crate::motion::MotionMode::Reduced,
     );
     assert!(available.controls.iter().all(|control| !matches!(
         control.target,
@@ -925,6 +928,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         80,
         None,
         false,
+        crate::motion::MotionMode::Reduced,
     );
     assert!(
         reserved

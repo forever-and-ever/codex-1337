@@ -209,9 +209,11 @@ impl TranscriptView {
         self.is_following()
             && self.snapshot().is_none()
             && self.visible.iter().any(|row| {
-                cells.get(row.index).is_some_and(|cell| {
-                    row.key == EntryKey::cell(cell) && cell.transcript_animation_tick().is_some()
-                })
+                row.layout.has_animated_tool_mark(row.row)
+                    || cells.get(row.index).is_some_and(|cell| {
+                        row.key == EntryKey::cell(cell)
+                            && cell.transcript_animation_tick().is_some()
+                    })
             })
     }
 

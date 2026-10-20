@@ -20,7 +20,8 @@ impl TextLayout {
     }
 
     pub(in crate::transcript_view) fn same_presentation(&self, other: &Self) -> bool {
-        self.text == other.text
+        self.heading.tool_marks == other.heading.tool_marks
+            && self.text == other.text
             && self.width == other.width
             && self.separated == other.separated
             && self.disclosure == other.disclosure

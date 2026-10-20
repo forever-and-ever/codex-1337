@@ -1272,6 +1272,9 @@ impl FeedIndex {
                     title_width as u16,
                     None,
                     full,
+                    crate::motion::MotionMode::from_animations_enabled(
+                        cell.transcript_animation_tick().is_some(),
+                    ),
                 );
                 (rows.lines, rows.controls)
             } else {
@@ -1407,12 +1410,31 @@ impl FeedIndex {
             title.line = Line::from(spans);
             title
         }));
+        let motion = header
+            .scope
+            .iter()
+            .filter_map(|index| cells.get(*index))
+            .filter(|cell| crate::history_cell::has_active_invocations(cell.as_ref()))
+            .map(|cell| {
+                crate::motion::MotionMode::from_animations_enabled(
+                    cell.transcript_animation_tick().is_some(),
+                )
+            })
+            .reduce(|left, right| {
+                if left == crate::motion::MotionMode::Animated {
+                    left
+                } else {
+                    right
+                }
+            });
         HeaderRows {
             lines,
             fold: (header.disclosure != HeaderDisclosure::FixedOpen)
                 .then(|| (self.fold_target(header), header.disclosure.unfolded())),
             controls,
+            tool_mark: None,
         }
+        .with_tool_mark(motion, TITLE_COLUMN.saturating_add(title_width as u16))
     }
 
     fn title(

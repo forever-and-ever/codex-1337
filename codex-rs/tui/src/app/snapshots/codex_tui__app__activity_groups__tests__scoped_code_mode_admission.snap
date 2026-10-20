@@ -4,7 +4,7 @@ expression: "examples.join(\"\\n\\n\")"
 ---
 Held reading
               Read child-a.rs (whole file)
-        [-] Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
+        [-] Code Mode (βεθε) · running •         [in [raw] [fmt]] [out]
               • MCP Inspect child-b
 
 Return to live
@@ -12,7 +12,7 @@ Return to live
 
         [-] Code Mode (ρξωζ)                     [in [raw] [fmt]] [out]                 10
               Read child-a.rs (whole file)
-        [-] Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
+        [-] Code Mode (βεθε) · running •         [in [raw] [fmt]] [out]
               • MCP Inspect child-b
         [+]   • Command
                   Waited for ρξωζ

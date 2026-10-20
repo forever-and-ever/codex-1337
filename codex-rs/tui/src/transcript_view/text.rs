@@ -80,6 +80,7 @@ pub(super) struct HeaderRows {
     pub(super) lines: Vec<HyperlinkLine>,
     pub(super) fold: Option<(FoldTarget, bool)>,
     pub(super) controls: Vec<HeaderControl>,
+    pub(super) tool_mark: Option<ToolMark>,
 }
 
 /// A control drawn in a header row's own text.
@@ -96,11 +97,21 @@ enum InlineAnchor {
     InputLine { line: usize, offset: usize },
 }
 
+mod tool_marks;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ToolMark {
+    pub(super) row: usize,
+    pub(super) column: u16,
+    pub(super) motion: crate::motion::MotionMode,
+}
+
 #[derive(Default)]
 struct HeadingDecorations {
     /// A loose row's tokens, and where they go.
     tokens: Option<(u64, crate::transcript_geometry::TokenSeat)>,
     inline: Vec<(InlineAnchor, Line<'static>)>,
+    tool_marks: Vec<ToolMark>,
 }
 
 struct DisclosureControl {
@@ -240,6 +251,7 @@ impl TextLayout {
             self.preserve_indent,
         );
         layout.heading.tokens = self.heading.tokens;
+        self.rewrap_tool_marks(&mut layout, header_lines);
         for (anchor, label) in &self.heading.inline {
             let anchor = match anchor {
                 InlineAnchor::Source(offset) => InlineAnchor::Source(offset.saturating_sub(prefix)),
@@ -387,6 +399,9 @@ impl TextLayout {
                 hang: Hang::Outside,
             },
         );
+        for mark in &mut self.heading.tool_marks {
+            mark.row += 1;
+        }
         for control in &mut self.disclosure_controls {
             control.row += 1;
         }
@@ -577,6 +592,7 @@ impl TextLayout {
             }
         }
         self.paint_brackets(area, buf, start_row);
+        self.paint_tool_marks(area, buf, start_row, crate::motion::MotionMode::Reduced);
     }
 
     pub(super) fn selection_position_at(&self, row: usize, column: u16) -> usize {

@@ -246,6 +246,7 @@ impl TranscriptView {
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, cells: &[Arc<dyn HistoryCell>]) {
         if self.cache.frames.is_none() {
             self.render_prepared(area, buf, cells);
+            self.paint_tool_marks(buf);
             return;
         }
         if self.deferred_scroll.is_some() && self.area.width == area.width {
@@ -329,6 +330,7 @@ impl TranscriptView {
             self.area = Rect::new(area.x, area.y, area.width, 0);
             self.tail_visible = false;
         }
+        self.paint_tool_marks(buf);
     }
 
     #[expect(

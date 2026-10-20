@@ -529,6 +529,7 @@ impl Invocations {
         width: u16,
         tokens: Option<u64>,
         full: bool,
+        motion: crate::motion::MotionMode,
     ) -> HeaderRows {
         let bill = tokens.map(|tokens| (tokens, super::text::token_label(tokens)));
         // The caller supplies the shared title lane; figures occupy the lane after it.
@@ -663,7 +664,9 @@ impl Invocations {
                 .collect(),
             fold: None,
             controls,
+            tool_mark: None,
         }
+        .with_tool_mark(call.is_active().then_some(motion), width)
     }
 
     pub(super) fn body(
@@ -766,6 +769,7 @@ impl Invocations {
         }
         let mut lines = Vec::new();
         let mut controls = Vec::new();
+        let mut tool_marks = Vec::new();
         let mut parts = Vec::new();
         let indent = crate::transcript_geometry::TITLE_COLUMN
             + if placement == super::feed::Content::Own {
@@ -797,8 +801,16 @@ impl Invocations {
                         .min(usize::from(body_width)) as u16,
                     tokens.for_ids(&call.output_ids()),
                     full,
+                    crate::motion::MotionMode::from_animations_enabled(
+                        cell.transcript_animation_tick().is_some(),
+                    ),
                 );
                 let offset = lines.len();
+                if let Some(mut mark) = header.tool_mark {
+                    mark.row += offset;
+                    mark.column += indent;
+                    tool_marks.push(mark);
+                }
                 for mut control in header.controls {
                     control.row += offset;
                     control.columns.start += indent;
@@ -852,6 +864,9 @@ impl Invocations {
         }
         let mut layout = TextLayout::with_invocation_rows(lines, width, controls)
             .with_brackets(/*brackets*/ true);
+        for mark in tool_marks {
+            layout = layout.with_tool_mark(mark);
+        }
         for part in parts {
             layout = layout.with_part_control(part);
         }

@@ -39,4 +39,5 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - Deciding which providers may receive conversation data → `docs/fork.md` Provider data
 
 ## grants
-- Deploy validated merged changes automatically with `scripts/install-local --staging`; production still requires explicit approval
+- Auto-deploy validated merged changes to staging with `scripts/install-local --staging`
+- Auto-deploy validated, merged minor changes to production with `scripts/install-local`; major changes require explicit approval

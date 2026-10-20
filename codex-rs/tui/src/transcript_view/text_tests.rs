@@ -338,6 +338,7 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
             super::HeaderRows::label(Line::from("[in] [out]"), 0..0),
         ],
         fold: None,
+        tool_mark: None,
         controls: vec![
             super::HeaderControl {
                 row: 0,
@@ -356,6 +357,46 @@ fn source_provenance_preserves_spaces_and_excludes_gutters() {
         ],
     });
     let expected = format!("界 Command\n{source}");
+    // Paint-only liveness survives header insertion, spacers and reflow without becoming source.
+    let label = "Code Mode (α)";
+    let label_width = unicode_width::UnicodeWidthStr::width(label);
+    let header = super::HeaderRows {
+        lines: vec![super::HeaderRows::label(Line::from(label), 0..label_width)],
+        fold: None,
+        controls: Vec::new(),
+        tool_mark: None,
+    }
+    .with_tool_mark(Some(crate::motion::MotionMode::Animated), 40);
+    let mark_column = u16::try_from(label_width + 1).unwrap();
+    let nested = TextLayout::with_invocation_rows(
+        vec![super::HeaderRows::label(Line::from(label), 0..label_width)],
+        40,
+        Vec::new(),
+    )
+    .with_tool_mark(super::ToolMark {
+        row: 0,
+        column: mark_column,
+        motion: crate::motion::MotionMode::Animated,
+    })
+    .with_fold_header(header)
+    .with_leading_separator();
+    for width in [40, 20, 40] {
+        let layout = nested.rewrap(width);
+        let area = ratatui::layout::Rect::new(0, 0, width, 6);
+        let mut buffer = ratatui::buffer::Buffer::empty(area);
+        layout.render(area, &mut buffer, 0);
+        for row in [1, 2] {
+            assert_eq!(buffer[(mark_column, row)].symbol(), "•");
+            assert!(layout.has_animated_tool_mark(usize::from(row)));
+        }
+        assert_eq!(layout.text(), format!("{label}\n{label}"));
+        let mut lines = Vec::new();
+        layout.copy_lines(0..layout.text().len(), "", &mut lines);
+        assert_eq!(
+            crate::markdown_copy::literal_selection(&lines, layout.text()),
+            layout.text()
+        );
+    }
     for width in [12, 48, 12] {
         let resized = layout.rewrap(width);
         assert_eq!(resized.text(), expected);
