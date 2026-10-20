@@ -418,6 +418,12 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
             Some(&app.config),
             &|_| crate::multi_agents::AgentMetadata::default(),
         );
+        // This fixture projects cells directly rather than dispatching replay notifications.
+        for turn in &started.turns {
+            if let Some(id) = crate::transcript_view::conversation::final_response(turn) {
+                app.transcript_view.record_final_response(id.to_string());
+            }
+        }
         app.enqueue_primary_thread_session(started.session, started.turns)
             .await?;
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();

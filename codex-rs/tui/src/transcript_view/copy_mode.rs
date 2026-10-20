@@ -263,13 +263,11 @@ impl TranscriptView {
         };
         let first = layout.row_for_offset(start.offset);
         // Match block painting: whole-entry highlights include final padding.
-        let finish = if start.offset == layout.content_start() && end.offset == layout.text().len()
-        {
-            end.offset
+        let last = if start.offset == layout.content_start() && end.offset == layout.text().len() {
+            layout.content_end_row()
         } else {
-            end.offset.saturating_sub(/*rhs*/ 1)
+            layout.row_for_offset(end.offset.saturating_sub(1))
         };
-        let last = layout.row_for_offset(finish);
         let height = usize::from(self.area.height);
         if height == 0 {
             return;

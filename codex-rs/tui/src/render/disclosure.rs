@@ -2,9 +2,9 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use unicode_width::UnicodeWidthStr;
 
-/// A disclosure's triangle, pointing at what it shows, centered in the control's columns.
+/// The entire three-column label is clickable.
 pub(crate) fn glyph(expanded: bool) -> &'static str {
-    if expanded { " ▾ " } else { " ▸ " }
+    if expanded { "[-]" } else { "[+]" }
 }
 
 pub(crate) fn columns() -> usize {

@@ -26,7 +26,7 @@ impl ChatWidget {
                 .transcript
                 .last_completed_agent_message
                 .as_ref()
-                .is_some_and(|(_, id)| id == item_id)
+                .is_some_and(|message| message.item_id == item_id)
                 || self.transcript.streaming_plan_item.as_deref() == Some(item_id))
         {
             self.transcript.last_status_copy_targets = None;

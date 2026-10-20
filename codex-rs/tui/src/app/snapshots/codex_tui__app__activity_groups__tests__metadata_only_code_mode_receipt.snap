@@ -3,46 +3,46 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "file_snapshots.join(\"\\n\")"
 ---
 Painted collapsed
-         ▾  Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
+        [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
               • Edited
-         ▸        /workspace/receipt.rs (+1, -1)
-         ▸        alpha.rs (+1, -0)
-         ▸        beta.rs (+0, -1)
+        [+]       /workspace/receipt.rs (+1, -1)
+        [+]       alpha.rs (+1, -0)
+        [+]       beta.rs (+0, -1)
 Clicked native file
-         ▾  Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
+        [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
               • Edited
-         ▸        /workspace/receipt.rs (+1, -1)
-         ▾        alpha.rs (+1, -0)
+        [+]       /workspace/receipt.rs (+1, -1)
+        [-]       alpha.rs (+1, -0)
                   1 +created body
-         ▸        beta.rs (+0, -1)
+        [+]       beta.rs (+0, -1)
 Receipt expanded
-         ▾  Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
+        [-] Code Mode (ωρρλ)                     [in [raw] [fmt]] [out]
               • MCP semedit.edit({})
               • Edited
-         ▾        /workspace/receipt.rs (+1, -1)
+        [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-         ▾        alpha.rs (+1, -0)
+        [-]       alpha.rs (+1, -0)
                   1 +created body
-         ▸        beta.rs (+0, -1)
+        [+]       beta.rs (+0, -1)
 Both ports hidden
-         ▾  Code Mode (ωρρλ)                     [in]             [out]
+        [-] Code Mode (ωρρλ)                     [in]             [out]
               • Edited
-         ▾        /workspace/receipt.rs (+1, -1)
+        [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-         ▾        alpha.rs (+1, -0)
+        [-]       alpha.rs (+1, -0)
                   1 +created body
-         ▸        beta.rs (+0, -1)
+        [+]       beta.rs (+0, -1)
 Output open
-         ▾  Code Mode (ωρρλ)                     [in]             [out [raw]      ]
+        [-] Code Mode (ωρρλ)                     [in]             [out [raw]      ]
               Exact output is unavailable in this record
               • Edited
-         ▾        /workspace/receipt.rs (+1, -1)
+        [-]       /workspace/receipt.rs (+1, -1)
                   1 -old
                   1 +new
-         ▾        alpha.rs (+1, -0)
+        [-]       alpha.rs (+1, -0)
                   1 +created body
-         ▸        beta.rs (+0, -1)
+        [+]       beta.rs (+0, -1)

@@ -136,7 +136,7 @@ fn tool_heading_decorations_preserve_source_and_hit_targets() {
         assert!(layout.text().starts_with("Called"));
         if tokens.is_some() {
             let text = crate::transcript_view::tests::text(&buffer);
-            assert!(text.contains("▸    • Called") || text.contains("▾    • Called"));
+            assert!(text.contains("[+]   • Called") || text.contains("[-]   • Called"));
             assert!(text.lines().next().is_some_and(|row| row.ends_with("  82")));
         }
         assert_eq!(layout.position_at(/*row*/ 0, /*column*/ 0), 0);

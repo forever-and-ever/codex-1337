@@ -566,7 +566,18 @@ impl FeedIndex {
         true
     }
 
-    fn rebuild<'b>(&mut self, cells: &'b [Arc<dyn HistoryCell>], bills: &'b StepBills, frame: u64) {
+    pub(super) fn invalidate(&mut self) {
+        self.cells.clear();
+        self.frame = None;
+    }
+
+    fn rebuild<'b>(
+        &mut self,
+        cells: &'b [Arc<dyn HistoryCell>],
+        bills: &'b StepBills,
+        frame: u64,
+        conversation: &super::conversation::Conversation,
+    ) {
         let mut names: Vec<&str> = Vec::new();
         let mut nodes: HashMap<&str, usize> = HashMap::new();
         let mut parent: Vec<usize> = Vec::new();
@@ -604,9 +615,16 @@ impl FeedIndex {
         let mut last_item = None;
         let mut last_step: Option<&str> = None;
         for (index, cell) in cells.iter().enumerate() {
-            if let Some((kind, key)) =
-                entry_kind(cell, &cell_nodes[index], last_step, &mut placed_users)
-            {
+            if let Some((kind, key)) = entry_kind(
+                cell,
+                if conversation.is_boundary(cell.as_ref()) {
+                    &[]
+                } else {
+                    &cell_nodes[index]
+                },
+                last_step,
+                &mut placed_users,
+            ) {
                 items.push(Item::new(kind, &key));
                 let item = items.len() - 1;
                 items[item].segments.push(vec![index]);
@@ -702,6 +720,9 @@ impl FeedIndex {
         self.bills = bills.revision();
         let mut hasher = DefaultHasher::new();
         self.cells.hash(&mut hasher);
+        for cell in cells {
+            conversation.is_boundary(cell.as_ref()).hash(&mut hasher);
+        }
         self.revision = hasher.finish();
         self.roles = roles;
         self.items = items;
@@ -1812,7 +1833,7 @@ impl TranscriptView {
             index,
             self.area.width.max(1),
             &self.disclosure.expanded,
-            &|index| self.elides_cell(cells, index),
+            &|index| self.elides_cell(cells, index) || self.conversation_hidden(index),
         );
         if let Some(Header {
             item,
@@ -1862,7 +1883,9 @@ impl TranscriptView {
             } else {
                 HashMap::new()
             };
-            self.feed.rebuild(cells, &self.step_bills, frame);
+            self.conversation.rebuild(cells);
+            self.feed
+                .rebuild(cells, &self.step_bills, frame, &self.conversation);
             for (index, cell) in cells.iter().enumerate() {
                 if let Some(prior) = prior_scopes.get(&cell_key(cell)) {
                     self.disclosure

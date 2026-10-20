@@ -66,23 +66,23 @@ neither port
             Script (bash)               [in]             [out]
 
 compound batch
-         ▾  Command                                                            10      2      8        …
+        [-] Command                                                            10      2      8        …
               Script (bash)             [in]             [out]              31
               Script (python)           [in]             [out]              79
               Fence · no output         [in]             [out]              0
 
 one child input
-         ▾  Command                                                            10      2      8        …
+        [-] Command                                                            10      2      8        …
               Script (bash)             [in]             [out]              31
               Script (python)           [in [raw]      ] [out]              79
         [       print('beta')
               Fence · no output         [in]             [out]              0
 
 outer fold
-         ▸  Command                                                            10      2      8        …
+        [+] Command                                                            10      2      8        …
 
 outer fold
-         ▾  Command                                                            10      2      8        …
+        [-] Command                                                            10      2      8        …
               Script (bash)             [in]             [out]              31
               Script (python)           [in [raw]      ] [out]              79
         [       print('beta')

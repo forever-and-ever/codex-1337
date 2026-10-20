@@ -1104,7 +1104,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
             .to_owned()
     };
     let painted = render(&mut view);
-    assert_eq!(painted.matches('▸').count(), 3, "{painted}");
+    assert_eq!(painted.matches("[+]").count(), 3, "{painted}");
     assert!(painted.contains("Edited"));
     assert!(painted.contains("receipt.rs"));
     let row = painted
@@ -1128,7 +1128,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
     assert!(
         clicked
             .lines()
-            .any(|line| line.contains("alpha.rs") && line.contains('▾'))
+            .any(|line| line.contains("alpha.rs") && line.contains("[-]"))
     );
     assert!(clicked.contains("created body"));
     assert!(!clicked.contains("deleted body"));
@@ -1169,7 +1169,7 @@ async fn metadata_only_receipt_keeps_block_disclosure_and_replay_without_a_token
         .lines()
         .find(|line| line.contains("receipt.rs"))
         .unwrap();
-    let receipt_fold = receipt_line[receipt_line.find('▸').unwrap()..].to_owned();
+    let receipt_fold = receipt_line[receipt_line.find("[+]").unwrap()..].to_owned();
     click(&mut view, &shown, &receipt_fold, None);
     let shown = render(&mut view);
     assert!(shown.contains("+new"));

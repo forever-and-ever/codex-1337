@@ -3,12 +3,12 @@ source: tui/src/transcript_view/copy_mode_tests.rs
 expression: text(&buffer)
 ---
 
-         ▾  User
+        [-] User
         ╭   One
         │   Two
         │   Three
         │   Four
         │   Five
         ╰   Six
-
-         ▾  Response
+        [-]
+        [-] Response

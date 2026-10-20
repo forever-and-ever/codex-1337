@@ -678,12 +678,11 @@ impl TranscriptView {
                 let last = if begin == visible.layout.content_start()
                     && finish == visible.layout.text().len()
                 {
-                    finish
+                    visible.layout.content_end_row()
                 } else {
-                    finish.saturating_sub(/*rhs*/ 1)
+                    visible.layout.row_for_offset(finish.saturating_sub(1))
                 };
-                let rows =
-                    visible.layout.row_for_offset(begin)..=visible.layout.row_for_offset(last);
+                let rows = visible.layout.row_for_offset(begin)..=last;
                 if rows.contains(&visible.row) {
                     buf.set_style(area, crate::style::selection_style());
                 }

@@ -157,7 +157,14 @@ impl App {
             self.composer_hint(transcript_width)
         };
         let now = Instant::now();
-        let turn_tip = self.turn_tip(transcript_width, now, &tui.frame_requester());
+        let conversation_tail_hidden = self
+            .transcript_view
+            .conversation_tail_hidden(&self.transcript_cells);
+        let turn_tip = if conversation_tail_hidden {
+            None
+        } else {
+            self.turn_tip(transcript_width, now, &tui.frame_requester())
+        };
         let working_tip = turn_tip
             .as_ref()
             .filter(|(surface, _)| *surface == TipSurface::Working)
@@ -171,7 +178,7 @@ impl App {
         .then(crate::bottom_pane::ComposerGap::default);
         let mut prompt_footer =
             self.prompt_navigation_footer(screen_size.width.saturating_sub(/*rhs*/ 2));
-        if let Some(gap) = &mut composer_gap {
+        if !conversation_tail_hidden && let Some(gap) = &mut composer_gap {
             gap.live_height = self.live_work.desired_height(transcript_width);
         }
         let live_work = &mut self.live_work;
@@ -417,7 +424,7 @@ impl App {
                 frame.set_cursor_position(position);
             }
             view.capture_painted_frame();
-            live_work.capture_painted_frame(composer_gap.is_some());
+            live_work.capture_painted_frame(composer_gap.is_some() && !conversation_tail_hidden);
         })?;
         if let Some((surface, tip)) = &turn_tip
             && tip.rendered.get().is_some()
@@ -441,7 +448,7 @@ impl App {
             tui.frame_requester()
                 .schedule_frame_in(Duration::from_millis(/*millis*/ 50));
         }
-        if let Some(delay) = self.live_work.refresh_in() {
+        if !conversation_tail_hidden && let Some(delay) = self.live_work.refresh_in() {
             tui.frame_requester().schedule_frame_in(delay);
         }
         self.refresh_link_hover(tui)?;

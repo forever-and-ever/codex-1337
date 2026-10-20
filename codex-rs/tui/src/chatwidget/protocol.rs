@@ -516,8 +516,8 @@ impl ChatWidget {
                         .transcript
                         .last_completed_agent_message
                         .as_ref()
-                        .is_none_or(|(turn_id, item_id)| {
-                            turn_id != &notification.turn.id || item_id != id
+                        .is_none_or(|message| {
+                            message.turn_id != notification.turn.id || &message.item_id != id
                         })
                 {
                     self.handle_thread_item(
@@ -534,6 +534,7 @@ impl ChatWidget {
                     self.speak_completed_realtime_delegation(&notification.turn.id, item);
                 }
                 self.last_non_retry_error = None;
+                self.record_final_response(&notification.turn);
                 let completion = self.completion_cell(&notification.turn, replay_kind);
                 self.on_task_complete(
                     last_agent_message.map(|(_, _, text)| text),

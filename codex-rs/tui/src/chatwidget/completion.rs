@@ -4,6 +4,29 @@
 use super::*;
 
 impl ChatWidget {
+    pub(super) fn record_final_response(&self, turn: &codex_app_server_protocol::Turn) {
+        let id = crate::transcript_view::conversation::final_response(turn).or_else(|| {
+            self.transcript
+                .last_completed_agent_message
+                .as_ref()
+                .filter(|message| {
+                    message.turn_id == turn.id
+                        && matches!(
+                            message.phase,
+                            Some(codex_protocol::models::MessagePhase::FinalAnswer) | None
+                        )
+                })
+                .map(|message| message.item_id.as_str())
+        });
+        if let (Some(thread_id), Some(id)) = (self.thread_id, id) {
+            self.app_event_tx
+                .send(crate::app_event::AppEvent::RecordFinalResponse {
+                    thread_id,
+                    item_id: id.to_string(),
+                });
+        }
+    }
+
     pub(crate) fn completion_cell(
         &mut self,
         turn: &Turn,

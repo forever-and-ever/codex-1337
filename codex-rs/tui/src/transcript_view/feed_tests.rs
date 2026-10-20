@@ -307,7 +307,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
         for (row, line) in text.lines().enumerate() {
-            for glyph in ['▸', '▾'] {
+            for glyph in ["[+]", "[-]"] {
                 for (offset, _) in line.match_indices(glyph) {
                     let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
                     let cell =
@@ -360,7 +360,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         text
     };
     let fresh = screen(&mut view, "unfolded");
-    assert!(fresh.contains("▸  Injection"), "{fresh}");
+    assert!(fresh.contains("[+] Injection"), "{fresh}");
     assert_eq!(fresh.matches("[cot]").count(), 2);
     assert!(!fresh.contains("Thought") && !fresh.contains("Considering the failure"));
     // Reasoning belongs to its response, not the tool it called. Opening it must not
@@ -960,4 +960,193 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
     assert!(body(&mut view, &cells, 4).contains("Code Mode"));
     let mut fresh = TranscriptView::default();
     assert!(body(&mut fresh, &cells, 1).contains("body:first"));
+}
+
+#[test]
+fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
+    use crate::history_cell::UserHistoryCell;
+    use crate::history_cell::activity_parts::FoldGroup;
+    use crate::prompt_order::UserPromptIdentity;
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
+
+    let user = |text: &str| -> Arc<dyn HistoryCell> {
+        Arc::new(UserHistoryCell {
+            timestamp: None,
+            prompt_identity: UserPromptIdentity::default(),
+            message: text.into(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+            spoken: false,
+        })
+    };
+    let notice = || -> Arc<dyn HistoryCell> {
+        Arc::new(crate::history_cell::NotificationCell::new(
+            "notification".into(),
+        ))
+    };
+    let mut cells = vec![
+        user("First prompt"),
+        message("commentary", "I'll inspect the code."),
+        script_block("first-code", None, Some("model output inside code")),
+        message("answer", "Final answer"),
+        notice(),
+        user("Second prompt"),
+        script_block("second-code", None, None),
+    ];
+    let mut view = TranscriptView::default();
+    // A completion can beat the prepared message. Neither phase-less commentary nor a
+    // message claimed by a tool step may accidentally become (or swallow) a boundary.
+    view.record_step_admission(step(
+        "answer-step",
+        &["first-code"],
+        &["answer"],
+        Admission::Sealed(SealedAdmission {
+            self_tokens: 100,
+            arrivals: Vec::new(),
+            released_tokens: 0,
+            precision: AdmissionPrecision::Apportioned,
+        }),
+    ));
+    view.record_final_response("answer".into());
+    view.live = Some(Arc::new(crate::transcript_view::TextLayout::new(
+        vec!["Responding".into()],
+        104,
+    )));
+    let paint = |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]| {
+        crate::transcript_view::tests::render(view, cells, 104, 80)
+    };
+    let click =
+        |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index, modifiers, column| {
+            view.jump_to_latest();
+            paint(view, cells);
+            let layout = view.current_layout(cells, index).unwrap();
+            let target = layout
+                .fold_targets()
+                .into_iter()
+                .find(|target| {
+                    matches!(
+                        target,
+                        FoldTarget::GroupedPart {
+                            group: FoldGroup::Conversation,
+                            ..
+                        }
+                    )
+                })
+                .unwrap();
+            let (row, columns, _) = layout.fold_position(&target).unwrap();
+            assert_eq!(columns.len(), 3);
+            assert_eq!(row, layout.row_count() - 1);
+            let screen_row = view
+                .visible
+                .iter()
+                .position(|visible| visible.index == index && visible.row == row)
+                .unwrap();
+            assert!(matches!(
+                view.handle_mouse(
+                    MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: columns.start + column,
+                        row: screen_row.try_into().unwrap(),
+                        modifiers,
+                    },
+                    cells
+                ),
+                Some(crate::transcript_view::input::ViewAction::Changed)
+            ));
+            paint(view, cells);
+        };
+    click(&mut view, &cells, 0, KeyModifiers::NONE, 0);
+    for index in [1, 2] {
+        assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
+    }
+    for index in [0, 3, 4, 5, 6, cells.len()] {
+        assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
+    }
+    assert!(!view.conversation_tail_hidden(&cells));
+    click(&mut view, &cells, 5, KeyModifiers::CONTROL, 2);
+    for index in [1, 2, 4, 6, cells.len()] {
+        assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
+    }
+    assert!(view.conversation_tail_hidden(&cells));
+    click(&mut view, &cells, 0, KeyModifiers::NONE, 1);
+    assert!(
+        view.current_layout(&cells, 1)
+            .unwrap()
+            .text()
+            .contains("inspect")
+    );
+    assert!(
+        view.current_layout(&cells, 2)
+            .unwrap()
+            .text()
+            .contains("Code Mode")
+    );
+    assert_eq!(view.current_layout(&cells, 6).unwrap().row_count(), 0);
+    // Full-content search/copy can still reach hidden evidence without changing fold choices.
+    assert!(
+        view.entry_layout(&cells, 6, true)
+            .unwrap()
+            .text()
+            .contains("Code Mode")
+    );
+    assert!(view.conversation_tail_hidden(&cells));
+
+    cells.splice(
+        0..0,
+        [user("Older prompt"), script_block("older", None, None)],
+    );
+    cells.push(notice());
+    view.record_final_response("later-answer".into());
+    cells.push(message("later-answer", "Later final answer"));
+    paint(&mut view, &cells);
+    assert_eq!(view.current_layout(&cells, 1).unwrap().row_count(), 0);
+    assert!(
+        view.current_layout(&cells, 3)
+            .unwrap()
+            .text()
+            .contains("inspect")
+    );
+    assert_eq!(
+        view.current_layout(&cells, cells.len() - 2)
+            .unwrap()
+            .row_count(),
+        0
+    );
+    assert!(
+        view.current_layout(&cells, cells.len() - 1)
+            .unwrap()
+            .text()
+            .contains("Later final")
+    );
+    for width in [32, 104] {
+        let layout = view.current_layout(&cells, 2).unwrap().rewrap(width);
+        let target = layout
+            .fold_targets()
+            .into_iter()
+            .find(|target| {
+                matches!(
+                    target,
+                    FoldTarget::GroupedPart {
+                        group: FoldGroup::Conversation,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            layout.fold_position(&target).unwrap().0,
+            layout.row_count() - 1
+        );
+        assert!(!layout.text().contains("[-]"));
+        assert!(!layout.text().contains("[+]"));
+    }
+    click(&mut view, &cells, 0, KeyModifiers::CONTROL, 0);
+    assert!(!view.conversation_tail_hidden(&cells));
+    for index in [1, 3, 4, 6, 8] {
+        assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
+    }
 }

@@ -78,6 +78,7 @@ impl App {
                     | AppEvent::CodeModeProjection { .. }
                     | AppEvent::RecordToolOutputTokens { .. }
                     | AppEvent::RecordStepAdmission { .. }
+                    | AppEvent::RecordFinalResponse { .. }
                     | AppEvent::CommitRealtimeTranscriptHistory
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
@@ -485,6 +486,12 @@ impl App {
             AppEvent::RecordToolInput { thread_id, input } => {
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     self.transcript_view.record_tool_input(input);
+                    tui.frame_requester().schedule_frame();
+                }
+            }
+            AppEvent::RecordFinalResponse { thread_id, item_id } => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.transcript_view.record_final_response(item_id);
                     tui.frame_requester().schedule_frame();
                 }
             }

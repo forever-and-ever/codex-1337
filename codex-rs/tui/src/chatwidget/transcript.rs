@@ -31,6 +31,12 @@ pub(super) struct StatusCopySource {
     pub(super) fields: Vec<(String, Arc<str>)>,
 }
 
+pub(super) struct CompletedAgentMessage {
+    pub(super) turn_id: String,
+    pub(super) item_id: String,
+    pub(super) phase: Option<codex_protocol::models::MessagePhase>,
+}
+
 #[derive(Default)]
 pub(super) struct TranscriptState {
     pub(super) active_cell: Option<Box<dyn HistoryCell>>,
@@ -47,7 +53,7 @@ pub(super) struct TranscriptState {
     pub(super) last_agent_source: Option<String>,
     /// Latest `/status` card and fields, retained across copying until a later turn or command.
     pub(super) last_status_copy_targets: Option<StatusCopySource>,
-    pub(super) last_completed_agent_message: Option<(String, String)>,
+    pub(super) last_completed_agent_message: Option<CompletedAgentMessage>,
     pub(super) agent_timestamp: Option<crate::history_cell::HistoryTimestamp>,
     /// Raw markdown of the most recently completed proposed plan.
     pub(super) latest_proposed_plan_markdown: Option<String>,

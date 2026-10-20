@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum FoldGroup {
+    Conversation,
     CodeMode,
     Command,
     Response,

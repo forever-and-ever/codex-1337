@@ -141,7 +141,7 @@ impl ChatWidget {
                     source,
                     item_id: completed_message
                         .and(self.transcript.last_completed_agent_message.as_ref())
-                        .map(|(_, id)| id.clone())
+                        .map(|message| message.item_id.clone())
                         .or_else(|| controller.item_id.clone()),
                     copy_source,
                     cwd: self.config.cwd.to_path_buf(),
@@ -417,7 +417,12 @@ impl ChatWidget {
         if !from_replay && let Some(questions) = &item.questions {
             self.add_async_questions(&item.id, questions);
         }
-        self.transcript.last_completed_agent_message = Some((turn_id.to_string(), item.id.clone()));
+        self.transcript.last_completed_agent_message =
+            Some(super::transcript::CompletedAgentMessage {
+                turn_id: turn_id.to_string(),
+                item_id: item.id.clone(),
+                phase: item.phase.clone(),
+            });
         let mut message = String::new();
         for content in &item.content {
             match content {

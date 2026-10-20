@@ -2,7 +2,7 @@
 //! Message text, Feed Item titles and Activity headings share `TITLE_COLUMN`. Other row content
 //! starts at `GUTTER_COLUMNS`, two columns to their right, whether an item claims the row or not;
 //! nothing moves sideways when the feed regroups a cell or the view turns detailed. A fold's
-//! triangle and the bracket beside words the model's context holds share the control column. The
+//! disclosure and the bracket beside words the model's context holds share the control column. The
 //! normal view trails a row's tokens after its first line; the detailed view puts them beside the
 //! bracket.
 //! Marker-bearing content entries share the content column; cards retain cell-owned markers.

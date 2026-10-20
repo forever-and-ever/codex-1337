@@ -5,8 +5,8 @@ expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(super::
 
             Code Mode (ζσξζ) · running [in [raw]      ] [out]
 ────────────────────────────────────────────────────────────────────────────────
-   ▾  Work (1)
-     ▸  Running (ζσξζ)
+  [-] Work (1)
+    [+] Running (ζσξζ)
 
   • Working (0s • ⌃c to interrupt)
 

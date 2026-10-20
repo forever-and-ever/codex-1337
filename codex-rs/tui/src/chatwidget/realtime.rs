@@ -984,7 +984,11 @@ impl ChatWidget {
         let input_generation = self.realtime_conversation.input_generation;
         *completed = true;
         self.transcript.last_completed_agent_message =
-            Some((turn_id.to_string(), item_id.to_string()));
+            Some(super::transcript::CompletedAgentMessage {
+                turn_id: turn_id.to_string(),
+                item_id: item_id.to_string(),
+                phase: None,
+            });
         if self.realtime_conversation.pending_speech.len() >= MAX_PENDING_SPEECH_DELIVERIES
             && let Some(oldest) = self.realtime_conversation.pending_speech.pop_front()
         {
@@ -1918,7 +1922,10 @@ impl ChatWidget {
             .as_ref()
             .is_some_and(|completed_item| {
                 matches!(
-                    self.realtime_conversation.agent_items.get(completed_item),
+                    self.realtime_conversation.agent_items.get(&(
+                        completed_item.turn_id.clone(),
+                        completed_item.item_id.clone()
+                    )),
                     Some(RealtimeAgentItemOrigin::Delegated {
                         completed: true,
                         ..

@@ -874,6 +874,7 @@ async fn live_app_server_user_message_omits_unsupported_media() {
 #[tokio::test]
 async fn live_app_server_turn_completed_clears_working_status_after_answer_item() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::from_u128(1));
 
     chat.handle_server_notification(
         ServerNotification::TurnStarted(TurnStartedNotification {
@@ -903,7 +904,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
     let item = AppServerThreadItem::AgentMessage {
         id: "msg-1".to_string(),
         text: "Yes. What do you need?".to_string(),
-        phase: Some(MessagePhase::FinalAnswer),
+        phase: None,
         memory_citation: None,
         delivery: None,
         questions: None,
@@ -930,7 +931,8 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Summary,
-                items: vec![item],
+                // Completion summaries may omit items; use the admitted message identity.
+                items: Vec::new(),
                 status: AppServerTurnStatus::Completed,
                 error: None,
                 started_at: None,
@@ -941,6 +943,13 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
         /*replay_kind*/ None,
     );
 
+    let events: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(events.iter().any(|event| matches!(
+        event, AppEvent::RecordFinalResponse { item_id, .. } if item_id == "msg-1"
+    )));
+    for event in events {
+        chat.app_event_tx.send(event);
+    }
     let completion_cells = drain_insert_history_normalized(&mut rx)
         .iter()
         .map(|lines| lines_to_single_string(lines).trim().to_string())
@@ -952,7 +961,10 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
     assert!(!chat.bottom_pane.is_task_running());
     assert!(chat.bottom_pane.status_widget().is_none());
     assert_eq!(
-        chat.transcript.last_completed_agent_message,
+        chat.transcript
+            .last_completed_agent_message
+            .as_ref()
+            .map(|message| (message.turn_id.clone(), message.item_id.clone())),
         Some(("turn-1".to_string(), "msg-1".to_string()))
     );
 }

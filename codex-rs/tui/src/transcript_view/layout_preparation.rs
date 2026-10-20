@@ -298,11 +298,19 @@ impl TranscriptView {
         if index > cells.len() {
             return None;
         }
+        self.refresh_feed(cells, index);
+        if !full_content && self.conversation_hidden(index) {
+            return Some(Arc::new(TextLayout::new(
+                Vec::new(),
+                self.area.width.max(1),
+            )));
+        }
         // Search reads retained entry content independently of its manual folds.
         let seat = if full_content
-            && cells
-                .get(index)
-                .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some())
+            && (self.conversation_hidden(index)
+                || cells
+                    .get(index)
+                    .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some()))
         {
             Seat::LOOSE
         } else {
@@ -319,11 +327,16 @@ impl TranscriptView {
         let width = self.area.width.max(/*other*/ 1);
         let Some(cell) = cells.get(index) else {
             let live = self.live.as_ref()?;
-            if !crate::transcript_geometry::separated(
-                previous.map(AsRef::as_ref),
-                self.live_tool_entry,
-                self.live_continuation,
-            ) {
+            if (!self.detailed
+                && self.mode == HistoryRenderMode::Rich
+                && previous_index
+                    .is_some_and(|previous| self.conversation.control(previous).is_some()))
+                || !crate::transcript_geometry::separated(
+                    previous.map(AsRef::as_ref),
+                    self.live_tool_entry,
+                    self.live_continuation,
+                )
+            {
                 return Some(Arc::clone(live));
             }
             return Some(Arc::clone(self.live_separated.get_or_insert_with(|| {
@@ -372,19 +385,27 @@ impl TranscriptView {
         if manually_expanded && crate::history_cell::invocation::collect(cell.as_ref()).is_empty() {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
-        let separated = match &seat.header {
-            Some(header) => {
-                previous_index.is_some()
-                    && (header.spacious
-                        || !previous_index.is_some_and(|previous| self.feed.compact(previous)))
-            }
-            None if loose => crate::transcript_geometry::separated(
-                previous.map(AsRef::as_ref),
-                cell.is_tool_entry(),
-                cell.is_stream_continuation(),
-            ),
-            None => false,
-        };
+        let conversation_control = (!detailed && mode == HistoryRenderMode::Rich)
+            .then(|| self.conversation.control(index))
+            .flatten()
+            .map(|id| (id.to_string(), self.conversation_open(id)));
+        let separated = !(!detailed
+            && mode == HistoryRenderMode::Rich
+            && previous_index
+                .is_some_and(|previous| self.conversation.control(previous).is_some()))
+            && match &seat.header {
+                Some(header) => {
+                    previous_index.is_some()
+                        && (header.spacious
+                            || !previous_index.is_some_and(|previous| self.feed.compact(previous)))
+                }
+                None if loose => crate::transcript_geometry::separated(
+                    previous.map(AsRef::as_ref),
+                    cell.is_tool_entry(),
+                    cell.is_stream_continuation(),
+                ),
+                None => false,
+            };
         let presentation = CellPresentation {
             separated,
             turn_tip_space: self.turn_tip_key == Some(EntryKey::cell(cell)),
@@ -664,6 +685,9 @@ impl TranscriptView {
                         full_content,
                         width,
                     ));
+                }
+                if let Some((id, open)) = &conversation_control {
+                    layout = layout.with_conversation_control(id.clone(), *open);
                 }
                 layout.with_brackets(mode == HistoryRenderMode::Rich)
             };

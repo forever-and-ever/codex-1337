@@ -623,7 +623,10 @@ async fn oversized_delegated_answer_remains_in_normal_history() {
     assert!(ops.try_recv().is_err());
     assert!(events.try_recv().is_ok());
     assert_eq!(
-        chat.transcript.last_completed_agent_message,
+        chat.transcript
+            .last_completed_agent_message
+            .as_ref()
+            .map(|message| (message.turn_id.clone(), message.item_id.clone())),
         Some((turn_id.to_string(), "large-answer".to_string()))
     );
 }

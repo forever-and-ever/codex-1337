@@ -419,7 +419,10 @@ impl TranscriptView {
         let Some(cell) = cells.get(index) else {
             return self.disclosure.live_ids.clone();
         };
-        let ids = cell.activity_ids();
+        let mut ids = cell.activity_ids();
+        if let Some(id) = self.conversation.control(index) {
+            ids.push(id.to_string());
+        }
         // A Feed Item's header over a cell without identities is focused through its fold.
         if ids.is_empty()
             && self.indexed_seat(cells, index).header.is_some()

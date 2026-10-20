@@ -289,7 +289,8 @@ impl TranscriptView {
                     .as_any()
                     .downcast_ref::<ReasoningSummaryCell>()
                     .is_some_and(ReasoningSummaryCell::is_transcript_only);
-            if self.elides_cell(cells, previous)
+            if self.conversation_hidden(previous)
+                || self.elides_cell(cells, previous)
                 || transcript_only
                 || !self.feed_seat(cells, previous).is_visible()
             {
