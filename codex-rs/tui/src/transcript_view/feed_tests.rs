@@ -902,11 +902,46 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
     }
     let mut cells = vec![
         arrival("first", ArrivalKind::InterAgent),
-        arrival("second", ArrivalKind::InterAgent),
+        Arc::new(crate::history_cell::DelegatedMessageCell(
+            crate::dynamic_tools::DelegatedMessage {
+                source_thread_id: "sender-thread".into(),
+                source_thread_name: Some("TEST_AGENT".into()),
+                sent_at: Some(CLOCK_MS),
+                input: "body:second".into(),
+            },
+        )),
         arrival("injected", ArrivalKind::Injection),
         script_block("code", None, Some("result")),
     ];
     let mut view = TranscriptView::default();
+    // Sender attribution must share the ordinary Message header and its fold group,
+    // not become an indented replacement header on coordination envelopes.
+    let rendered = crate::transcript_view::tests::render(&mut view, &cells, 104, 80);
+    let text = crate::transcript_view::tests::text(&rendered);
+    let (row, header) = text
+        .lines()
+        .enumerate()
+        .find(|(_, line)| line.contains("Sent by"))
+        .unwrap();
+    assert_eq!(
+        header.find("Message"),
+        Some(usize::from(crate::transcript_geometry::TITLE_COLUMN))
+    );
+    assert!(header.contains("Message  Sent by TEST_AGENT"));
+    let sender_column = header.find("Sent by").unwrap();
+    assert_eq!(
+        rendered[(sender_column.try_into().unwrap(), row.try_into().unwrap())].fg,
+        crate::warpaint::Figure::InkMuted.color()
+    );
+    assert!(
+        header.contains(
+            HistoryTimestamp::from_millis(CLOCK_MS)
+                .unwrap()
+                .span()
+                .content
+                .trim()
+        )
+    );
     let click =
         |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index: usize, modifiers| {
             view.jump_to_latest();

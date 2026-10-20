@@ -98,6 +98,9 @@ pub(super) fn feed_entry(cell: &dyn HistoryCell) -> Option<&dyn FeedEntry> {
     if let Some(farm) = any.downcast_ref::<crate::history_cell::FarmReceipt>() {
         return Some(farm);
     }
+    if let Some(message) = any.downcast_ref::<crate::history_cell::DelegatedMessageCell>() {
+        return Some(message);
+    }
     if let Some(arrival) = any.downcast_ref::<ArrivalCell>() {
         return Some(arrival);
     }
