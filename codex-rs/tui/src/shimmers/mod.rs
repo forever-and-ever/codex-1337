@@ -13,6 +13,7 @@
 //! To add a shimmer, implement `stage::Shimmer` in a new file beside a `RECIPE` and list it in
 //! `ROSTER` with its author. `/shimmer` shows that credit beside the blurb.
 
+mod cambrian;
 mod critter;
 mod engine;
 mod fireflies;
@@ -59,7 +60,7 @@ const DEEPSEEK: &str = "DeepSeek V4.1 Flash 1017";
 const USER: &str = "The User";
 
 /// The stock shimmers, in the order `/shimmer` lists them.
-const ROSTER: [RosterEntry; 16] = [
+const ROSTER: [RosterEntry; 17] = [
     credited(lava_lamp::RECIPE, OPUS),
     credited(critter::RECIPE, OPUS),
     credited(rubik::RECIPE, OPUS),
@@ -76,4 +77,5 @@ const ROSTER: [RosterEntry; 16] = [
     credited(phyllotaxis::RECIPE, DEEPSEEK),
     credited(tectonic::RECIPE, DEEPSEEK),
     credited(lfsr::RECIPE, USER),
+    credited(cambrian::RECIPE, USER),
 ];
