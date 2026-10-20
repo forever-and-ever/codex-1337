@@ -158,7 +158,8 @@ light text on a dark ground correctly.
   a pale tint of the accent: its hue at 9 M, 3 Lc beneath the ink's contrast, unless a spec's
   `[label]` states otherwise. Bold carries the rest of their prominence, and no label reads
   above Lc 95 over the canvas. The feed's headings are the ink, bold, since a hue would claim a
-  meaning they lack: only work still running wears the accent, and a verb that reports a
+  meaning they lack; a heading that names its speaker, as User and Response do, wears the
+  speaker's bracket. Only work still running wears the accent, and a verb that reports a
   failure or an interruption the failure figure. An open disclosure tab reads between the faint
   ink of the tabs beside it and the label: the accent's hue at 15 M, halfway between their
   contrasts, underlined rather than bold, unless a spec's `[tab]` states otherwise. Neither

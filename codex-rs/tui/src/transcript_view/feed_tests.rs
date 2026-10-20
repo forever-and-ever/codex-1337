@@ -338,6 +338,8 @@ fn steps_fold_under_one_header_with_their_figures() {
                         cell.fg,
                         match label {
                             "Context compacted" => ratatui::style::Color::Yellow,
+                            "User" => crate::warpaint::Bracket::Prompt.color(),
+                            "Response" => crate::warpaint::Bracket::Response.color(),
                             _ => crate::render::header::style().fg.unwrap(),
                         }
                     );

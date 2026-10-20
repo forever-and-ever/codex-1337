@@ -1423,38 +1423,49 @@ impl FeedIndex {
     ) -> Line<'static> {
         let item = &self.items[header.item];
         let cell = |index: usize| cells.get(index).map(AsRef::as_ref);
-        let response = || Line::from("Response".bold());
-        let title = match (&item.kind, header.title) {
-            (_, Title::Command) => Line::from("Command".bold()),
-            (Kind::User { .. }, _) => Line::from("User".bold()),
-            (Kind::Entry { .. }, _) => header
-                .scope
-                .first()
-                .and_then(|index| feed_entry(cell(*index)?))
-                .map(FeedEntry::feed_title)
-                .unwrap_or_default(),
+        let response = || {
+            (
+                Line::from("Response".bold()),
+                Some(crate::warpaint::Bracket::Response),
+            )
+        };
+        // A heading that names its speaker wears the speaker's bracket.
+        let (title, speaker) = match (&item.kind, header.title) {
+            (_, Title::Command) => (Line::from("Command".bold()), None),
+            (Kind::User { .. }, _) => (
+                Line::from("User".bold()),
+                Some(crate::warpaint::Bracket::Prompt),
+            ),
+            (Kind::Entry { .. }, _) => (
+                header
+                    .scope
+                    .first()
+                    .and_then(|index| feed_entry(cell(*index)?))
+                    .map(FeedEntry::feed_title)
+                    .unwrap_or_default(),
+                None,
+            ),
             (Kind::Steps { .. } | Kind::CodeMode, Title::Owned(index) | Title::Borrowed(index)) => {
                 cell(index)
                     .and_then(|cell| title_row(cell, expanded, width))
-                    .unwrap_or_else(response)
+                    .map_or_else(response, |title| (title, None))
             }
             (Kind::Steps { .. } | Kind::CodeMode, Title::Response) | (Kind::Reply, _) => response(),
         };
-        if matches!(
+        let active = matches!(
             item.kind,
             Kind::Steps {
                 sealed_calls: true,
                 ..
             } | Kind::CodeMode
-        ) {
-            let active = header
-                .scope
-                .iter()
-                .filter_map(|index| cell(*index))
-                .any(crate::history_cell::has_active_invocations);
-            crate::render::header::paint_work(title, active)
-        } else {
-            crate::render::header::paint(title)
+        ) && header
+            .scope
+            .iter()
+            .filter_map(|index| cell(*index))
+            .any(crate::history_cell::has_active_invocations);
+        match speaker {
+            Some(speaker) => crate::render::header::paint_speaker(title, speaker, active),
+            None => crate::render::header::paint_work(title, active),
         }
     }
 

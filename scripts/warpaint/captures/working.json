@@ -14,8 +14,8 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": " ▾  ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "User", "fg": "figure:ink", "bg": "reset", "mods": ["bold"]},
+      {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "User", "fg": "bracket:prompt", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
@@ -24,7 +24,7 @@
       {"text": "   cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "        [-]                                                                                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
@@ -64,7 +64,7 @@
     ],
     [
       {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": " ▸ ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "[+]", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "       src/parser.rs (", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "+1", "fg": "figure:success", "bg": "reset", "mods": []},
       {"text": ", ", "fg": "figure:ink", "bg": "reset", "mods": []},

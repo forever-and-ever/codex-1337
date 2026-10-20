@@ -1,5 +1,6 @@
 //! Feed headings: entry titles speak in the page's ink, bold, since a hue would claim a meaning
-//! they lack; active work speaks in its accent, the pack's signature, as heat does. An open tab
+//! they lack, and a heading that names its speaker wears the speaker's bracket, the one meaning it
+//! has. Active work speaks in its accent, the pack's signature, as heat does. An open tab
 //! beneath them takes the pack's tab. Words that carry a meaning of their own keep its color: a
 //! failure stays red in any heading.
 
@@ -9,6 +10,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
+use crate::warpaint::Bracket;
 use crate::warpaint::Figure;
 
 pub(crate) fn style() -> Style {
@@ -33,6 +35,18 @@ pub(crate) fn paint(line: Line<'static>) -> Line<'static> {
 
 pub(crate) fn paint_work(line: Line<'static>, active: bool) -> Line<'static> {
     paint_with(line, if active { work_style() } else { style() })
+}
+
+/// Paints a heading that names `speaker`, unless the work beneath it still runs.
+pub(crate) fn paint_speaker(line: Line<'static>, speaker: Bracket, active: bool) -> Line<'static> {
+    paint_with(
+        line,
+        if active {
+            work_style()
+        } else {
+            style().fg(speaker.color())
+        },
+    )
 }
 
 fn paint_with(mut line: Line<'static>, mut heading: Style) -> Line<'static> {

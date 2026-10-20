@@ -21,7 +21,7 @@
       {"text": "   cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "        [-]                                                                                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
@@ -61,7 +61,7 @@
     ],
     [
       {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": " ▾ ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "[-]", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "       src/parser.rs (", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "+1", "fg": "figure:success", "bg": "reset", "mods": []},
       {"text": ", ", "fg": "figure:ink", "bg": "reset", "mods": []},
@@ -165,7 +165,7 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": " ▾  ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "Message", "fg": "figure:ink", "bg": "reset", "mods": ["bold"]},
       {"text": " from ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "reviewer                                      ", "fg": "reset", "bg": "reset", "mods": []},
@@ -182,8 +182,8 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": " ▾  ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Response", "fg": "figure:ink", "bg": "reset", "mods": ["bold"]},
+      {"text": "[-] ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "Response", "fg": "bracket:response", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                                ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
@@ -397,12 +397,12 @@
       {"text": "                                                                                       ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "                                                                                                    ", "fg": "reset", "bg": "reset", "mods": []}
+      {"text": "        [-]                                                                                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "    ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "Response", "fg": "figure:ink", "bg": "reset", "mods": ["bold"]},
+      {"text": "Response", "fg": "bracket:response", "bg": "reset", "mods": ["bold"]},
       {"text": "                                             ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "[cot]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
       {"text": "                              ", "fg": "reset", "bg": "reset", "mods": []}

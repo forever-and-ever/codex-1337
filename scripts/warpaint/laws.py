@@ -138,7 +138,8 @@ dichromat floors below then decide which choices survive."""
 RUNNING: Arc = (105.0, 180.0)
 """Green, from its yellow edge to teal, says work is running: an active thread's dot wears it. No
 heading may, neither a settled entry's label nor the open tab beneath it, or a finished feed reads
-as one still at work."""
+as one still at work. The Response heading is the exception: it wears its bracket's green, which
+reads as the speaker, not as work."""
 
 DIFF_HUES = {Figure.ADDED: 125.0, Figure.REMOVED: 345.0}
 """Lime against rose: the pair a protan or deutan still tells apart, ink and band alike, because
