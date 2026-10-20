@@ -163,6 +163,8 @@ enum Contribution {
     Activity,
     /// An assistant message, shown even while an item that made calls is folded.
     Message,
+    /// The completed end-of-turn answer, still owned by its admitted step.
+    FinalResponse,
     /// A Thought with text to read.
     Thought,
     /// A Thought with nothing to read: only its tokens count, in its step's figures.
@@ -170,7 +172,7 @@ enum Contribution {
 }
 
 impl Contribution {
-    fn of(cell: &dyn HistoryCell) -> Self {
+    fn of(cell: &dyn HistoryCell, conversation: &super::conversation::Conversation) -> Self {
         let any = cell.as_any();
         if let Some(thought) = any.downcast_ref::<ThoughtCell>() {
             if thought.is_readable() {
@@ -179,7 +181,11 @@ impl Contribution {
                 Self::Silent
             }
         } else if any.is::<AgentMarkdownCell>() {
-            Self::Message
+            if conversation.is_boundary(cell) {
+                Self::FinalResponse
+            } else {
+                Self::Message
+            }
         } else {
             Self::Activity
         }
@@ -315,7 +321,7 @@ impl Item {
     fn shows(&self, member: &Membership, unfolded: bool) -> bool {
         match member.contribution {
             Contribution::Silent | Contribution::Thought => false,
-            Contribution::Message => {
+            Contribution::Message | Contribution::FinalResponse => {
                 unfolded
                     || matches!(
                         self.kind,
@@ -615,16 +621,10 @@ impl FeedIndex {
         let mut last_item = None;
         let mut last_step: Option<&str> = None;
         for (index, cell) in cells.iter().enumerate() {
-            if let Some((kind, key)) = entry_kind(
-                cell,
-                if conversation.is_boundary(cell.as_ref()) {
-                    &[]
-                } else {
-                    &cell_nodes[index]
-                },
-                last_step,
-                &mut placed_users,
-            ) {
+            let contribution = Contribution::of(cell.as_ref(), conversation);
+            if let Some((kind, key)) =
+                entry_kind(cell, &cell_nodes[index], last_step, &mut placed_users)
+            {
                 items.push(Item::new(kind, &key));
                 let item = items.len() - 1;
                 items[item].segments.push(vec![index]);
@@ -633,7 +633,7 @@ impl FeedIndex {
                     segment: 0,
                     steps: Vec::new(),
                     opens: Vec::new(),
-                    contribution: Contribution::of(cell.as_ref()),
+                    contribution,
                 });
                 last_item = Some(item);
                 continue;
@@ -661,7 +661,12 @@ impl FeedIndex {
                 ));
                 items.len() - 1
             });
-            if last_item != Some(item) || items[item].segments.is_empty() {
+            let splits_response = contribution == Contribution::FinalResponse
+                && items[item].segments.last().is_some_and(|segment| {
+                    segment.iter().any(|prior| matches!(&roles[*prior],
+                        Role::Member(member) if matches!(member.contribution, Contribution::Activity | Contribution::Message)))
+                });
+            if last_item != Some(item) || items[item].segments.is_empty() || splits_response {
                 items[item].segments.push(Vec::new());
             }
             let segment = items[item].segments.len() - 1;
@@ -689,7 +694,7 @@ impl FeedIndex {
                 segment,
                 steps,
                 opens,
-                contribution: Contribution::of(cell.as_ref()),
+                contribution,
             });
             last_item = Some(item);
         }
@@ -727,6 +732,26 @@ impl FeedIndex {
         self.roles = roles;
         self.items = items;
         self.placed_users = placed_users;
+    }
+
+    /// Thought and accounting rows are part of their answer, not the preceding gap.
+    pub(super) fn response_owner(&self, index: usize) -> Option<usize> {
+        let Role::Member(member) = self.roles.get(index)? else {
+            return None;
+        };
+        if !matches!(
+            member.contribution,
+            Contribution::Thought | Contribution::Silent
+        ) {
+            return None;
+        }
+        self.items[member.item].segments[member.segment]
+            .iter()
+            .copied()
+            .find(|candidate| {
+                matches!(self.roles.get(*candidate), Some(Role::Member(member))
+                if member.contribution == Contribution::FinalResponse)
+            })
     }
 
     pub(super) fn seat(
@@ -821,7 +846,7 @@ impl FeedIndex {
         if matches!(item.kind, Kind::Steps { .. })
             && !item.segments.iter().flatten().any(|index| {
                 matches!(self.roles.get(*index), Some(Role::Member(member))
-                    if matches!(member.contribution, Contribution::Activity | Contribution::Message))
+                    if matches!(member.contribution, Contribution::Activity | Contribution::Message | Contribution::FinalResponse))
             })
         {
             return false;
@@ -972,18 +997,26 @@ impl FeedIndex {
                 && matches!(self.roles.get(*index), Some(Role::Member(member))
                     if member.contribution == Contribution::Activity)
         };
+        let response = scope.iter().any(|index| {
+            matches!(self.roles.get(*index),
+            Some(Role::Member(member)) if member.contribution == Contribution::FinalResponse)
+        });
         let title = scope
             .iter()
             .copied()
             .find(activity)
             .map(Title::Owned)
             .or_else(|| {
-                item.segments
-                    .iter()
+                (!response)
+                    .then(|| {
+                        item.segments
+                            .iter()
+                            .flatten()
+                            .copied()
+                            .find(activity)
+                            .map(Title::Borrowed)
+                    })
                     .flatten()
-                    .copied()
-                    .find(activity)
-                    .map(Title::Borrowed)
             })
             .unwrap_or(Title::Response);
         let calls: HashSet<_> = scope
@@ -1185,6 +1218,16 @@ impl FeedIndex {
             .or_else(|| {
                 header.steps.iter().find_map(|step| {
                     HistoryTimestamp::from_millis(bills.step(&item.steps[*step])?.completed_at_ms)
+                })
+            })
+            .or_else(|| {
+                header.scope.iter().find_map(|index| {
+                    let message = cells
+                        .get(*index)?
+                        .as_any()
+                        .downcast_ref::<AgentMarkdownCell>()?;
+                    let step = bills.step_of_message(message.item_id.as_deref()?)?;
+                    HistoryTimestamp::from_millis(bills.step(step)?.completed_at_ms)
                 })
             });
         let (header_width, reach) = header_columns(width);

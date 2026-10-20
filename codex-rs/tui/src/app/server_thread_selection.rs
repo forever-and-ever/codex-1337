@@ -111,7 +111,7 @@ pub(super) enum SelectionReceipt {
         prepared: PreparedSession,
         handle: AppServerRequestHandle,
     },
-    Fallback(PreparedHistory),
+    Fallback(Box<PreparedHistory>),
     SideDetached(detach::DetachReceipt),
     Terminated,
 }
@@ -205,7 +205,7 @@ impl App {
                         handle,
                         config,
                         local_settings,
-                    } => SelectionReceipt::Fallback(
+                    } => SelectionReceipt::Fallback(Box::new(
                         Box::pin(crate::app_server_session::session_preparation::prepare_thread_history(
                             RequestPolicy::Interactive,
                             handle,
@@ -214,7 +214,7 @@ impl App {
                             *local_settings,
                         ))
                         .await,
-                    ),
+                    )),
                 }
             })
             .catch_unwind())

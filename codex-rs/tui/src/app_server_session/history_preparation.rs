@@ -148,6 +148,7 @@ pub(super) async fn merge_thread_item_page(
                 missing_turn_ids.remove(&turn.id);
             }
         }
+        state.user_prompt_clocks.record(&entry);
         if let Some(turn) = turns.iter_mut().find(|turn| turn.id == entry.turn_id)
             && !turn.items.iter().any(|item| item.id() == entry.item.id())
         {

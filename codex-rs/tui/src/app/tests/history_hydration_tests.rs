@@ -70,9 +70,11 @@ async fn history_fixture(
                 thread_id,
                 turn_id: turn_id.clone(),
                 started_at_ms: None,
-                completed_at_ms: 0,
+                completed_at_ms: 1_767_312_000_000 + i64::try_from(index * 60_000 + item)?,
                 item: TurnItem::UserMessage(UserMessageItem {
-                    source_response_item_id: None,
+                    source_response_item_id: Some(codex_protocol::ResponseItemId::from_server(
+                        format!("source-{index}-{item}"),
+                    )),
                     id: format!("item-{index}-{item}"),
                     client_id: None,
                     content: vec![CoreUserInput::Text {
@@ -301,6 +303,47 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
     assert!(!server.has_older_history(target.thread_id));
     assert_eq!(thread.turns.first().unwrap().id, "turn-0");
 
+    // Initial load and subsequent pages must retain producer clocks through the
+    // real history-cell admission path; the turns themselves have no timestamps.
+    app.chat_widget.handle_thread_session(test_thread_session(
+        target.thread_id,
+        app.config.cwd.to_path_buf(),
+    ));
+    let cells = crate::thread_transcript::thread_to_transcript_cells(
+        thread.clone(),
+        crate::thread_transcript::RawReasoningVisibility::Hidden,
+        Some(&app.config),
+        &|_| crate::multi_agents::AgentMetadata::default(),
+    );
+    for cell in cells {
+        if let Some(user) = cell
+            .as_any()
+            .downcast_ref::<history_cell::UserHistoryCell>()
+        {
+            assert!(user.timestamp.is_none());
+            app.handle_event(
+                &mut tui,
+                &mut server,
+                AppEvent::InsertHistoryCell(Box::new(user.clone())),
+            )
+            .await?;
+        }
+    }
+    assert_eq!(
+        app.transcript_cells
+            .iter()
+            .filter_map(|cell| cell
+                .as_any()
+                .downcast_ref::<history_cell::UserHistoryCell>())
+            .map(HistoryCell::transcript_timestamp)
+            .collect::<Vec<_>>(),
+        [1, 2, 3, 5, 12]
+            .into_iter()
+            .map(|index| history_cell::HistoryTimestamp::from_millis(
+                1_767_312_000_000 + index * 60_000
+            ))
+            .collect::<Vec<_>>(),
+    );
     server
         .hydrate_initial_thread_history(
             &mut thread,

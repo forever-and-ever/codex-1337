@@ -69,17 +69,13 @@ pub(super) enum Total {
 
 impl StepBills {
     pub(super) fn subset(&self, ids: &[String]) -> Self {
-        Self {
-            by_response: ids
-                .iter()
-                .filter_map(|id| {
-                    self.by_response
-                        .get(id)
-                        .map(|step| (id.clone(), step.clone()))
-                })
-                .collect(),
-            ..Self::default()
+        let mut subset = Self::default();
+        for id in ids {
+            if let Some(step) = self.by_response.get(id) {
+                subset.record(step.clone());
+            }
         }
+        subset
     }
 
     /// Advances whenever a record changes, so derived presentation can tell it is stale.

@@ -205,6 +205,7 @@ pub(crate) struct ThreadHistoryPagination {
     seen_turn_cursors: HashSet<String>,
     seen_item_cursors: HashSet<String>,
     loading_older: bool,
+    user_prompt_clocks: crate::prompt_order::UserPromptClocks,
 }
 
 impl AppServerSession {
@@ -229,6 +230,15 @@ impl AppServerSession {
         } else if let Some(page) = self.history_pagination.get_mut(&thread_id) {
             page.loading_older = false;
         }
+    }
+
+    pub(crate) fn user_prompt_clocks(
+        &self,
+        thread_id: ThreadId,
+    ) -> Option<&crate::prompt_order::UserPromptClocks> {
+        self.history_pagination
+            .get(&thread_id)
+            .map(|state| &state.user_prompt_clocks)
     }
 
     pub(crate) fn has_older_history(&self, thread_id: ThreadId) -> bool {

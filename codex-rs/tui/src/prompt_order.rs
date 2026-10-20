@@ -1,15 +1,72 @@
 //! Human-only source aliases and prompt-relative context placement.
 use crate::history_cell::ArrivalCell;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryTimestamp;
 use crate::history_cell::UserHistoryCell;
+use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemEntry;
 use codex_protocol::step_admission::ArrivalSide;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub(crate) struct UserPromptIdentity {
     pub(crate) client_id: Option<String>,
     pub(crate) source_response_item_id: Option<codex_protocol::ResponseItemId>,
+}
+
+/// Admission clocks retained from history-page envelopes, never inferred from turn times.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct UserPromptClocks(HashMap<UserPromptIdentity, HistoryTimestamp>);
+
+impl UserPromptClocks {
+    pub(crate) fn record(&mut self, entry: &ThreadItemEntry) {
+        let ThreadItem::UserMessage {
+            client_id,
+            source_response_item_id,
+            ..
+        } = &entry.item
+        else {
+            return;
+        };
+        if client_id.is_none() && source_response_item_id.is_none() {
+            return;
+        }
+        let timestamp = entry
+            .completed_at_ms
+            .and_then(HistoryTimestamp::from_millis)
+            .or_else(|| entry.started_at_ms.and_then(HistoryTimestamp::from_millis));
+        if let Some(timestamp) = timestamp {
+            self.0.insert(
+                UserPromptIdentity {
+                    client_id: client_id.clone(),
+                    source_response_item_id: source_response_item_id.clone(),
+                },
+                timestamp,
+            );
+        }
+    }
+
+    pub(crate) fn stamped(&self, cell: &dyn HistoryCell) -> Option<UserHistoryCell> {
+        let user = cell.as_any().downcast_ref::<UserHistoryCell>()?;
+        if user.timestamp.is_some() {
+            return None;
+        }
+        let timestamp = *self.0.get(&user.prompt_identity)?;
+        let mut user = user.clone();
+        user.timestamp = Some(timestamp);
+        Some(user)
+    }
+
+    /// Stamp only fresh projections, before they enter the immutable transcript.
+    pub(crate) fn stamp(&self, cells: &mut [Arc<dyn HistoryCell>]) {
+        for cell in cells {
+            if let Some(user) = self.stamped(cell.as_ref()) {
+                *cell = Arc::new(user);
+            }
+        }
+    }
 }
 
 #[derive(Default)]

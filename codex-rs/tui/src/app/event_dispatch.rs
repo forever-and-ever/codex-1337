@@ -463,7 +463,13 @@ impl App {
             AppEvent::SubagentTextInput { thread_id, expected_turn_id, source, input } => {
                 self.enqueue_subagent_turn(app_server, thread_id, expected_turn_id, input, source);
             }
-            AppEvent::InsertHistoryCell(cell) => {
+            AppEvent::InsertHistoryCell(mut cell) => {
+                if let Some(user) = self.chat_widget.thread_id()
+                    .and_then(|thread| app_server.user_prompt_clocks(thread))
+                    .and_then(|clocks| clocks.stamped(cell.as_ref()))
+                {
+                    cell = Box::new(user);
+                }
                 self.insert_history_cell(tui, cell);
             }
             AppEvent::BindUserPrompt { thread_id, identity, timestamp } => {

@@ -107,7 +107,7 @@ impl App {
         };
         let width = tui.terminal.last_known_screen_size.width;
         self.remove_hidden_review_cells(tui, &turns, &hidden_item_ids, thread_id, &cwd, visibility);
-        let cells = self.project_older_history_cells(
+        let mut cells = self.project_older_history_cells(
             tui,
             items,
             &turns,
@@ -116,6 +116,9 @@ impl App {
             &cwd,
             visibility,
         );
+        if let Some(clocks) = app_server.user_prompt_clocks(thread_id) {
+            clocks.stamp(&mut cells);
+        }
         let inserted = self.prepend_older_transcript_cells(cells);
         self.transcript_view
             .history_loaded(&self.transcript_cells, inserted.clone());

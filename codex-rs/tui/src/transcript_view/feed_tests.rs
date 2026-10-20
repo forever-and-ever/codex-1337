@@ -1060,6 +1060,22 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
             paint(view, cells);
         };
     click(&mut view, &cells, 0, KeyModifiers::NONE, 0);
+    let rendered = crate::transcript_view::tests::text(&paint(&mut view, &cells));
+    let headers = rendered
+        .lines()
+        .filter(|line| line.contains("Response"))
+        .collect::<Vec<_>>();
+    assert_eq!(headers.len(), 1, "{rendered}");
+    assert!(
+        headers[0].contains(
+            HistoryTimestamp::from_millis(CLOCK_MS)
+                .unwrap()
+                .span()
+                .content
+                .trim()
+        ),
+        "{rendered}"
+    );
     for index in [1, 2] {
         assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
     }
@@ -1148,5 +1164,79 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
     assert!(!view.conversation_tail_hidden(&cells));
     for index in [1, 3, 4, 6, 8] {
         assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
+    }
+
+    // A final answer and its accounting/CoT witness are separate immutable cells,
+    // but one feed item: folding the preceding gap must not strand its header.
+    for readable in [false, true] {
+        let cells = vec![
+            user("Question"),
+            Arc::new(ThoughtCell::from_item(
+                ThreadItem::Thought {
+                    id: "thought:final-step".into(),
+                    response_id: "final-step".into(),
+                    completed_at_ms: CLOCK_MS,
+                    summary: Vec::new(),
+                    content: if readable {
+                        vec!["Considering the failure".into()]
+                    } else {
+                        Vec::new()
+                    },
+                    reported_reasoning_tokens: None,
+                },
+                std::path::Path::new("/tmp"),
+            )),
+            message("final", "The completed answer"),
+        ];
+        let mut view = TranscriptView::default();
+        view.record_step_admission(step(
+            "final-step",
+            &[],
+            &["final"],
+            Admission::Sealed(SealedAdmission {
+                self_tokens: 100,
+                arrivals: Vec::new(),
+                released_tokens: 0,
+                precision: AdmissionPrecision::Apportioned,
+            }),
+        ));
+        view.record_final_response("final".into());
+        let before = crate::transcript_view::tests::text(&paint(&mut view, &cells));
+        let headers = before
+            .lines()
+            .filter(|line| line.contains("Response"))
+            .collect::<Vec<_>>();
+        assert_eq!(headers.len(), 1, "{before}");
+        let header = headers[0];
+        let clock = HistoryTimestamp::from_millis(CLOCK_MS).unwrap();
+        assert!(header.contains(clock.span().content.trim()), "{before}");
+        assert!(header.contains("254"), "{before}");
+
+        click(&mut view, &cells, 0, KeyModifiers::NONE, 1);
+        let after = crate::transcript_view::tests::text(&paint(&mut view, &cells));
+        assert_eq!(
+            after
+                .lines()
+                .filter(|line| line.contains("Response"))
+                .collect::<Vec<_>>(),
+            vec![header]
+        );
+        assert!(after.contains("The completed answer"), "{after}");
+        assert_eq!(after.contains("[cot]"), readable);
+        if readable {
+            let (row, line) = after
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains("[cot]"))
+                .unwrap();
+            let column = line[..line.find("[cot]").unwrap()].chars().count();
+            assert!(view.toggle_disclosure_at(
+                &cells,
+                column.try_into().unwrap(),
+                row.try_into().unwrap()
+            ));
+            let expanded = crate::transcript_view::tests::text(&paint(&mut view, &cells));
+            assert!(expanded.contains("Considering the failure"), "{expanded}");
+        }
     }
 }

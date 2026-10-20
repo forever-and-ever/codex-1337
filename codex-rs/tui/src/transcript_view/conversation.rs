@@ -119,7 +119,7 @@ impl TranscriptView {
             && self.mode == HistoryRenderMode::Rich
             && self
                 .conversation
-                .gap(index)
+                .gap(self.feed.response_owner(index).unwrap_or(index))
                 .is_some_and(|id| !self.conversation_open(id))
     }
 

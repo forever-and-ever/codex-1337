@@ -945,6 +945,29 @@ async fn assert_prompt_arrival_ordering() {
         ],
     );
     assert_eq!(labels(&project(&app, &items)), expected);
+
+    // History envelopes carry the same admission receipts as live notifications.
+    // Replaying a steer must not substitute the turn's start or the reload time.
+    let mut clocks = crate::prompt_order::UserPromptClocks::default();
+    for (index, item) in items.iter().enumerate() {
+        clocks.record(&codex_app_server_protocol::ThreadItemEntry {
+            turn_id: "turn".into(),
+            item: item.clone(),
+            started_at_ms: None,
+            completed_at_ms: Some(receipt_time + i64::try_from(index).unwrap() * 60_000),
+        });
+    }
+    let timestamps = |cells: &[Arc<dyn HistoryCell>]| {
+        cells
+            .iter()
+            .filter_map(|cell| {
+                cell.as_any()
+                    .downcast_ref::<history_cell::UserHistoryCell>()
+            })
+            .map(HistoryCell::transcript_timestamp)
+            .collect::<Vec<_>>()
+    };
+    let expected_clocks = timestamps(&app.transcript_cells);
     let retained = app.transcript_cells.clone();
     app.reconcile_prompt_order(&mut tui);
     assert!(
@@ -958,6 +981,8 @@ async fn assert_prompt_arrival_ordering() {
         paged.transcript_cells = project(&paged, &items[split..]);
         let mut prefix = project(&paged, &items[..split]);
         prefix.append(&mut paged.transcript_cells);
+        clocks.stamp(&mut prefix);
+        assert_eq!(timestamps(&prefix), expected_clocks);
         paged.transcript_cells = prefix;
         paged.reconcile_prompt_order(&mut tui);
         assert_eq!(
