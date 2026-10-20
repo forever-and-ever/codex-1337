@@ -1265,6 +1265,7 @@ impl FeedIndex {
                     .max(1);
                 let rows = invocations.header(
                     &call,
+                    None,
                     &prepared,
                     input_width,
                     true,
@@ -1929,7 +1930,8 @@ impl TranscriptView {
             .feed
             .verify(cells, index, frame, self.step_bills.revision())
         {
-            let scoped = self.disclosure.expanded.has_item_defaults();
+            let scoped = self.disclosure.expanded.has_item_defaults()
+                || self.invocations.has_item_defaults();
             let prior_scopes: HashMap<_, _> = if scoped {
                 self.feed
                     .cells
@@ -1945,13 +1947,11 @@ impl TranscriptView {
                 .rebuild(cells, &self.step_bills, frame, &self.conversation);
             for (index, cell) in cells.iter().enumerate() {
                 if let Some(prior) = prior_scopes.get(&cell_key(cell)) {
-                    self.disclosure
-                        .expanded
-                        .remap_scope(prior, self.feed.fold_scope(index));
+                    self.remap_fold_scope(prior, self.feed.fold_scope(index));
                 }
                 if scoped {
                     for id in cell.activity_ids() {
-                        self.disclosure.expanded.remap_scope(
+                        self.remap_fold_scope(
                             &crate::history_cell::activity_parts::FoldScope::Item(format!(
                                 "live:{id}"
                             )),
@@ -1974,16 +1974,16 @@ impl TranscriptView {
                 self.disclosure
                     .expanded
                     .remap(&prior.fold_mark, &item.fold_mark);
-                self.disclosure.expanded.remap_scope(
-                    &crate::history_cell::activity_parts::FoldScope::Item(prior.fold.clone()),
-                    self.feed.fold_scope(index),
-                );
                 if let Some(focused) = &mut self.disclosure.focused
                     && let FoldTarget::Part(fold) = &mut focused.target
                     && *fold == prior.fold
                 {
                     fold.clone_from(&item.fold);
                 }
+                self.remap_fold_scope(
+                    &crate::history_cell::activity_parts::FoldScope::Item(prior.fold.clone()),
+                    self.feed.fold_scope(index),
+                );
             }
         }
     }

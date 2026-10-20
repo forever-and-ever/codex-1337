@@ -55,10 +55,11 @@ fn input_open_by_default(name: Option<&ToolName>) -> bool {
     })
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-struct Choices {
-    input: Option<Panel>,
-    output: Option<Panel>,
+mod choices;
+
+fn nested(placement: super::feed::Content, index: usize) -> bool {
+    placement == super::feed::Content::Own
+        || (placement == super::feed::Content::Beheaded && index != 0)
 }
 
 #[derive(Clone, Copy)]
@@ -307,7 +308,7 @@ struct PreparationCache {
 
 pub(super) struct InvocationSnapshot {
     inputs: HashMap<String, Arc<ToolInput>>,
-    choices: HashMap<String, Choices>,
+    choices: Arc<choices::Policy>,
 }
 
 impl InvocationSnapshot {
@@ -324,7 +325,7 @@ impl InvocationSnapshot {
 pub(super) struct Invocations {
     inputs: HashMap<String, Arc<ToolInput>>,
     revision: u64,
-    choices: HashMap<String, Choices>,
+    choices: Arc<choices::Policy>,
     prepared: RefCell<PreparationCache>,
 }
 
@@ -347,14 +348,7 @@ impl Invocations {
                         .map(|input| ((*id).to_owned(), Arc::clone(input)))
                 })
                 .collect(),
-            choices: ids
-                .iter()
-                .filter_map(|id| {
-                    self.choices
-                        .get(*id)
-                        .map(|choice| ((*id).to_owned(), *choice))
-                })
-                .collect(),
+            choices: Arc::clone(&self.choices),
         }
     }
 
@@ -436,6 +430,7 @@ impl Invocations {
     fn ports(
         &self,
         call: &Invocation<'_>,
+        item: Option<&str>,
         open: bool,
         formatted: bool,
         formatted_output: bool,
@@ -457,14 +452,16 @@ impl Invocations {
                 }),
             };
         }
-        let choices = self.choices.get(call.id);
         let mode = if formatted {
             OutputMode::Fmt
         } else {
             OutputMode::Raw
         };
         // Code Mode opens semantic projections by default; raw source is opt-in.
-        let preferred = choices.and_then(|choice| choice.input).unwrap_or(
+        let preferred = self.choices.panel(
+            call.id,
+            item,
+            Port::Input,
             if open
                 && input_open_by_default(call.name(self.input(call.id)))
                 && (formatted
@@ -484,26 +481,37 @@ impl Invocations {
         Ports {
             input: available(preferred, formatted),
             output: available(
-                choices
-                    .and_then(|choice| choice.output)
-                    .unwrap_or(Panel::Hidden(OutputMode::Fmt)),
+                self.choices
+                    .panel(call.id, item, Port::Output, Panel::Hidden(OutputMode::Fmt)),
                 formatted_output,
             ),
         }
     }
 
     pub(super) fn apply(&mut self, id: &str, action: Action) {
-        // A control carries its next complete panel value, so live-to-retained regrouping
-        // cannot change the meaning of a click already hit-tested against the old layout.
-        let (port, panel) = match action {
-            Action::Toggle(port, next) => (port, next),
-            Action::Format(port, mode) => (port, Panel::Visible(mode)),
-        };
+        self.apply_scoped(id, None, action);
+    }
+
+    pub(super) fn apply_scoped(&mut self, id: &str, item: Option<&str>, action: Action) {
         self.revision = self.revision.wrapping_add(1);
-        let ports = self.choices.entry(id.to_owned()).or_default();
-        match port {
-            Port::Input => ports.input = Some(panel),
-            Port::Output => ports.output = Some(panel),
+        Arc::make_mut(&mut self.choices).apply(id, item, action);
+    }
+
+    pub(super) fn has_item_defaults(&self) -> bool {
+        self.choices.has_items()
+    }
+
+    pub(super) fn remap_scope(
+        &mut self,
+        from: &crate::history_cell::activity_parts::FoldScope,
+        to: &crate::history_cell::activity_parts::FoldScope,
+    ) {
+        use crate::history_cell::activity_parts::FoldScope;
+        if let (FoldScope::Item(from), FoldScope::Item(to)) = (from, to)
+            && from != to
+            && self.choices.has_item(from)
+        {
+            Arc::make_mut(&mut self.choices).remap(from, to);
         }
     }
 
@@ -514,6 +522,7 @@ impl Invocations {
     pub(super) fn header(
         &self,
         call: &Invocation<'_>,
+        item: Option<&str>,
         prepared: &PreparedInvocation,
         input_width: u16,
         open: bool,
@@ -528,7 +537,7 @@ impl Invocations {
             .input(call, self.input(call.id), input_width, false)
             .0;
         let formatted_output = prepared.has_formatted_output(call, input_width);
-        let ports = self.ports(call, open, formatted, formatted_output, full);
+        let ports = self.ports(call, item, open, formatted, formatted_output, full);
         let mut title =
             crate::render::header::paint_work(call.title(self.input(call.id)), call.is_active());
         let mut controls = Vec::new();
@@ -660,6 +669,7 @@ impl Invocations {
     pub(super) fn body(
         &self,
         call: &Invocation<'_>,
+        item: Option<&str>,
         prepared: &PreparedInvocation,
         open: bool,
         width: u16,
@@ -669,6 +679,7 @@ impl Invocations {
         let formatted = prepared.input(call, input, width, false).0;
         let ports = self.ports(
             call,
+            item,
             open,
             formatted,
             prepared.has_formatted_output(call, width),
@@ -764,6 +775,9 @@ impl Invocations {
             };
         let body_width = width.saturating_sub(indent).max(1);
         for (index, call) in calls.iter().enumerate() {
+            let item = nested(placement, index)
+                .then(|| expanded.item_scope())
+                .flatten();
             let prepared = self.prepared(call, source);
             let input_width = body_width
                 .saturating_sub(crate::transcript_geometry::ENTRY_INDENT)
@@ -771,6 +785,7 @@ impl Invocations {
             if placement != super::feed::Content::Beheaded || index != 0 {
                 let header = self.header(
                     call,
+                    item,
                     &prepared,
                     input_width,
                     open && calls.len() == 1,
@@ -795,6 +810,7 @@ impl Invocations {
             let body_indent = crate::transcript_geometry::ENTRY_INDENT;
             let mut body = self.body(
                 call,
+                item,
                 &prepared,
                 open && calls.len() == 1,
                 body_width.saturating_sub(body_indent).max(1),

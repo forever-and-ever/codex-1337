@@ -78,6 +78,13 @@ impl FoldState {
         }
     }
 
+    pub(crate) fn item_scope(&self) -> Option<&str> {
+        match &self.scope {
+            FoldScope::Item(item) => Some(item),
+            FoldScope::Transcript => None,
+        }
+    }
+
     pub(crate) fn is_open(&self, group: FoldGroup, id: &str, initial: bool) -> bool {
         self.is_open_in(&self.scope, group, id, initial)
     }

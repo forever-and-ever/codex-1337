@@ -804,6 +804,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     );
     let python = view.invocations.body(
         &call,
+        None,
         &view
             .invocations
             .prepared(&call, invocation::PreparationSource::Uncached),
@@ -822,6 +823,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     );
     let available = view.invocations.header(
         &call,
+        None,
         &view
             .invocations
             .prepared(&call, invocation::PreparationSource::Uncached),
@@ -850,6 +852,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         view.invocations
             .body(
                 &call,
+                None,
                 &view
                     .invocations
                     .prepared(&call, invocation::PreparationSource::Uncached),
@@ -913,6 +916,7 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
     );
     let reserved = opaque.invocations.header(
         &call,
+        None,
         &opaque
             .invocations
             .prepared(&call, invocation::PreparationSource::Uncached),
@@ -1057,5 +1061,278 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
         let narrow = layout.rewrap(6);
         assert_eq!(narrow.text(), source);
         assert_eq!(narrow.rewrap(80).row_count(), layout.row_count());
+    }
+}
+
+#[test]
+fn grouped_invocation_ports_stay_within_their_feed_item() {
+    use crossterm::event::KeyModifiers;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
+
+    fn call(view: &mut TranscriptView, id: &str) -> Arc<dyn HistoryCell> {
+        view.record_tool_input(ToolInput {
+            id: format!("input:{id}"),
+            call_id: id.into(),
+            name: ToolName::plain("custom"),
+            payload: ToolInputPayload::Json(format!(r#"{{"input":"{id}","n":12}}"#)),
+        });
+        Arc::new(
+            ToolOutputCell::from_output(
+                &format!("output:{id}"),
+                Some(id),
+                "custom",
+                None,
+                &FunctionCallOutputBody::Text(format!(r#"{{"output":"{id}","n":34}}"#)),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn panel(
+        view: &mut TranscriptView,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        port: Port,
+    ) -> Panel {
+        view.current_layout(cells, index)
+            .unwrap()
+            .fold_targets()
+            .into_iter()
+            .find_map(|target| match target {
+                FoldTarget::Invocation {
+                    action: Action::Toggle(found, next),
+                    ..
+                } if found == port => Some(next.toggled()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn click(
+        view: &mut TranscriptView,
+        cells: &[Arc<dyn HistoryCell>],
+        index: usize,
+        port: Port,
+        mode: Option<OutputMode>,
+        modifiers: KeyModifiers,
+    ) {
+        let width = view.area.width;
+        tests::render(view, cells, width, 100);
+        let layout = view.current_layout(cells, index).unwrap();
+        let target = layout
+            .fold_targets()
+            .into_iter()
+            .find(|target| match (target, mode) {
+                (
+                    FoldTarget::Invocation {
+                        action: Action::Toggle(found, _),
+                        ..
+                    },
+                    None,
+                ) => *found == port,
+                (
+                    FoldTarget::Invocation {
+                        action: Action::Format(found, choice),
+                        ..
+                    },
+                    Some(mode),
+                ) => *found == port && *choice == mode,
+                _ => false,
+            })
+            .unwrap();
+        let (row, columns, _) = layout.fold_position(&target).unwrap();
+        let screen = view
+            .visible
+            .iter()
+            .position(|visible| visible.index == index && visible.row == row)
+            .unwrap();
+        assert!(matches!(
+            view.handle_mouse(
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: columns.start,
+                    row: u16::try_from(screen).unwrap(),
+                    modifiers,
+                },
+                cells
+            ),
+            Some(ViewAction::Changed)
+        ));
+        let width = view.area.width;
+        tests::render(view, cells, width, 100);
+    }
+
+    let mut view = TranscriptView::default();
+    let mut cells: Vec<_> = ["a", "b", "c", "d", "e", "f"]
+        .map(|id| call(&mut view, id))
+        .into();
+    for (response, ids) in [
+        ("group", vec!["a", "b", "older", "new"]),
+        ("other", vec!["c", "d"]),
+        ("single-e", vec!["e"]),
+        ("single-f", vec!["f"]),
+    ] {
+        view.record_step_admission(codex_protocol::step_admission::StepAdmissionItem {
+            id: format!("step:{response}"),
+            response_id: response.into(),
+            completed_at_ms: 0,
+            read_tokens: 0,
+            thinking_tokens: None,
+            output_tokens: 0,
+            call_ids: ids.into_iter().map(str::to_owned).collect(),
+            message_ids: Vec::new(),
+            admission: codex_protocol::step_admission::Admission::Pending,
+        });
+    }
+    tests::render(&mut view, &cells, 104, 100);
+    let untouched: Vec<_> = (2..6)
+        .map(|index| {
+            (
+                panel(&mut view, &cells, index, Port::Input),
+                panel(&mut view, &cells, index, Port::Output),
+            )
+        })
+        .collect();
+    let ctrl = KeyModifiers::CONTROL;
+    let plain = KeyModifiers::NONE;
+
+    click(&mut view, &cells, 0, Port::Input, None, ctrl);
+    for index in 0..2 {
+        assert!(panel(&mut view, &cells, index, Port::Input).visible());
+        assert!(!panel(&mut view, &cells, index, Port::Output).visible());
+    }
+    click(&mut view, &cells, 1, Port::Input, None, plain);
+    assert!(panel(&mut view, &cells, 0, Port::Input).visible());
+    assert!(!panel(&mut view, &cells, 1, Port::Input).visible());
+    click(&mut view, &cells, 0, Port::Input, None, ctrl);
+    click(&mut view, &cells, 0, Port::Input, None, ctrl);
+    assert!(panel(&mut view, &cells, 1, Port::Input).visible());
+
+    click(
+        &mut view,
+        &cells,
+        0,
+        Port::Input,
+        Some(OutputMode::Raw),
+        ctrl,
+    );
+    click(
+        &mut view,
+        &cells,
+        1,
+        Port::Input,
+        Some(OutputMode::Fmt),
+        plain,
+    );
+    click(&mut view, &cells, 0, Port::Output, None, ctrl);
+    click(
+        &mut view,
+        &cells,
+        0,
+        Port::Output,
+        Some(OutputMode::Fmt),
+        ctrl,
+    );
+    for index in 0..2 {
+        assert_eq!(
+            panel(&mut view, &cells, index, Port::Output),
+            Panel::Visible(OutputMode::Fmt)
+        );
+    }
+    click(
+        &mut view,
+        &cells,
+        0,
+        Port::Output,
+        Some(OutputMode::Raw),
+        ctrl,
+    );
+    // Visibility is a separate choice: group open/close preserves each member's format.
+    click(&mut view, &cells, 0, Port::Input, None, ctrl);
+    click(&mut view, &cells, 1, Port::Input, None, ctrl);
+    assert_eq!(
+        panel(&mut view, &cells, 0, Port::Input),
+        Panel::Visible(OutputMode::Raw)
+    );
+    assert_eq!(
+        panel(&mut view, &cells, 1, Port::Input),
+        Panel::Visible(OutputMode::Fmt)
+    );
+    for index in 0..2 {
+        assert_eq!(
+            panel(&mut view, &cells, index, Port::Output),
+            Panel::Visible(OutputMode::Raw)
+        );
+    }
+
+    // Workers keep immutable choices, while later arrivals inherit the current item default.
+    let worker = view
+        .invocations
+        .snapshot(cells.iter().map(AsRef::as_ref))
+        .restore();
+    let scope = view.feed.fold_of(0).unwrap().to_owned();
+    click(&mut view, &cells, 0, Port::Output, None, ctrl);
+    let invocation = crate::history_cell::invocation::collect(cells[0].as_ref()).remove(0);
+    let old_body = worker.body(
+        &invocation,
+        Some(&scope),
+        &worker.prepared(&invocation, invocation::PreparationSource::Uncached),
+        true,
+        80,
+        false,
+    );
+    assert!(
+        old_body
+            .lines
+            .iter()
+            .any(|line| line.line.to_string().contains(r#""output":"a""#))
+    );
+    cells.insert(2, call(&mut view, "new"));
+    tests::render(&mut view, &cells, 104, 100);
+    assert_eq!(
+        panel(&mut view, &cells, 2, Port::Input),
+        Panel::Visible(OutputMode::Raw)
+    );
+    assert!(!panel(&mut view, &cells, 2, Port::Output).visible());
+    for (index, expected) in (3..7).zip(untouched) {
+        assert_eq!(
+            (
+                panel(&mut view, &cells, index, Port::Input),
+                panel(&mut view, &cells, index, Port::Output),
+            ),
+            expected
+        );
+    }
+
+    // A Feed Item's own port strip is never a bulk action, even when it wraps.
+    click(&mut view, &cells, 5, Port::Output, None, ctrl);
+    click(
+        &mut view,
+        &cells,
+        5,
+        Port::Output,
+        Some(OutputMode::Raw),
+        ctrl,
+    );
+    assert!(panel(&mut view, &cells, 5, Port::Output).visible());
+    for index in [0, 1, 2, 3, 4, 6] {
+        assert!(!panel(&mut view, &cells, index, Port::Output).visible());
+    }
+    cells.insert(0, call(&mut view, "older"));
+    for width in [48, 104] {
+        tests::render(&mut view, &cells, width, 100);
+        assert_eq!(
+            panel(&mut view, &cells, 0, Port::Input),
+            Panel::Visible(OutputMode::Raw)
+        );
+        assert!(!panel(&mut view, &cells, 0, Port::Output).visible());
+        assert_eq!(
+            panel(&mut view, &cells, 2, Port::Input),
+            Panel::Visible(OutputMode::Fmt)
+        );
+        click(&mut view, &cells, 6, Port::Output, None, ctrl);
+        assert!(!panel(&mut view, &cells, 7, Port::Output).visible());
     }
 }

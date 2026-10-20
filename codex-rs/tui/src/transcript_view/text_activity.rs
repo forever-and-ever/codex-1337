@@ -268,6 +268,15 @@ impl TextLayout {
             .collect()
     }
 
+    pub(in crate::transcript_view) fn is_feed_header_control(&self, target: &FoldTarget) -> bool {
+        self.feed_header.as_ref().is_some_and(|header| {
+            header
+                .controls
+                .iter()
+                .any(|control| control.target.same_control(target))
+        })
+    }
+
     pub(in crate::transcript_view) fn fold_at(
         &self,
         row: usize,

@@ -213,10 +213,18 @@ impl TranscriptView {
         };
         if !matches!(
             target,
-            FoldTarget::Activity | FoldTarget::Part(_) | FoldTarget::GroupedPart { .. }
+            FoldTarget::Activity
+                | FoldTarget::Part(_)
+                | FoldTarget::GroupedPart { .. }
+                | FoldTarget::Invocation { .. }
+                | FoldTarget::OutputMode(_)
         ) {
             return false;
         }
+        let grouped = !matches!(
+            target,
+            FoldTarget::Invocation { .. } | FoldTarget::OutputMode(_)
+        ) || !visible.layout.is_feed_header_control(&target);
         let ids = Arc::clone(&visible.activity_ids);
         let Some(index) = self.canonical_fold_index(cells, &ids, &target) else {
             return false;
@@ -224,7 +232,7 @@ impl TranscriptView {
         if target == FoldTarget::Activity && self.feed.activity_group(index).is_none() {
             return false;
         }
-        self.toggle_activity_scoped(cells, index, target, true);
+        self.toggle_activity_scoped(cells, index, target, grouped);
         true
     }
 
@@ -233,6 +241,15 @@ impl TranscriptView {
             "live:{}",
             self.disclosure.live_ids.first().map_or("", String::as_str)
         ))
+    }
+
+    pub(super) fn remap_fold_scope(
+        &mut self,
+        from: &crate::history_cell::activity_parts::FoldScope,
+        to: crate::history_cell::activity_parts::FoldScope,
+    ) {
+        self.invocations.remap_scope(from, &to);
+        self.disclosure.expanded.remap_scope(from, to);
     }
 
     pub(super) fn handle_disclosure_key(
@@ -657,7 +674,11 @@ impl TranscriptView {
                 self.disclosure.expanded.set(id.clone(), !open);
             }
         } else if let FoldTarget::Invocation { call_id, action } = &target {
-            self.invocations.apply(call_id, *action);
+            if grouped && let Some(item) = self.feed.fold_of(index) {
+                self.invocations.apply_scoped(call_id, Some(item), *action);
+            } else {
+                self.invocations.apply(call_id, *action);
+            }
         } else if let FoldTarget::OutputMode(mode) = target {
             self.disclosure.output_revision = self
                 .disclosure
