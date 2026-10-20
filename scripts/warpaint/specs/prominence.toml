@@ -8,8 +8,6 @@ colorfulness = 0.5
 lightness = 9.0
 
 [ink]
-hue = 260
-colorfulness = 0.6
 contrast = 87
 
 [voice]
@@ -32,6 +30,7 @@ number = 355
 attribute = 290
 comment = 265
 constant = 5
+variable = 260
 
 [livery]
 count = 8
@@ -52,8 +51,6 @@ least = 0
 
 [gain]
 comment = 0.05
-punctuation = 0.2
-variable = 0.2
 
 [surfaces]
 selection_rise = 7.5

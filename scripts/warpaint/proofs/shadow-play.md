@@ -9,7 +9,7 @@ The shade ring stands at J_HK 62.3, held there by syntax.comment over ground.can
 The body ring stands at J_HK 70.8, held there by syntax.keyword over ground.canvas.
 The flame ring stands at J_HK 77.4, held there by syntax.number over ground.canvas.
 The terminal ring stands at J_HK 66.3, held there by slot 5 over ground.canvas.
-The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, above the faint ink's 45.3.
+The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, above the faint ink's 45.5.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -19,10 +19,10 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | ground.prompt | `#0a1934` | 18.8 | 8.1 | 7.9 | 267 | 234 |
 | ground.added | `#0f1400` | 12.9 | 3.5 | 7.0 | 124 | 233 |
 | ground.removed | `#1d0014` | 13.0 | 6.4 | 7.0 | 345 | 232 |
-| figure.ink | `#e0d8cc` | 86.1 | 2.1 | 2.2 | 99 | 253 |
-| figure.ink_muted | `#bab3a9` | 71.9 | 1.8 | 1.8 | 97 | 249 |
-| figure.ink_faint | `#9b958c` | 60.5 | 1.6 | 1.5 | 98 | 246 |
-| figure.ink_selected | `#dcd4c8` | 84.5 | 2.2 | 2.2 | 99 | 188 |
+| figure.ink | `#d9d9d9` | 87.2 | 1.3 | 0.0 | 209 | 253 |
+| figure.ink_muted | `#b4b4b4` | 73.0 | 1.1 | 0.0 | 209 | 249 |
+| figure.ink_faint | `#969696` | 61.6 | 0.9 | 0.0 | 209 | 246 |
+| figure.ink_selected | `#d5d5d5` | 85.7 | 1.3 | 0.0 | 209 | 188 |
 | figure.rule | `#4f5265` | 38.6 | 6.0 | 6.1 | 275 | 239 |
 | figure.accent | `#b7a1d3` | 73.6 | 15.5 | 15.6 | 305 | 146 |
 | figure.link | `#90cad9` | 81.9 | 11.9 | 12.0 | 215 | 152 |
@@ -85,24 +85,24 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | text | ground | Lc | floor |
 |---|---|---|---|
 | figure.ink | ground.canvas | 83.4 | 83 |
-| figure.ink | ground.dais | 82.8 | 79 |
+| figure.ink | ground.dais | 82.9 | 79 |
 | figure.ink | ground.selection | 82.5 | 73 |
 | figure.ink | ground.prompt | 82.1 | 79 |
 | figure.ink | ground.added | 82.9 | 78 |
 | figure.ink | ground.removed | 83.1 | 78 |
-| figure.ink_muted | ground.canvas | 61.5 | 61 |
-| figure.ink_muted | ground.dais | 61.0 | 57 |
+| figure.ink_muted | ground.canvas | 61.6 | 61 |
+| figure.ink_muted | ground.dais | 61.1 | 57 |
 | figure.ink_muted | ground.selection | 60.7 | 51 |
-| figure.ink_muted | ground.prompt | 60.3 | 57 |
-| figure.ink_muted | ground.added | 61.1 | 56 |
-| figure.ink_muted | ground.removed | 61.2 | 56 |
-| figure.ink_faint | ground.canvas | 45.3 | 45 |
-| figure.ink_faint | ground.dais | 44.8 | 41 |
-| figure.ink_faint | ground.selection | 44.5 | 35 |
-| figure.ink_faint | ground.prompt | 44.1 | 41 |
-| figure.ink_faint | ground.added | 44.9 | 40 |
-| figure.ink_faint | ground.removed | 45.0 | 40 |
-| figure.ink_selected | ground.selection | 80.0 | 80 |
+| figure.ink_muted | ground.prompt | 60.4 | 57 |
+| figure.ink_muted | ground.added | 61.2 | 56 |
+| figure.ink_muted | ground.removed | 61.3 | 56 |
+| figure.ink_faint | ground.canvas | 45.5 | 45 |
+| figure.ink_faint | ground.dais | 45.0 | 41 |
+| figure.ink_faint | ground.selection | 44.6 | 35 |
+| figure.ink_faint | ground.prompt | 44.2 | 41 |
+| figure.ink_faint | ground.added | 45.0 | 40 |
+| figure.ink_faint | ground.removed | 45.2 | 40 |
+| figure.ink_selected | ground.selection | 80.1 | 80 |
 | figure.rule | ground.canvas | 15.2 | 15 |
 | figure.rule | ground.dais | 14.6 | 8 |
 | figure.accent | ground.canvas | 56.2 | 55 |
@@ -249,10 +249,10 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 - syntax in rank body: least dE 10.5, floor 9
 - syntax in rank flame: least dE 22.2, floor 9
 - syntax across levels: least dE 8.6, floor 9; nearer pairs stand apart in level by 5.8 Lc or more, floor 5
-- code recession: least dE 0.0, floor 5; nearer pairs stand beneath prose by 26.7 Lc or more, floor 5
+- code recession: least dE 0.0, floor 5; nearer pairs stand beneath prose by 26.8 Lc or more, floor 5
 - surfaces: least dE 4.8, floor 2
-- ink ladder: least dE 9.1, floor 8
-- code against prose: least dE 4.6, floor 10; nearer pairs stand beneath prose by 7.0 Lc or more, floor 5
+- ink ladder: least dE 9.0, floor 8
+- code against prose: least dE 9.4, floor 10; nearer pairs stand beneath prose by 7.1 Lc or more, floor 5
 - terminal: least dE 8.4, floor 8
 - terminal brights: least dE 8.1, floor 8
 - terminal brights from their slots: least dE 5.8 (slot 3), floor 5
@@ -286,15 +286,15 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | 4 | `#7baecd` | 72.4 | 11.9 | 12.0 | 235 | 110 |
 | 5 | `#a993b9` | 67.0 | 11.7 | 12.0 | 310 | 139 |
 | 6 | `#8bbfbd` | 77.2 | 11.9 | 12.0 | 195 | 109 |
-| 7 | `#bab3a9` | 71.9 | 1.8 | 1.8 | 97 | 249 |
-| 8 | `#9b958c` | 60.5 | 1.6 | 1.5 | 98 | 246 |
+| 7 | `#b4b4b4` | 73.0 | 1.1 | 0.0 | 209 | 249 |
+| 8 | `#969696` | 61.6 | 0.9 | 0.0 | 209 | 246 |
 | 9 | `#e8a4a1` | 76.3 | 12.0 | 12.0 | 20 | 217 |
 | 10 | `#add5bd` | 84.3 | 11.9 | 12.0 | 166 | 151 |
 | 11 | `#e4c78e` | 81.4 | 12.0 | 12.0 | 87 | 223 |
 | 12 | `#91c3e2` | 80.3 | 11.9 | 12.0 | 235 | 110 |
 | 13 | `#bfa8ce` | 75.0 | 11.7 | 12.0 | 310 | 182 |
 | 14 | `#a2d4d2` | 85.2 | 11.8 | 12.0 | 196 | 152 |
-| 15 | `#e0d8cc` | 86.1 | 2.1 | 2.2 | 99 | 253 |
+| 15 | `#d9d9d9` | 87.2 | 1.3 | 0.0 | 209 | 253 |
 
 ## faults
 

@@ -112,7 +112,7 @@ draws a smaller flowchart grammar than Mermaid's and rejects `subgraph`, so rend
 | `scripts/warpaint/captures/<frame>.json` | live frames of a fabricated conversation, exported before binding by `just warpaint-capture` |
 
 A spec makes the decisions that give a palette its character and nothing else: the ground's
-hue, colorfulness and lightness; the ink's hue, tint and contrast; the voice's colorfulness,
+hue, colorfulness and lightness; the ink's contrast; the voice's colorfulness,
 `lean` and `naturalism`; and the hue of each authored role. Every color is derived from them
 by law.
 
@@ -123,7 +123,7 @@ each restatement beside the doctrine's value:
 |---|---|
 | `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
 | `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
-| `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6), `punctuation` and `variable` of the ink's (1.5, 2) |
+| `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6) |
 | `[surfaces]` | the elevations `dais`, `selection_rise` and `prompt_rise` (5, 9, 9.5 J') and the tints `selection_tint`, `diff_tint` and `prompt_tint` (9, 7, 2.25 M) |
 | `[label]` | the label's `hue`, `colorfulness` and `contrast` |
 | `[tab]` | the open tab's `hue`, `colorfulness` and `contrast` |
@@ -164,6 +164,10 @@ light text on a dark ground correctly.
   contrasts, underlined rather than bold, unless a spec's `[tab]` states otherwise. Neither
   label nor tab may take a hue between 105 and 180 degrees, green from its yellow edge to teal,
   which the active thread's dot wears: a finished feed would read as one still at work.
+- The ink carries no hue: body text, and the muted, faint and selected ink beneath it, are grays
+  equal in every channel, not the frame's neutral, which its partial adaptation warms.
+  Punctuation no rank holds speaks in such a gray; a variable no rank holds asks 6 M of its hue,
+  the ground's unless the spec names one.
 - The ink ladder is solved to APCA tiers. Every text role is lifted until it clears its floor
   over every ground the TUI paints it on; `composition` in `laws.py` holds the floors, the TUI's
   declaration in `roles.json` names the pairs, and the proof checks every declared pair. A

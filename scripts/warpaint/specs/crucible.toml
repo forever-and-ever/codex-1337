@@ -8,8 +8,6 @@ colorfulness = 5.0
 lightness = 10.5
 
 [ink]
-hue = 110
-colorfulness = 2.0
 contrast = 84
 
 [voice]
@@ -34,6 +32,7 @@ comment = 150
 added = 150
 removed = 350
 code = 80
+variable = 110
 
 [livery]
 count = 8

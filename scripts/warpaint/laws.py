@@ -1,7 +1,7 @@
 """The laws: every role, ramp and ring derived from a spec's decisions, and the doctrine the
 proof holds them to. A spec states a palette's character in perceptual terms: the ground it is
-painted on, the temperature of its ink, the hues it speaks in and the shape of its voice; no
-color is chosen by hand at a call site or in a pack.
+painted on, the contrast of its ink, which has no hue, the hues it speaks in and the shape of its
+voice; no color is chosen by hand at a call site or in a pack.
 """
 
 from __future__ import annotations
@@ -97,6 +97,9 @@ so the tab reads as the accent's hue rather than as a second label."""
 TAB_LEVEL = 0.5
 """Where an open tab's contrast falls between the faint ink of the tabs beside it (0) and the label
 (1), unless its spec states its contrast."""
+VARIABLE_TINT = 6.0
+"""A variable's colorfulness unless a rank holds it. Punctuation no rank holds is achromatic, as
+the ink is: plain text never carries a palette's hue."""
 
 LIVERY_RISE = 10.0
 """J_HK an identity may climb above the least lightness that clears the voice floor."""
@@ -245,7 +248,7 @@ def composition(spec: Spec) -> dict[Paint, Floors]:
     lifts each role to this table and the proof checks it, so the two cannot disagree. A rank's
     classes take code's floors at the rank's Lc in place of their own; the label takes the
     ink's at its own contrast, wherever it is painted."""
-    body = spec.ink.contrast
+    body = spec.ink_contrast
     secondary, tertiary = body * INK_MUTED, body * INK_FAINT
 
     def ladder(tier: float) -> Floors:
@@ -403,17 +406,14 @@ class Rank:
 
 @dataclass(frozen=True, slots=True)
 class Gain:
-    """The colorfulness each family asks, as a multiple of the voice's for status, diff ink, tool
-    output, comments and inline code, and of the ink's for punctuation and variables, which never
-    ask less than M 6."""
+    """The colorfulness each family asks, as a multiple of the voice's: status, diff ink, tool
+    output, comments and inline code."""
 
     signal: float = 1.0
     diff: float = 1.0
     terminal: float = 1.0
     comment: float = 0.4
     code: float = 0.6
-    punctuation: float = 1.5
-    variable: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,16 +441,16 @@ STYLES = ("bold", "italic")
 """The modifiers a pack may give a syntax class; the TUI adds them wherever it binds the class."""
 
 
-def label_law(ink: InkSpec, accent: float) -> InkSpec:
+def label_law(ink: float, accent: float) -> InkSpec:
     """The label as the doctrine paints it: the accent's hue at LABEL_TINT, LABEL_DROP beneath the
-    ink's contrast."""
-    return InkSpec(accent, LABEL_TINT, ink.contrast - LABEL_DROP)
+    ink's contrast, `ink`."""
+    return InkSpec(accent, LABEL_TINT, ink - LABEL_DROP)
 
 
-def tab_law(ink: InkSpec, label: InkSpec) -> InkSpec:
+def tab_law(ink: float, label: InkSpec) -> InkSpec:
     """The open tab as the doctrine paints it: the label's hue at TAB_TINT, TAB_LEVEL of the way
     from the faint ink's contrast to the label's."""
-    faint = ink.contrast * INK_FAINT
+    faint = ink * INK_FAINT
     return InkSpec(label.hue, TAB_TINT, faint + TAB_LEVEL * (label.contrast - faint))
 
 
@@ -459,7 +459,7 @@ class Spec:
     name: str
     stance: str
     ground: GroundSpec
-    ink: InkSpec
+    ink_contrast: float
     label: InkSpec
     tab: InkSpec
     voice: VoiceSpec
@@ -516,9 +516,7 @@ class Spec:
             ("hue", "colorfulness", "lightness"),
             ("hue", "colorfulness", "lightness"),
         )
-        ink = table(
-            "ink", ("hue", "colorfulness", "contrast"), ("colorfulness", "contrast")
-        )
+        ink = table("ink", ("contrast",), ("contrast",))
         label = table("label", ("hue", "colorfulness", "contrast"), ())
         tab = table("tab", ("hue", "colorfulness", "contrast"), ())
         voice = table(
@@ -547,15 +545,14 @@ class Spec:
             return float(value) % 360
 
         livery = table("livery", ("count", "arcs"), ("count",))
-        ink_hue = float(ink.get("hue", ground["hue"]))
         hued = {role.value: role for role in AUTHORED}
         authored = {hued[name]: hue(name, value) for name, value in hues.items()}
         defaults = {
             **DIFF_HUES,
             Syntax.CONSTANT: authored[Syntax.NUMBER],
             Syntax.COMMENT: float(ground["hue"]),
-            Syntax.PUNCTUATION: ink_hue,
-            Syntax.VARIABLE: ink_hue,
+            Syntax.PUNCTUATION: float(ground["hue"]),
+            Syntax.VARIABLE: float(ground["hue"]),
             Figure.CODE: authored[Syntax.STRING],
         }
         naturalism = float(voice.get("naturalism", 0.0))
@@ -597,7 +594,7 @@ class Spec:
         for name, modifiers in style.items():
             if not modifiers or not set(modifiers) <= set(STYLES):
                 raise Invalid(f"{where}: [style] {name} must be some of {list(STYLES)}")
-        inked = InkSpec(ink_hue, float(ink["colorfulness"]), float(ink["contrast"]))
+        inked = float(ink["contrast"])
         law = label_law(inked, authored[Figure.ACCENT])
         labeled = InkSpec(
             float(label.get("hue", law.hue)) % 360,
@@ -613,7 +610,7 @@ class Spec:
                 float(ground["colorfulness"]),
                 float(ground["lightness"]),
             ),
-            ink=inked,
+            ink_contrast=inked,
             label=labeled,
             tab=InkSpec(
                 float(tab.get("hue", tabbed.hue)) % 360,
@@ -671,9 +668,8 @@ class Pack:
 
 
 def smelt(spec: Spec) -> Pack:
-    g, ink, voice, hues, gain, surfaces = (
+    g, voice, hues, gain, surfaces = (
         spec.ground,
-        spec.ink,
         spec.voice,
         spec.hues,
         spec.gain,
@@ -718,13 +714,15 @@ def smelt(spec: Spec) -> Pack:
         )
         return paint(j, m, hue)
 
-    primary = roles[Figure.INK] = text(Figure.INK, ink.colorfulness, ink.hue)
-    for role in (Figure.INK_MUTED, Figure.INK_FAINT):
-        probe = text(role, ink.colorfulness, ink.hue)
-        roles[role] = text(
-            role, ink.colorfulness * probe.lightness / primary.lightness, ink.hue
-        )
-    roles[Figure.INK_SELECTED] = text(Figure.INK_SELECTED, ink.colorfulness, ink.hue)
+    def gray(role: Paint) -> Swatch:
+        """The darkest gray that clears every floor of the role. Plain text carries no hue: equal
+        channels, not the frame's neutral, which partial adaptation warms."""
+        levels = np.repeat(np.arange(256)[:, None], 3, axis=1)
+        clear = margin(role, levels) >= 0
+        return Swatch.of(levels[int(np.argmax(clear)) if clear.any() else -1], 0.0)
+
+    for role in (Figure.INK, Figure.INK_MUTED, Figure.INK_FAINT, Figure.INK_SELECTED):
+        roles[role] = gray(role)
     roles[Figure.LABEL] = text(Figure.LABEL, spec.label.colorfulness, spec.label.hue)
     roles[Figure.TAB] = text(Figure.TAB, spec.tab.colorfulness, spec.tab.hue)
     roles[Figure.RULE] = text(Figure.RULE, canvas.colorfulness * 1.6, g.hue)
@@ -796,16 +794,10 @@ def smelt(spec: Spec) -> Pack:
             Syntax.COMMENT, voice.colorfulness * gain.comment, hues[Syntax.COMMENT]
         )
     if Syntax.PUNCTUATION not in ranked:
-        roles[Syntax.PUNCTUATION] = text(
-            Syntax.PUNCTUATION,
-            ink.colorfulness * gain.punctuation,
-            hues[Syntax.PUNCTUATION],
-        )
+        roles[Syntax.PUNCTUATION] = gray(Syntax.PUNCTUATION)
     if Syntax.VARIABLE not in ranked:
         roles[Syntax.VARIABLE] = text(
-            Syntax.VARIABLE,
-            max(ink.colorfulness * gain.variable, 6.0),
-            hues[Syntax.VARIABLE],
+            Syntax.VARIABLE, VARIABLE_TINT, hues[Syntax.VARIABLE]
         )
     roles[Figure.CODE] = text(
         Figure.CODE, voice.colorfulness * gain.code, hues[Figure.CODE]

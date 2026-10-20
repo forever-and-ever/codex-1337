@@ -9,7 +9,7 @@ The sunk ring stands at J_HK 61.8, held there by syntax.number over ground.canva
 The body ring stands at J_HK 69.7, held there by syntax.keyword over ground.canvas.
 The crown ring stands at J_HK 89.7, held there by syntax.constant over ground.canvas.
 The terminal ring stands at J_HK 71.6, held there by slot 5 over ground.canvas.
-The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, above the faint ink's 45.3.
+The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, above the faint ink's 45.5.
 
 | role | hex | J_HK | M | asked | h | xterm |
 |---|---|---|---|---|---|---|
@@ -19,10 +19,10 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 | ground.prompt | `#001e15` | 17.3 | 5.7 | 5.7 | 173 | 234 |
 | ground.added | `#000f01` | 11.6 | 4.1 | 8.5 | 149 | 232 |
 | ground.removed | `#18000d` | 11.6 | 5.0 | 8.5 | 350 | 232 |
-| figure.ink | `#ded8cc` | 85.9 | 2.0 | 2.0 | 108 | 188 |
-| figure.ink_muted | `#b7b3a9` | 71.7 | 1.7 | 1.7 | 114 | 249 |
-| figure.ink_faint | `#9a958d` | 60.4 | 1.4 | 1.4 | 103 | 246 |
-| figure.ink_selected | `#dbd6ca` | 85.1 | 2.0 | 2.0 | 113 | 188 |
+| figure.ink | `#d9d9d9` | 87.2 | 1.3 | 0.0 | 209 | 253 |
+| figure.ink_muted | `#b4b4b4` | 73.0 | 1.1 | 0.0 | 209 | 249 |
+| figure.ink_faint | `#969696` | 61.6 | 0.9 | 0.0 | 209 | 246 |
+| figure.ink_selected | `#d7d7d7` | 86.5 | 1.3 | 0.0 | 209 | 188 |
 | figure.rule | `#485746` | 36.9 | 5.3 | 5.2 | 150 | 239 |
 | figure.accent | `#ff8c6a` | 74.2 | 24.5 | 28.6 | 35 | 209 |
 | figure.link | `#80ced6` | 82.8 | 15.5 | 15.5 | 205 | 116 |
@@ -41,7 +41,7 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 | syntax.string | `#af9875` | 63.3 | 7.9 | 8.0 | 82 | 137 |
 | syntax.number | `#ad869b` | 62.2 | 8.0 | 7.9 | 344 | 139 |
 | syntax.comment | `#92a08e` | 64.4 | 5.6 | 5.8 | 150 | 247 |
-| syntax.punctuation | `#b1ad9c` | 69.4 | 3.0 | 3.0 | 111 | 145 |
+| syntax.punctuation | `#adadad` | 70.4 | 1.0 | 0.0 | 209 | 145 |
 | syntax.variable | `#bcb86f` | 73.1 | 13.0 | 13.0 | 110 | 143 |
 | syntax.constant | `#ffcae5` | 90.1 | 10.4 | 28.9 | 345 | 225 |
 | syntax.attribute | `#89b0ba` | 72.2 | 8.6 | 8.5 | 215 | 109 |
@@ -89,25 +89,25 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 
 | text | ground | Lc | floor |
 |---|---|---|---|
-| figure.ink | ground.canvas | 83.1 | 83 |
-| figure.ink | ground.dais | 82.5 | 79 |
-| figure.ink | ground.selection | 81.4 | 73 |
-| figure.ink | ground.prompt | 81.8 | 79 |
-| figure.ink | ground.added | 83.0 | 78 |
-| figure.ink | ground.removed | 83.0 | 78 |
-| figure.ink_muted | ground.canvas | 61.2 | 61 |
-| figure.ink_muted | ground.dais | 60.6 | 57 |
-| figure.ink_muted | ground.selection | 59.5 | 51 |
-| figure.ink_muted | ground.prompt | 59.9 | 57 |
-| figure.ink_muted | ground.added | 61.0 | 56 |
-| figure.ink_muted | ground.removed | 61.0 | 56 |
-| figure.ink_faint | ground.canvas | 45.3 | 45 |
-| figure.ink_faint | ground.dais | 44.7 | 41 |
-| figure.ink_faint | ground.selection | 43.6 | 35 |
-| figure.ink_faint | ground.prompt | 44.0 | 41 |
-| figure.ink_faint | ground.added | 45.1 | 40 |
-| figure.ink_faint | ground.removed | 45.1 | 40 |
-| figure.ink_selected | ground.selection | 80.0 | 80 |
+| figure.ink | ground.canvas | 83.4 | 83 |
+| figure.ink | ground.dais | 82.9 | 79 |
+| figure.ink | ground.selection | 81.7 | 73 |
+| figure.ink | ground.prompt | 82.1 | 79 |
+| figure.ink | ground.added | 83.3 | 78 |
+| figure.ink | ground.removed | 83.3 | 78 |
+| figure.ink_muted | ground.canvas | 61.6 | 61 |
+| figure.ink_muted | ground.dais | 61.1 | 57 |
+| figure.ink_muted | ground.selection | 59.9 | 51 |
+| figure.ink_muted | ground.prompt | 60.4 | 57 |
+| figure.ink_muted | ground.added | 61.5 | 56 |
+| figure.ink_muted | ground.removed | 61.5 | 56 |
+| figure.ink_faint | ground.canvas | 45.5 | 45 |
+| figure.ink_faint | ground.dais | 45.0 | 41 |
+| figure.ink_faint | ground.selection | 43.8 | 35 |
+| figure.ink_faint | ground.prompt | 44.2 | 41 |
+| figure.ink_faint | ground.added | 45.4 | 40 |
+| figure.ink_faint | ground.removed | 45.4 | 40 |
+| figure.ink_selected | ground.selection | 80.5 | 80 |
 | figure.rule | ground.canvas | 15.2 | 15 |
 | figure.rule | ground.dais | 14.7 | 8 |
 | figure.accent | ground.canvas | 57.4 | 55 |
@@ -182,10 +182,10 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 | syntax.comment | ground.prompt | 47.3 | 38 |
 | syntax.comment | ground.added | 48.4 | 38 |
 | syntax.comment | ground.removed | 48.5 | 38 |
-| syntax.punctuation | ground.canvas | 57.6 | 56 |
-| syntax.punctuation | ground.prompt | 56.3 | 56 |
-| syntax.punctuation | ground.added | 57.5 | 56 |
-| syntax.punctuation | ground.removed | 57.5 | 56 |
+| syntax.punctuation | ground.canvas | 57.8 | 56 |
+| syntax.punctuation | ground.prompt | 56.5 | 56 |
+| syntax.punctuation | ground.added | 57.6 | 56 |
+| syntax.punctuation | ground.removed | 57.6 | 56 |
 | syntax.variable | ground.canvas | 62.2 | 52 |
 | syntax.variable | ground.prompt | 60.9 | 48 |
 | syntax.variable | ground.added | 62.0 | 48 |
@@ -254,10 +254,10 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 - syntax in rank sunk: least dE 5.1, floor 4
 - syntax in rank body: least dE 10.7, floor 9
 - syntax across levels: least dE 14.3, floor 9
-- code recession: least dE 8.2, floor 5
+- code recession: least dE 10.1, floor 5
 - surfaces: least dE 2.6, floor 2
 - ink ladder: least dE 9.0, floor 8
-- code against prose: least dE 7.6, floor 10; nearer pairs stand beneath prose by 6.8 Lc or more, floor 5
+- code against prose: least dE 12.5, floor 10
 - terminal: least dE 15.1, floor 10
 - terminal brights: least dE 14.7, floor 10
 - terminal brights from their slots: least dE 5.5 (slot 3), floor 5
@@ -291,15 +291,15 @@ The label reads at Lc 80.0 over the canvas, ceiling 95; an open tab at Lc 62.6, 
 | 4 | `#31b7f1` | 75.9 | 21.9 | 22.0 | 235 | 74 |
 | 5 | `#b18cd4` | 69.4 | 21.9 | 22.0 | 309 | 140 |
 | 6 | `#55cfcc` | 81.9 | 22.1 | 22.0 | 195 | 80 |
-| 7 | `#b7b3a9` | 71.7 | 1.7 | 1.7 | 114 | 249 |
-| 8 | `#9a958d` | 60.4 | 1.4 | 1.4 | 103 | 246 |
+| 7 | `#b4b4b4` | 73.0 | 1.1 | 0.0 | 209 | 249 |
+| 8 | `#969696` | 61.6 | 0.9 | 0.0 | 209 | 246 |
 | 9 | `#ff9aba` | 79.8 | 19.0 | 22.0 | 360 | 211 |
 | 10 | `#94e6b2` | 88.3 | 22.0 | 22.0 | 160 | 115 |
 | 11 | `#f6d35b` | 86.0 | 22.0 | 22.0 | 95 | 221 |
 | 12 | `#6dccff` | 83.9 | 19.2 | 22.0 | 235 | 117 |
 | 13 | `#c7a1e9` | 77.4 | 21.9 | 22.0 | 310 | 183 |
 | 14 | `#72e4e1` | 89.9 | 22.0 | 22.0 | 195 | 80 |
-| 15 | `#ded8cc` | 85.9 | 2.0 | 2.0 | 108 | 188 |
+| 15 | `#d9d9d9` | 87.2 | 1.3 | 0.0 | 209 | 253 |
 
 ## faults
 

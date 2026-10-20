@@ -8,8 +8,6 @@ colorfulness = 1.0
 lightness = 9.0
 
 [ink]
-hue = 65
-colorfulness = 1.5
 contrast = 86
 
 [voice]
@@ -31,6 +29,7 @@ string = 90
 number = 25
 attribute = 300
 comment = 45
+variable = 65
 
 [livery]
 count = 8

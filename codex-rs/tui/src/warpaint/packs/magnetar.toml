@@ -25,15 +25,15 @@ terminal = [
   "#29b7ff",
   "#b986ea",
   "#00d6d3",
-  "#b2b7bb",
-  "#94989b",
+  "#b6b6b6",
+  "#989898",
   "#ffa8a5",
   "#72f0a9",
   "#ffd55d",
   "#88ceff",
   "#cf9bff",
   "#00ece9",
-  "#d7dde1",
+  "#dcdcdc",
 ]
 
 [ground]
@@ -45,10 +45,10 @@ added = "#070a00"
 removed = "#100009"
 
 [figure]
-ink = "#d7dde1"
-ink_muted = "#b2b7bb"
-ink_faint = "#94989b"
-ink_selected = "#d3d8dd"
+ink = "#dcdcdc"
+ink_muted = "#b6b6b6"
+ink_faint = "#989898"
+ink_selected = "#d8d8d8"
 rule = "#4e5356"
 accent = "#00e5ce"
 link = "#00d9f0"
@@ -69,7 +69,7 @@ type = "#89a8ff"
 string = "#e6e100"
 number = "#ff9c88"
 comment = "#5b96b2"
-punctuation = "#a4b0b8"
+punctuation = "#afafaf"
 variable = "#bcd2df"
 constant = "#ff9c88"
 attribute = "#00d6f6"

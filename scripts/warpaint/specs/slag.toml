@@ -1,5 +1,5 @@
 stance = """
-Slag: amber constants burn bold at the bottom; the rest of the code sinks below the warm grey prose.
+Slag: amber constants burn bold at the bottom; the rest of the code sinks below the grey prose.
 """
 
 [ground]
@@ -8,8 +8,6 @@ colorfulness = 1.0
 lightness = 9.0
 
 [ink]
-hue = 65
-colorfulness = 1.5
 contrast = 86
 
 [voice]
@@ -32,6 +30,7 @@ number = 65
 attribute = 55
 comment = 45
 constant = 65
+variable = 65
 
 [livery]
 count = 8

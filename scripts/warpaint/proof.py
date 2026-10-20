@@ -316,8 +316,8 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
             ]
     accent = spec.hues[Figure.ACCENT]
     for title, stated, law in (
-        ("label", spec.label, label_law(spec.ink, accent)),
-        ("tab", spec.tab, tab_law(spec.ink, spec.label)),
+        ("label", spec.label, label_law(spec.ink_contrast, accent)),
+        ("tab", spec.tab, tab_law(spec.ink_contrast, spec.label)),
     ):
         if moved := [
             f for f in law.__dataclass_fields__ if getattr(stated, f) != getattr(law, f)

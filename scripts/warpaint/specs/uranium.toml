@@ -8,8 +8,6 @@ colorfulness = 5.0
 lightness = 10.5
 
 [ink]
-hue = 110
-colorfulness = 2.0
 contrast = 84
 
 [label]
@@ -39,6 +37,7 @@ added = 150
 removed = 350
 code = 120
 constant = 150
+variable = 110
 
 [livery]
 count = 8
@@ -52,8 +51,6 @@ naturalism = 0.3
 [gain]
 signal = 0.5
 comment = 0.08
-punctuation = 0.15
-variable = 0.2
 code = 0.3
 diff = 0.5
 terminal = 0.5
