@@ -65,6 +65,11 @@ warpaint-capture:
 clippy *args:
     cargo clippy --tests {args}
 
+# Film the shimmer reel, or paint its stills, score or contact sheets: scripts/shimmer-reel/README.md.
+[unix]
+shimmer-reel *args:
+    ~/.local/libexec/cpu-lanes {{ justfile_directory() }}/scripts/shimmer-reel/reel.py {args}
+
 [unix]
 install:
     rustup show active-toolchain

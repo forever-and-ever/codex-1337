@@ -27,6 +27,8 @@ mod phyllotaxis;
 mod picker;
 mod prism;
 mod quipu;
+#[cfg(test)]
+mod reel;
 mod relay;
 mod rubik;
 mod sandpile;

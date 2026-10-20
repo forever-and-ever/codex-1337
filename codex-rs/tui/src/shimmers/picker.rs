@@ -18,6 +18,7 @@ use super::engine::color;
 use super::live;
 use super::script::Script;
 use super::stage::Palette;
+use super::stage::Rgb;
 use super::stage::TICK;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionItem;
@@ -32,7 +33,7 @@ use crate::tui::FrameRequester;
 /// Columns the preview needs beside the list.
 const PREVIEW_WIDTH: u16 = 44;
 /// Rows of the preview: a running tool and its output, a blank row, the status row.
-const PREVIEW_ROWS: u16 = 4;
+pub(super) const PREVIEW_ROWS: u16 = 4;
 
 pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionViewParams {
     let current = live::engaged();
@@ -155,7 +156,7 @@ impl Renderable for PreviewPane {
             height: area.height.saturating_sub(1),
             ..area
         };
-        stage_rows(engine, script, *ticks, *palette, area, buf);
+        stage_rows(engine, Scene::scripted(script, *ticks), *palette, area, buf);
         if animated {
             self.frames.schedule_frame_in(Duration::from_secs_f64(TICK));
         }
@@ -178,18 +179,40 @@ pub(super) fn feed(engine: &mut Engine, script: &Script, tick: u64) {
     engine.step(u32::try_from(tokens - before).unwrap_or(u32::MAX), spell);
 }
 
-/// Draws the live rows as codex-tui lays them out, with the script `tick` ticks in: a running tool
-/// and its output on the first two rows of `area`, the status row on the fourth.
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "Preview time is a nonnegative visual clock; the displayed timer deliberately uses whole seconds modulo 480."
-)]
+/// What the live rows show around a shimmer: a running tool's command and output, and the status
+/// row's header and timer.
+#[derive(Clone, Copy)]
+pub(super) struct Scene<'a> {
+    pub(super) command: &'a str,
+    pub(super) output: &'a str,
+    pub(super) header: &'a str,
+    pub(super) timer: u64,
+}
+
+impl Scene<'static> {
+    /// The preview's scene `tick` ticks into `script`.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "Preview time is a nonnegative visual clock; the displayed timer deliberately uses whole seconds modulo 480."
+    )]
+    fn scripted(script: &Script, tick: u64) -> Self {
+        let t = tick as f64 * TICK;
+        Self {
+            command: "cargo test -p codex-tui --lib",
+            output: "Compiling codex-tui v0.0.0",
+            header: script.at(t).1,
+            timer: 63 + (t as u64) % 480,
+        }
+    }
+}
+
+/// Draws the live rows as codex-tui lays them out: `scene`'s running tool and its output on the
+/// first two rows of `area`, the status row on the fourth.
 pub(super) fn stage_rows(
     engine: &mut Engine,
-    script: &Script,
-    tick: u64,
+    scene: Scene<'_>,
     palette: Palette,
     area: Rect,
     buf: &mut Buffer,
@@ -197,17 +220,20 @@ pub(super) fn stage_rows(
     if area.height < PREVIEW_ROWS {
         return;
     }
-    let t = tick as f64 * TICK;
-    let (_, header, _) = script.at(t);
-    let timer = 63 + (t as u64) % 480;
+    let Scene {
+        command,
+        output,
+        header,
+        timer,
+    } = scene;
     let tool = Line::from(vec![
         engine.tool(palette),
         " ".into(),
         "Command".bold(),
-        " cargo test -p codex-tui --lib".into(),
+        format!(" {command}").into(),
     ]);
     buf.set_line(area.x, area.y, &tool, area.width);
-    let output = Line::from("    Compiling codex-tui v0.0.0".dim());
+    let output = Line::from(format!("    {output}").dim());
     buf.set_line(area.x, area.y + 1, &output, area.width);
     let (mut lead, backdrop) = engine.status(
         header, timer, palette, /*mark*/ true, /*letters*/ true,
@@ -216,9 +242,19 @@ pub(super) fn stage_rows(
         Span::from(" "),
         format!("({} • ⌃c to interrupt)", fmt_elapsed_compact(timer)).dim(),
     ]);
-    let y = area.y + 3;
+    lay_status(lead, &backdrop, area, area.y + 3, buf);
+}
+
+/// Lays a status row's `lead` on row `y` of `area`, over the shimmer's `backdrop`.
+pub(super) fn lay_status(
+    lead: Vec<Span<'static>>,
+    backdrop: &[Rgb],
+    area: Rect,
+    y: u16,
+    buf: &mut Buffer,
+) {
     buf.set_line(area.x, y, &Line::from(lead), area.width);
-    for (x, bg) in (area.x..area.right()).zip(&backdrop) {
+    for (x, bg) in (area.x..area.right()).zip(backdrop) {
         buf[(x, y)].set_bg(color(*bg));
     }
 }

@@ -40,6 +40,7 @@ pub(super) trait Shimmer: Send {
 
 /// Whether the agent is producing output or waiting on a tool.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(test, derive(serde::Deserialize), serde(rename_all = "lowercase"))]
 pub(super) enum Spell {
     #[default]
     Busy,
