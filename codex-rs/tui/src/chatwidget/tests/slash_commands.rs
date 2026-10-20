@@ -2922,19 +2922,42 @@ async fn slash_clear_is_disabled_while_task_running() {
 }
 
 #[tokio::test]
-async fn slash_archive_cancellation_keeps_task_running() {
-    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.bottom_pane.set_task_running(/*running*/ true);
+async fn local_picker_actions_keep_task_running() {
+    for (command, close) in [
+        (SlashCommand::Archive, KeyCode::Enter),
+        (SlashCommand::Theme, KeyCode::Esc),
+        (SlashCommand::Theme, KeyCode::Enter),
+    ] {
+        let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.on_task_started();
+        while rx.try_recv().is_ok() {}
 
-    chat.dispatch_command(SlashCommand::Archive);
+        chat.dispatch_command(command);
+        assert!(chat.bottom_pane.has_active_view(), "{command:?}");
+        if command == SlashCommand::Theme {
+            chat.handle_key_event(KeyEvent::from(KeyCode::Down));
+        }
+        chat.handle_key_event(KeyEvent::from(close));
 
-    assert!(chat.bottom_pane.has_active_view());
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-
-    assert!(!chat.bottom_pane.has_active_view());
-    assert!(chat.bottom_pane.is_task_running());
-    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
-    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+        assert!(!chat.bottom_pane.has_active_view());
+        assert!(chat.bottom_pane.is_task_running());
+        assert!(chat.is_agent_turn_running());
+        let events = std::iter::from_fn(|| rx.try_recv().ok()).collect::<Vec<_>>();
+        assert!(
+            events.iter().all(|event| matches!(
+                event,
+                AppEvent::SyntaxThemePreviewed | AppEvent::SyntaxThemeSelected { .. }
+            )),
+            "{events:?}"
+        );
+        assert_eq!(
+            events
+                .iter()
+                .any(|event| matches!(event, AppEvent::SyntaxThemeSelected { .. })),
+            command == SlashCommand::Theme && close == KeyCode::Enter,
+        );
+        assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+    }
 }
 
 #[tokio::test]

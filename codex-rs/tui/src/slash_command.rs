@@ -331,8 +331,8 @@ impl SlashCommand {
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Agents | SlashCommand::MultiAgents => true,
-            SlashCommand::Shimmer => true,
-            SlashCommand::Config | SlashCommand::Theme => false,
+            SlashCommand::Shimmer | SlashCommand::Theme => true,
+            SlashCommand::Config => false,
         }
     }
 
