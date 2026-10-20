@@ -84,7 +84,7 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
             insta::assert_snapshot!(
                 format!("{}\n{highlight}", text(&buffer)),
                 @"
-                    (     selected text
+                          selected text
             ··············^^^^^^^^········
             "
             );
@@ -139,9 +139,9 @@ fn copy_on_select_waits_for_release_and_confirmed_delivery() {
                 insta::assert_snapshot!(
                     format!("{}\n{highlight}", text(&buffer)),
                     @"
-                        (     selected text
-                ······························
-                "
+                                  selected text
+                    ······························
+                    "
                 );
             }
         }

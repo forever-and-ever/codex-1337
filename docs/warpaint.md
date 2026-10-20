@@ -7,7 +7,7 @@ pack colors; the binder resolves every cell as the frame is flushed.
 
 `codex-rs/tui/src/warpaint/paint.rs` declares four families: grounds, what a cell is
 painted on; figures, text and glyphs painted over a ground; brackets, the strokes in the
-transcript's gutter that say who speaks; and syntax classes, which only the scope theme names. One macro per family emits the enum, the table a pack must fill and the
+transcript's gutter that mark the model's context and say who spoke it; and syntax classes, which only the scope theme names. One macro per family emits the enum, the table a pack must fill and the
 family's token range. Three ramps complete a pack: `livery` for thread identities, `heat` for
 activity, and `terminal`, tool output's sixteen colors in xterm order.
 
@@ -140,10 +140,13 @@ light text on a dark ground correctly.
 - Surfaces are the canvas's material raised or recessed in equal perceptual steps at constant
   hue and saturation. The selection bar is that material tinted toward the accent; diff bands
   take their ink's hue outright. Every surface stands 2 dE from every other.
-- The transcript lies on the canvas, and a bracket in its gutter says who speaks: the response,
-  this thread's words to the user; a message, other agents' words; a call, the verbatim input of
-  a tool call; the reasoning; the prompt, the user's words; and the harness, tool output,
-  injected context and whatever else the harness says in the user's stead. The brackets keep
+- The transcript lies on the canvas, and a bracket in its gutter stands beside the words the
+  model's context holds and says who spoke them: the response, this thread's words to the user;
+  a message, other agents' words; a call, the verbatim input of a tool call; the reasoning; the
+  prompt, the user's words; and the harness, tool output, injected context and whatever else
+  the harness says in the user's stead. Headings, summaries, the client's projections of a call
+  and its notices hang none, so a bracket begins at its first word; a view that reflows words
+  the model saw keeps their bracket. A fold is a triangle in the same column. The brackets keep
   that order round the hue circle, nearest 30, 95, 125, 150, 240 and 300 degrees from reasoning
   to harness, and wear the livery's colors, so a palette marks its speakers only in colors it
   already has: of the identities at 12 M or more, they take the assignment that keeps their

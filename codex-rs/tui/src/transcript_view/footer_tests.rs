@@ -542,7 +542,6 @@ fn activity_focus_keeps_controls_without_passive_hints() {
     let cell = Arc::new(ActivityCell::default());
     let mut view = TranscriptView::default();
     let render_live = |view: &mut TranscriptView| {
-        view.set_live_cell(Some(cell.as_ref() as &dyn HistoryCell));
         let expanded = view.sync_live_activity(&cells, cell.activity_ids());
         let header_tokens = view.activity_output_tokens(&cell.activity_ids());
         view.sync_live_activity_tail(

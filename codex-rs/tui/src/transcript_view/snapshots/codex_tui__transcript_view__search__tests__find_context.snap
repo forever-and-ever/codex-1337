@@ -5,24 +5,16 @@ expression: "format!(\"{found:?}\")"
 Buffer {
     area: Rect { x: 0, y: 0, width: 40, height: 6 },
     content: [
-        "        ╰     result                    ",
+        "              result                    ",
         "                                        ",
-        "        (     needle in the result      ",
+        "              needle in the result      ",
         "                                        ",
-        "        ╭     explanation after the     ",
-        "        ╰     result                    ",
+        "              explanation after the     ",
+        "              result                    ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
         x: 14, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: REVERSED,
         x: 20, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 4, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 5, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 5, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

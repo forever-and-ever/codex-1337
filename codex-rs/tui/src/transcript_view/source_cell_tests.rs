@@ -212,11 +212,6 @@ fn recap_copy_preserves_hard_lines_and_reflows_only_soft_wraps() {
         }
         let mut actual = Buffer::empty(area);
         view.render(area, &mut actual, &cells);
-        // The recap hangs from the harness's bracket beside its words; the words are compared.
-        for row in 0..area.height {
-            let column = crate::transcript_geometry::CONTROL_COLUMN;
-            actual[(column, row)] = expected[(column, row)].clone();
-        }
         // The viewport styles entire rows, including padding and hidden wide-character cells.
         // Italic has no visible glyph there; retain every other attribute in the comparison.
         for cell in actual.content.iter_mut().chain(expected.content.iter_mut()) {

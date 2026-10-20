@@ -2,22 +2,22 @@
 source: tui/src/transcript_view/tool_entries_tests.rs
 expression: text
 ---
-        [   Command (wait)          [in]             [out [raw] [fmt]]
+            Command (wait)          [in]             [out [raw] [fmt]]
         ╭     Script completed
         ┊     Wall time 5.0 seconds
         ┊     Output:
         ┊
         ┊     {"chunk_id":"sample","wall_time_seconds":5.0,"output":"","exit_code":0,"session_id":nu
         ╰     ll}
-        [   Command (wait)          [in]             [out [raw]      ]
+            Command (wait)          [in]             [out [raw]      ]
         ╭     Script completed
         ╰     Output:
-        [   Command (exec)          [in]             [out [raw]      ]
+            Command (exec)          [in]             [out [raw]      ]
         ╭     Script completed
         ┊     Output:
         ┊
         ┊     Script failed
         ╰     Output:
-        [   Command (exec)          [in]             [out [raw]      ]
+            Command (exec)          [in]             [out [raw]      ]
         ╭     Script completed
         ╰     Output:

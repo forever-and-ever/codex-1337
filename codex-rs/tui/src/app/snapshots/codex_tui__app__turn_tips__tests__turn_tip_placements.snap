@@ -3,7 +3,7 @@ source: tui/src/app/turn_tips_tests.rs
 expression: "crate::chatwidget::tests::helpers::normalize_snapshot_paths(screens.join(\"\\n\\n\"))"
 ---
 working=true, response rows=1, 80x12
-        (     Response row 0
+              Response row 0
 ────────────────────────────────────────────────────────────────────────────────
 
   • Working (0s • ⌃c to interrupt)
@@ -41,10 +41,10 @@ working=false, response rows=1, 80x12
 working=false, response rows=1, 80x24
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-        ╭   User
-        ╰   Show a response.
+         ▾  User
+        (   Show a response.
 
-        (     Response row 0
+              Response row 0
 
         [   Done.
   └ Tip: Try /help.
@@ -67,10 +67,10 @@ working=false, response rows=1, 80x24
 Completion tip selected, 80x24
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-        ╭   User
-        ╰   Show a response.
+         ▾  User
+        (   Show a response.
 
-        (     Response row 0
+              Response row 0
 
         [   Done.
   └ Tip: Try /help.

@@ -149,8 +149,6 @@ pub(crate) struct TranscriptView {
     live_key: Option<(u16, ActiveCellTranscriptKey)>,
     live_continuation: bool,
     live_tool_entry: bool,
-    /// The bracket the live cell's block hangs from, when it hangs one.
-    live_bracket: Option<crate::warpaint::Bracket>,
     area: Rect,
     prompt_header_target: Option<(Rect, EntryKey)>,
     suppressed_prompt_header: Option<prompt_header::SuppressedHeader>,
@@ -203,7 +201,6 @@ impl Default for TranscriptView {
             live_key: None,
             live_continuation: false,
             live_tool_entry: false,
-            live_bracket: None,
             area: Rect::default(),
             prompt_header_target: None,
             suppressed_prompt_header: None,
@@ -398,7 +395,6 @@ impl TranscriptView {
         lines: impl FnOnce(u16) -> Option<Vec<HyperlinkLine>>,
     ) -> bool {
         let mode = self.mode;
-        let bracket = self.live_bracket();
         self.sync_live_layout(width, key, |width, _| {
             lines(crate::transcript_geometry::content_width(width, mode)).map(|lines| {
                 let lines = if mode == HistoryRenderMode::Rich {
@@ -407,21 +403,14 @@ impl TranscriptView {
                     lines
                 };
                 (
-                    Arc::new(TextLayout::new(lines, width).with_bracket(bracket)),
+                    Arc::new(
+                        TextLayout::new(lines, width)
+                            .with_brackets(mode == HistoryRenderMode::Rich),
+                    ),
                     key.is_some_and(|key| key.is_tool_entry),
                 )
             })
         })
-    }
-
-    /// Note whose block the live cell is, so its rows hang from that bracket.
-    pub(crate) fn set_live_cell(&mut self, cell: Option<&dyn HistoryCell>) {
-        self.live_bracket = cell.and_then(brackets::of_cell);
-    }
-
-    fn live_bracket(&self) -> Option<crate::warpaint::Bracket> {
-        self.live_bracket
-            .filter(|_| self.mode == HistoryRenderMode::Rich)
     }
 
     pub(crate) fn sync_live_activity_tail(
@@ -437,7 +426,6 @@ impl TranscriptView {
     ) -> bool {
         let mode = self.mode;
         let output_mode = self.disclosure.output_mode(&self.disclosure.live_ids);
-        let bracket = self.live_bracket();
         self.sync_live_layout(width, key, |width, view| {
             lines(
                 crate::transcript_geometry::content_width(width, mode),
@@ -457,7 +445,10 @@ impl TranscriptView {
                     lines.activity.extend(lines.auxiliary);
                     TextLayout::new(lines.activity, width)
                 };
-                (Arc::new(layout.with_bracket(bracket)), is_tool_entry)
+                (
+                    Arc::new(layout.with_brackets(mode == HistoryRenderMode::Rich)),
+                    is_tool_entry,
+                )
             })
         })
     }

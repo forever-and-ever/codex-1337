@@ -307,13 +307,14 @@ fn steps_fold_under_one_header_with_their_figures() {
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
         for (row, line) in text.lines().enumerate() {
-            // A bracket's stroke keeps its own paint, never the heading's bold.
-            let stroke = &buffer[(
-                crate::transcript_geometry::CONTROL_COLUMN,
-                u16::try_from(row).unwrap(),
-            )];
-            if stroke.symbol() != " " {
-                assert!(!stroke.modifier.contains(ratatui::style::Modifier::BOLD));
+            for glyph in ['▸', '▾'] {
+                for (offset, _) in line.match_indices(glyph) {
+                    let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
+                    let cell =
+                        &buffer[(u16::try_from(column).unwrap(), u16::try_from(row).unwrap())];
+                    assert_eq!(cell.fg, ratatui::style::Color::Reset);
+                    assert!(!cell.modifier.contains(ratatui::style::Modifier::BOLD));
+                }
             }
             for label in [
                 "User",
@@ -359,7 +360,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         text
     };
     let fresh = screen(&mut view, "unfolded");
-    assert!(fresh.contains("╭   Injection"), "{fresh}");
+    assert!(fresh.contains("▸  Injection"), "{fresh}");
     assert_eq!(fresh.matches("[cot]").count(), 2);
     assert!(!fresh.contains("Thought") && !fresh.contains("Considering the failure"));
     // Reasoning belongs to its response, not the tool it called. Opening it must not
@@ -796,7 +797,7 @@ fn steps_fold_under_one_header_with_their_figures() {
                         u16::try_from(row).unwrap()
                     )]
                         .fg,
-                    Bracket::Call.color()
+                    crate::warpaint::Bracket::Call.color()
                 );
                 assert!(
                     view.current_layout(&cells, 0)

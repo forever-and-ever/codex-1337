@@ -3,39 +3,39 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "examples.join(\"\\n\\n\")"
 ---
 unknown
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        ┏   Command (tool) · no output
-        ┗   [in]             [out]
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+            Command (tool) · no output
+            [in]             [out]
+              • Completed `/root/worker`
 
 positive
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        ┏   Command (tool) · no output                     3
-        ┗   [in]             [out]
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+            Command (tool) · no output                     3
+            [in]             [out]
+              • Completed `/root/worker`
 
 zero
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+              • Completed `/root/worker`
 
 completed
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+              • Completed `/root/worker`
 
 failed
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        ┏   Command (exec)                                 0
-        ┗   [in]             [out]
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+            Command (exec)                                 0
+            [in]             [out]
+              • Completed `/root/worker`
 
 media
-        [   Command    [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        ┏   Command (exec)                                 0
-        ┗   [in]             [out]
-        (     • Completed `/root/worker`
+            Command    [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+            Command (exec)                                 0
+            [in]             [out]
+              • Completed `/root/worker`

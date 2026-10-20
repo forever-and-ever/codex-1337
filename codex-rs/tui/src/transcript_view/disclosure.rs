@@ -144,27 +144,7 @@ impl TranscriptView {
             }
             _ => crate::render::disclosure::style(true),
         };
-        if let Some((control_row, words)) = layout.bracket_focus(target) {
-            // A bracket's fold keeps its paint: focus only underlines the glyph and its words.
-            if control_row == row {
-                let underline = ratatui::style::Style::default()
-                    .add_modifier(ratatui::style::Modifier::UNDERLINED);
-                let glyph = crate::transcript_geometry::CONTROL_COLUMN;
-                buf.set_style(
-                    Rect::new(area.x + glyph, area.y, 1, /*height*/ 1),
-                    underline,
-                );
-                buf.set_style(
-                    Rect::new(
-                        area.x + words.start,
-                        area.y,
-                        words.end - words.start,
-                        /*height*/ 1,
-                    ),
-                    underline,
-                );
-            }
-        } else if let Some((control_row, columns, _)) = layout.fold_position(target)
+        if let Some((control_row, columns, _)) = layout.fold_position(target)
             && control_row == row
         {
             buf.set_style(

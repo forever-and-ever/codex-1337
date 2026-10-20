@@ -6,7 +6,7 @@ Fmt
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 14 },
     content: [
-        "        [   Command (tool)             [in]             [out [raw] [fmt]]  123  ",
+        "            Command (tool)             [in]             [out [raw] [fmt]]  123  ",
         "        ╭     {                                                                 ",
         "        ┊       "a": 9007199254740993123456789,                                 ",
         "        ┊       "a": 1.2300e+04,                                                ",
@@ -23,8 +23,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
@@ -65,7 +63,7 @@ Raw
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 14 },
     content: [
-        "        [   Command (tool)             [in]             [out [raw] [fmt]]  123  ",
+        "            Command (tool)             [in]             [out [raw] [fmt]]  123  ",
         "        ╭     {"a":9007199254740993123456789,"a":1.2300e+04,"text":"first\nsecon",
         "        ┊     d\tend","literal":"\\n","key\n":"\u0061"}                         ",
         "        ┊     prefix {"embedded":true}                                          ",
@@ -82,8 +80,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
@@ -111,7 +107,7 @@ Fmt
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 14 },
     content: [
-        "        [   Command (tool)             [in]             [out [raw] [fmt]]  123  ",
+        "            Command (tool)             [in]             [out [raw] [fmt]]  123  ",
         "        ╭     {                                                                 ",
         "        ┊       "a": 9007199254740993123456789,                                 ",
         "        ┊       "a": 1.2300e+04,                                                ",
@@ -128,8 +124,6 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
         x: 26, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 40, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
@@ -210,16 +204,10 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
         x: 25, y: 0, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 1, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 13, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: DIM,
         x: 15, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 2, fg: Indexed(108), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 2, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 13, y: 2, fg: Indexed(79), bg: Reset, underline: Reset, modifier: UNDERLINED,
         x: 16, y: 2, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 17, y: 2, fg: Indexed(79), bg: Reset, underline: Reset, modifier: UNDERLINED,
@@ -234,12 +222,6 @@ Buffer {
         x: 8, y: 6, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
         x: 9, y: 6, fg: Cyan, bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 7, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 7, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 7, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 8, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 8, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 9, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 9, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 10, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
@@ -304,8 +286,8 @@ definitions folded
 Buffer {
     area: Rect { x: 0, y: 0, width: 64, height: 6 },
     content: [
-        "        ╭   Injection · Additional tools                     ≈44",
-        "        ├     Raw Context                                       ",
+        "         ▾  Injection · Additional tools                     ≈44",
+        "         ▸    Raw Context                                       ",
         "                                                                ",
         "                                                                ",
         "                                                                ",
@@ -313,15 +295,15 @@ Buffer {
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD | UNDERLINED,
-        x: 21, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM | UNDERLINED,
-        x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 58, y: 0, fg: Indexed(66), bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 12, y: 0, fg: Indexed(78), bg: Reset, underline: Reset, modifier: BOLD,
+        x: 21, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: DIM,
+        x: 24, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 58, y: 0, fg: Indexed(66), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 11, y: 1, fg: Indexed(64), bg: Reset, underline: Reset, modifier: NONE,
         x: 0, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

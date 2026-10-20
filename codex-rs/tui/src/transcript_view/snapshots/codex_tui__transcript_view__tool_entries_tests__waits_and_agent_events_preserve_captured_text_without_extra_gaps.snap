@@ -2,26 +2,26 @@
 source: tui/src/transcript_view/tool_entries_tests.rs
 expression: rendered
 ---
-        (     Before tools
+              Before tools
 
-        [   Command                 [in [raw] [fmt]] [out]
-        [     • Started `/root/worker`
-        [   Command (exec)          [in]             [out]              47
-        [   Command (exec)          [in]             [out]              18
-        [   Command                 [in [raw] [fmt]] [out]
-        [     • Interacted with `/root/worker`
-        [   Command (wait)          [in]             [out]              18
-        [   Command (wait)          [in]             [out]              47
-        [   Command (exec)          [in]             [out]              47
-        [   Command                 [in [raw] [fmt]] [out]
-        [     • Interrupted `/root/worker`
-        [   Command (wait)          [in]             [out]              13
-        [   Command (wait)          [in]             [out]              13
-        [   Command (exec)          [in]             [out]              4
-        [   Command (wait)          [in]             [out]              7
-        [   Command (exec)          [in]             [out]              14
-        [   Command (exec)          [in]             [out]              7
-        (     • Completed `/root/worker`
-        [   Command (exec)          [in]             [out]
+            Command                 [in [raw] [fmt]] [out]
+              • Started `/root/worker`
+            Command (exec)          [in]             [out]              47
+            Command (exec)          [in]             [out]              18
+            Command                 [in [raw] [fmt]] [out]
+              • Interacted with `/root/worker`
+            Command (wait)          [in]             [out]              18
+            Command (wait)          [in]             [out]              47
+            Command (exec)          [in]             [out]              47
+            Command                 [in [raw] [fmt]] [out]
+              • Interrupted `/root/worker`
+            Command (wait)          [in]             [out]              13
+            Command (wait)          [in]             [out]              13
+            Command (exec)          [in]             [out]              4
+            Command (wait)          [in]             [out]              7
+            Command (exec)          [in]             [out]              14
+            Command (exec)          [in]             [out]              7
+              • Completed `/root/worker`
+            Command (exec)          [in]             [out]
 
-        (     After tools
+              After tools

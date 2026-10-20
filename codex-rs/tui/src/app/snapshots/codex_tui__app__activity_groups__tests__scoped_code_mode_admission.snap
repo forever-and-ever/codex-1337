@@ -3,19 +3,19 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "examples.join(\"\\n\\n\")"
 ---
 Held reading
-        ┗     Read child-a.rs (whole file)
-        ┏   Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
-        ┗     • MCP Inspect child-b
+              Read child-a.rs (whole file)
+         ▾  Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
+              • MCP Inspect child-b
 
 Return to live
         [   Before script
 
-        ┏   Code Mode (ρξωζ)                     [in [raw] [fmt]] [out]                 10
-        ┗     Read child-a.rs (whole file)
-        ┏   Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
-        ┗     • MCP Inspect child-b
-        ┏     • Command
-        ┗         Waited for ρξωζ
+         ▾  Code Mode (ρξωζ)                     [in [raw] [fmt]] [out]                 10
+              Read child-a.rs (whole file)
+         ▾  Code Mode (βεθε) · running           [in [raw] [fmt]] [out]
+              • MCP Inspect child-b
+         ▸    • Command
+                  Waited for ρξωζ
 
 Terminal interactions
 ↳ Interacted with background terminal · cat child-a.rs

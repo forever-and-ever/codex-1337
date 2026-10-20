@@ -665,10 +665,7 @@ impl TranscriptView {
                         width,
                     ));
                 }
-                layout.with_bracket(
-                    super::brackets::of_cell(cell.as_ref())
-                        .filter(|_| mode == HistoryRenderMode::Rich),
-                )
+                layout.with_brackets(mode == HistoryRenderMode::Rich)
             };
             if let Some(snapshot) = snapshot {
                 Box::new(move || render(&snapshot.restore()))

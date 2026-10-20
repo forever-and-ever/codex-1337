@@ -654,7 +654,6 @@ impl Invocations {
                 .collect(),
             fold: None,
             controls,
-            speaker: call.caller(),
         }
     }
 
@@ -678,26 +677,31 @@ impl Invocations {
         let mut parts = ActivityParts::default();
         if ports.input.visible() {
             parts = if ports.input.mode() == OutputMode::Fmt {
+                // The client's projection of the call, which the model never saw as such.
                 prepared
                     .input(call, input, width, true)
                     .1
                     .map(|input| input.paint())
             } else {
-                prepared.raw_input(call, input).map(|lines| ActivityParts {
-                    lines,
-                    ..Default::default()
+                prepared.raw_input(call, input).map(|mut lines| {
+                    crate::history_cell::output_provenance::hang(&mut lines, call.caller());
+                    ActivityParts {
+                        lines,
+                        ..Default::default()
+                    }
                 })
             }
             .unwrap_or_else(|| ActivityParts {
                 lines: vec![client_notice("Exact input is unavailable in this record")],
                 ..Default::default()
             });
-            crate::history_cell::output_provenance::hang(&mut parts.lines, call.caller());
         }
         if ports.output.visible() {
-            parts
-                .lines
-                .extend(prepared.output(call, width, ports.output.mode()));
+            let output = prepared.output(call, width, ports.output.mode());
+            if !parts.lines.is_empty() && !output.is_empty() {
+                parts.lines.push(client_notice(""));
+            }
+            parts.lines.extend(output);
         }
         parts
     }
@@ -831,7 +835,7 @@ impl Invocations {
             lines.extend(crate::transcript_geometry::rich_lines(auxiliary));
         }
         let mut layout = TextLayout::with_invocation_rows(lines, width, controls)
-            .with_bracket(super::brackets::of_cell(cell));
+            .with_brackets(/*brackets*/ true);
         for part in parts {
             layout = layout.with_part_control(part);
         }

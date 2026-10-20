@@ -5,22 +5,16 @@ expression: "format!(\"{buffer:?}\")"
 Buffer {
     area: Rect { x: 0, y: 0, width: 50, height: 8 },
     content: [
-        "        (     joined computer actions             ",
+        "              joined computer actions             ",
         "                                                  ",
-        "        (     latest answer                       ",
+        "              latest answer                       ",
         "                                                  ",
-        "        (     new committed answer                ",
+        "              new committed answer                ",
         "                                                  ",
         "              stream after page                   ",
         "                                                  ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 2, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 2, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 4, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 4, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }

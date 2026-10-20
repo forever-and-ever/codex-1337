@@ -2,8 +2,7 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use unicode_width::UnicodeWidthStr;
 
-/// A live row's disclosure: the transcript draws its folds in its brackets, the live list in a
-/// triangle that points at what it shows, centered in the control's columns.
+/// A disclosure's triangle, pointing at what it shows, centered in the control's columns.
 pub(crate) fn glyph(expanded: bool) -> &'static str {
     if expanded { " ▾ " } else { " ▸ " }
 }

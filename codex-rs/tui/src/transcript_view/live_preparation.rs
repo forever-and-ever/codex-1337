@@ -112,23 +112,6 @@ impl OwnedLiveTail {
         tokens: &tool_output_tokens::ToolOutputTokens,
         search: bool,
     ) -> TextLayout {
-        self.lay_out(key, expanded, invocations, tokens, search)
-            .with_bracket(
-                self.active
-                    .as_deref()
-                    .and_then(super::brackets::of_cell)
-                    .filter(|_| key.mode == HistoryRenderMode::Rich),
-            )
-    }
-
-    fn lay_out(
-        &self,
-        key: &Key,
-        expanded: bool,
-        invocations: &invocation::Invocations,
-        tokens: &tool_output_tokens::ToolOutputTokens,
-        search: bool,
-    ) -> TextLayout {
         let width = key.width;
         let columns = if self
             .active

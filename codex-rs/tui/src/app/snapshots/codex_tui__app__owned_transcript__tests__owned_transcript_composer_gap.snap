@@ -5,9 +5,9 @@ expression: "snapshots.join(\"\\n\\n\")"
 Latest
 
 ────────────────────────────────────────────────────────────────────────────────
-        ┊     Transcript row 38
-        ┊     Transcript row 39
-        ╰     Transcript row 40
+              Transcript row 38
+              Transcript row 39
+              Transcript row 40
 ────────────────────────────────────────────────────────────────────────────────
 
 
@@ -19,9 +19,9 @@ Latest
 Reading
   esc latest
 ────────────────────────────────────────────────────────────────────────────────
-        ┊     Transcript row 36
-        ┊     Transcript row 37
-        ┊     Transcript row 38
+              Transcript row 36
+              Transcript row 37
+              Transcript row 38
 ────────────────────────────────────────────────────────────────────────────────
                              ↓ Back to bottom · esc
 
@@ -32,8 +32,8 @@ Reading
 
 Resized multiline composer
   esc latest
-        ┊     Transcript row 36
-        ┊     Transcript row 37
+              Transcript row 36
+              Transcript row 37
 ────────────────────────────────────────
          ↓ Back to bottom · esc
 
@@ -54,7 +54,7 @@ Tiny terminal
 Detailed
 
 ────────────────────────────────────────────────────────────────────────────────
-        [     • Viewed image assets/detail-image.png
+              • Viewed image assets/detail-image.png
 
 
 ────────────────────────────────────────────────────────────────────────────────

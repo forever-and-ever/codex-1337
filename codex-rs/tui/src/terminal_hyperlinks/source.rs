@@ -23,8 +23,8 @@ pub(crate) enum LineWrapPolicy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LogicalLineSource {
     pub(crate) output_provenance: crate::history_cell::output_provenance::OutputProvenance,
-    /// The speaker whose bracket the line hangs from where its producer names one; otherwise its
-    /// provenance or its block decides.
+    /// The speaker whose bracket the line hangs from: set only on words the model's context holds,
+    /// never on the client's own.
     pub(crate) bracket: Option<crate::warpaint::Bracket>,
     pub(crate) text: Arc<str>,
     pub(crate) copy: Option<Arc<crate::markdown_copy::CopyLine>>,

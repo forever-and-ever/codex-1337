@@ -6,28 +6,24 @@ awaiting measurement
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        ╭     Activity summary  ",
+        "         ▸    Activity summary  ",
         "                                ",
         "                                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 collapsed
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        ╭     Activity summary  ",
+        "         ▸    Activity summary  ",
         "                                ",
         "                                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 20 columns: <composer hints>
@@ -37,16 +33,14 @@ focused
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        ╭     Activity summary  ",
+        "         ▸    Activity summary  ",
         "                                ",
         "                                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 30, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 focused, 20 columns: esc back
@@ -56,18 +50,14 @@ expanded
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        ╭     Activity summary  ",
-        "        ╰     Hidden details    ",
+        "         ▾    Activity summary  ",
+        "              Hidden details    ",
         "                                ",
     ],
     styles: [
         x: 0, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 0, fg: Indexed(111), bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 9, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 14, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
-        x: 30, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
-        x: 8, y: 1, fg: Indexed(111), bg: Reset, underline: Reset, modifier: NONE,
-        x: 9, y: 1, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
+        x: 8, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: UNDERLINED,
+        x: 11, y: 0, fg: Reset, bg: Reset, underline: Reset, modifier: NONE,
     ]
 }
 "ctrl-x t": <composer hints>

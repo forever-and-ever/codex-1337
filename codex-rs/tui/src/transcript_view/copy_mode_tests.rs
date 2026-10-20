@@ -78,12 +78,12 @@ fn navigate_copy_resize_and_exit() {
     );
     insta::assert_snapshot!(text(&buffer), @"
     ╭   User text > user quote ``` user code…
-    ║
-    ║       Latest plan
-    ║
-    ║       > assistant quote
-    ║
-    ╙       assistant code
+
+            Latest plan
+
+            > assistant quote
+
+            assistant code
     ");
     insta::assert_snapshot!(
         view.footer_with_navigation(/*width*/ 50, crate::motion::MotionMode::Reduced, "")

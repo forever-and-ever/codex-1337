@@ -69,19 +69,17 @@ pub(super) struct TextLayout {
     heading: HeadingDecorations,
     output_mode: Option<OutputMode>,
     feed_header: Option<HeaderRows>,
-    /// The bracket a rich entry hangs in its gutter, which its rows hang from until a line names
-    /// another speaker; none for an entry that hangs none.
-    bracket: Option<crate::warpaint::Bracket>,
+    /// Whether the rows hang their speakers' brackets: a rich entry lays its words beside a gutter
+    /// for them, a raw entry has none.
+    brackets: bool,
 }
 
-/// A Feed Item's synthetic header rows: its fold on the first, the controls their text draws, and
-/// the speaker their title names, whom they hang from.
+/// A Feed Item's synthetic header rows: its fold on the first, and a control their text draws.
 #[derive(Clone)]
 pub(super) struct HeaderRows {
     pub(super) lines: Vec<HyperlinkLine>,
     pub(super) fold: Option<(FoldTarget, bool)>,
     pub(super) controls: Vec<HeaderControl>,
-    pub(super) speaker: crate::warpaint::Bracket,
 }
 
 /// A control drawn in a header row's own text.
@@ -123,12 +121,9 @@ enum DisclosurePlacement {
     },
     Leading {
         line: usize,
-        expanded: bool,
     },
     /// A Feed Item's fold, after the clock on its header row.
-    Fold {
-        expanded: bool,
-    },
+    Fold,
     Output {
         start: usize,
         end: usize,
@@ -262,11 +257,13 @@ impl TextLayout {
                     control.label.clone(),
                     control.source_offset.saturating_sub(prefix),
                 ),
-                DisclosurePlacement::Leading { line, expanded } => {
-                    layout.with_leading_disclosure_on_line(expanded, line, control.target.clone())
-                }
+                DisclosurePlacement::Leading { line } => layout.with_leading_disclosure_on_line(
+                    control.label.clone(),
+                    line,
+                    control.target.clone(),
+                ),
                 // The header row is synthetic and returns with its line below.
-                DisclosurePlacement::Fold { .. } | DisclosurePlacement::Inline { .. } => layout,
+                DisclosurePlacement::Fold | DisclosurePlacement::Inline { .. } => layout,
                 DisclosurePlacement::Output { start, end } => {
                     if let FoldTarget::OutputMode(mode) = control.target {
                         layout.with_output_target(
@@ -282,7 +279,7 @@ impl TextLayout {
             };
         }
         layout.output_mode = self.output_mode;
-        layout.bracket = self.bracket;
+        layout.brackets = self.brackets;
         if let Some(rows) = &self.feed_header {
             layout = layout.with_fold_header(rows.clone());
         }
@@ -320,9 +317,6 @@ impl TextLayout {
             Line::from(format!("{}{label}", " ".repeat(indent))).dim(),
             usize::from(self.width),
         );
-        let hang = control_row
-            .checked_sub(1)
-            .map_or(Hang::Block, |row| self.rows[row].hang);
         self.rows.insert(
             control_row,
             TextRow {
@@ -335,7 +329,7 @@ impl TextLayout {
                 prefix_columns: indent,
                 tabs: tabs::TabStops::default(),
                 inline_decoration: None,
-                hang,
+                hang: Hang::Outside,
             },
         );
         self.disclosure = true;
@@ -451,7 +445,7 @@ impl TextLayout {
                 row.first_column as u16
                     ..line_width(&row.line.line).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold { .. } => {
+            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold => {
                 crate::transcript_geometry::CONTROL_COLUMN.min(self.width)
                     ..(crate::transcript_geometry::CONTROL_COLUMN
                         + crate::transcript_geometry::CONTROL_COLUMNS)
@@ -507,11 +501,21 @@ impl TextLayout {
                 }
             }
             for control in self.disclosure_controls.iter().filter(|control| {
-                matches!(control.placement, DisclosurePlacement::Output { .. })
-                    && control.row == start_row + usize::from(screen_row)
+                matches!(
+                    control.placement,
+                    DisclosurePlacement::Leading { .. }
+                        | DisclosurePlacement::Fold
+                        | DisclosurePlacement::Output { .. }
+                ) && control.row == start_row + usize::from(screen_row)
             }) {
                 let columns = self.control_columns(control);
-                let mut label = Line::from(control.label.as_str()).style(Style::default().dim());
+                let mut label = Line::from(control.label.as_str()).style(
+                    if matches!(control.target, FoldTarget::OutputMode(_)) {
+                        Style::default().dim()
+                    } else {
+                        crate::render::disclosure::style(false)
+                    },
+                );
                 if let FoldTarget::OutputMode(mode) = control.target
                     && self.output_mode == Some(mode)
                 {
@@ -744,9 +748,7 @@ impl TextLayout {
         let mut text = String::new();
         let mut rows = Vec::new();
         let mut source_seen = false;
-        let mut hang = Hang::Block;
         for (index, line) in logical.iter().enumerate() {
-            hang = hang.after(&line.origin);
             if !line.is_decoration() {
                 if source_seen {
                     text.push('\n');
@@ -784,7 +786,7 @@ impl TextLayout {
                     width,
                     index,
                     preserve_indent,
-                    hang,
+                    Hang::of(&line.origin),
                 ));
             }
             if let Some(row) = rows.last_mut() {
@@ -803,7 +805,7 @@ impl TextLayout {
             output_mode: None,
             heading: HeadingDecorations::default(),
             feed_header: None,
-            bracket: None,
+            brackets: false,
         }
     }
 }

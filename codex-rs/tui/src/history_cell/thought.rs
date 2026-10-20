@@ -86,6 +86,7 @@ impl HistoryCell for ThoughtCell {
                 Some(&self.cwd),
             );
             mark_lines(&mut lines, OutputProvenance::Reasoning);
+            super::output_provenance::hang(&mut lines, crate::warpaint::Bracket::Reasoning);
             lines
         })
     }

@@ -58,10 +58,6 @@ impl ExecCell {
                     {
                         let mut detail = HyperlinkLine::from(unwrapped);
                         mark_lines(std::slice::from_mut(&mut detail), provenance);
-                        crate::history_cell::output_provenance::hang(
-                            std::slice::from_mut(&mut detail),
-                            crate::warpaint::Bracket::Harness,
-                        );
                         lines.extend(adaptive_wrap_hyperlink_lines(&[detail], wrap_opts.clone()));
                     }
                 }

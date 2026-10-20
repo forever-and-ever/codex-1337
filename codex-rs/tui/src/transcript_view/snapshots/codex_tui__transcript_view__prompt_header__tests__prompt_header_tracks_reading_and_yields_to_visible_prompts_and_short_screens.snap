@@ -4,33 +4,33 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 Latest
         ╭   Second café ques…
-        ┊     seven
-        ┊     eight
-        ┊     nine
-        ╰     ten
+              seven
+              eight
+              nine
+              ten
 
 Earlier answer
         ╭   First question
-        ╭     one
-        ┊     two
-        ┊     three
-        ┊     four
+              one
+              two
+              three
+              four
 
 After prepend
         ╭   First question
-        ╭     one
-        ┊     two
-        ┊     three
-        ┊     four
+              one
+              two
+              three
+              four
 
 Prompt visible
-        ╰   First question
+        (   First question
 
-        ╭     one
-        ┊     two
-        ┊     three
+              one
+              two
+              three
 
 Short screen
-        ┊     eight
-        ┊     nine
-        ╰     ten
+              eight
+              nine
+              ten

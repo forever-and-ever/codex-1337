@@ -3,117 +3,117 @@ source: tui/src/transcript_view/tool_entries_tests.rs
 expression: "snapshots.join(\"\\n\\n\").replace(&clock, \"14:17\")"
 ---
 width=64
-        ╭   User
-        ╰   Review the layout
+         ▾  User
+        (   Review the layout
 
-  14:17 ╭     • Activity Reviewing layout
-        ┊
-        ╰       More text
+  14:17       • Activity Reviewing layout
 
-  14:17 ┏   Command    [in]             [out]
-        ┇   Command    [in]             [out]
-        ┇   Command    [in]             [out]
-        ┇   Command (exec)                                 128
-        ┗   [in]             [out]
-        ┏   Command    [in]             [out]
-        ┇     • Edited
-        ┣         foo.rs (+1, -0)
-        ┏   Command    [in]             [out]
-        ┇     • Edited
-        ┣         bar.rs (+1, -0)
+                More text
 
-  14:17 ╓   Response
-        ║   The layout keeps prose, code, and tools aligned.
+  14:17     Command    [in]             [out]
+            Command    [in]             [out]
+            Command    [in]             [out]
+            Command (exec)                                 128
+            [in]             [out]
+            Command    [in]             [out]
+              • Edited
+         ▸        foo.rs (+1, -0)
+            Command    [in]             [out]
+              • Edited
+         ▸        bar.rs (+1, -0)
+
+  14:17  ▾  Response
+        ╓   The layout keeps prose, code, and tools aligned.
         ║
         ╙     source_indent();
 
 expanded width=64
-        ╭   User
-        ╰   Review the layout
+         ▾  User
+        (   Review the layout
 
-  14:17 ╭     • Activity Reviewing layout
-        ┊
-        ╰       More text
+  14:17       • Activity Reviewing layout
 
-  14:17 ┏   Command    [in [raw] [fmt]] [out]
-        ┇     Stored execution · exact input unavailable
-        ┇     poll foo
-        ┇   Command    [in]             [out]
-        ┇   Command    [in]             [out]
-        ┇   Command (exec)                                 128
-        ┗   [in]             [out]
-        ┏   Command    [in]             [out]
-        ┇     • Edited
-        ┣         foo.rs (+1, -0)
-        ┏   Command    [in]             [out]
-        ┇     • Edited
-        ┣         bar.rs (+1, -0)
+                More text
 
-  14:17 ╓   Response
-        ║   The layout keeps prose, code, and tools aligned.
+  14:17     Command    [in [raw] [fmt]] [out]
+              Stored execution · exact input unavailable
+              poll foo
+            Command    [in]             [out]
+            Command    [in]             [out]
+            Command (exec)                                 128
+            [in]             [out]
+            Command    [in]             [out]
+              • Edited
+         ▸        foo.rs (+1, -0)
+            Command    [in]             [out]
+              • Edited
+         ▸        bar.rs (+1, -0)
+
+  14:17  ▾  Response
+        ╓   The layout keeps prose, code, and tools aligned.
         ║
         ╙     source_indent();
 
 detailed width=64
         (   Review the layout
 
-  14:17 ╭     • Activity Reviewing layout
-        ┊
-        ╰       More text
+  14:17       • Activity Reviewing layout
 
-  14:17 ╭  128    $ poll foo
-        ┊
-        ┊     • Command
-        ┊         $ cat foo.rs
-        ┊
-        ┊     • MCP tools.inspect()
-        ┊
-        ╰         combined result
-        ┏     • Edited
-        ┇         foo.rs (+1, -0)
-        ┗         1 +new line
-        ┏     • Edited
-        ┇         bar.rs (+1, -0)
-        ┗         1 +new line
+                More text
+
+  14:17    128    $ poll foo
+
+              • Command
+                  $ cat foo.rs
+
+              • MCP tools.inspect()
+
+                  combined result
+              • Edited
+                  foo.rs (+1, -0)
+                  1 +new line
+              • Edited
+                  bar.rs (+1, -0)
+                  1 +new line
 
   14:17 ╓   The layout keeps prose, code, and tools aligned.
         ║
         ╙     source_indent();
 
 width=32
-        ╭   User
-        ╰   Review the layout
+         ▾  User
+        (   Review the layout
 
-  14:17 ╭     • Activity
-        ┊       Reviewing layout
-        ┊
-        ╰       More text
+  14:17       • Activity
+                Reviewing layout
 
-  14:17 ┏   Command
-        ┇   [in]
-        ┇   [out]
-        ┇   Command
-        ┇   [in]
-        ┇   [out]
-        ┇   Command
-        ┇   [in]
-        ┇   [out]
-        ┇   Command (exe…  128
-        ┇   [in]
-        ┗   [out]
-        ┏   Command
-        ┇   [in]
-        ┇   [out]
-        ┇     • Edited
-        ┣         foo.… (+1, -0)
-        ┏   Command
-        ┇   [in]
-        ┇   [out]
-        ┇     • Edited
-        ┣         bar.… (+1, -0)
+                More text
 
-  14:17 ╓   Response
-        ║   The layout keeps
+  14:17     Command
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+            Command (exe…  128
+            [in]
+            [out]
+            Command
+            [in]
+            [out]
+              • Edited
+         ▸        foo.… (+1, -0)
+            Command
+            [in]
+            [out]
+              • Edited
+         ▸        bar.… (+1, -0)
+
+  14:17  ▾  Response
+        ╓   The layout keeps
         ║   prose, code, and
         ║   tools aligned.
         ║
@@ -122,27 +122,27 @@ width=32
 detailed width=32
         (   Review the layout
 
-  14:17 ╭     • Activity
-        ┊       Reviewing layout
-        ┊
-        ╰       More text
+  14:17       • Activity
+                Reviewing layout
 
-  14:17 ╭  128    $ poll foo
-        ┊
-        ┊     • Command
-        ┊         $ cat foo.rs
-        ┊
-        ┊     • MCP
-        ┊     tools.inspect()
-        ┊
-        ┊         combined
-        ╰         result
-        ┏     • Edited
-        ┇         foo.… (+1, -0)
-        ┗         1 +new line
-        ┏     • Edited
-        ┇         bar.… (+1, -0)
-        ┗         1 +new line
+                More text
+
+  14:17    128    $ poll foo
+
+              • Command
+                  $ cat foo.rs
+
+              • MCP
+              tools.inspect()
+
+                  combined
+                  result
+              • Edited
+                  foo.… (+1, -0)
+                  1 +new line
+              • Edited
+                  bar.… (+1, -0)
+                  1 +new line
 
   14:17 ╓   The layout keeps
         ║   prose, code, and

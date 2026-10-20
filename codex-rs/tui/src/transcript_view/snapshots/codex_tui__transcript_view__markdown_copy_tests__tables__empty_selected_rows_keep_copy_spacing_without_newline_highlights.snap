@@ -2,9 +2,9 @@
 source: tui/src/transcript_view/table_copy_tests.rs
 expression: "highlighted.join(\"\\n\")"
 ---
-        ╓   Response
+         ▾  Response
 
-        ║   Before
+        ╓   Before
             ^^^^^^^
         ║
 

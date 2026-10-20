@@ -142,8 +142,8 @@ fn page_join_merges_unseen_groups_while_an_unrelated_selection_is_held() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!(lines, @"
-    ╭     merged summary
-    ╰     changed preview
+    merged summary
+    changed preview
     ");
     assert_eq!(view.selected_text(&cells), selected);
 }

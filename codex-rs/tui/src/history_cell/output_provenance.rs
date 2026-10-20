@@ -80,9 +80,8 @@ pub(crate) fn captured_lines(
         OutputProvenance::Captured
     };
     mark_lines(&mut lines, provenance);
-    if provenance == OutputProvenance::Captured {
-        hang(&mut lines, author.bracket());
-    }
+    // Reflowed or escaped, the words are still the ones the model saw.
+    hang(&mut lines, author.bracket());
     if escaped.is_some() {
         lines.push(client_notice("Control characters escaped for display"));
     }
@@ -175,6 +174,7 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
     if any.is::<super::ThoughtCell>() {
         let mut lines = crate::terminal_hyperlinks::plain_hyperlink_lines(cell.raw_lines());
         mark_lines(&mut lines, OutputProvenance::Reasoning);
+        hang(&mut lines, Bracket::Reasoning);
         return lines;
     }
     let members = any
@@ -226,17 +226,6 @@ pub(crate) fn raw_cell_lines(cell: &dyn super::HistoryCell, width: u16) -> Vec<H
 }
 
 impl OutputProvenance {
-    /// The speaker a line of this provenance hangs from unless its producer names another. The
-    /// client's own words name none: they hang from whoever spoke before them.
-    pub(crate) fn bracket(self) -> Option<Bracket> {
-        match self {
-            Self::Reasoning => Some(Bracket::Reasoning),
-            Self::Captured | Self::Formatted | Self::Definitions(_) => Some(Bracket::Harness),
-            Self::ClientDiff => Some(Bracket::Call),
-            Self::Unspecified | Self::Client => None,
-        }
-    }
-
     fn style(self) -> Style {
         match self {
             Self::Unspecified
@@ -254,8 +243,8 @@ impl OutputProvenance {
     }
 }
 
-/// Hang `lines` from `bracket` whatever their block's own speaker. The words are that speaker's,
-/// so their bold is theirs too: bold words keep the page's ink rather than read as the client's
+/// Hang `lines` from `bracket`: they are words the model's context holds as that speaker's, and only
+/// words so marked hang a bracket. Their bold is the speaker's too: bold words keep the page's ink rather than read as the client's
 /// label.
 pub(crate) fn hang(lines: &mut [HyperlinkLine], bracket: Bracket) {
     fn ink(style: &mut Style, under: Style) {

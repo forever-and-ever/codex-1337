@@ -207,7 +207,7 @@ impl Session<'_> {
         self.click_at(column, row).await
     }
 
-    /// Clicks the fold on the row where `text` first starts: its bracket's stroke in the gutter.
+    /// Clicks the fold on the row where `text` first starts: its triangle in the control column.
     async fn open_fold(&mut self, text: &str) -> Result<()> {
         self.draw()?;
         let (_, row) = self.find(text);

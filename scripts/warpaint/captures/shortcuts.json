@@ -20,16 +20,13 @@
       {"text": "   cargo test fails on the parser branch. Find out why and fix it.                         ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
-      {"text": "        ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "┗", "fg": "bracket:call", "bg": "reset", "mods": []},
-      {"text": "         ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "                  ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "17 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": " }                                                                             ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "┏", "fg": "bracket:call", "bg": "reset", "mods": []},
-      {"text": "   ", "fg": "figure:ink", "bg": "reset", "mods": []},
+      {"text": "    ", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "Command (exec_command)", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "  [", "fg": "figure:ink", "bg": "reset", "mods": []},
       {"text": "in", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},
@@ -41,7 +38,7 @@
     ],
     [
       {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "┗", "fg": "bracket:call", "bg": "reset", "mods": []},
+      {"text": "[", "fg": "bracket:call", "bg": "reset", "mods": []},
       {"text": "     {\"cmd\":\"cargo test -p parser\"}                                                        ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
@@ -49,8 +46,7 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "┍", "fg": "bracket:message", "bg": "reset", "mods": []},
-      {"text": "   ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": " ▾  ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "Message", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": " from ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
       {"text": "reviewer                                      ", "fg": "reset", "bg": "reset", "mods": []},
@@ -59,7 +55,7 @@
     ],
     [
       {"text": "        ", "fg": "figure:ink", "bg": "reset", "mods": []},
-      {"text": "┕", "fg": "bracket:message", "bg": "reset", "mods": []},
+      {"text": "[", "fg": "bracket:message", "bg": "reset", "mods": []},
       {"text": "     Checked the binding powers against the grammar: only unary minus was out of order.    ", "fg": "figure:ink", "bg": "reset", "mods": []}
     ],
     [
@@ -67,14 +63,13 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "╓", "fg": "bracket:response", "bg": "reset", "mods": []},
-      {"text": "   ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": " ▾  ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "Response", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                                                ", "fg": "reset", "bg": "reset", "mods": []}
     ],
     [
       {"text": "        ", "fg": "reset", "bg": "reset", "mods": []},
-      {"text": "║", "fg": "bracket:response", "bg": "reset", "mods": []},
+      {"text": "╓", "fg": "bracket:response", "bg": "reset", "mods": []},
       {"text": "   ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "## Fixed: operator precedence", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                                           ", "fg": "reset", "bg": "reset", "mods": []}
@@ -287,8 +282,7 @@
     ],
     [
       {"text": "  09:41 ", "fg": "figure:ink_faint", "bg": "reset", "mods": []},
-      {"text": "[", "fg": "bracket:response", "bg": "reset", "mods": []},
-      {"text": "   ", "fg": "reset", "bg": "reset", "mods": []},
+      {"text": "    ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "Response", "fg": "figure:label", "bg": "reset", "mods": ["bold"]},
       {"text": "                                             ", "fg": "reset", "bg": "reset", "mods": []},
       {"text": "[cot]", "fg": "figure:tab", "bg": "reset", "mods": ["underline"]},

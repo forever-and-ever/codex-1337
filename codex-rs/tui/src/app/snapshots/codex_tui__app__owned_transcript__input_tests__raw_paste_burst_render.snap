@@ -5,7 +5,7 @@ expression: "format!(\"During paste:\\n{during_paste}\\n\\nAfter flush:\\n{}\", 
 During paste:
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
-        (     Before paste
+              Before paste
 
 
 
@@ -31,7 +31,7 @@ During paste:
 After flush:
 
 ────────────────────────────────────────────────────────────────────────────────
-        (     After paste
+              After paste
 
 
 

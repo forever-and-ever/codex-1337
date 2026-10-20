@@ -118,7 +118,10 @@ pub(super) fn activity_layout(
     )
     .with_header_tokens(lines.header_tokens, TokenSeat::Trailing);
     if has_details {
-        layout = layout.with_leading_disclosure_control(expanded, control_line);
+        layout = layout.with_leading_disclosure_control(
+            crate::render::disclosure::glyph(expanded).into(),
+            control_line,
+        );
     }
     for part in lines.controls {
         layout = layout.with_part_control(part);
@@ -276,11 +279,7 @@ impl TranscriptView {
     }
 
     /// The nearest earlier entry that draws anything.
-    pub(super) fn previous_visible(
-        &mut self,
-        cells: &[Arc<dyn HistoryCell>],
-        index: usize,
-    ) -> Option<usize> {
+    fn previous_visible(&mut self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Option<usize> {
         let mut candidate = index.min(cells.len());
         while let Some(previous) = candidate.checked_sub(/*rhs*/ 1) {
             candidate = previous;

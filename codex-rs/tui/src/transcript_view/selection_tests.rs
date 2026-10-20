@@ -451,7 +451,7 @@ fn live_selection_survives_commits_finalization_new_live_content_and_resize() {
     live(&mut view, &unrelated, /*revision*/ 2);
     insta::assert_snapshot!(render(&mut view, &cells, /*width*/ GUTTER_COLUMNS + 28, /*height*/ 4), @"
     [   first
-            tail selected
+    [       tail selected
     ");
     render(
         &mut view,
