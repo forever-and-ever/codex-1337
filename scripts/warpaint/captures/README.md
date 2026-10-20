@@ -20,7 +20,7 @@ a rerun is byte-identical.
 - `approval.json`: the agent asking to run the workspace's tests.
 
 A color is named as the binder resolves it, short of the pack: tokens by role (`ground:`,
-`figure:`, `syntax:`), upstream's named chrome colors by the role they stand for, dimmed ink
+`figure:`, `bracket:`, `syntax:`), upstream's named chrome colors by the role they stand for, dimmed ink
 as `figure:ink_faint`, bold default ink on a panel as `figure:label`, tool output as `terminal:<index>`, and `reset` for the page's ink and
 canvas. The exporter proves every cell's names against the real binder.
 

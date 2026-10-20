@@ -49,23 +49,24 @@ PAGE = """<!doctype html>
 def theme_variables(pack: Path | None) -> tuple[dict[str, str], str]:
     if pack is None:
         return {"darkMode": "true"}, "#0d0f11"
-    roles = tomllib.loads(pack.read_text())["roles"]
+    painted = tomllib.loads(pack.read_text())
+    ground, figure = painted["ground"], painted["figure"]
     return {
         "darkMode": "true",
-        "background": roles["canvas"],
-        "primaryColor": roles["dais"],
-        "primaryTextColor": roles["ink"],
-        "primaryBorderColor": roles["rule"],
-        "secondaryColor": roles["trough"],
-        "tertiaryColor": roles["trough"],
-        "lineColor": roles["accent_muted"],
-        "textColor": roles["ink_muted"],
-        "clusterBkg": roles["trough"],
-        "clusterBorder": roles["rule"],
-        "edgeLabelBackground": roles["canvas"],
+        "background": ground["canvas"],
+        "primaryColor": ground["dais"],
+        "primaryTextColor": figure["ink"],
+        "primaryBorderColor": figure["rule"],
+        "secondaryColor": ground["prompt"],
+        "tertiaryColor": ground["prompt"],
+        "lineColor": figure["tab"],
+        "textColor": figure["ink_muted"],
+        "clusterBkg": ground["prompt"],
+        "clusterBorder": figure["rule"],
+        "edgeLabelBackground": ground["canvas"],
         "fontFamily": "JetBrains Mono, monospace",
         "fontSize": "15px",
-    }, roles["canvas"]
+    }, ground["canvas"]
 
 
 def trim(image_path: Path, canvas: str) -> None:
