@@ -1588,7 +1588,7 @@
       "type": "object"
     },
     "EndpointSlug": {
-      "description": "An OpenRouter endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
+      "description": "An `OpenRouter` endpoint, `host[/variant][/region][/tier]`; a base slug names a host.",
       "type": "string"
     },
     "ExperimentalRequestUserInput": {
@@ -2500,7 +2500,7 @@
       "type": "object"
     },
     "KeyName": {
-      "description": "The name of an OpenRouter key; config maps it to the file holding the secret.",
+      "description": "The name of an `OpenRouter` key; config maps it to the file holding the secret.",
       "type": "string"
     },
     "KeybindingsSpec": {
