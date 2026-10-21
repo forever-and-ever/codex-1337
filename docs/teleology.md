@@ -479,12 +479,12 @@ During a merge, look up each conflicted path in the index at the end and resolve
 
 ### attention-gated-painting
 
-- Telos: an unwatched TUI spends no CPU on painting.
-- Holds: `PresentationMode` (`Normal`, `Reduced`, `Frozen`) follows X11 idle time and i3 visibility and focus (`DesktopAttention`); unknown visibility or focus never counts as hidden; `Reduced` and `Frozen` stop animation and title refresh; attention never suspends agent or server work; observer failure restores a usable UI.
-- Owners: `codex-rs/tui/src/tui/presentation.rs` (`DesktopAttention`), `codex-rs/tui/src/tui/desktop_attention.rs`, `codex-rs/tui/src/tui/frame_requester.rs` (`PresentationMode`), `codex-rs/tui/src/app/presentation.rs`.
-- Tripwire: `observer_freeze_retires_presentation_clocks_without_suspending_input` (`codex-rs/tui/src/app/tests.rs`), `reduced_presentation_keeps_status_readable_without_activity_animation` (`codex-rs/tui/src/status_indicator_widget/effects_tests.rs`).
+- Telos: an unwatched TUI spends no CPU on painting, and a watched one paints only what moves.
+- Holds: `PresentationMode` (`Normal`, `Peripheral`, `Reduced`, `Frozen`) follows X11 idle time and i3 visibility and focus (`DesktopAttention`); unknown visibility or focus never counts as hidden; a visible but unfocused window is `Peripheral`, where content coalesces and only the status row moves; `Reduced` and `Frozen` stop animation and title refresh; attention never suspends agent or server work; observer failure restores a usable UI. Animations share one beat (`libshimmer::TICK`), so concurrent motion shares its frames; motion answering input paints off the beat, and every animation outside the status row asks for its own frames. A full frame offers its status row when that row reaches the frame's end intact. While only that row moves, a glint repaints it over the cells beneath it and writes exactly what a full frame would for its rows (`Terminal::draw_patch`): on the beat in `Normal`, every third beat in `Peripheral`. A focused window still paints fully at least once a second; anything else owed takes a full frame (`Due`, `ScheduledPaint`).
+- Owners: `codex-rs/tui/src/tui/presentation.rs` (`DesktopAttention`, `ScheduledPaint`), `codex-rs/tui/src/tui/desktop_attention.rs`, `codex-rs/tui/src/tui/frame_requester.rs` (`PresentationMode`), `codex-rs/tui/src/tui/frame_requester/beat.rs` (`Due`), `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`, `codex-rs/tui/src/tui/glint.rs`, `codex-rs/tui/src/custom_terminal/patch.rs`, `codex-rs/tui/src/app/presentation.rs`.
+- Tripwire: `observer_freeze_retires_presentation_clocks_without_suspending_input` (`codex-rs/tui/src/app/tests.rs`), `reduced_presentation_keeps_status_readable_without_activity_animation` (`codex-rs/tui/src/status_indicator_widget/effects_tests.rs`), `animation_shares_the_beat_and_a_peripheral_window_keeps_only_the_glint` (`codex-rs/tui/src/tui/frame_requester.rs`), `a_patch_leaves_the_screen_a_full_frame_would` (`codex-rs/tui/src/custom_terminal/patch.rs`).
 - Pressure: none in 0.162 on the owners.
-- Evidence: 5247a0733e.
+- Evidence: 5247a0733e; owner decision, 2026-10-21.
 
 ### key-doctrine
 
@@ -633,9 +633,9 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/protocol/src/models.rs`: native-robustness
 - `codex-rs/rollout/src/policy.rs`: human-only-facts
 - `codex-rs/tui/src/app/startup.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/owned_transcript.rs`: fast-ui-thread, attention-gated-painting
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
-- `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint
+- `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint, attention-gated-painting
 - `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread
 - `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
@@ -650,7 +650,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/bottom_pane/chat_composer_history.rs`: key-doctrine
 - `codex-rs/tui/src/bottom_pane/request_user_input/mod.rs`: async-questions-never-auto-answered
 - `codex-rs/tui/src/chatwidget/interaction.rs`: key-doctrine
-- `codex-rs/tui/src/chatwidget.rs`: explicit-command-verbs
+- `codex-rs/tui/src/chatwidget.rs`: explicit-command-verbs, attention-gated-painting
 - `codex-rs/tui/src/chatwidget/slash_dispatch.rs`: explicit-command-verbs
 - `codex-rs/tui/src/goal_display.rs`: explicit-command-verbs
 - `codex-rs/tui/src/slash_command.rs`: explicit-command-verbs
@@ -683,7 +683,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/render/highlight.rs`: warpaint
 - `codex-rs/tui/src/render/mod.rs`: warpaint
 - `codex-rs/tui/src/theme_picker.rs`: warpaint
-- `codex-rs/tui/src/bottom_pane/mod.rs`: warpaint
+- `codex-rs/tui/src/bottom_pane/mod.rs`: warpaint, attention-gated-painting
 - `codex-rs/tui/src/bottom_pane/chat_composer/sparkle_field.rs`: warpaint
 - `codex-rs/tui/src/analytics/activity_chart/palette.rs`: warpaint
 - `codex-rs/tui/src/analytics/activity_chart/palette_tests.rs`: warpaint
@@ -703,13 +703,13 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/markdown_render.rs`: warpaint
 - `codex-rs/tui/src/markdown_render_tests.rs`: warpaint
 - `codex-rs/tui/src/resume_picker_color_tests.rs`: warpaint
-- `codex-rs/tui/src/app.rs`: warpaint
+- `codex-rs/tui/src/app.rs`: warpaint, attention-gated-painting
 
 - `codex-rs/tui/src/chatwidget/streaming.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view.rs`: fast-ui-thread
 - `codex-rs/tui/src/terminal_probe.rs`: fast-ui-thread, warpaint
 - `codex-rs/tui/src/tui/event_stream.rs`: fast-ui-thread
-- `codex-rs/tui/src/tui.rs`: fast-ui-thread, warpaint
+- `codex-rs/tui/src/tui.rs`: fast-ui-thread, warpaint, attention-gated-painting
 - `codex-rs/tui/src/transcript_view/layout_tests.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/input.rs`: fast-ui-thread
 - `codex-rs/tui/src/transcript_view/disclosure.rs`: fast-ui-thread
@@ -722,6 +722,9 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/history_cell/mcp.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/plans.rs`: fast-ui-thread
 - `codex-rs/tui/src/history_cell/notices.rs`: fast-ui-thread
+- `codex-rs/tui/src/status_indicator_widget.rs`: attention-gated-painting
+- `codex-rs/tui/src/pager_overlay.rs`: attention-gated-painting
+- `codex-rs/tui/src/pager_overlay/transcript.rs`: attention-gated-painting
 
 Fork-owned files, absent upstream:
 - `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: fast-ui-thread
@@ -771,7 +774,7 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/app/local_ui_requests.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/navigation_config.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/prompt_revert.rs`: fast-ui-thread
-- `codex-rs/tui/src/custom_terminal/output.rs`: fast-ui-thread
+- `codex-rs/tui/src/custom_terminal/output.rs`: fast-ui-thread, attention-gated-painting
 - `codex-rs/tui/src/transcript_view/presented.rs`: fast-ui-thread
 - `codex-rs/tui/src/live_work/presented.rs`: fast-ui-thread
 - `codex-rs/tui/src/streaming/background.rs`: fast-ui-thread, stable-feed-publication
@@ -884,6 +887,14 @@ Fork-owned files, absent upstream:
 - `codex-rs/tui/src/transcript_view/text_gutter.rs`: token-bills, fullscreen-only
 - `codex-rs/tui/src/tui/desktop_attention.rs`: attention-gated-painting
 - `codex-rs/tui/src/tui/presentation.rs`: attention-gated-painting
+- `codex-rs/tui/src/tui/glint.rs`: attention-gated-painting
+- `codex-rs/tui/src/tui/frame_requester/beat.rs`: attention-gated-painting
+- `codex-rs/tui/src/tui/frame_requester/paint_schedule.rs`: attention-gated-painting
+- `codex-rs/tui/src/custom_terminal/patch.rs`: attention-gated-painting
+- `codex-rs/tui/src/status_indicator_widget/glint.rs`: attention-gated-painting
+- `codex-rs/tui/src/bottom_pane/glint.rs`: attention-gated-painting
+- `codex-rs/tui/src/chatwidget/glint.rs`: attention-gated-painting
+- `codex-rs/tui/src/shimmers/live.rs`: attention-gated-painting
 - `codex-rs/utils/output-truncation/src/token_count.rs`: token-bills
 - `docs/fork.md`: provider-parity
 - `scripts/check_removed_capabilities.py`: no-terminal-pets, no-ide-context-capture, no-external-agent-import

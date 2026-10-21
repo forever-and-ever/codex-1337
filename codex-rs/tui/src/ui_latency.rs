@@ -58,7 +58,7 @@ stages! {
     Reconnect = 9, Timer = 10, KeyRouting = 11,
     FramePreparation = 13, FramePaint = 14, InvocationPreparation = 15,
     TerminalDiff = 16, TerminalWrite = 17, TerminalFlush = 18,
-    ReactionLatency = 20,
+    ReactionLatency = 20, GlintPaint = 21,
     }
     retired { PreKeyPaint = 12, RpcWait = 19 }
 }

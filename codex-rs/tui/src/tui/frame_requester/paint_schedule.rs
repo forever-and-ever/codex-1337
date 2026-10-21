@@ -1,19 +1,21 @@
-//! Content cadence is independent of completed-frame paint admission.
+//! Content cadence is independent of completed-frame paint admission; animation keeps the beat.
 
+use super::Due;
 use super::Duration;
 use super::FrameKind;
 use super::FrameRequest;
 use super::FrameScheduler;
 use super::Instant;
-use super::Ordering;
 use super::PresentationMode;
-use super::REDUCED_CONTENT_INTERVAL;
+use super::UNFOCUSED_CONTENT_INTERVAL;
+use super::beat::BEAT;
+use super::beat::next_beat;
 use super::scheduling_now;
 
 impl FrameScheduler {
     pub(super) async fn run_prepared(mut self) {
         const ONE_YEAR: Duration = Duration::from_hours(8760);
-        let mut deadlines: [Option<Instant>; 3] = [None; 3];
+        let mut deadlines: [Option<Instant>; 4] = [None; 4];
         loop {
             let target = deadlines
                 .iter()
@@ -52,22 +54,22 @@ impl FrameScheduler {
                             *deadline = None;
                         }
                     }
-                    let mode = self.mode.load(Ordering::Relaxed);
-                    if due[FrameKind::Maintenance as usize]
-                        || (mode != PresentationMode::Frozen as u8 && (
-                            due[FrameKind::Content as usize]
-                            || (mode == PresentationMode::Normal as u8
-                                && due[FrameKind::Cosmetic as usize])
-                        )) {
-                            // A preceding paint may have cleared dirty before delayed
-                            // content (for example a turn tip) became visible.
-                            if due[FrameKind::Content as usize] {
-                                self.dirty.store(true, Ordering::Relaxed);
-                            }
-                            if due[FrameKind::Content as usize] {
-                                self.last_content_at = Some(scheduling_now());
-                            }
-                            let _ = self.draw_tx.send(());
+                    let mode = self.mode();
+                    let mut owed = Due::NONE;
+                    if due[FrameKind::Content as usize] && mode != PresentationMode::Frozen {
+                        // A preceding paint may have paid content before delayed content (for
+                        // example a turn tip) became visible.
+                        owed = owed.with(Due::CONTENT);
+                        self.last_content_at = Some(now);
+                    }
+                    if due[FrameKind::Cosmetic as usize] && mode == PresentationMode::Normal {
+                        owed = owed.with(Due::COSMETIC);
+                    }
+                    if due[FrameKind::Glint as usize] && mode.glints() {
+                        owed = owed.with(Due::GLINT);
+                    }
+                    if owed != Due::NONE || due[FrameKind::Maintenance as usize] {
+                        self.emit(owed);
                     }
                 }
             }
@@ -76,42 +78,50 @@ impl FrameScheduler {
 
     pub(super) fn absorb_prepared(
         &mut self,
-        deadlines: &mut [Option<Instant>; 3],
+        deadlines: &mut [Option<Instant>; 4],
         request: FrameRequest,
     ) {
-        if matches!(request.kind, FrameKind::ModeChanged) {
-            // Every transition starts a new presentation epoch. In particular,
-            // Frozen may have been entered and left before this actor is polled.
-            deadlines[FrameKind::Cosmetic as usize] = None;
-            deadlines[FrameKind::Content as usize] = None;
-            self.last_content_at = None;
-            return;
-        }
-        if matches!(request.kind, FrameKind::Cosmetic)
-            && self.mode.load(Ordering::Relaxed) != PresentationMode::Normal as u8
-        {
-            return;
-        }
-        let draw_at = if matches!(request.kind, FrameKind::Content)
-            && self.mode.load(Ordering::Relaxed) == PresentationMode::Reduced as u8
-            && !request.interactive
-        {
-            self.last_content_at.map_or(request.at, |last| {
-                request.at.max(last + REDUCED_CONTENT_INTERVAL)
-            })
-        } else {
-            request.at
+        let mode = self.mode();
+        let draw_at = match request.kind {
+            FrameKind::ModeChanged => {
+                // Every transition starts a new presentation epoch. In particular,
+                // Frozen may have been entered and left before this actor is polled.
+                for kind in [FrameKind::Content, FrameKind::Cosmetic, FrameKind::Glint] {
+                    deadlines[kind as usize] = None;
+                }
+                self.last_content_at = None;
+                return;
+            }
+            FrameKind::Content if mode.throttles_content() && !request.interactive => {
+                self.last_content_at.map_or(request.at, |last| {
+                    request.at.max(last + UNFOCUSED_CONTENT_INTERVAL)
+                })
+            }
+            FrameKind::Content | FrameKind::Maintenance => request.at,
+            FrameKind::Cosmetic if mode != PresentationMode::Normal => return,
+            // Motion answering input paints at once; animations share the beat.
+            FrameKind::Cosmetic if request.interactive => request.at,
+            FrameKind::Cosmetic => next_beat(self.origin, BEAT, request.at),
+            FrameKind::Glint => match mode.glint_beat() {
+                Some(beat) => next_beat(self.origin, beat, request.at),
+                None => return,
+            },
         };
-        if matches!(request.kind, FrameKind::Content) {
-            if deadlines[FrameKind::Cosmetic as usize]
-                .is_some_and(|cosmetic| request.at <= cosmetic)
+        match request.kind {
+            // A content frame paints every animation due by then.
+            FrameKind::Content
+                if deadlines[FrameKind::Cosmetic as usize]
+                    .is_some_and(|cosmetic| request.at <= cosmetic) =>
             {
                 deadlines[FrameKind::Cosmetic as usize] = None;
             }
-        } else if matches!(request.kind, FrameKind::Cosmetic)
-            && deadlines[FrameKind::Content as usize].is_some_and(|content| content <= request.at)
-        {
-            return;
+            FrameKind::Cosmetic
+                if deadlines[FrameKind::Content as usize]
+                    .is_some_and(|content| content <= draw_at) =>
+            {
+                return;
+            }
+            _ => {}
         }
         let deadline = &mut deadlines[request.kind as usize];
         *deadline = Some(deadline.map_or(draw_at, |cur| cur.min(draw_at)));

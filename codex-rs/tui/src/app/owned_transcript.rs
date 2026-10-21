@@ -244,6 +244,7 @@ impl App {
         let mut blossom_tick = None;
         let mut transcript_bottom = available.saturating_sub(u16::from(composer_gap.is_none()));
         drop(preparation_stage);
+        let mut glint = None;
         tui.draw(screen_size.height, |frame| {
             chat_widget.rendered_selection.borrow_mut().areas.clear();
             ratatui::widgets::Clear.render(
@@ -421,9 +422,15 @@ impl App {
                 frame.set_cursor_style(cursor_style);
                 frame.set_cursor_position(position);
             }
+            glint = crate::tui::glint::settle(
+                frame.buffer,
+                rendered_cursor.map(ratatui::layout::Position::from),
+                cursor_style,
+            );
             view.capture_painted_frame();
             live_work.capture_painted_frame(composer_gap.is_some() && !work_hidden);
         })?;
+        tui.offer_glint(glint);
         if let Some((surface, tip)) = &turn_tip
             && tip.rendered.get().is_some()
         {
@@ -525,7 +532,7 @@ impl App {
         if matches!(event, TuiEvent::Draw) {
             if self.transcript_view.tick_selection(&cells) {
                 tui.frame_requester()
-                    .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
+                    .schedule_interactive_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
             }
             return Ok(false);
         }

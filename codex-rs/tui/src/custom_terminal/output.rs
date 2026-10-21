@@ -18,6 +18,7 @@ use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Position;
+use ratatui::layout::Rect;
 use ratatui::layout::Size;
 
 use super::Terminal;
@@ -39,6 +40,9 @@ impl Invalidation {
     pub(super) fn take(&mut self) -> bool {
         std::mem::take(&mut self.0)
     }
+    pub(super) fn is_marked(&self) -> bool {
+        self.0
+    }
 }
 
 struct Snapshot {
@@ -49,9 +53,19 @@ struct Snapshot {
     invalidate: bool,
 }
 
+/// Cells painted over the presented frame, which otherwise stands.
+struct Patch {
+    cells: Buffer,
+    screen: Size,
+    viewport: Rect,
+    cursor: Option<Position>,
+    style: SetCursorStyle,
+}
+
 enum Operation {
     Bytes(Vec<u8>),
     Frame(Snapshot),
+    Patch(Patch),
 }
 
 struct FrameJob {
@@ -63,6 +77,9 @@ struct FrameJob {
 enum Job {
     Control(Vec<u8>),
     Frame(FrameJob),
+    /// An update over the presented frame. Unlike a frame it keeps its place: a later frame
+    /// paints over it rather than replacing it.
+    Patch(Vec<Operation>),
     Barrier,
     Stop,
 }
@@ -344,6 +361,13 @@ impl CaptureGuard {
             .iter()
             .any(|op| matches!(op, Operation::Frame(_)))
         {
+            if operations
+                .iter()
+                .any(|op| matches!(op, Operation::Patch(_)))
+            {
+                enqueue(&self.shared, Job::Patch(operations))?;
+                return Ok(());
+            }
             let mut bytes = b"\x1b[?2026h".to_vec();
             for operation in operations {
                 if let Operation::Bytes(part) = operation {
@@ -444,6 +468,28 @@ pub(super) fn capture_frame(
             cursor,
             style,
             invalidate,
+        }));
+        true
+    })
+}
+
+pub(super) fn capture_patch(
+    cells: &Buffer,
+    screen: Size,
+    viewport: Rect,
+    cursor: Option<Position>,
+    style: SetCursorStyle,
+) -> bool {
+    CAPTURE.with_borrow_mut(|capture| {
+        let Some(capture) = capture else {
+            return false;
+        };
+        capture.operations.push(Operation::Patch(Patch {
+            cells: cells.clone(),
+            screen,
+            viewport,
+            cursor,
+            style,
         }));
         true
     })
@@ -654,19 +700,7 @@ fn write_snapshot<B: Backend<Error = io::Error> + Write>(
     let updates = super::diff_buffers(terminal.previous_buffer(), terminal.current_buffer());
     let diff_end = Instant::now();
     let write_start = diff_end;
-    if !updates.is_empty() && !terminal.hidden_cursor {
-        terminal.hide_cursor()?;
-    }
-    terminal.flush_updates(updates)?;
-    match snapshot.cursor {
-        None if !terminal.hidden_cursor => terminal.hide_cursor()?,
-        None => {}
-        Some(position) => {
-            terminal.set_cursor_style_with_repair(snapshot.style)?;
-            terminal.set_cursor_position(position)?;
-            terminal.show_cursor()?;
-        }
-    }
+    terminal.present(updates, snapshot.cursor, snapshot.style)?;
     terminal.swap_buffers();
     let write_end = Instant::now();
     Backend::flush(terminal.backend_mut())?;
@@ -676,6 +710,48 @@ fn write_snapshot<B: Backend<Error = io::Error> + Write>(
         (write_start, write_end),
         (write_end, flush_end),
     ])
+}
+
+fn write_patch<B: Backend<Error = io::Error> + Write>(
+    terminal: &mut Terminal<B>,
+    patch: &Patch,
+) -> io::Result<()> {
+    // A patch paints over the frame it was drawn against; any other screen awaits a full frame.
+    if terminal.viewport_area != patch.viewport || terminal.last_known_screen_size != patch.screen {
+        return Ok(());
+    }
+    // Control batches can change cursor state independently of the buffer.
+    terminal.invalidate_cursor_state();
+    terminal.paint_patch(&patch.cells, patch.cursor, patch.style)
+}
+
+/// Writes one synchronized update, with its frame's phases when it carried a frame.
+fn write_update<B: Backend<Error = io::Error> + Write>(
+    terminal: &mut Terminal<B>,
+    operations: Vec<Operation>,
+) -> io::Result<Option<[(Instant, Instant); 3]>> {
+    let mut phases = None;
+    let written = terminal
+        .backend_mut()
+        .write_all(b"\x1b[?2026h")
+        .and_then(|()| {
+            for operation in operations {
+                match operation {
+                    Operation::Bytes(bytes) => terminal.backend_mut().write_all(&bytes)?,
+                    Operation::Frame(snapshot) => {
+                        phases = Some(write_snapshot(terminal, snapshot)?);
+                    }
+                    Operation::Patch(patch) => write_patch(terminal, &patch)?,
+                }
+            }
+            Ok(())
+        });
+    // End synchronized output even after a failed update.
+    let ended = terminal
+        .backend_mut()
+        .write_all(b"\x1b[?2026l")
+        .and_then(|()| Write::flush(terminal.backend_mut()));
+    written.and(ended).map(|()| phases)
 }
 
 #[expect(
@@ -710,32 +786,12 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: &Shared, mut terminal: Ter
                 .write_all(&bytes)
                 .and_then(|()| Write::flush(terminal.backend_mut())),
             Job::Frame(frame) => {
-                let now = Instant::now();
-                let mut phases = [(now, now); 3];
-                let result = terminal
-                    .backend_mut()
-                    .write_all(b"\x1b[?2026h")
-                    .and_then(|()| {
-                        for operation in frame.operations {
-                            match operation {
-                                Operation::Bytes(bytes) => {
-                                    terminal.backend_mut().write_all(&bytes)?;
-                                }
-                                Operation::Frame(snapshot) => {
-                                    phases = write_snapshot(&mut terminal, snapshot)?;
-                                }
-                            }
-                        }
-                        Ok(())
-                    });
-                // End synchronized output even after a failed frame.
-                let ended = terminal
-                    .backend_mut()
-                    .write_all(b"\x1b[?2026l")
-                    .and_then(|()| Write::flush(terminal.backend_mut()));
+                let started = Instant::now();
+                let written = write_update(&mut terminal, frame.operations);
                 let ended_at = Instant::now();
-                phases[2].1 = ended_at;
-                if result.is_ok() && ended.is_ok() {
+                if let Ok(phases) = &written {
+                    let mut phases = phases.unwrap_or([(started, started); 3]);
+                    phases[2].1 = ended_at;
                     completion = Some(Completion {
                         id: frame.id,
                         stamp: frame.stamp,
@@ -743,8 +799,9 @@ fn run<B: Backend<Error = io::Error> + Write>(shared: &Shared, mut terminal: Ter
                         ended_at,
                     });
                 }
-                result.and(ended)
+                written.map(|_| ())
             }
+            Job::Patch(operations) => write_update(&mut terminal, operations).map(|_| ()),
             Job::Barrier | Job::Stop => Write::flush(terminal.backend_mut()),
         };
         let mut state = shared
@@ -927,7 +984,7 @@ mod tests {
                 .into_iter()
                 .filter_map(|operation| match operation {
                     Operation::Frame(frame) => Some(frame),
-                    Operation::Bytes(_) => None,
+                    Operation::Bytes(_) | Operation::Patch(_) => None,
                 });
             let snapshot = frames.next().expect("one frame");
             assert!(frames.next().is_none());

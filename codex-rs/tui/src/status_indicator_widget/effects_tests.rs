@@ -4,6 +4,7 @@ use super::*;
 use crate::app_event::AppEvent;
 use crate::terminal_palette::with_test_default_colors;
 use crate::terminal_probe::DefaultColors;
+use std::time::Duration;
 
 #[test]
 fn shimmer_and_progress_are_independent_and_obey_master_switch() {

@@ -70,6 +70,12 @@ qualified forms.
   work is everything else the transcript shows of it. Dialogue mode (Alt+W,
   `tui.keymap.global.toggle_dialogue`) hides the work in the main transcript; detailed and raw
   views always show it.
+- beat, glint, peripheral: the beat is the clock every TUI animation shares
+  (`libshimmer::TICK`, 32 ms), so concurrent motion paints in one frame; it is no
+  heartbeat. A glint repaints only the status row over the last full frame and writes the
+  cells that changed; a full frame repaints the whole screen. A peripheral window is
+  visible but unfocused: its content coalesces and only its status row moves, glinting
+  every third beat.
 
 ## Build inputs
 
@@ -217,7 +223,7 @@ child totals overlap: never sum them as disjoint CPU work. `IdleSelect` is
 select polling and waiting, normally idle rather than a handler. A slow
 synchronous select poll cannot be distinguished from ordinary waiting here. Other stages identify coarse dispatcher
 occupancy, key routing, server and delivery completions, frame
-preparation/painting, invocation materialization, and terminal
+preparation/painting, status-row glints (`GlintPaint`), invocation materialization, and terminal
 diff/write/flush. The output writer thread measures the terminal stages; the UI
 records them when it drains that frame's completion. Retired stage ids
 (`PreKeyPaint`, `RpcWait`) stay reserved and never record.

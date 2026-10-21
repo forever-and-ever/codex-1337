@@ -898,7 +898,7 @@ impl App {
             let previous = tui.presentation_mode();
             tui.note_terminal_input();
             self.apply_presentation_transition(tui, previous)?;
-            if tui.presentation_mode() == tui::PresentationMode::Reduced
+            if tui.presentation_mode().throttles_content()
                 && (matches!(&event, TuiEvent::Key(_) | TuiEvent::Paste(_))
                     || matches!(&event, TuiEvent::Mouse(mouse)
                         if mouse.kind != crossterm::event::MouseEventKind::Moved))
@@ -1227,11 +1227,7 @@ impl App {
                     }
                     self.chat_widget.pre_draw_tick();
                     self.refresh_agents_overview_usage(app_server, tui.frame_requester());
-                    if scheduled_draw && !tui.should_render_scheduled_frame() {
-                        tui.clipboard.advance(tui.frame_requester());
-                        return Ok(AppRunControl::Continue);
-                    }
-                    if Self::defer_input_frame(tui, &event, screen_size) {
+                    if self.spare_full_frame(tui, &event, screen_size)? {
                         return Ok(AppRunControl::Continue);
                     }
                     self.render_chat_widget_frame(tui, screen_size)?;

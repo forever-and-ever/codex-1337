@@ -99,7 +99,7 @@ async fn desktop_attention_recovers_on_input_and_fails_open() {
     });
     assert_eq!(
         tui.presentation_mode(),
-        super::super::PresentationMode::Reduced
+        super::super::PresentationMode::Peripheral
     );
     tui.note_terminal_input();
     assert_eq!(

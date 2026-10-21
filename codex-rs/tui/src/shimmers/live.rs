@@ -80,9 +80,16 @@ impl Live {
             .is_some_and(|frames| frames.mode() == PresentationMode::Normal)
     }
 
+    /// Whether the status row moves: focused, or visible through its glints.
+    fn glints(&self) -> bool {
+        self.frames
+            .as_ref()
+            .is_some_and(|frames| frames.mode().glints())
+    }
+
     /// The running shimmer, advanced up to now.
     fn current(&mut self) -> Option<&mut Shimmer> {
-        if !self.draws_motion() {
+        if !self.glints() {
             return None;
         }
         let now = Instant::now();
@@ -195,7 +202,7 @@ pub(crate) fn dress_status(
 /// Lays the dressed status row's backdrop under the row rendered at the top of `area`.
 pub(crate) fn shade_status(area: Rect, buf: &mut Buffer) {
     let live = live();
-    if live.draws_motion() {
+    if live.glints() {
         live.row.shade(area, buf);
     }
 }

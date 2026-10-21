@@ -2,6 +2,8 @@
 
 use super::PresentationMode;
 use super::Tui;
+use super::frame_requester::Due;
+use super::glint::FULL_FRAME_FLOOR;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct DesktopAttention {
@@ -10,6 +12,16 @@ pub(crate) struct DesktopAttention {
     pub(crate) visible: Option<bool>,
     /// `None` is unknown and never proof that a window is unfocused.
     pub(crate) focused: Option<bool>,
+}
+
+/// What a scheduled draw paints in the current presentation mode.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ScheduledPaint {
+    /// The mode admits nothing the screen owes.
+    Skip,
+    /// Only the status row moved.
+    Glint,
+    Full,
 }
 
 impl Tui {
@@ -38,6 +50,8 @@ impl Tui {
             PresentationMode::Frozen
         } else if self.is_terminal_focused() && self.window_focused != Some(false) {
             PresentationMode::Normal
+        } else if self.window_visible == Some(true) {
+            PresentationMode::Peripheral
         } else {
             PresentationMode::Reduced
         };
@@ -58,11 +72,26 @@ impl Tui {
         }
     }
 
-    pub(crate) fn should_render_scheduled_frame(&self) -> bool {
+    pub(crate) fn scheduled_paint(&self) -> ScheduledPaint {
+        let owed = self.frame_requester.owed();
         match self.presentation_mode() {
-            PresentationMode::Normal => true,
-            PresentationMode::Reduced => self.frame_requester.take_dirty(),
-            PresentationMode::Frozen => false,
+            // A focused window still paints fully each floor, so clocks beyond the status row
+            // keep time.
+            PresentationMode::Normal
+                if owed == Due::GLINT && self.painted_fully_within(FULL_FRAME_FLOOR) =>
+            {
+                ScheduledPaint::Glint
+            }
+            PresentationMode::Normal => ScheduledPaint::Full,
+            PresentationMode::Peripheral | PresentationMode::Reduced
+                if owed.contains(Due::CONTENT) =>
+            {
+                ScheduledPaint::Full
+            }
+            PresentationMode::Peripheral if owed.contains(Due::GLINT) => ScheduledPaint::Glint,
+            PresentationMode::Peripheral | PresentationMode::Reduced | PresentationMode::Frozen => {
+                ScheduledPaint::Skip
+            }
         }
     }
 }

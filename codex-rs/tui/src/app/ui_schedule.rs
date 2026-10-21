@@ -294,9 +294,6 @@ impl App {
             {
                 return false;
             }
-            // Reduced presentation consumed dirty before reaching this seam. A maintenance
-            // wake cannot acknowledge content which has not actually been presented.
-            requester.retain_dirty();
             tui.defer_screen_size(screen_size);
             tui.clipboard.advance(requester);
             return true;

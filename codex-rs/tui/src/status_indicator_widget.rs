@@ -6,7 +6,6 @@
 //! Hook activity uses the remaining space or its own line on overflow, so it
 //! never displaces background-process controls.
 
-use std::time::Duration;
 use std::time::Instant;
 
 use crossterm::event::KeyCode;
@@ -35,6 +34,7 @@ use crate::width::display_width;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_lines;
 
+mod glint;
 mod timer;
 pub(crate) use timer::StatusTimer;
 
@@ -232,8 +232,7 @@ impl StatusIndicator<'_> {
             |started_at| now.saturating_duration_since(started_at),
         );
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
-        let animated = row.animations_enabled
-            && row.frame_requester.mode() == crate::tui::PresentationMode::Normal;
+        let animated = row.animations_enabled && row.frame_requester.mode().glints();
         let progress = MotionMode::from_animations_enabled(animated && row.effects.progress);
         let shimmer = MotionMode::from_animations_enabled(animated && row.effects.shimmer);
 
@@ -305,22 +304,13 @@ impl Renderable for StatusIndicator<'_> {
         if area.is_empty() {
             return;
         }
-        if self.row.frame_requester.mode() == crate::tui::PresentationMode::Normal
-            && (self.row.animations_enabled || self.timer.display_started_at.is_some())
-        {
-            let interval_ms = if self.row.animations_enabled
-                && (self.row.effects.progress || self.row.effects.shimmer)
-            {
-                32
-            } else {
-                1_000
-            };
-            self.row
-                .frame_requester
-                .schedule_frame_in(Duration::from_millis(interval_ms));
-        }
-        Paragraph::new(Text::from(self.lines(area.width))).render(area, buf);
-        crate::shimmers::shade_status(area, buf);
+        self.schedule_glint();
+        let lines = self.lines(area.width);
+        let height = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+        crate::tui::glint::paint_status(area, height, buf, |buf| {
+            Paragraph::new(Text::from(lines)).render(area, buf);
+            crate::shimmers::shade_status(area, buf);
+        });
     }
 }
 
@@ -331,6 +321,7 @@ mod tests {
     use crate::app_event_sender::AppEventSender;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::time::Duration;
     use tokio::sync::mpsc::unbounded_channel;
 
     use pretty_assertions::assert_eq;

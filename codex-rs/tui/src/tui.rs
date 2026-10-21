@@ -71,6 +71,7 @@ mod event_stream;
 mod frame_rate_limiter;
 mod frame_requester;
 pub(crate) use frame_requester::PresentationMode;
+pub(crate) mod glint;
 mod history_tail;
 mod input_boundary;
 #[cfg(unix)]
@@ -86,6 +87,7 @@ mod owned_screen_tests;
 mod panic_tests;
 mod presentation;
 pub(crate) use presentation::DesktopAttention;
+pub(crate) use presentation::ScheduledPaint;
 mod screen_size;
 mod scrollback;
 mod selection_clipboard;
@@ -677,6 +679,7 @@ impl OverlayInput {
 pub struct Tui {
     pub(crate) link_hover: link_pointer::LinkHover,
     frame_requester: FrameRequester,
+    glint: glint::Glint,
     presentation_over_ssh: bool,
     desktop_idle: bool,
     window_visible: Option<bool>,
@@ -764,6 +767,7 @@ impl Tui {
         Self {
             link_hover: link_pointer::LinkHover::default(),
             frame_requester,
+            glint: glint::Glint::default(),
             presentation_over_ssh,
             desktop_idle: false,
             window_visible: None,
@@ -1331,7 +1335,7 @@ impl Tui {
         if self.presentation_mode() == PresentationMode::Frozen {
             return Ok(());
         }
-        self.frame_requester.take_dirty();
+        self.begin_full_frame();
         let screen_size = self.take_event_screen_size()?;
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
@@ -1435,7 +1439,7 @@ impl Tui {
         if self.presentation_mode() == PresentationMode::Frozen {
             return Ok(());
         }
-        self.frame_requester.take_dirty();
+        self.begin_full_frame();
         // If we are resuming from ^Z, we need to prepare the resume action now so we can apply it
         // in the synchronized update.
         #[cfg(unix)]

@@ -168,7 +168,11 @@ impl TranscriptOverlay {
             }
         })?;
         let loading = self.view.is_loading_history() && self.motion == MotionMode::Animated;
-        if scanning || loading {
+        // A search scan answers input; the loading glyph is animation, which keeps the beat.
+        if scanning {
+            tui.frame_requester()
+                .schedule_interactive_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
+        } else if loading {
             tui.frame_requester()
                 .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
         }
@@ -223,7 +227,7 @@ impl TranscriptOverlay {
             TuiEvent::Draw | TuiEvent::Resize(_) | TuiEvent::FocusGained | TuiEvent::Resume => {
                 if matches!(event, TuiEvent::Draw) && self.view.tick_selection(&self.cells) {
                     tui.frame_requester()
-                        .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
+                        .schedule_interactive_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
                 }
                 self.draw(tui)?;
                 return Ok(());

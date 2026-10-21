@@ -10675,7 +10675,7 @@ async fn observer_freeze_retires_presentation_clocks_without_suspending_input() 
             app.commit_animation.is_some(),
             app.chat_widget.terminal_title_next_refresh,
         ),
-        (tui::PresentationMode::Reduced, false, None),
+        (tui::PresentationMode::Peripheral, false, None),
     );
     Ok(())
 }

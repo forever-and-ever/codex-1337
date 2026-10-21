@@ -261,6 +261,7 @@ mod connectors;
 mod constructor;
 mod dynamic_activity;
 mod empty_state_policy;
+mod glint;
 mod live_work;
 pub(crate) use self::connectors::ConnectorScopeGeneration;
 use self::connectors::ConnectorsState;

@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 
 use super::frame_rate_limiter::FrameRateLimiter;
 
-const REDUCED_CONTENT_INTERVAL: Duration = Duration::from_millis(120);
+const UNFOCUSED_CONTENT_INTERVAL: Duration = Duration::from_millis(120);
 
 fn scheduling_now() -> Instant {
     // Use Tokio's clock so elapsed deadlines and fake-clock scheduler tests share one epoch.
@@ -37,6 +37,9 @@ fn scheduling_now() -> Instant {
 pub(crate) enum PresentationMode {
     #[default]
     Normal,
+    /// Visible but unfocused: content coalesces, and only the status row moves, glinting on a
+    /// slower beat.
+    Peripheral,
     Reduced,
     Frozen,
 }
@@ -45,7 +48,10 @@ pub(crate) enum PresentationMode {
 #[repr(u8)]
 enum FrameKind {
     Content,
+    /// Animation, on the beat; only a focused window admits it.
     Cosmetic,
+    /// The status row's motion alone, painted between full frames.
+    Glint,
     Maintenance,
     ModeChanged,
 }
@@ -59,7 +65,9 @@ pub(crate) struct FrameRequest {
 
 #[path = "background_preparation.rs"]
 mod background_preparation;
+mod beat;
 mod paint_schedule;
+pub(crate) use beat::Due;
 
 /// A requester for scheduling future frame draws on the TUI event loop.
 ///
@@ -72,7 +80,7 @@ mod paint_schedule;
 pub struct FrameRequester {
     frame_schedule_tx: mpsc::UnboundedSender<FrameRequest>,
     mode: Arc<AtomicU8>,
-    dirty: Arc<AtomicBool>,
+    due: Arc<AtomicU8>,
     paint_admitted: Arc<AtomicBool>,
     background_preparation: Arc<AtomicBool>,
 }
@@ -84,13 +92,13 @@ impl FrameRequester {
     pub fn new(draw_tx: broadcast::Sender<()>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let mode = Arc::new(AtomicU8::new(PresentationMode::Normal as u8));
-        let dirty = Arc::new(AtomicBool::new(false));
-        let scheduler = FrameScheduler::new(rx, draw_tx, mode.clone(), dirty.clone());
+        let due = Arc::new(AtomicU8::new(0));
+        let scheduler = FrameScheduler::new(rx, draw_tx, mode.clone(), due.clone());
         tokio::spawn(scheduler.run());
         Self {
             frame_schedule_tx: tx,
             mode,
-            dirty,
+            due,
             paint_admitted: Arc::new(AtomicBool::new(true)),
             background_preparation: Arc::new(AtomicBool::new(false)),
         }
@@ -98,7 +106,7 @@ impl FrameRequester {
 
     /// Schedule a frame draw as soon as possible.
     pub fn schedule_frame(&self) {
-        self.dirty.store(true, Ordering::Relaxed);
+        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now(),
@@ -110,7 +118,7 @@ impl FrameRequester {
 
     /// Admit meaningful local input without imposing the unattended stream cadence.
     pub(crate) fn schedule_interactive_frame(&self) {
-        self.dirty.store(true, Ordering::Relaxed);
+        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now(),
@@ -120,7 +128,7 @@ impl FrameRequester {
         }
     }
 
-    /// Schedule a frame draw to occur after the specified duration.
+    /// Schedule an animation frame on the first beat after the specified duration.
     pub fn schedule_frame_in(&self, dur: Duration) {
         if self.mode() == PresentationMode::Normal {
             let _ = self.frame_schedule_tx.send(FrameRequest {
@@ -133,7 +141,7 @@ impl FrameRequester {
 
     /// Reveal meaningful delayed content, unlike a cosmetic animation frame.
     pub(crate) fn schedule_content_in(&self, dur: Duration) {
-        self.dirty.store(true, Ordering::Relaxed);
+        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now() + dur,
@@ -153,12 +161,7 @@ impl FrameRequester {
     }
 
     pub(crate) fn mode(&self) -> PresentationMode {
-        match self.mode.load(Ordering::Relaxed) {
-            0 => PresentationMode::Normal,
-            1 => PresentationMode::Reduced,
-            2 => PresentationMode::Frozen,
-            _ => unreachable!("presentation mode must be set through set_mode"),
-        }
+        PresentationMode::decode(self.mode.load(Ordering::Relaxed))
     }
 
     pub(crate) fn set_mode(&self, mode: PresentationMode) {
@@ -178,10 +181,6 @@ impl FrameRequester {
             self.schedule_interactive_frame();
         }
     }
-
-    pub(crate) fn take_dirty(&self) -> bool {
-        self.dirty.swap(false, Ordering::Relaxed)
-    }
 }
 
 #[cfg(test)]
@@ -192,7 +191,7 @@ impl FrameRequester {
         FrameRequester {
             frame_schedule_tx: tx,
             mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
-            dirty: Arc::new(AtomicBool::new(false)),
+            due: Arc::new(AtomicU8::new(0)),
             paint_admitted: Arc::new(AtomicBool::new(true)),
             background_preparation: Arc::new(AtomicBool::new(false)),
         }
@@ -209,7 +208,9 @@ struct FrameScheduler {
     draw_tx: broadcast::Sender<()>,
     last_content_at: Option<Instant>,
     mode: Arc<AtomicU8>,
-    dirty: Arc<AtomicBool>,
+    due: Arc<AtomicU8>,
+    /// Where the beat's grid starts.
+    origin: Instant,
 }
 
 impl FrameScheduler {
@@ -218,14 +219,15 @@ impl FrameScheduler {
         receiver: mpsc::UnboundedReceiver<FrameRequest>,
         draw_tx: broadcast::Sender<()>,
         mode: Arc<AtomicU8>,
-        dirty: Arc<AtomicBool>,
+        due: Arc<AtomicU8>,
     ) -> Self {
         Self {
             receiver,
             draw_tx,
             last_content_at: None,
             mode,
-            dirty,
+            due,
+            origin: scheduling_now(),
         }
     }
 
@@ -237,13 +239,14 @@ impl FrameScheduler {
         self.run_prepared().await
     }
 
-    fn absorb_request(&mut self, deadlines: &mut [Option<Instant>; 3], request: FrameRequest) {
+    fn absorb_request(&mut self, deadlines: &mut [Option<Instant>; 4], request: FrameRequest) {
         self.absorb_prepared(deadlines, request)
     }
 }
 #[cfg(test)]
 mod tests {
     use super::super::frame_rate_limiter::MIN_FRAME_INTERVAL;
+    use super::beat::BEAT;
     use super::*;
     use tokio::time;
     use tokio_util::time::FutureExt;
@@ -256,7 +259,7 @@ mod tests {
                 FrameRequester {
                     frame_schedule_tx: tx,
                     mode: Arc::new(AtomicU8::new(PresentationMode::Normal as u8)),
-                    dirty: Arc::new(AtomicBool::new(false)),
+                    due: Arc::new(AtomicU8::new(0)),
                     paint_admitted: Arc::new(AtomicBool::new(true)),
                     background_preparation: Arc::new(AtomicBool::new(false)),
                 },
@@ -361,7 +364,7 @@ mod tests {
             matches!(
                 draw_rx
                     .recv()
-                    .timeout(REDUCED_CONTENT_INTERVAL + Duration::from_millis(/*millis*/ 20))
+                    .timeout(UNFOCUSED_CONTENT_INTERVAL + Duration::from_millis(/*millis*/ 20))
                     .await,
                 Ok(Ok(()))
             ),
@@ -372,7 +375,7 @@ mod tests {
             "burst produced only one content paint"
         );
         requester.schedule_content_in(Duration::from_millis(/*millis*/ 200));
-        requester.take_dirty(); // A paint before the delayed content becomes visible.
+        requester.pay_all(); // A paint before the delayed content becomes visible.
         assert!(matches!(
             draw_rx
                 .recv()
@@ -381,7 +384,7 @@ mod tests {
             Ok(Ok(()))
         ));
         assert!(
-            requester.take_dirty(),
+            requester.pay_all().contains(Due::CONTENT),
             "due content must survive the preceding paint"
         );
     }
@@ -394,7 +397,7 @@ mod tests {
         tokio::task::yield_now().await;
         time::advance(Duration::from_millis(/*millis*/ 1)).await;
         assert!(draw_rx.try_recv().is_ok());
-        requester.take_dirty();
+        requester.pay_all();
 
         requester.schedule_frame();
         tokio::task::yield_now().await;
@@ -407,9 +410,9 @@ mod tests {
             draw_rx.try_recv().is_ok(),
             "input must not wait on a stream deadline"
         );
-        assert!(requester.take_dirty());
+        assert!(requester.pay_all().contains(Due::CONTENT));
 
-        time::advance(REDUCED_CONTENT_INTERVAL).await;
+        time::advance(UNFOCUSED_CONTENT_INTERVAL).await;
         assert!(
             draw_rx.try_recv().is_err(),
             "input already painted pending content"
@@ -518,5 +521,48 @@ mod tests {
         // No additional draw should fire for the later delayed requests.
         let second = draw_rx.recv().timeout(Duration::from_millis(120)).await;
         assert!(second.is_err(), "unexpected extra draw received");
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn animation_shares_the_beat_and_a_peripheral_window_keeps_only_the_glint() {
+        /// Advances the clock, then lets the scheduler it woke run before the test looks.
+        async fn advance(by: Duration) {
+            time::advance(by).await;
+            tokio::task::yield_now().await;
+        }
+        let (draw_tx, mut draw_rx) = broadcast::channel(16);
+        let requester = FrameRequester::new(draw_tx);
+        requester.schedule_frame_in(Duration::ZERO);
+        requester.schedule_frame_in(Duration::from_millis(/*millis*/ 5));
+        requester.schedule_glint_in(Duration::ZERO);
+        advance(BEAT - Duration::from_millis(/*millis*/ 1)).await;
+        assert!(draw_rx.try_recv().is_err(), "motion waits for the beat");
+        advance(Duration::from_millis(/*millis*/ 1)).await;
+        assert!(
+            draw_rx.try_recv().is_ok(),
+            "concurrent motion shares one frame"
+        );
+        assert!(draw_rx.try_recv().is_err());
+        assert_eq!(requester.pay_all(), Due::COSMETIC.with(Due::GLINT));
+
+        advance(Duration::from_millis(/*millis*/ 1)).await;
+        requester.set_mode(PresentationMode::Peripheral);
+        advance(Duration::from_millis(/*millis*/ 1)).await;
+        assert!(draw_rx.try_recv().is_ok(), "the transition paints once");
+        assert_eq!(requester.pay_all(), Due::CONTENT);
+        requester.schedule_frame_in(Duration::ZERO);
+        requester.schedule_glint_in(Duration::ZERO);
+        advance(BEAT * 2 - Duration::from_millis(/*millis*/ 3)).await;
+        assert!(
+            draw_rx.try_recv().is_err(),
+            "a peripheral glint keeps the slower beat"
+        );
+        advance(Duration::from_millis(/*millis*/ 2)).await;
+        assert!(draw_rx.try_recv().is_ok());
+        assert_eq!(
+            requester.pay_all(),
+            Due::GLINT,
+            "only the status row moves in a peripheral window"
+        );
     }
 }

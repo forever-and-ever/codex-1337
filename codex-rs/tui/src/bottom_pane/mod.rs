@@ -82,6 +82,7 @@ mod approval_overlay;
 mod async_questions;
 mod config_panel;
 mod empty_state_policy;
+mod glint;
 mod hook_status;
 mod mcp_server_elicitation;
 mod multi_select_picker;

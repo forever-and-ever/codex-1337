@@ -50,6 +50,7 @@ use ratatui::style::Modifier;
 use ratatui::widgets::WidgetRef;
 
 mod cursor;
+mod patch;
 
 pub(crate) mod output;
 

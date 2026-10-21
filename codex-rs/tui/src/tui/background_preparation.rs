@@ -38,8 +38,4 @@ impl FrameRequester {
     pub(crate) fn paint_admitted(&self) -> bool {
         self.paint_admitted.load(Ordering::Relaxed)
     }
-
-    pub(crate) fn retain_dirty(&self) {
-        self.dirty.store(true, Ordering::Relaxed);
-    }
 }
