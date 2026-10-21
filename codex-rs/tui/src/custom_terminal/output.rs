@@ -587,7 +587,8 @@ pub(crate) fn paint_ready() -> bool {
         .expect("terminal output mailbox poisoned");
     let ready = matches!(state.phase, Phase::Failed(_) | Phase::Stopped)
         || (matches!(state.phase, Phase::Idle) && state.queue.is_empty());
-    state.waiting |= !ready;
+    // Readiness retires an earlier wait, so a late completion never retries a paid paint.
+    state.waiting = !ready;
     ready
 }
 

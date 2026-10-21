@@ -33,7 +33,8 @@ impl App {
     }
 
     /// Pays what a draw owes short of a full frame where it can: skipping what the mode withholds,
-    /// deferring while output is busy, or glinting the status row. True when spared.
+    /// deferring while output is busy, or glinting the status row, whose refusal owes content
+    /// instead. True when spared.
     pub(super) fn spare_full_frame(
         &self,
         tui: &mut tui::Tui,
@@ -56,13 +57,15 @@ impl App {
             return Ok(false);
         }
         let chat_widget = &self.chat_widget;
-        // A refused glint means the screen or the row's layout moved, which a full frame repaints.
         let glinted = tui.draw_glint(screen_size, |area, height, buf| {
             chat_widget.paint_status_glint(area, height, buf)
         })?;
-        if glinted {
-            tui.clipboard.advance(tui.frame_requester());
+        if !glinted {
+            // The screen or the row's layout moved, which is content: it waits with any content
+            // already awaiting its deadline rather than painting that content early.
+            tui.frame_requester().schedule_frame();
         }
-        Ok(glinted)
+        tui.clipboard.advance(tui.frame_requester());
+        Ok(true)
     }
 }
