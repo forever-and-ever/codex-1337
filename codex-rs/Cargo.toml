@@ -388,6 +388,7 @@ keyring = { version = "3.6", default-features = false }
 landlock = "0.4.4"
 lazy_static = "1"
 libc = "0.2.182"
+libshimmer = { path = "/home/main/programming/projects/libshimmer/.worktrees/extract", features = ["ratatui"] }
 # Keep SQLx's bundled SQLite on a version containing the WAL-reset corruption fix:
 # https://www.sqlite.org/wal.html#the_wal_reset_bug
 libsqlite3-sys = { version = "0.37", default-features = false }

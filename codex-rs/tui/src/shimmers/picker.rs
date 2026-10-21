@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
-use std::time::Duration;
 use std::time::Instant;
 
 use ratatui::buffer::Buffer;
@@ -12,14 +11,19 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 
-use super::ROSTER;
-use super::engine::Engine;
-use super::engine::color;
+use libshimmer::Motion;
+use libshimmer::Palette;
+use libshimmer::Recipe;
+use libshimmer::Row;
+use libshimmer::STALE;
+use libshimmer::Shimmer;
+use libshimmer::TICK;
+use libshimmer::Wide;
+use libshimmer::script;
+use libshimmer::stock::ROSTER;
+
 use super::live;
-use super::script::Script;
-use super::stage::Palette;
-use super::stage::Rgb;
-use super::stage::TICK;
+use super::live::GLYPHS;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
@@ -36,14 +40,23 @@ const PREVIEW_WIDTH: u16 = 44;
 pub(super) const PREVIEW_ROWS: u16 = 4;
 
 pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionViewParams {
-    let current = live::engaged();
-    let items = ROSTER
+    let recipes: Vec<_> = ROSTER
         .iter()
+        .filter(|recipe| recipe.fits::<Wide>(GLYPHS).is_ok())
+        .collect();
+    let current = live::engaged().and_then(|engaged| {
+        recipes
+            .iter()
+            .position(|recipe| std::ptr::eq(*recipe, engaged))
+    });
+    let items = recipes
+        .iter()
+        .copied()
         .enumerate()
-        .map(|(recipe, entry)| SelectionItem {
-            name: entry.recipe.name.to_owned(),
-            description: Some(format!("{} — {}", entry.recipe.blurb, entry.credit)),
-            is_current: current == Some(recipe),
+        .map(|(index, recipe)| SelectionItem {
+            name: recipe.name().to_owned(),
+            description: Some(format!("{} — {}", recipe.blurb(), recipe.credit())),
+            is_current: current == Some(index),
             dismiss_on_select: true,
             actions: vec![Box::new(move |_: &AppEventSender| live::engage(recipe))],
             ..Default::default()
@@ -54,7 +67,7 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
         footer_hint: Some(standard_popup_hint_line()),
         items,
         initial_selected_idx: current,
-        max_visible_rows: ROSTER.len(),
+        max_visible_rows: recipes.len(),
         ..SelectionViewParams::picker()
     };
     let Some(palette) = live::palette() else {
@@ -66,7 +79,7 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
         };
     };
     let preview = Arc::new(Mutex::new(Preview::new(
-        current.unwrap_or_default(),
+        recipes[current.unwrap_or_default()],
         palette,
     )));
     let pane = |preview: &Arc<Mutex<Preview>>, frames| PreviewPane {
@@ -86,7 +99,7 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
             follow
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .show(recipe);
+                .show(recipes[recipe]);
         })),
         ..params
     }
@@ -94,25 +107,28 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
 
 /// The highlighted shimmer playing the script from its start.
 struct Preview {
-    engine: Engine,
+    shimmer: Shimmer,
     palette: Palette,
-    script: Script,
     stepped: Instant,
-    ticks: u64,
+    ticks: u32,
 }
 
 impl Preview {
-    fn new(recipe: usize, palette: Palette) -> Self {
+    #[expect(
+        clippy::expect_used,
+        reason = "The picker offers only recipes that fit codex-tui's wide captions and octants."
+    )]
+    fn new(recipe: &'static Recipe, palette: Palette) -> Self {
         Self {
-            engine: Engine::new(recipe, palette),
+            shimmer: Shimmer::new(recipe, rand::random(), GLYPHS)
+                .expect("the preview recipe fits codex-tui"),
             palette,
-            script: Script::new(),
             stepped: Instant::now(),
             ticks: 0,
         }
     }
 
-    fn show(&mut self, recipe: usize) {
+    fn show(&mut self, recipe: &'static Recipe) {
         *self = Self::new(recipe, self.palette);
     }
 }
@@ -132,23 +148,22 @@ impl Renderable for PreviewPane {
             && self.frames.mode() == crate::tui::PresentationMode::Normal;
         let mut preview = self.preview.lock().unwrap_or_else(PoisonError::into_inner);
         let Preview {
-            engine,
+            shimmer,
             palette,
-            script,
             stepped,
             ticks,
         } = &mut *preview;
         if animated {
             let now = Instant::now();
-            let tick = Duration::from_secs_f64(TICK);
+            let tick = TICK;
             // Hidden or suspended previews pause; never replay an unbounded wall-clock backlog.
-            if now.saturating_duration_since(*stepped) > Duration::from_secs(1) {
+            if now.saturating_duration_since(*stepped) > STALE {
                 *stepped = now;
             }
             while now.saturating_duration_since(*stepped) >= tick {
                 *stepped += tick;
                 *ticks += 1;
-                feed(engine, script, *ticks);
+                feed(shimmer, *ticks);
             }
         }
         let area = Rect {
@@ -156,9 +171,9 @@ impl Renderable for PreviewPane {
             height: area.height.saturating_sub(1),
             ..area
         };
-        stage_rows(engine, Scene::scripted(script, *ticks), *palette, area, buf);
+        stage_rows(shimmer, Scene::scripted(*ticks), *palette, area, buf);
         if animated {
-            self.frames.schedule_frame_in(Duration::from_secs_f64(TICK));
+            self.frames.schedule_frame_in(TICK);
         }
     }
 
@@ -167,43 +182,34 @@ impl Renderable for PreviewPane {
     }
 }
 
-/// Steps `engine` through the script's `tick`th tick, counting from one.
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "Preview ticks become approximate animation seconds, not semantic time or token accounting."
-)]
-pub(super) fn feed(engine: &mut Engine, script: &Script, tick: u64) {
-    let t = tick as f64 * TICK;
-    let (spell, _, tokens) = script.at(t);
-    let (_, _, before) = script.at(t - TICK);
-    engine.step(u32::try_from(tokens - before).unwrap_or(u32::MAX), spell);
+/// Advances `shimmer` through the script's `tick`th tick, counting from one.
+pub(super) fn feed(shimmer: &mut Shimmer, tick: u32) {
+    let cue = script::cue(TICK * tick);
+    shimmer.set_spell(cue.spell);
+    shimmer.show(cue.caption);
+    shimmer.set_intensity(cue.intensity);
+    shimmer.advance(TICK);
 }
 
 /// What the live rows show around a shimmer: a running tool's command and output, and the status
-/// row's header and timer.
+/// row's caption and timer.
 #[derive(Clone, Copy)]
 pub(super) struct Scene<'a> {
     pub(super) command: &'a str,
     pub(super) output: &'a str,
-    pub(super) header: &'a str,
+    pub(super) caption: &'a str,
     pub(super) timer: u64,
 }
 
 impl Scene<'static> {
-    /// The preview's scene `tick` ticks into `script`.
-    #[expect(
-        clippy::cast_precision_loss,
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "Preview time is a nonnegative visual clock; the displayed timer deliberately uses whole seconds modulo 480."
-    )]
-    fn scripted(script: &Script, tick: u64) -> Self {
-        let t = tick as f64 * TICK;
+    /// The preview's scene after `tick` ticks.
+    fn scripted(tick: u32) -> Self {
+        let at = TICK * tick;
         Self {
             command: "cargo test -p codex-tui --lib",
             output: "Compiling codex-tui v0.0.0",
-            header: script.at(t).1,
-            timer: 63 + (t as u64) % 480,
+            caption: script::cue(at).caption,
+            timer: 63 + at.as_secs() % 480,
         }
     }
 }
@@ -211,7 +217,7 @@ impl Scene<'static> {
 /// Draws the live rows as codex-tui lays them out: `scene`'s running tool and its output on the
 /// first two rows of `area`, the status row on the fourth.
 pub(super) fn stage_rows(
-    engine: &mut Engine,
+    shimmer: &mut Shimmer,
     scene: Scene<'_>,
     palette: Palette,
     area: Rect,
@@ -223,11 +229,11 @@ pub(super) fn stage_rows(
     let Scene {
         command,
         output,
-        header,
+        caption,
         timer,
     } = scene;
     let tool = Line::from(vec![
-        engine.tool(palette),
+        shimmer.bullet(palette).span("•"),
         " ".into(),
         "Command".bold(),
         format!(" {command}").into(),
@@ -235,26 +241,30 @@ pub(super) fn stage_rows(
     buf.set_line(area.x, area.y, &tool, area.width);
     let output = Line::from(format!("    {output}").dim());
     buf.set_line(area.x, area.y + 1, &output, area.width);
-    let (mut lead, backdrop) = engine.status(
-        header, timer, palette, /*mark*/ true, /*letters*/ true,
+    shimmer.show(caption);
+    let row = shimmer.status(
+        palette,
+        Motion {
+            mark: true,
+            letters: true,
+        },
     );
+    let mut lead = row.spans();
     lead.extend([
         Span::from(" "),
         format!("({} • ⌃c to interrupt)", fmt_elapsed_compact(timer)).dim(),
     ]);
-    lay_status(lead, &backdrop, area, area.y + 3, buf);
+    lay_status(lead, &row, area, area.y + 3, buf);
 }
 
 /// Lays a status row's `lead` on row `y` of `area`, over the shimmer's `backdrop`.
 pub(super) fn lay_status(
     lead: Vec<Span<'static>>,
-    backdrop: &[Rgb],
+    row: &Row,
     area: Rect,
     y: u16,
     buf: &mut Buffer,
 ) {
     buf.set_line(area.x, y, &Line::from(lead), area.width);
-    for (x, bg) in (area.x..area.right()).zip(backdrop) {
-        buf[(x, y)].set_bg(color(*bg));
-    }
+    row.shade(Rect { y, ..area }, buf);
 }

@@ -4171,6 +4171,7 @@ dependencies = [
  "itertools 0.14.0",
  "lazy_static",
  "libc",
+ "libshimmer",
  "objc2-app-kit",
  "objc2-foundation",
  "pathdiff",
@@ -8784,6 +8785,15 @@ dependencies = [
  "bitflags 2.13.1",
  "libc",
  "redox_syscall 0.7.0",
+]
+
+[[package]]
+name = "libshimmer"
+version = "0.1.0"
+dependencies = [
+ "ratatui-core",
+ "unicode-segmentation",
+ "unicode-width 0.2.1",
 ]
 
 [[package]]

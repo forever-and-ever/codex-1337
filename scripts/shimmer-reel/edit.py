@@ -7,13 +7,13 @@ centered on the beat where the shots meet; the last shot's cut fades the film ou
 
 from __future__ import annotations
 
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
 
+import tomllib
 from turn import Busy, Reach, Segment, Wait, Work
 
 
@@ -203,9 +203,9 @@ def words(entry: Mapping[str, object], key: str) -> tuple[str, ...]:
 
 
 def turn(
-    entries: list[object], beat: float, header: str | None = None
+    entries: list[object], beat: float, caption: str | None = None
 ) -> tuple[Segment, ...]:
-    """Segments from `{header, beats, busy | wait | reach}` tables; `header` stands in for a
+    """Segments from `{caption, beats, busy | wait | reach}` tables; `caption` stands in for a
     missing one."""
     segments = []
     for entry in entries:
@@ -214,17 +214,17 @@ def turn(
                 work: Work = Busy(float(rate))
             case {"wait": float() | int() as tokens}:
                 work = Wait(float(tokens))
-            case {"reach": int(tokens)}:
-                work = Reach(tokens)
+            case {"reach": int(quanta)}:
+                work = Reach(quanta)
             case _:
                 raise ValueError(f"a segment works, waits or reaches: {entry}")
         match entry:
-            case {"header": str(title), "beats": float() | int() as beats}:
+            case {"caption": str(title), "beats": float() | int() as beats}:
                 segments.append(Segment(title, beats * beat, work))
-            case {"beats": float() | int() as beats} if header is not None:
-                segments.append(Segment(header, beats * beat, work))
+            case {"beats": float() | int() as beats} if caption is not None:
+                segments.append(Segment(caption, beats * beat, work))
             case _:
-                raise ValueError(f"a segment needs a header and beats: {entry}")
+                raise ValueError(f"a segment needs a caption and beats: {entry}")
     return tuple(segments)
 
 

@@ -1,7 +1,7 @@
 # Shimmer reel
 
 A film of codex-tui's stock shimmers, rebuilt from `reel.toml` on demand. The shimmers are the real
-ones: the ignored test `shimmers::reel::export` drives each through codex-tui's own engine and live
+ones: the ignored test `shimmers::reel::export` drives each through libshimmer and codex-tui's live
 rows, tick by tick, on a synthetic turn, and exports the cells it draws. Everything after that is
 generated here: the terminal that paints those cells, the camera, the cuts, the lettering and the
 score.
@@ -19,12 +19,12 @@ the shot list and render again. The film is 1080p60 H.264 with AAC; size, rate, 
 and glow are `[film]` settings.
 
 The first render after a cue or shimmer change runs the export, which compiles codex-tui's tests;
-exports are cached by cue sheet and shimmer source in `~/.cache/codex-1337/shimmer-reel/`, newest
-four kept. Turing and Cambrian draw from `rand`, so a fresh export of either is a different take.
+exports are cached by cue sheet, host source and libshimmer identity in
+`~/.cache/codex-1337/shimmer-reel/`, newest four kept. Each clip uses a fixed seed, so fresh exports remain deterministic.
 
 | Module | Owns |
 |---|---|
-| `turn.py` | Synthetic turns paced as `live.rs` paces a thread; `reach` lands a token milestone on a beat |
+| `turn.py` | Raw context-inflow rates; `reach` plans a quantum milestone under libshimmer's pacing |
 | `edit.py` | `reel.toml` as shots on a beat grid, validated |
 | `cells.py` | Exported clips as cell planes; the terminal that paints them |
 | `cuts.py` | Camera and transitions |

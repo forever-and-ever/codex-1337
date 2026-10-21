@@ -10,21 +10,24 @@ use std::time::Instant;
 
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
+use libshimmer::Glyphs;
+use libshimmer::Intensity;
+use libshimmer::Motion;
+use libshimmer::Palette;
+use libshimmer::Recipe;
+use libshimmer::Reservoir;
+use libshimmer::Row;
+use libshimmer::STALE;
+use libshimmer::Shimmer;
+use libshimmer::Spell;
+use libshimmer::TICK;
+use libshimmer::stock::ROSTER;
 use rand::Rng as _;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
 use ratatui::text::Span;
 
-use super::ROSTER;
-use super::engine::Engine;
-use super::engine::color;
-use super::stage::DRAIN;
-use super::stage::Palette;
-use super::stage::Rgb;
-use super::stage::Spell;
-use super::stage::TICK;
-use super::stage::pace;
 use crate::motion::MotionMode;
 use crate::terminal_palette::StdoutColorLevel;
 use crate::terminal_palette::default_bg;
@@ -33,8 +36,10 @@ use crate::terminal_palette::effective_stdout_color_level;
 use crate::tui::FrameRequester;
 use crate::tui::PresentationMode;
 
-/// A gap in drawing longer than this, as between turns, pauses the shimmer's clock.
-const STALE: Duration = Duration::from_secs(/*secs*/ 1);
+/// Codex-tui's terminals draw octants.
+pub(super) const GLYPHS: Glyphs = Glyphs::OCTANTS;
+/// Tokens a second that count as `Intensity::BRISK`.
+pub(super) const BRISK: f64 = 100.0;
 /// Output tokens a second the forecast assumes until a usage report teaches it.
 const RATE: f64 = 60.0;
 /// The weight of each usage report's rate in the forecast.
@@ -52,8 +57,8 @@ struct Live {
     feed: Feed,
     frames: Option<FrameRequester>,
     act: Act,
-    /// The backdrop of the status row dressed last, which `shade_status` lays under the rendered row.
-    backdrop: Vec<Rgb>,
+    /// The status row painted last, whose backdrop `shade_status` lays beneath the rendered row.
+    row: Row,
 }
 
 #[derive(Default)]
@@ -61,12 +66,10 @@ enum Act {
     /// Nothing is engaged; the classic sweep runs.
     #[default]
     Classic,
-    /// Engaged but not yet drawn, so the terminal's colors are still unknown.
-    Engaged(usize),
-    /// Drawing; `stepped` is when its clock last ticked.
+    /// Drawing; `drawn` is when the shimmer last advanced.
     Running {
-        engine: Box<Engine>,
-        stepped: Instant,
+        shimmer: Box<Shimmer>,
+        drawn: Instant,
     },
 }
 
@@ -77,33 +80,27 @@ impl Live {
             .is_some_and(|frames| frames.mode() == PresentationMode::Normal)
     }
 
-    /// The running engine, stepped up to now.
-    fn current(&mut self, palette: Palette) -> Option<&mut Engine> {
+    /// The running shimmer, advanced up to now.
+    fn current(&mut self) -> Option<&mut Shimmer> {
         if !self.draws_motion() {
             return None;
         }
         let now = Instant::now();
-        let tick = Duration::from_secs_f64(TICK);
-        let restart = now.checked_sub(tick).unwrap_or(now);
-        if let Act::Engaged(recipe) = self.act {
-            self.act = Act::Running {
-                engine: Box::new(Engine::new(recipe, palette)),
-                stepped: restart,
-            };
-            self.feed.forget();
-        }
-        let Act::Running { engine, stepped } = &mut self.act else {
+        let Act::Running { shimmer, drawn } = &mut self.act else {
             return None;
         };
-        if now.saturating_duration_since(*stepped) > STALE {
-            *stepped = restart;
+        let dt = now.saturating_duration_since(*drawn);
+        let measured = if dt > STALE {
             self.feed.forget();
-        }
-        while now.saturating_duration_since(*stepped) >= tick {
-            *stepped += tick;
-            engine.step(self.feed.tick(), self.feed.spell());
-        }
-        Some(engine)
+            TICK
+        } else {
+            dt
+        };
+        shimmer.set_spell(self.feed.spell());
+        shimmer.set_intensity(self.feed.intensity(measured));
+        shimmer.advance(dt);
+        *drawn = now;
+        Some(shimmer)
     }
 }
 
@@ -127,19 +124,30 @@ pub(crate) fn follow_presentation(frames: FrameRequester) {
 
 /// Engages a random stock shimmer. Until something does, as in tests, the classic sweep runs.
 pub(crate) fn engage_random() {
-    engage(rand::rng().random_range(0..ROSTER.len()));
+    engage(&ROSTER[rand::rng().random_range(0..ROSTER.len())]);
 }
 
-pub(super) fn engage(recipe: usize) {
-    live().act = Act::Engaged(recipe);
+#[expect(
+    clippy::expect_used,
+    reason = "The picker checks the selected stock recipe against codex-tui's wide captions and octants; every random stock choice fits too."
+)]
+pub(super) fn engage(recipe: &'static Recipe) {
+    let shimmer = Shimmer::new(recipe, rand::random(), GLYPHS)
+        .expect("the selected stock recipe fits codex-tui");
+    let mut live = live();
+    live.act = Act::Running {
+        shimmer: Box::new(shimmer),
+        drawn: Instant::now(),
+    };
+    live.feed.forget();
+    live.row = Row::default();
 }
 
-/// The roster entry engaged, if any.
-pub(super) fn engaged() -> Option<usize> {
+/// The recipe engaged, if any.
+pub(super) fn engaged() -> Option<&'static Recipe> {
     match &live().act {
         Act::Classic => None,
-        Act::Engaged(recipe) => Some(*recipe),
-        Act::Running { engine, .. } => Some(engine.recipe),
+        Act::Running { shimmer, .. } => Some(shimmer.recipe()),
     }
 }
 
@@ -148,24 +156,23 @@ pub(crate) fn observe(notification: &ServerNotification) {
     if let Some((thread, event)) = event(notification) {
         let mut live = live();
         if live.feed.observe(thread, event, Instant::now())
-            && let Act::Running { engine, .. } = &mut live.act
+            && let Act::Running { shimmer, .. } = &mut live.act
         {
-            engine.pause();
+            shimmer.set_spell(Spell::Idle);
         }
     }
 }
 
-/// Replaces the status row's lead in `spans`, the classic indicator and header, with the engaged
-/// shimmer's. Leaves `spans` alone when nothing is engaged, nothing moves, or colors are unknown.
+/// Replaces the status row's lead in `spans`, turning the upstream header into a caption.
+/// Leaves `spans` alone when nothing is engaged, nothing moves, or colors are unknown.
 pub(crate) fn dress_status(
     spans: &mut Vec<Span<'static>>,
-    header: &str,
-    elapsed: Duration,
+    caption: &str,
     mark: MotionMode,
     letters: MotionMode,
 ) {
     let mut live = live();
-    live.backdrop.clear();
+    live.row = Row::default();
     let (mark, letters) = (
         mark == MotionMode::Animated,
         letters == MotionMode::Animated,
@@ -176,41 +183,40 @@ pub(crate) fn dress_status(
     let Some(palette) = palette() else {
         return;
     };
-    let Some(engine) = live.current(palette) else {
+    let Some(shimmer) = live.current() else {
         return;
     };
-    let (lead, backdrop) = engine.status(header, elapsed.as_secs(), palette, mark, letters);
-    *spans = lead;
-    live.backdrop = backdrop;
+    shimmer.show(caption);
+    let row = shimmer.status(palette, Motion { mark, letters });
+    *spans = row.spans();
+    live.row = row;
 }
 
 /// Lays the dressed status row's backdrop under the row rendered at the top of `area`.
 pub(crate) fn shade_status(area: Rect, buf: &mut Buffer) {
     let live = live();
-    if !live.draws_motion() {
-        return;
-    }
-    for (x, bg) in (area.x..area.right()).zip(&live.backdrop) {
-        buf[(x, area.y)].set_bg(color(*bg));
+    if live.draws_motion() {
+        live.row.shade(area, buf);
     }
 }
 
-pub(crate) fn tool_mark() -> Option<Span<'static>> {
+pub(crate) fn bullet() -> Option<Span<'static>> {
     let mut live = live();
     if !live.draws_motion() {
         return (!matches!(live.act, Act::Classic)).then(|| "•".dim());
     }
     let palette = palette()?;
-    live.current(palette).map(|engine| engine.tool(palette))
+    live.current()
+        .map(|shimmer| shimmer.bullet(palette).span("•"))
 }
 
-/// The displayed thread's context inflow, the tokens entering its context, paced for the stage.
+/// The displayed thread's context inflow, the tokens entering its context, measured for the shimmer.
 ///
 /// Usage reports count those tokens exactly, but only as each model response ends. Between reports
 /// the feed estimates: while the model works it forecasts output at the rate recent responses
 /// sustained, and a finished tool's result enters at its serialized size. Each report settles the
 /// estimates since the one before against the response's output and the context's growth: a
-/// shortfall joins the reservoir, which drains over [`DRAIN`] seconds, and an excess is taken back
+/// shortfall joins the reservoir, which drains over four seconds, and an excess is taken back
 /// from it. Inflow the stage did not see, while nothing was drawn, is forgotten, not replayed.
 struct Feed {
     /// The thread that fed this last; another thread's notification starts the feed over.
@@ -227,9 +233,7 @@ struct Feed {
     /// Output tokens a second while the model works.
     rate: f64,
     /// Tokens yet to drain into the stage.
-    reservoir: f64,
-    /// Paced tokens short of a whole one.
-    carry: f64,
+    reservoir: Reservoir,
 }
 
 impl Default for Feed {
@@ -242,8 +246,7 @@ impl Default for Feed {
             forecast: 0.0,
             estimated: 0.0,
             rate: RATE,
-            reservoir: 0.0,
-            carry: 0.0,
+            reservoir: Reservoir::default(),
         }
     }
 }
@@ -320,7 +323,7 @@ impl Feed {
                     let result =
                         (size.saturating_sub(started) as f64 / BYTES_PER_TOKEN).min(RESULT_CAP);
                     self.estimated += result;
-                    self.reservoir += result;
+                    self.reservoir.pour(result);
                 }
                 if tools.is_empty() {
                     self.phase = Phase::Busy { since: now };
@@ -342,8 +345,8 @@ impl Feed {
         let output = usage.output as f64;
         if let Some(last) = self.usage {
             let growth = (usage.context - last.context - last.output).max(0) as f64;
-            self.reservoir =
-                (self.reservoir + output - self.forecast + growth - self.estimated).max(0.0);
+            self.reservoir
+                .pour(output - self.forecast + growth - self.estimated);
         }
         if self.worked >= 1.0 {
             self.rate += LEARN * (output / self.worked - self.rate);
@@ -357,39 +360,26 @@ impl Feed {
     /// Drops what the stage has not yet seen, as when the shimmer's clock restarts.
     fn forget(&mut self) {
         self.usage = None;
-        self.reservoir = 0.0;
-        self.carry = 0.0;
+        self.reservoir = Reservoir::default();
     }
 
-    /// Tokens entering the context during one tick, as the feed reckons them.
-    fn inflow(&mut self) -> f64 {
-        let drained = self.reservoir * -(-TICK / DRAIN).exp_m1();
-        self.reservoir -= drained;
+    /// The context's inflow rate over `dt`, normalized to brisk work.
+    fn intensity(&mut self, dt: Duration) -> Intensity {
+        let drained = self.reservoir.drain(dt);
+        let seconds = dt.as_secs_f64();
         let forecast = match self.phase {
-            Phase::Busy { .. } => self.rate * TICK,
+            Phase::Busy { .. } => self.rate * seconds,
             Phase::Idle | Phase::Wait { .. } => 0.0,
         };
         self.forecast += forecast;
-        forecast + drained
-    }
-
-    /// One tick's paced tokens.
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "Nonnegative paced inflow deliberately emits whole visual tokens and retains the fractional carry; logarithmic pacing bounds each tick."
-    )]
-    fn tick(&mut self) -> u32 {
-        self.carry += pace(self.inflow() / TICK) * TICK;
-        let whole = self.carry.floor();
-        self.carry -= whole;
-        whole as u32
+        Intensity::new((forecast + drained) / seconds / BRISK)
     }
 
     fn spell(&self) -> Spell {
         match self.phase {
             Phase::Wait { .. } => Spell::Wait,
-            Phase::Idle | Phase::Busy { .. } => Spell::Busy,
+            Phase::Idle => Spell::Idle,
+            Phase::Busy { .. } => Spell::Busy,
         }
     }
 }
@@ -466,37 +456,34 @@ mod tests {
     #[test]
     fn inactive_windows_do_not_start_or_catch_up_the_shimmer_clock() {
         let (frames, _requests) = FrameRequester::test_channel();
+        let before = Instant::now().checked_sub(Duration::from_secs(20)).unwrap();
         let mut live = Live {
-            act: Act::Engaged(0),
+            act: Act::Running {
+                shimmer: Box::new(Shimmer::new(&ROSTER[0], 7, GLYPHS).unwrap()),
+                drawn: before,
+            },
             frames: Some(frames.clone()),
             ..Live::default()
         };
-        let palette = Palette {
-            fg: (208, 208, 208).into(),
-            bg: (21, 21, 21).into(),
-        };
-        frames.set_mode(PresentationMode::Reduced);
-        assert!(live.current(palette).is_none());
-        assert!(matches!(live.act, Act::Engaged(_)));
-
-        frames.set_mode(PresentationMode::Normal);
-        assert!(live.current(palette).is_some());
-        let before = Instant::now().checked_sub(Duration::from_secs(20)).unwrap();
-        let Act::Running { stepped, .. } = &mut live.act else {
-            panic!("the foreground started the shimmer");
-        };
-        *stepped = before;
-        // Content can still repaint an inactive window; painting must not run its clock.
+        live.feed.observe("thread", Event::TurnStarted, before);
+        // Content can still repaint an inactive window; painting must not run its clock or feed.
         for mode in [PresentationMode::Reduced, PresentationMode::Frozen] {
             frames.set_mode(mode);
-            assert!(live.current(palette).is_none());
-            let Act::Running { stepped, .. } = &live.act else {
+            assert!(live.current().is_none());
+            let Act::Running { drawn, .. } = &live.act else {
                 panic!("attention changes retain the selected shimmer");
             };
-            assert_eq!(*stepped, before);
+            assert_eq!(*drawn, before);
+            assert_eq!(live.feed.forecast, 0.0);
         }
         frames.set_mode(PresentationMode::Normal);
-        assert!(live.current(palette).is_some());
+        assert!(live.current().is_some());
+        // Returning to the foreground measures one tick, never the hidden twenty seconds.
+        assert!((live.feed.forecast - RATE * TICK.as_secs_f64()).abs() < f64::EPSILON);
+        let Act::Running { drawn, .. } = &live.act else {
+            panic!("the foreground retains the shimmer");
+        };
+        assert!(*drawn > before);
     }
 
     /// Tokens the feed lets into the stage over `secs`.
@@ -506,8 +493,8 @@ mod tests {
         reason = "The test deliberately quantizes a nonnegative fixed duration into animation ticks."
     )]
     fn run(feed: &mut Feed, secs: f64) -> f64 {
-        (0..(secs / TICK).round() as usize)
-            .map(|_| feed.inflow())
+        (0..(secs / TICK.as_secs_f64()).round() as usize)
+            .map(|_| feed.intensity(TICK).level() * BRISK * TICK.as_secs_f64())
             .sum()
     }
 

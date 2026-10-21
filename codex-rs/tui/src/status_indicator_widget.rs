@@ -251,7 +251,7 @@ impl StatusIndicator<'_> {
             now.saturating_duration_since(row.header_started_at),
             shimmer,
         ));
-        crate::shimmers::dress_status(&mut spans, &row.header, elapsed_duration, progress, shimmer);
+        crate::shimmers::dress_status(&mut spans, &row.header, progress, shimmer);
         if !spans.is_empty() {
             spans.push(" ".into());
         }

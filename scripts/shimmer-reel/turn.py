@@ -1,26 +1,14 @@
-"""Synthetic turns: the ticks the live feed would hand a shimmer while an agent works through a
-sequence of segments, reckoned as `live.rs` reckons them: output forecast at the model's rate, each
-tool result draining into the stage, the sum paced and carried in whole tokens."""
+"""Synthetic turns: each tick's raw context inflow, before libshimmer paces it."""
 
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Sequence
-from itertools import accumulate
 from dataclasses import dataclass
-from pathlib import Path
+from itertools import accumulate
 
-STAGE = Path(__file__).resolve().parents[2] / "codex-rs/tui/src/shimmers/stage.rs"
-
-
-def constant(name: str) -> float:
-    found = re.search(rf"const {name}: f64 = ([0-9.]+);", STAGE.read_text())
-    assert found, f"stage.rs declares no {name}"
-    return float(found[1])
-
-
-TICK, DRAIN, KNEE = (constant(name) for name in ("TICK", "DRAIN", "KNEE"))
+# Model libshimmer's clock and reservoir and codex's BRISK; only Reach planning uses pacing.
+TICK, DRAIN, BRISK = 0.032, 4.0, 100.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,10 +27,10 @@ class Wait:
 
 @dataclass(frozen=True, slots=True)
 class Reach:
-    """The model works at the steady rate that brings the paced total to `tokens` by the segment's
+    """The model works at the steady rate that brings the quantum total to `quanta` by the segment's
     end, so a shimmer's milestone lands on a chosen beat."""
 
-    tokens: int
+    quanta: int
 
 
 type Work = Busy | Wait | Reach
@@ -50,22 +38,23 @@ type Work = Busy | Wait | Reach
 
 @dataclass(frozen=True, slots=True)
 class Segment:
-    header: str
+    caption: str
     seconds: float
     work: Work
 
 
-type Tick = tuple[int, str, str, int]
+type Tick = tuple[float, str, str, int]
 
 
 def pace(rate: float) -> float:
-    """`stage::pace`: the rate itself up to the knee, logarithmic beyond."""
-    return rate if rate <= KNEE else KNEE * (1 + math.log(rate / KNEE))
+    """Libshimmer pacing, used only to plan a Reach milestone."""
+    intensity = rate / BRISK
+    return BRISK * (intensity if intensity <= 1.0 else 1.0 + math.log(intensity))
 
 
 def ticks(segments: Sequence[Segment], count: int, timer: float) -> list[Tick]:
     """The first `count` ticks of `segments`, the last segment holding past its end, as
-    `[tokens, spell, header, timer]` with the status timer starting at `timer` seconds. Each `Reach`
+    `[rate, spell, caption, timer]` with the status timer starting at `timer` seconds. Each `Reach`
     becomes the steady rate that meets it."""
     segments = list(segments)
     ends = list(accumulate(segment.seconds for segment in segments))
@@ -77,16 +66,21 @@ def ticks(segments: Sequence[Segment], count: int, timer: float) -> list[Tick]:
                 rate = (low + high) / 2
                 trial = [
                     *segments[:k],
-                    Segment(segment.header, segment.seconds, Busy(rate)),
+                    Segment(segment.caption, segment.seconds, Busy(rate)),
                 ]
-                total = sum(tick[0] for tick in paced(trial, through, timer))
-                low, high = (rate, high) if total < segment.work.tokens else (low, rate)
-            segments[k] = Segment(segment.header, segment.seconds, Busy(high))
-    return paced(segments, count, timer)
+                total, carry = 0, 0.0
+                for arrival, *_ in inflow(trial, through, timer):
+                    carry += pace(arrival) * TICK
+                    whole = math.floor(carry)
+                    total += whole
+                    carry -= whole
+                low, high = (rate, high) if total < segment.work.quanta else (low, rate)
+            segments[k] = Segment(segment.caption, segment.seconds, Busy(high))
+    return inflow(segments, count, timer)
 
 
-def paced(segments: Sequence[Segment], count: int, timer: float) -> list[Tick]:
-    reservoir = carry = 0.0
+def inflow(segments: Sequence[Segment], count: int, timer: float) -> list[Tick]:
+    reservoir = 0.0
     ends = list(accumulate(segment.seconds for segment in segments))
     out: list[Tick] = []
     current = 0
@@ -106,8 +100,7 @@ def paced(segments: Sequence[Segment], count: int, timer: float) -> list[Tick]:
                 forecast, spell = 0.0, "wait"
             case Reach():
                 raise AssertionError("ticks() resolves every Reach before pacing")
-        carry += pace((forecast + drained) / TICK) * TICK
-        whole = math.floor(carry)
-        carry -= whole
-        out.append((whole, spell, segment.header, int(timer + t)))
+        out.append(
+            ((forecast + drained) / TICK, spell, segment.caption, int(timer + t))
+        )
     return out

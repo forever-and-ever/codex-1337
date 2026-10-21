@@ -97,7 +97,7 @@ pub(crate) fn shimmer_text(text: &str, motion_mode: MotionMode) -> Vec<Span<'sta
 }
 
 fn animated_activity_indicator(start_time: Option<Instant>) -> Span<'static> {
-    if let Some(mark) = crate::shimmers::tool_mark() {
+    if let Some(mark) = crate::shimmers::bullet() {
         return mark;
     }
     let elapsed = start_time.map(|st| st.elapsed()).unwrap_or_default();

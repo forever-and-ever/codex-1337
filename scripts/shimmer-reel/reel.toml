@@ -5,7 +5,7 @@
 # shimmer playing a synthetic turn in the live rows around `command` and its `output`, or with
 # `rows = "status"` in the status row alone. The turn starts `preroll` beats before the shot, at
 # least half the cut into it; each segment works at `busy` output tokens a second, waits on a tool
-# whose result adds `wait` tokens as it ends, or `reach`es a paced token total by its end. `energy`
+# whose result adds `wait` tokens as it ends, or `reach`es a quantum total by its end. `energy`
 # arranges the score under the shot: 0 pads, 1 adds the arpeggio and bass, 2 drums, 3 everything.
 #
 # A take in the live rows is framed `still`, slowly pushing in (`push`), `close` on the status row,
@@ -34,7 +34,7 @@ energy = 0
 title = "none"
 caption = ["shimmers"]
 preroll = 2
-turn = [{ header = "codex-1337", beats = 30, busy = 70 }]
+turn = [{ caption = "codex-1337", beats = 30, busy = 70 }]
 cut = { kind = "scan", beats = 2 }
 
 [[shot]]
@@ -46,7 +46,7 @@ command = "cargo build --release"
 output = "Compiling ratatui v0.30.2"
 timer = 74
 preroll = 4
-turn = [{ header = "Warming the status row", beats = 24, busy = 60 }]
+turn = [{ caption = "Warming the status row", beats = 24, busy = 60 }]
 cut = { kind = "flap", beats = 2 }
 
 [[shot]]
@@ -58,7 +58,7 @@ command = "rg -n tube codex-rs/tui/src"
 output = "shimmers/neon.rs: 4 matches"
 timer = 131
 preroll = 4
-turn = [{ header = "Rewiring the sign", beats = 24, busy = 70 }]
+turn = [{ caption = "Rewiring the sign", beats = 24, busy = 70 }]
 cut = { kind = "glitch", beats = 1 }
 
 [[shot]]
@@ -70,7 +70,7 @@ command = "cargo test -p codex-tui rubik"
 output = "running 2 tests"
 timer = 187
 preroll = 4
-turn = [{ header = "Solving the puzzle", beats = 24, busy = 80 }]
+turn = [{ caption = "Solving the puzzle", beats = 24, busy = 80 }]
 cut = { kind = "decrypt", beats = 2 }
 
 [[shot]]
@@ -82,7 +82,7 @@ command = "just test -p codex-tui --lib"
 output = "Compiling codex-tui v0.163.0"
 timer = 242
 preroll = 8
-turn = [{ header = "Evolving automaton rules", beats = 30, busy = 75 }]
+turn = [{ caption = "Evolving automaton rules", beats = 30, busy = 75 }]
 cut = { kind = "melt", beats = 2 }
 
 [[shot]]
@@ -94,7 +94,7 @@ command = "cargo run --release --bin tetris"
 output = "Finished release profile"
 timer = 305
 preroll = 6
-turn = [{ header = "Clearing four lines", beats = 30, busy = 90 }]
+turn = [{ caption = "Clearing four lines", beats = 30, busy = 90 }]
 cut = { kind = "crt", beats = 2 }
 
 [[shot]]
@@ -107,8 +107,8 @@ output = "Compiling codex-core v0.163.0"
 timer = 366
 preroll = 6
 turn = [
-  { header = "Tempering the release", beats = 14, busy = 120 },
-  { header = "Waiting for background terminal", beats = 30, wait = 3000 },
+  { caption = "Tempering the release", beats = 14, busy = 120 },
+  { caption = "Waiting for background terminal", beats = 30, wait = 3000 },
 ]
 cut = { kind = "punch", beats = 2 }
 
@@ -122,8 +122,8 @@ output = "Finished release profile [optimized]"
 timer = 412
 preroll = 6
 turn = [
-  { header = "Igniting the build", beats = 7, reach = 279 },
-  { header = "Igniting the build", beats = 20, busy = 75 },
+  { caption = "Igniting the build", beats = 7, reach = 279 },
+  { caption = "Igniting the build", beats = 20, busy = 75 },
 ]
 cut = { kind = "shatter", beats = 2 }
 
@@ -136,7 +136,7 @@ command = "cargo test -p codex-tui"
 output = "test result: ok. 412 passed"
 timer = 431
 preroll = 4
-turn = [{ header = "Celebrating green tests", beats = 20, busy = 140 }]
+turn = [{ caption = "Celebrating green tests", beats = 20, busy = 140 }]
 cut = { kind = "flap", beats = 1 }
 
 [[shot]]
@@ -148,7 +148,7 @@ command = "git log --oneline -3"
 output = "0eaab19 Underline the LFSR's taps"
 timer = 448
 preroll = 4
-turn = [{ header = "Splitting the spectrum", beats = 20, busy = 90 }]
+turn = [{ caption = "Splitting the spectrum", beats = 20, busy = 90 }]
 cut = { kind = "glitch", beats = 1 }
 
 [[shot]]
@@ -160,7 +160,7 @@ command = "cargo run --example busy_beaver"
 output = "halted after 47176870 steps"
 timer = 467
 preroll = 4
-turn = [{ header = "Running four machines", beats = 20, busy = 100 }]
+turn = [{ caption = "Running four machines", beats = 20, busy = 100 }]
 cut = { kind = "shred", beats = 1 }
 
 [[shot]]
@@ -172,7 +172,7 @@ command = "cargo bench -p codex-tui"
 output = "Benchmarking shimmer/fireflies"
 timer = 485
 preroll = 4
-turn = [{ header = "Syncing with output", beats = 20, busy = 110 }]
+turn = [{ caption = "Syncing with output", beats = 20, busy = 110 }]
 cut = { kind = "decrypt", beats = 1 }
 
 [[shot]]
@@ -184,7 +184,7 @@ command = "cargo test sandpile -- --nocapture"
 output = "avalanche of 214 grains"
 timer = 503
 preroll = 4
-turn = [{ header = "Toppling grains", beats = 20, busy = 130 }]
+turn = [{ caption = "Toppling grains", beats = 20, busy = 130 }]
 cut = { kind = "iris", beats = 2 }
 
 [[shot]]

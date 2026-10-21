@@ -2,6 +2,7 @@
 //! cells codex-tui draws for them. The reel runs this test through `just shimmer-reel`.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use ratatui::buffer::Buffer;
 use ratatui::buffer::Cell;
@@ -11,20 +12,26 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
 
-use super::ROSTER;
-use super::RosterEntry;
-use super::engine::Engine;
-use super::kit::OCTANTS;
+use libshimmer::Glyphs;
+use libshimmer::Intensity;
+use libshimmer::Motion;
+use libshimmer::Palette;
+use libshimmer::Shimmer;
+use libshimmer::Spell;
+use libshimmer::TICK;
+use libshimmer::stock::ROSTER;
+
+use super::live::BRISK;
+use super::live::GLYPHS;
 use super::picker::PREVIEW_ROWS;
 use super::picker::Scene;
 use super::picker::lay_status;
 use super::picker::stage_rows;
-use super::stage::Palette;
-use super::stage::Spell;
 
 /// The cue sheet the reel writes to `$SHIMMER_REEL/cues.json`.
 #[derive(Deserialize)]
 struct Cues {
+    tick: f64,
     fg: (u8, u8, u8),
     bg: (u8, u8, u8),
     width: u16,
@@ -44,14 +51,30 @@ struct Cue {
 enum Rows {
     /// The live rows `/shimmer` previews, around a running `command` and its `output`.
     Live { command: String, output: String },
-    /// The status row's lead alone: its mark, header and tail over the backdrop.
+    /// The status row's lead alone: its mark, caption and tail over the backdrop.
     Status,
 }
 
-/// One tick: the paced tokens that arrived in it, its spell, the status header and the timer's
-/// whole seconds.
+/// One tick's raw inflow rate in tokens a second, spell, caption and timer's whole seconds.
 #[derive(Deserialize)]
-struct Tick(u32, Spell, String, u64);
+struct Tick(f64, CueSpell, String, u64);
+
+/// Cue sheets name only the two spells within a bout.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum CueSpell {
+    Busy,
+    Wait,
+}
+
+impl From<CueSpell> for Spell {
+    fn from(spell: CueSpell) -> Self {
+        match spell {
+            CueSpell::Busy => Self::Busy,
+            CueSpell::Wait => Self::Wait,
+        }
+    }
+}
 
 #[test]
 #[ignore = "exports clips for scripts/shimmer-reel, which runs it through `just shimmer-reel`"]
@@ -63,6 +86,11 @@ fn export() {
         &std::fs::read(dir.join("cues.json")).expect("the reel wrote a cue sheet"),
     )
     .expect("the cue sheet parses");
+    assert_eq!(
+        Duration::from_secs_f64(cues.tick),
+        TICK,
+        "the cue sheet uses libshimmer ticks"
+    );
     let palette = Palette {
         fg: cues.fg.into(),
         bg: cues.bg.into(),
@@ -72,10 +100,18 @@ fn export() {
         .iter()
         .map(|cue| film(cue, palette, cues.width))
         .collect();
-    let octants: String = OCTANTS.iter().collect();
+    let octants: String = (0..=u8::MAX).map(Glyphs::octant).collect();
+    let roster: Value = ROSTER
+        .iter()
+        .map(|recipe| {
+            json!({
+                "name": recipe.name(), "blurb": recipe.blurb(), "credit": recipe.credit(),
+            })
+        })
+        .collect();
     std::fs::write(
         dir.join("clips.json"),
-        json!({ "octants": octants, "clips": clips }).to_string(),
+        json!({ "octants": octants, "clips": clips, "roster": roster }).to_string(),
     )
     .expect("the clips are written");
 }
@@ -84,9 +120,9 @@ fn export() {
 fn film(cue: &Cue, palette: Palette, width: u16) -> Value {
     let recipe = ROSTER
         .iter()
-        .position(|entry| entry.recipe.name == cue.shimmer)
+        .find(|recipe| recipe.name() == cue.shimmer)
         .unwrap_or_else(|| panic!("no stock shimmer is named {:?}", cue.shimmer));
-    let mut engine = Engine::new(recipe, palette);
+    let mut shimmer: Shimmer = Shimmer::new(recipe, 7, GLYPHS).unwrap();
     let height = match cue.rows {
         Rows::Live { .. } => PREVIEW_ROWS,
         Rows::Status => 1,
@@ -95,31 +131,37 @@ fn film(cue: &Cue, palette: Palette, width: u16) -> Value {
     let frames: Value = cue
         .ticks
         .iter()
-        .map(|Tick(tokens, spell, header, timer)| {
-            engine.step(*tokens, *spell);
+        .map(|Tick(rate, spell, caption, timer)| {
+            shimmer.set_spell((*spell).into());
+            shimmer.show(caption);
+            shimmer.set_intensity(Intensity::new(*rate / BRISK));
+            shimmer.advance(TICK);
             let mut buf = Buffer::empty(area);
             match &cue.rows {
                 Rows::Live { command, output } => {
                     let scene = Scene {
                         command,
                         output,
-                        header,
+                        caption,
                         timer: *timer,
                     };
-                    stage_rows(&mut engine, scene, palette, area, &mut buf);
+                    stage_rows(&mut shimmer, scene, palette, area, &mut buf);
                 }
                 Rows::Status => {
-                    let (lead, backdrop) = engine.status(
-                        header, *timer, palette, /*mark*/ true, /*letters*/ true,
+                    let row = shimmer.status(
+                        palette,
+                        Motion {
+                            mark: true,
+                            letters: true,
+                        },
                     );
-                    lay_status(lead, &backdrop, area, area.y, &mut buf);
+                    lay_status(row.spans(), &row, area, area.y, &mut buf);
                 }
             }
             cells(&buf)
         })
         .collect();
-    let RosterEntry { recipe, credit } = &ROSTER[recipe];
-    json!({ "shimmer": recipe.name, "blurb": recipe.blurb, "credit": credit, "frames": frames })
+    json!({ "shimmer": recipe.name(), "blurb": recipe.blurb(), "credit": recipe.credit(), "frames": frames })
 }
 
 /// `buf`'s rows of `[symbol, fg, bg, modifier bits, underline]` cells, colors as `0xRRGGBB` or null

@@ -19,7 +19,6 @@ import json
 import math
 import multiprocessing
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -31,12 +30,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
-
 import score
+import tomllib
 from cells import FACES, Clip, Grid, Rushes, Terminal, face
 from cuts import CUTS, Camera, Side, Stage, ease
 from edit import Card, Edit, Framing, Roll, Shot, Single, Take, Title
+from PIL import Image, ImageDraw, ImageFont
 from turn import TICK, Busy, Segment, Wait, ticks
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,26 +59,32 @@ SURVEY = (
 
 
 def roster() -> tuple[str, ...]:
-    """Stock shimmer names in `/shimmer` order, as `mod.rs` lists them and their recipes name
-    them."""
-    names = []
-    for module in re.findall(
-        r"credited\((\w+)::RECIPE", (SHIMMERS / "mod.rs").read_text()
-    ):
-        recipe = re.search(
-            r'Recipe \{\s*name: "([^"]+)"', (SHIMMERS / f"{module}.rs").read_text()
-        )
-        assert recipe, f"{module}.rs declares no recipe name"
-        names.append(recipe[1])
-    return tuple(names)
+    """Stock recipes in picker order, listed by libshimmer through the reel export."""
+    listing = exported({"fg": [214] * 3, "bg": [0] * 3, "width": 1, "clips": []})
+    return tuple(recipe["name"] for recipe in json.loads(listing.read_text())["roster"])
 
 
-def export(cues: dict[str, object], cols: int) -> Rushes:
-    """The clips codex-tui draws for `cues`, exported once per cue sheet and shimmer source."""
-    blob = json.dumps(cues, separators=(",", ":"))
+def exported(cues: dict[str, object]) -> Path:
+    """Cached cell export, keyed on its cue sheet and the host and library identities."""
+    blob = json.dumps({"tick": TICK, **cues}, separators=(",", ":"))
     digest = hashlib.sha256(blob.encode())
     for source in sorted(SHIMMERS.glob("*.rs")):
         digest.update(source.read_bytes())
+    workspace = ROOT / "codex-rs"
+    manifest = tomllib.loads((workspace / "Cargo.toml").read_text())
+    dependency = manifest["workspace"]["dependencies"]["libshimmer"]
+    if isinstance(dependency, dict) and "path" in dependency:
+        library = workspace / dependency["path"]
+        digest.update((library / "Cargo.toml").read_bytes())
+        for source in sorted((library / "src").rglob("*.rs")):
+            digest.update(source.relative_to(library).as_posix().encode())
+            digest.update(source.read_bytes())
+    else:
+        lock = tomllib.loads((workspace / "Cargo.lock").read_text())
+        (package,) = (
+            package for package in lock["package"] if package["name"] == "libshimmer"
+        )
+        digest.update(json.dumps([package["version"], package["checksum"]]).encode())
     entry = CACHE / digest.hexdigest()[:20]
     clips = entry / "clips.json"
     if not clips.exists():
@@ -97,7 +102,11 @@ def export(cues: dict[str, object], cols: int) -> Rushes:
         KEEP:
     ]:
         shutil.rmtree(stale)
-    return Rushes.load(clips, cols)
+    return clips
+
+
+def export(cues: dict[str, object], cols: int) -> Rushes:
+    return Rushes.load(exported(cues), cols)
 
 
 def cue(take: Take, count: int) -> dict[str, object]:
