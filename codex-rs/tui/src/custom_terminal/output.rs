@@ -624,7 +624,12 @@ pub(crate) fn completion_received() {
     if failed || (state.waiting && matches!(state.phase, Phase::Idle) && state.queue.is_empty()) {
         state.waiting = false;
         if let Some(ui) = &state.ui {
-            ui.requester.schedule_frame();
+            // A refused paint still owes what it owed; only a failure calls for fresh content.
+            if failed {
+                ui.requester.schedule_frame();
+            } else {
+                ui.requester.retry_paint();
+            }
         }
     }
 }

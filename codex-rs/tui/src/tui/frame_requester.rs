@@ -106,7 +106,6 @@ impl FrameRequester {
 
     /// Schedule a frame draw as soon as possible.
     pub fn schedule_frame(&self) {
-        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now(),
@@ -118,7 +117,6 @@ impl FrameRequester {
 
     /// Admit meaningful local input without imposing the unattended stream cadence.
     pub(crate) fn schedule_interactive_frame(&self) {
-        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now(),
@@ -141,7 +139,6 @@ impl FrameRequester {
 
     /// Reveal meaningful delayed content, unlike a cosmetic animation frame.
     pub(crate) fn schedule_content_in(&self, dur: Duration) {
-        self.owe(Due::CONTENT);
         if self.mode() != PresentationMode::Frozen {
             let _ = self.frame_schedule_tx.send(FrameRequest {
                 at: scheduling_now() + dur,
@@ -551,6 +548,7 @@ mod tests {
         assert!(draw_rx.try_recv().is_ok(), "the transition paints once");
         assert_eq!(requester.pay_all(), Due::CONTENT);
         requester.schedule_frame_in(Duration::ZERO);
+        requester.schedule_frame();
         requester.schedule_glint_in(Duration::ZERO);
         advance(BEAT * 2 - Duration::from_millis(/*millis*/ 3)).await;
         assert!(
@@ -562,7 +560,13 @@ mod tests {
         assert_eq!(
             requester.pay_all(),
             Due::GLINT,
-            "only the status row moves in a peripheral window"
+            "only the status row moves before content's coalescing deadline"
         );
+        // The content arrived with the transition paint at 34ms and waits out its interval.
+        advance(Duration::from_millis(/*millis*/ 56)).await;
+        assert!(draw_rx.try_recv().is_err());
+        advance(Duration::from_millis(/*millis*/ 2)).await;
+        assert!(draw_rx.try_recv().is_ok());
+        assert_eq!(requester.pay_all(), Due::CONTENT);
     }
 }

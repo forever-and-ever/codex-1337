@@ -105,8 +105,9 @@ impl FrameRequester {
         }
     }
 
-    pub(super) fn owe(&self, debt: Due) {
-        self.due.fetch_or(debt.0, Ordering::Relaxed);
+    /// Wakes the event loop to pay what the screen already owes, adding no debt of its own.
+    pub(crate) fn retry_paint(&self) {
+        self.schedule_maintenance_in(Duration::ZERO);
     }
 
     /// What the screen owes, left owing.
