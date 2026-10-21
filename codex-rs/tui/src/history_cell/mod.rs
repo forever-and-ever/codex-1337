@@ -145,6 +145,7 @@ mod mcp;
 mod messages;
 mod plan_stream_rows;
 mod responding;
+pub(crate) mod status_output;
 pub(crate) use failed_turn::FailedTurnCell;
 pub(crate) use plan_stream_rows::render_plan_rows;
 pub(crate) use responding::RespondingCell;

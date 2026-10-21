@@ -114,9 +114,12 @@ impl TranscriptView {
         )
     }
 
-    pub(super) fn conversation_hidden(&self, index: usize) -> bool {
+    pub(super) fn conversation_hidden(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> bool {
         !self.detailed
             && self.mode == HistoryRenderMode::Rich
+            && !cells
+                .get(index)
+                .is_some_and(|cell| crate::history_cell::status_output::matches(cell.as_ref()))
             && self
                 .conversation
                 .gap(self.feed.response_owner(index).unwrap_or(index))
@@ -125,6 +128,6 @@ impl TranscriptView {
 
     pub(crate) fn conversation_tail_hidden(&mut self, cells: &[Arc<dyn HistoryCell>]) -> bool {
         self.refresh_feed(cells, cells.len());
-        self.conversation_hidden(cells.len())
+        self.conversation_hidden(cells, cells.len())
     }
 }

@@ -15,6 +15,7 @@ pub(crate) mod remote_connection;
 mod thread_usage;
 
 pub(crate) use account::StatusAccountDisplay;
+pub(crate) use card::StatusHistoryCell;
 pub(crate) use card::StatusHistoryHandle;
 pub(crate) use card::claude_quota_data;
 #[cfg(test)]

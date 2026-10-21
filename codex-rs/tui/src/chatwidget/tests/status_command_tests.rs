@@ -81,16 +81,74 @@ async fn status_command_does_not_print_cached_limits_when_refresh_fails() {
 
 #[tokio::test]
 async fn status_command_renders_immediately_without_rate_limit_refresh() {
-    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    use crate::history_cell::NotificationCell;
+    use crate::history_cell::UserHistoryCell;
+    use crate::prompt_order::UserPromptIdentity;
+    use crate::transcript_geometry::CONTROL_COLUMN;
+    use crate::transcript_view::TranscriptView;
+    use crossterm::event::MouseButton;
+    use crossterm::event::MouseEvent;
+    use crossterm::event::MouseEventKind;
 
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
     chat.dispatch_command(SlashCommand::Status);
 
-    assert_matches!(rx.try_recv(), Ok(AppEvent::InsertHistoryCell(_)));
+    let status = match rx.try_recv() {
+        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
+        event => panic!("expected immediate status output, got {event:?}"),
+    };
     assert!(
         !std::iter::from_fn(|| rx.try_recv().ok())
             .any(|event| matches!(event, AppEvent::RefreshRateLimits { .. })),
         "non-ChatGPT sessions should not request a rate-limit refresh for /status"
     );
+
+    // /status is an explicit inspection, not a conversational boundary: show it while
+    // ordinary work before and after it remains folded under the latest user message.
+    let mut cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(UserHistoryCell {
+        timestamp: None,
+        prompt_identity: UserPromptIdentity::default(),
+        message: "Continue working".into(),
+        text_elements: Vec::new(),
+        local_image_paths: Vec::new(),
+        remote_image_urls: Vec::new(),
+        spoken: false,
+    })];
+    let mut view = TranscriptView::default();
+    let area = Rect::new(0, 0, 140, 80);
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer, &cells);
+    let row = (area.top()..area.bottom())
+        .rfind(|row| buffer[(CONTROL_COLUMN, *row)].symbol() == "[")
+        .unwrap();
+    assert!(
+        view.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: CONTROL_COLUMN + 1,
+                row,
+                modifiers: KeyModifiers::CONTROL,
+            },
+            &cells,
+        )
+        .is_some()
+    );
+    cells.push(Arc::new(NotificationCell::new(
+        "Hidden before status".into(),
+    )));
+    cells.push(Arc::from(status));
+    cells.push(Arc::new(NotificationCell::new(
+        "Hidden after status".into(),
+    )));
+    view.render(area, &mut buffer, &cells);
+    let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    assert!(rendered.contains("/status"), "{rendered}");
+    assert!(rendered.contains(&thread_id.to_string()), "{rendered}");
+    assert!(!rendered.contains("Hidden before status"), "{rendered}");
+    assert!(!rendered.contains("Hidden after status"), "{rendered}");
+    assert!(view.conversation_tail_hidden(&cells));
 }
 
 #[tokio::test]

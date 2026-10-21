@@ -1033,5 +1033,18 @@ mod tests {
         let area = Rect::new(2, 3, 24, 10);
         view.render(area, &mut Buffer::empty(area));
         assert_eq!(view.selection.selected_text(&[]).as_deref(), Some(command));
+        // A conversational fold hides this panel while transcript controls occupy its old rows.
+        // The hidden text surface must not intercept their clicks, even with a held selection.
+        view.render(Rect::default(), &mut Buffer::empty(Rect::default()));
+        view.capture_painted_frame(false);
+        assert_eq!(view.handle_mouse(click), Interaction::Ignored);
+        assert!(
+            view.selection_event(&mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                area.x + crate::ui_consts::LIVE_PREFIX_COLS,
+                area.y + 1,
+            ))
+            .is_none()
+        );
     }
 }

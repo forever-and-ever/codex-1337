@@ -1913,7 +1913,7 @@ impl TranscriptView {
             index,
             self.area.width.max(1),
             &self.disclosure.expanded,
-            &|index| self.elides_cell(cells, index) || self.conversation_hidden(index),
+            &|index| self.elides_cell(cells, index) || self.conversation_hidden(cells, index),
         );
         if let Some(Header {
             item,

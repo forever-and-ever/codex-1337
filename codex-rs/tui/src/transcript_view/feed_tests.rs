@@ -1125,6 +1125,12 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
         assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
     }
     assert!(view.conversation_tail_hidden(&cells));
+    // The trailing user has no final answer yet; its gap must still reopen.
+    click(&mut view, &cells, 5, KeyModifiers::NONE, 1);
+    assert!(!view.conversation_tail_hidden(&cells));
+    assert!(view.current_layout(&cells, 6).unwrap().row_count() > 0);
+    click(&mut view, &cells, 5, KeyModifiers::NONE, 1);
+    assert!(view.conversation_tail_hidden(&cells));
     click(&mut view, &cells, 0, KeyModifiers::NONE, 1);
     assert!(
         view.current_layout(&cells, 1)
@@ -1139,6 +1145,35 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
             .contains("Code Mode")
     );
     assert_eq!(view.current_layout(&cells, 6).unwrap().row_count(), 0);
+    // The latest User's own header remains reversible independently of its folded work.
+    for expanded in [false, true] {
+        let layout = view.current_layout(&cells, 5).unwrap();
+        let target = layout
+            .fold_targets()
+            .into_iter()
+            .find(|target| matches!(target, FoldTarget::Part(_)))
+            .unwrap();
+        let (row, columns, _) = layout.fold_position(&target).unwrap();
+        let screen_row = view
+            .visible
+            .iter()
+            .position(|visible| visible.index == 5 && visible.row == row)
+            .unwrap();
+        assert!(view.toggle_disclosure_at(
+            &cells,
+            columns.start + 1,
+            screen_row.try_into().unwrap(),
+        ));
+        paint(&mut view, &cells);
+        assert_eq!(
+            view.current_layout(&cells, 5)
+                .unwrap()
+                .text()
+                .contains("Second prompt"),
+            expanded,
+        );
+        assert!(view.conversation_tail_hidden(&cells));
+    }
     // Full-content search/copy can still reach hidden evidence without changing fold choices.
     assert!(
         view.entry_layout(&cells, 6, true)

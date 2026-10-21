@@ -148,7 +148,7 @@ impl StatusHistoryHandle {
 }
 
 #[derive(Debug)]
-struct StatusHistoryCell {
+pub(crate) struct StatusHistoryCell {
     model_name: String,
     model_details: Vec<String>,
     directory: PathBuf,

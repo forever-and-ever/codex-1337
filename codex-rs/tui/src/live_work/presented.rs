@@ -4,6 +4,7 @@ use super::LiveWorkView;
 use super::Rect;
 use crate::custom_terminal::output;
 use crate::custom_terminal::output::FrameId;
+use ratatui::buffer::Buffer;
 
 #[derive(Default)]
 pub(super) struct FrameHits {
@@ -25,6 +26,17 @@ impl FrameHits {
 
 impl LiveWorkView {
     pub(crate) fn capture_painted_frame(&mut self, visible: bool) {
+        if !visible {
+            self.hits.clear();
+            self.focused = false;
+            self.selection.jump_to_latest();
+            self.release_hover();
+            self.selection.render_surface(
+                Rect::default(),
+                &mut Buffer::empty(Rect::default()),
+                Vec::new(),
+            );
+        }
         let Some(id) = output::current_frame() else {
             return;
         };
@@ -37,9 +49,7 @@ impl LiveWorkView {
                 Vec::new()
             },
         ));
-        if visible {
-            self.selection.capture_painted_frame();
-        }
+        self.selection.capture_painted_frame();
     }
 
     pub(crate) fn promote_presented_frame(&mut self) {

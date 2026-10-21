@@ -299,7 +299,7 @@ impl TranscriptView {
             return None;
         }
         self.refresh_feed(cells, index);
-        if !full_content && self.conversation_hidden(index) {
+        if !full_content && self.conversation_hidden(cells, index) {
             return Some(Arc::new(TextLayout::new(
                 Vec::new(),
                 self.area.width.max(1),
@@ -307,7 +307,7 @@ impl TranscriptView {
         }
         // Search reads retained entry content independently of its manual folds.
         let seat = if full_content
-            && (self.conversation_hidden(index)
+            && (self.conversation_hidden(cells, index)
                 || cells
                     .get(index)
                     .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some()))
