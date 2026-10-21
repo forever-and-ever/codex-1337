@@ -286,8 +286,8 @@ definitions folded
 Buffer {
     area: Rect { x: 0, y: 0, width: 64, height: 6 },
     content: [
-        "        [-] Injection · Additional tools                     ≈44",
-        "        [+]   Raw Context                                       ",
+        "         ▽  Injection · Additional tools                     ≈44",
+        "         ▷    Raw Context                                       ",
         "                                                                ",
         "                                                                ",
         "                                                                ",

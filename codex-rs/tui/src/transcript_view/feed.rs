@@ -175,7 +175,7 @@ enum Contribution {
 }
 
 impl Contribution {
-    fn of(cell: &dyn HistoryCell, conversation: &super::conversation::Conversation) -> Self {
+    fn of(cell: &dyn HistoryCell, dialogue: &super::dialogue::Dialogue) -> Self {
         let any = cell.as_any();
         if let Some(thought) = any.downcast_ref::<ThoughtCell>() {
             if thought.is_readable() {
@@ -184,7 +184,7 @@ impl Contribution {
                 Self::Silent
             }
         } else if any.is::<AgentMarkdownCell>() {
-            if conversation.is_boundary(cell) {
+            if dialogue.admits(cell) {
                 Self::FinalResponse
             } else {
                 Self::Message
@@ -585,7 +585,7 @@ impl FeedIndex {
         cells: &'b [Arc<dyn HistoryCell>],
         bills: &'b StepBills,
         frame: u64,
-        conversation: &super::conversation::Conversation,
+        dialogue: &super::dialogue::Dialogue,
     ) {
         let mut names: Vec<&str> = Vec::new();
         let mut nodes: HashMap<&str, usize> = HashMap::new();
@@ -624,7 +624,7 @@ impl FeedIndex {
         let mut last_item = None;
         let mut last_step: Option<&str> = None;
         for (index, cell) in cells.iter().enumerate() {
-            let contribution = Contribution::of(cell.as_ref(), conversation);
+            let contribution = Contribution::of(cell.as_ref(), dialogue);
             if let Some((kind, key)) =
                 entry_kind(cell, &cell_nodes[index], last_step, &mut placed_users)
             {
@@ -729,7 +729,7 @@ impl FeedIndex {
         let mut hasher = DefaultHasher::new();
         self.cells.hash(&mut hasher);
         for cell in cells {
-            conversation.is_boundary(cell.as_ref()).hash(&mut hasher);
+            dialogue.admits(cell.as_ref()).hash(&mut hasher);
         }
         self.revision = hasher.finish();
         self.roles = roles;
@@ -1913,7 +1913,7 @@ impl TranscriptView {
             index,
             self.area.width.max(1),
             &self.disclosure.expanded,
-            &|index| self.elides_cell(cells, index) || self.conversation_hidden(cells, index),
+            &|index| self.elides_cell(cells, index) || self.eclipsed(cells, index),
         );
         if let Some(Header {
             item,
@@ -1964,9 +1964,8 @@ impl TranscriptView {
             } else {
                 HashMap::new()
             };
-            self.conversation.rebuild(cells);
             self.feed
-                .rebuild(cells, &self.step_bills, frame, &self.conversation);
+                .rebuild(cells, &self.step_bills, frame, &self.dialogue);
             for (index, cell) in cells.iter().enumerate() {
                 if let Some(prior) = prior_scopes.get(&cell_key(cell)) {
                     self.remap_fold_scope(prior, self.feed.fold_scope(index));

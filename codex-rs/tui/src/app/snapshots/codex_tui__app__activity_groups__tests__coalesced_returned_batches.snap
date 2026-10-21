@@ -3,14 +3,14 @@ source: tui/src/app/activity_groups_tests.rs
 expression: "snapshots.join(\"\\n\\n\")"
 ---
 Exploration ordinary=false expanded=false
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out]               1280
+▽  Code Mode (εμογ)        [in [raw] [fmt]] [out]               1280
               Read first.rs (whole file)
               Read nested.rs (whole file)
-        [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
+         ▽  Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
               Read second.rs (whole file)
 
 Exploration ordinary=false expanded=true
-[-] Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
+▽  Code Mode (εμογ)        [in [raw] [fmt]] [out [raw]      ]   1280
               Read first.rs (whole file)
               Read nested.rs (whole file)
 
@@ -27,7 +27,7 @@ Exploration ordinary=false expanded=true
         ┊     Wall time 0.0 seconds
         ┊     Output:
         ╰     Only model-visible text.
-        [-] Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
+         ▽  Code Mode (τνμβ)        [in [raw] [fmt]] [out]                 20
               Read second.rs (whole file)
 
 Computer ordinary=false expanded=false

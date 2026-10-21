@@ -84,11 +84,7 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
     use crate::history_cell::NotificationCell;
     use crate::history_cell::UserHistoryCell;
     use crate::prompt_order::UserPromptIdentity;
-    use crate::transcript_geometry::CONTROL_COLUMN;
     use crate::transcript_view::TranscriptView;
-    use crossterm::event::MouseButton;
-    use crossterm::event::MouseEvent;
-    use crossterm::event::MouseEventKind;
 
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let thread_id = ThreadId::new();
@@ -105,8 +101,8 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
         "non-ChatGPT sessions should not request a rate-limit refresh for /status"
     );
 
-    // /status is an explicit inspection, not a conversational boundary: show it while
-    // ordinary work before and after it remains folded under the latest user message.
+    // /status is an explicit inspection, not dialogue: dialogue mode shows it while hiding the
+    // work around it.
     let mut cells: Vec<Arc<dyn HistoryCell>> = vec![Arc::new(UserHistoryCell {
         timestamp: None,
         prompt_identity: UserPromptIdentity::default(),
@@ -119,22 +115,7 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
     let mut view = TranscriptView::default();
     let area = Rect::new(0, 0, 140, 80);
     let mut buffer = Buffer::empty(area);
-    view.render(area, &mut buffer, &cells);
-    let row = (area.top()..area.bottom())
-        .rfind(|row| buffer[(CONTROL_COLUMN, *row)].symbol() == "[")
-        .unwrap();
-    assert!(
-        view.handle_mouse(
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: CONTROL_COLUMN + 1,
-                row,
-                modifiers: KeyModifiers::CONTROL,
-            },
-            &cells,
-        )
-        .is_some()
-    );
+    view.toggle_lens(&cells);
     cells.push(Arc::new(NotificationCell::new(
         "Hidden before status".into(),
     )));
@@ -148,7 +129,7 @@ async fn status_command_renders_immediately_without_rate_limit_refresh() {
     assert!(rendered.contains(&thread_id.to_string()), "{rendered}");
     assert!(!rendered.contains("Hidden before status"), "{rendered}");
     assert!(!rendered.contains("Hidden after status"), "{rendered}");
-    assert!(view.conversation_tail_hidden(&cells));
+    assert!(view.dialogue_only());
 }
 
 #[tokio::test]

@@ -2,9 +2,9 @@ use ratatui::style::Modifier;
 use ratatui::style::Style;
 use unicode_width::UnicodeWidthStr;
 
-/// The entire three-column label is clickable.
+/// A hollow triangle points at what its fold shows, centered in three clickable columns.
 pub(crate) fn glyph(expanded: bool) -> &'static str {
-    if expanded { "[-]" } else { "[+]" }
+    if expanded { " ▽ " } else { " ▷ " }
 }
 
 pub(crate) fn columns() -> usize {

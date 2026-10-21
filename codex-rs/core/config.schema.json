@@ -5024,6 +5024,7 @@
               "open_transcript": null,
               "queue": null,
               "submit": null,
+              "toggle_dialogue": null,
               "toggle_fast_mode": null,
               "toggle_raw_output": null,
               "toggle_shortcuts": null,
@@ -5880,6 +5881,14 @@
           ],
           "description": "Submit the current composer draft."
         },
+        "toggle_dialogue": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Toggle dialogue mode, which hides the work between prompts and answers."
+        },
         "toggle_fast_mode": {
           "allOf": [
             {
@@ -6043,6 +6052,7 @@
             "open_transcript": null,
             "queue": null,
             "submit": null,
+            "toggle_dialogue": null,
             "toggle_fast_mode": null,
             "toggle_raw_output": null,
             "toggle_shortcuts": null,

@@ -420,7 +420,7 @@ async fn beginning_navigation_holds_the_view_until_the_last_page_arrives() -> Re
         );
         // This fixture projects cells directly rather than dispatching replay notifications.
         for turn in &started.turns {
-            if let Some(id) = crate::transcript_view::conversation::final_response(turn) {
+            if let Some(id) = crate::transcript_view::dialogue::final_response(turn) {
                 app.transcript_view.record_final_response(id.to_string());
             }
         }

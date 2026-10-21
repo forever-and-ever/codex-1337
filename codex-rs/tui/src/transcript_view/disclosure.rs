@@ -464,14 +464,13 @@ impl TranscriptView {
             return false;
         };
         self.end_selection(cells);
+        self.refresh_feed(cells, index);
+        if self.eclipsed(cells, index) {
+            self.set_lens(cells, super::dialogue::Lens::Work);
+        }
         self.jump_to_entry(cells, index);
         // The previous paint cannot prove visibility after this explicit jump.
         self.visible.clear();
-        self.refresh_feed(cells, index);
-        if let Some(id) = self.conversation.gap(index) {
-            self.disclosure.expanded.set(id.to_string(), true);
-            self.cache.clear();
-        }
         if let Some(fold) = self.feed.fold_of(index)
             && self.feed.is_unfolded(fold, &self.disclosure.expanded) == Some(false)
         {
@@ -588,13 +587,6 @@ impl TranscriptView {
             self.toggle_feed_scoped(cells, index, &fold, grouped);
             return;
         }
-        let conversation = matches!(
-            target,
-            FoldTarget::GroupedPart {
-                group: crate::history_cell::activity_parts::FoldGroup::Conversation,
-                ..
-            }
-        );
         let activity_ids = self.activity_ids(cells, index);
         let ids = target.ids(&activity_ids);
         if ids.is_empty() {
@@ -625,7 +617,7 @@ impl TranscriptView {
             .and_then(|(key, top_ids, offset, row_bias)| {
                 let unchanged = cells.iter().position(|cell| EntryKey::cell(cell) == key);
                 let top = unchanged.or_else(|| self.canonical_activity_index(cells, &top_ids))?;
-                let preserve_offset = unchanged.is_some() && (top != index || conversation);
+                let preserve_offset = unchanged.is_some() && top != index;
                 Some(Anchor {
                     key: cells.get(top).map_or(EntryKey::Live, EntryKey::cell),
                     index: top,
@@ -657,9 +649,7 @@ impl TranscriptView {
                 }
             }
         } else if let FoldTarget::GroupedPart { id, group } = &target {
-            let scope = if conversation {
-                crate::history_cell::activity_parts::FoldScope::Transcript
-            } else if index == cells.len() {
+            let scope = if index == cells.len() {
                 self.live_fold_scope()
             } else {
                 self.feed.fold_scope(index)
@@ -667,7 +657,7 @@ impl TranscriptView {
             let open = self
                 .disclosure
                 .expanded
-                .is_open_in(&scope, *group, id, conversation);
+                .is_open_in(&scope, *group, id, false);
             if grouped {
                 self.disclosure.expanded.set_default(scope, *group, !open);
             } else {
@@ -714,8 +704,7 @@ impl TranscriptView {
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;
-        if !conversation
-            && anchor.index == index
+        if anchor.index == index
             && let Some(layout) = self.current_layout(cells, index)
         {
             // Offset zero is the first selectable byte, not a synthetic Feed header.

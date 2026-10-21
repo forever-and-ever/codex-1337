@@ -6,7 +6,7 @@ awaiting measurement
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        [+]   Activity summary  ",
+        "         ▷    Activity summary  ",
         "                                ",
         "                                ",
     ],
@@ -18,7 +18,7 @@ collapsed
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        [+]   Activity summary  ",
+        "         ▷    Activity summary  ",
         "                                ",
         "                                ",
     ],
@@ -33,7 +33,7 @@ focused
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        [+]   Activity summary  ",
+        "         ▷    Activity summary  ",
         "                                ",
         "                                ",
     ],
@@ -50,7 +50,7 @@ expanded
 Buffer {
     area: Rect { x: 0, y: 0, width: 32, height: 3 },
     content: [
-        "        [-]   Activity summary  ",
+        "         ▽    Activity summary  ",
         "              Hidden details    ",
         "                                ",
     ],

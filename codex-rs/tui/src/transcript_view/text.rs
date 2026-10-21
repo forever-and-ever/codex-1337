@@ -135,8 +135,6 @@ enum DisclosurePlacement {
     },
     /// A Feed Item's fold, after the clock on its header row.
     Fold,
-    /// Presentation-only row after a conversational boundary.
-    Trailing,
     Output {
         start: usize,
         end: usize,
@@ -277,9 +275,7 @@ impl TextLayout {
                     control.target.clone(),
                 ),
                 // The header row is synthetic and returns with its line below.
-                DisclosurePlacement::Fold
-                | DisclosurePlacement::Inline { .. }
-                | DisclosurePlacement::Trailing => layout,
+                DisclosurePlacement::Fold | DisclosurePlacement::Inline { .. } => layout,
                 DisclosurePlacement::Output { start, end } => {
                     if let FoldTarget::OutputMode(mode) = control.target {
                         layout.with_output_target(
@@ -298,12 +294,6 @@ impl TextLayout {
         layout.brackets = self.brackets;
         if let Some(rows) = &self.feed_header {
             layout = layout.with_fold_header(rows.clone());
-        }
-        for control in &self.disclosure_controls {
-            if control.placement == DisclosurePlacement::Trailing {
-                layout =
-                    layout.with_trailing_control(control.label.clone(), control.target.clone());
-            }
         }
         if self.separated {
             layout.with_leading_separator()
@@ -408,40 +398,6 @@ impl TextLayout {
         self
     }
 
-    pub(super) fn with_conversation_control(self, id: String, open: bool) -> Self {
-        self.with_trailing_control(
-            crate::render::disclosure::glyph(open).to_string(),
-            FoldTarget::GroupedPart {
-                id,
-                group: crate::history_cell::activity_parts::FoldGroup::Conversation,
-            },
-        )
-    }
-
-    fn with_trailing_control(mut self, label: String, target: FoldTarget) -> Self {
-        let offset = self.text.len();
-        self.disclosure_controls.push(DisclosureControl {
-            row: self.rows.len(),
-            label,
-            source_offset: offset,
-            target,
-            placement: DisclosurePlacement::Trailing,
-        });
-        self.rows.push(TextRow {
-            logical_line: None,
-            line: HyperlinkLine::from(Line::default()),
-            source: offset..offset,
-            line_end: None,
-            content_width: self.width,
-            first_column: 0,
-            prefix_columns: 0,
-            tabs: tabs::TabStops::default(),
-            inline_decoration: None,
-            hang: Hang::Outside,
-        });
-        self
-    }
-
     /// Source text between adjacent retained fragments; distinct logical lines have a hard break.
     pub(super) fn separator_after(&self, next: &Self) -> &str {
         if let Some(previous) = self.logical.last()
@@ -504,9 +460,7 @@ impl TextLayout {
                 row.first_column as u16
                     ..line_width(&row.line.line).min(usize::from(self.width)) as u16
             }
-            DisclosurePlacement::Leading { .. }
-            | DisclosurePlacement::Fold
-            | DisclosurePlacement::Trailing => {
+            DisclosurePlacement::Leading { .. } | DisclosurePlacement::Fold => {
                 crate::transcript_geometry::CONTROL_COLUMN.min(self.width)
                     ..(crate::transcript_geometry::CONTROL_COLUMN
                         + crate::transcript_geometry::CONTROL_COLUMNS)
@@ -566,7 +520,6 @@ impl TextLayout {
                     control.placement,
                     DisclosurePlacement::Leading { .. }
                         | DisclosurePlacement::Fold
-                        | DisclosurePlacement::Trailing
                         | DisclosurePlacement::Output { .. }
                 ) && control.row == start_row + usize::from(screen_row)
             }) {

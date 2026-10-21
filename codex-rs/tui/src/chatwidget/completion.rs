@@ -5,7 +5,7 @@ use super::*;
 
 impl ChatWidget {
     pub(super) fn record_final_response(&self, turn: &codex_app_server_protocol::Turn) {
-        let id = crate::transcript_view::conversation::final_response(turn).or_else(|| {
+        let id = crate::transcript_view::dialogue::final_response(turn).or_else(|| {
             self.transcript
                 .last_completed_agent_message
                 .as_ref()

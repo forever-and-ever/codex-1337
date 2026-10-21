@@ -162,6 +162,8 @@ pub struct TuiGlobalKeymap {
     pub toggle_fast_mode: Option<KeybindingsSpec>,
     /// Toggle raw scrollback mode for copy-friendly transcript selection.
     pub toggle_raw_output: Option<KeybindingsSpec>,
+    /// Toggle dialogue mode, which hides the work between prompts and answers.
+    pub toggle_dialogue: Option<KeybindingsSpec>,
     /// Switch between a side conversation and its parent without closing either.
     pub toggle_side_conversation: Option<KeybindingsSpec>,
 }

@@ -299,7 +299,7 @@ impl TranscriptView {
             return None;
         }
         self.refresh_feed(cells, index);
-        if !full_content && self.conversation_hidden(cells, index) {
+        if !full_content && self.eclipsed(cells, index) {
             return Some(Arc::new(TextLayout::new(
                 Vec::new(),
                 self.area.width.max(1),
@@ -307,7 +307,7 @@ impl TranscriptView {
         }
         // Search reads retained entry content independently of its manual folds.
         let seat = if full_content
-            && (self.conversation_hidden(cells, index)
+            && (self.eclipsed(cells, index)
                 || cells
                     .get(index)
                     .is_some_and(|cell| feed::feed_entry(cell.as_ref()).is_some()))
@@ -327,16 +327,11 @@ impl TranscriptView {
         let width = self.area.width.max(/*other*/ 1);
         let Some(cell) = cells.get(index) else {
             let live = self.live.as_ref()?;
-            if (!self.detailed
-                && self.mode == HistoryRenderMode::Rich
-                && previous_index
-                    .is_some_and(|previous| self.conversation.control(previous).is_some()))
-                || !crate::transcript_geometry::separated(
-                    previous.map(AsRef::as_ref),
-                    self.live_tool_entry,
-                    self.live_continuation,
-                )
-            {
+            if !crate::transcript_geometry::separated(
+                previous.map(AsRef::as_ref),
+                self.live_tool_entry,
+                self.live_continuation,
+            ) {
                 return Some(Arc::clone(live));
             }
             return Some(Arc::clone(self.live_separated.get_or_insert_with(|| {
@@ -385,14 +380,8 @@ impl TranscriptView {
         if manually_expanded && crate::history_cell::invocation::collect(cell.as_ref()).is_empty() {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
-        let conversation_control = (!detailed && mode == HistoryRenderMode::Rich)
-            .then(|| self.conversation.control(index))
-            .flatten()
-            .map(|id| (id.to_string(), self.conversation_open(id)));
-        let separated = !(!detailed
-            && mode == HistoryRenderMode::Rich
-            && previous_index
-                .is_some_and(|previous| self.conversation.control(previous).is_some()))
+        // Dialogue mode stacks prompts and answers; with the work shown, blank rows set them apart.
+        let separated = !self.dialogue_only()
             && match &seat.header {
                 Some(header) => {
                     previous_index.is_some()
@@ -685,9 +674,6 @@ impl TranscriptView {
                         full_content,
                         width,
                     ));
-                }
-                if let Some((id, open)) = &conversation_control {
-                    layout = layout.with_conversation_control(id.clone(), *open);
                 }
                 layout.with_brackets(mode == HistoryRenderMode::Rich)
             };

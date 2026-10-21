@@ -66,6 +66,10 @@ qualified forms.
   without detaching its server connection. An idle restart replaces it after five
   quiet minutes when a newer installation exists, through the reload host when one
   is present (hosted) and by `exec` otherwise (unhosted).
+- dialogue, work: a turn's dialogue is the user's prompt and the agent's final answer; its
+  work is everything else the transcript shows of it. Dialogue mode (Alt+W,
+  `tui.keymap.global.toggle_dialogue`) hides the work in the main transcript; detailed and raw
+  views always show it.
 
 ## Build inputs
 

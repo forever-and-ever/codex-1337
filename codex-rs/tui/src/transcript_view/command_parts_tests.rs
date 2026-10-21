@@ -450,8 +450,9 @@ fn invocation_ports_preserve_sources_across_completion_and_reflow() {
                 .unwrap();
             assert!(header.contains("[in [raw]"));
             assert!(!header.contains("[fmt]"));
-            assert!(!header.contains("[-]"));
-            assert!(!header.contains("[+]"));
+            for open in [false, true] {
+                assert!(!header.contains(crate::render::disclosure::glyph(open).trim()));
+            }
             assert!(empty_view.focus_fold(&code, 0, open_raw));
             let _ = empty_view.handle_key(KeyCode::Enter.into(), &code);
             drop(tests::render(&mut empty_view, &code, 104, 26));

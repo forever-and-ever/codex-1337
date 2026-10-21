@@ -11,8 +11,8 @@ mod activity;
 mod bookmark;
 mod brackets;
 mod composer_gap;
-pub(crate) mod conversation;
 mod copy_mode;
+pub(crate) mod dialogue;
 mod disclosure;
 mod disclosure_navigation;
 mod feed;
@@ -173,7 +173,8 @@ pub(crate) struct TranscriptView {
     step_bills: step_bills::StepBills,
     invocations: invocation::Invocations,
     feed: feed::FeedIndex,
-    conversation: conversation::Conversation,
+    dialogue: dialogue::Dialogue,
+    lens: dialogue::Lens,
 }
 
 impl Default for TranscriptView {
@@ -226,7 +227,8 @@ impl Default for TranscriptView {
             step_bills: Default::default(),
             invocations: Default::default(),
             feed: Default::default(),
-            conversation: Default::default(),
+            dialogue: Default::default(),
+            lens: Default::default(),
         }
     }
 }

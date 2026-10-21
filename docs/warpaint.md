@@ -146,7 +146,7 @@ light text on a dark ground correctly.
   prompt, the user's words; and the harness, tool output, injected context and whatever else
   the harness says in the user's stead. Headings, summaries, the client's projections of a call
   and its notices hang none, so a bracket begins at its first word; a view that reflows words
-  the model saw keeps their bracket. A fold is a triangle in the same column. The brackets keep
+  the model saw keeps their bracket. A fold is a hollow triangle in the same column. The brackets keep
   that order round the hue circle, nearest 30, 95, 125, 150, 240 and 300 degrees from reasoning
   to harness, and wear the livery's colors, so a palette marks its speakers only in colors it
   already has: of the identities at 12 M or more, they take the assignment that keeps their

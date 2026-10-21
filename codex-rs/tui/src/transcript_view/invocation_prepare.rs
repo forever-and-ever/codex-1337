@@ -9,11 +9,14 @@ impl TranscriptView {
         self.cache.frames = Some(frames);
     }
 
-    /// Reset conversation-local state without turning a live UI back into a synchronous view.
+    /// Reset conversation-local state without turning a live UI back into a synchronous view or
+    /// dropping the lens the human chose.
     pub(crate) fn reset(&mut self) {
         let frames = self.cache.frames.clone();
+        let lens = self.lens;
         *self = Self::default();
         self.cache.frames = frames;
+        self.lens = lens;
     }
 }
 

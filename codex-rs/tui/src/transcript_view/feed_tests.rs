@@ -307,7 +307,7 @@ fn steps_fold_under_one_header_with_their_figures() {
         );
         let text = crate::transcript_view::tests::text(&buffer).replace(&clock, "HH:MM");
         for (row, line) in text.lines().enumerate() {
-            for glyph in ["[+]", "[-]"] {
+            for glyph in [false, true].map(|open| crate::render::disclosure::glyph(open).trim()) {
                 for (offset, _) in line.match_indices(glyph) {
                     let column = unicode_width::UnicodeWidthStr::width(&line[..offset]);
                     let cell =
@@ -362,7 +362,13 @@ fn steps_fold_under_one_header_with_their_figures() {
         text
     };
     let fresh = screen(&mut view, "unfolded");
-    assert!(fresh.contains("[+] Injection"), "{fresh}");
+    assert!(
+        fresh.contains(&format!(
+            "{} Injection",
+            crate::render::disclosure::glyph(false)
+        )),
+        "{fresh}"
+    );
     assert_eq!(fresh.matches("[cot]").count(), 2);
     assert!(!fresh.contains("Thought") && !fresh.contains("Considering the failure"));
     // Reasoning belongs to its response, not the tool it called. Opening it must not
@@ -670,7 +676,10 @@ fn steps_fold_under_one_header_with_their_figures() {
             );
             assert_eq!(shown.matches("[cot]").count(), 1, "{shown}");
             assert_eq!(shown.matches("Code Mode").count(), 1, "{shown}");
-            assert!(!shown.contains("[+]"), "{shown}");
+            assert!(
+                !shown.contains(crate::render::disclosure::glyph(false).trim()),
+                "{shown}"
+            );
             assert!(!shown.contains("Provider summary"), "{shown}");
             for paragraph in ["Private alpha.", "Private omega.", "Private terminus."] {
                 assert_eq!(
@@ -926,12 +935,15 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
         .enumerate()
         .find(|(_, line)| line.contains("Sent by"))
         .unwrap();
+    let column = |needle: &str| {
+        unicode_width::UnicodeWidthStr::width(&header[..header.find(needle).unwrap()])
+    };
     assert_eq!(
-        header.find("Message"),
-        Some(usize::from(crate::transcript_geometry::TITLE_COLUMN))
+        column("Message"),
+        usize::from(crate::transcript_geometry::TITLE_COLUMN)
     );
     assert!(header.contains("Message  Sent by TEST_AGENT"));
-    let sender_column = header.find("Sent by").unwrap();
+    let sender_column = column("Sent by");
     assert_eq!(
         rendered[(sender_column.try_into().unwrap(), row.try_into().unwrap())].fg,
         crate::warpaint::Figure::InkMuted.color()
@@ -1046,14 +1058,9 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
 }
 
 #[test]
-fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
+fn dialogue_mode_keeps_only_users_and_end_of_turn_answers() {
     use crate::history_cell::UserHistoryCell;
-    use crate::history_cell::activity_parts::FoldGroup;
     use crate::prompt_order::UserPromptIdentity;
-    use crossterm::event::KeyModifiers;
-    use crossterm::event::MouseButton;
-    use crossterm::event::MouseEvent;
-    use crossterm::event::MouseEventKind;
 
     let user = |text: &str| -> Arc<dyn HistoryCell> {
         Arc::new(UserHistoryCell {
@@ -1082,7 +1089,7 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
     ];
     let mut view = TranscriptView::default();
     // A completion can beat the prepared message. Neither phase-less commentary nor a
-    // message claimed by a tool step may accidentally become (or swallow) a boundary.
+    // message claimed by a tool step may accidentally join (or swallow) the dialogue.
     view.record_step_admission(step(
         "answer-step",
         &["first-code"],
@@ -1102,47 +1109,11 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
     let paint = |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]| {
         crate::transcript_view::tests::render(view, cells, 104, 80)
     };
-    let click =
-        |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index, modifiers, column| {
-            view.jump_to_latest();
-            paint(view, cells);
-            let layout = view.current_layout(cells, index).unwrap();
-            let target = layout
-                .fold_targets()
-                .into_iter()
-                .find(|target| {
-                    matches!(
-                        target,
-                        FoldTarget::GroupedPart {
-                            group: FoldGroup::Conversation,
-                            ..
-                        }
-                    )
-                })
-                .unwrap();
-            let (row, columns, _) = layout.fold_position(&target).unwrap();
-            assert_eq!(columns.len(), 3);
-            assert_eq!(row, layout.row_count() - 1);
-            let screen_row = view
-                .visible
-                .iter()
-                .position(|visible| visible.index == index && visible.row == row)
-                .unwrap();
-            assert!(matches!(
-                view.handle_mouse(
-                    MouseEvent {
-                        kind: MouseEventKind::Down(MouseButton::Left),
-                        column: columns.start + column,
-                        row: screen_row.try_into().unwrap(),
-                        modifiers,
-                    },
-                    cells
-                ),
-                Some(crate::transcript_view::input::ViewAction::Changed)
-            ));
-            paint(view, cells);
-        };
-    click(&mut view, &cells, 0, KeyModifiers::NONE, 0);
+    paint(&mut view, &cells);
+    // Hiding the work being read still leaves the dialogue on screen.
+    view.jump_to_entry(&cells, 2);
+    view.toggle_lens(&cells);
+    assert!(view.dialogue_only());
     let rendered = crate::transcript_view::tests::text(&paint(&mut view, &cells));
     let headers = rendered
         .lines()
@@ -1159,76 +1130,30 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
         ),
         "{rendered}"
     );
-    for index in [1, 2] {
-        assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
-    }
-    for index in [0, 3, 4, 5, 6, cells.len()] {
-        assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
-    }
-    assert!(!view.conversation_tail_hidden(&cells));
-    click(&mut view, &cells, 5, KeyModifiers::CONTROL, 2);
+    // Prompts and answers stack without the blank rows that set them apart from work.
+    assert!(
+        !rendered
+            .lines()
+            .skip_while(|line| !line.contains("First prompt"))
+            .take_while(|line| !line.contains("Second prompt"))
+            .any(|line| line.trim().is_empty()),
+        "{rendered}"
+    );
     for index in [1, 2, 4, 6, cells.len()] {
         assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
     }
-    assert!(view.conversation_tail_hidden(&cells));
-    // The trailing user has no final answer yet; its gap must still reopen.
-    click(&mut view, &cells, 5, KeyModifiers::NONE, 1);
-    assert!(!view.conversation_tail_hidden(&cells));
-    assert!(view.current_layout(&cells, 6).unwrap().row_count() > 0);
-    click(&mut view, &cells, 5, KeyModifiers::NONE, 1);
-    assert!(view.conversation_tail_hidden(&cells));
-    click(&mut view, &cells, 0, KeyModifiers::NONE, 1);
-    assert!(
-        view.current_layout(&cells, 1)
-            .unwrap()
-            .text()
-            .contains("inspect")
-    );
-    assert!(
-        view.current_layout(&cells, 2)
-            .unwrap()
-            .text()
-            .contains("Code Mode")
-    );
-    assert_eq!(view.current_layout(&cells, 6).unwrap().row_count(), 0);
-    // The latest User's own header remains reversible independently of its folded work.
-    for expanded in [false, true] {
-        let layout = view.current_layout(&cells, 5).unwrap();
-        let target = layout
-            .fold_targets()
-            .into_iter()
-            .find(|target| matches!(target, FoldTarget::Part(_)))
-            .unwrap();
-        let (row, columns, _) = layout.fold_position(&target).unwrap();
-        let screen_row = view
-            .visible
-            .iter()
-            .position(|visible| visible.index == 5 && visible.row == row)
-            .unwrap();
-        assert!(view.toggle_disclosure_at(
-            &cells,
-            columns.start + 1,
-            screen_row.try_into().unwrap(),
-        ));
-        paint(&mut view, &cells);
-        assert_eq!(
-            view.current_layout(&cells, 5)
-                .unwrap()
-                .text()
-                .contains("Second prompt"),
-            expanded,
-        );
-        assert!(view.conversation_tail_hidden(&cells));
+    for index in [0, 3, 5] {
+        assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
     }
-    // Full-content search/copy can still reach hidden evidence without changing fold choices.
+    // Full-content search/copy can still reach hidden evidence.
     assert!(
         view.entry_layout(&cells, 6, true)
             .unwrap()
             .text()
             .contains("Code Mode")
     );
-    assert!(view.conversation_tail_hidden(&cells));
 
+    // Older pages and later answers join the dialogue by identity, not position.
     cells.splice(
         0..0,
         [user("Older prompt"), script_block("older", None, None)],
@@ -1237,55 +1162,23 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
     view.record_final_response("later-answer".into());
     cells.push(message("later-answer", "Later final answer"));
     paint(&mut view, &cells);
-    assert_eq!(view.current_layout(&cells, 1).unwrap().row_count(), 0);
-    assert!(
-        view.current_layout(&cells, 3)
-            .unwrap()
-            .text()
-            .contains("inspect")
-    );
-    assert_eq!(
-        view.current_layout(&cells, cells.len() - 2)
-            .unwrap()
-            .row_count(),
-        0
-    );
+    for index in [1, cells.len() - 2] {
+        assert_eq!(view.current_layout(&cells, index).unwrap().row_count(), 0);
+    }
     assert!(
         view.current_layout(&cells, cells.len() - 1)
             .unwrap()
             .text()
             .contains("Later final")
     );
-    for width in [32, 104] {
-        let layout = view.current_layout(&cells, 2).unwrap().rewrap(width);
-        let target = layout
-            .fold_targets()
-            .into_iter()
-            .find(|target| {
-                matches!(
-                    target,
-                    FoldTarget::GroupedPart {
-                        group: FoldGroup::Conversation,
-                        ..
-                    }
-                )
-            })
-            .unwrap();
-        assert_eq!(
-            layout.fold_position(&target).unwrap().0,
-            layout.row_count() - 1
-        );
-        assert!(!layout.text().contains("[-]"));
-        assert!(!layout.text().contains("[+]"));
-    }
-    click(&mut view, &cells, 0, KeyModifiers::CONTROL, 0);
-    assert!(!view.conversation_tail_hidden(&cells));
-    for index in [1, 3, 4, 6, 8] {
+    view.toggle_lens(&cells);
+    assert!(!view.dialogue_only());
+    for index in [1, 3, 4, 6, 8, cells.len()] {
         assert!(view.current_layout(&cells, index).unwrap().row_count() > 0);
     }
 
     // A final answer and its accounting/CoT witness are separate immutable cells,
-    // but one feed item: folding the preceding gap must not strand its header.
+    // but one feed item: hiding the work must not strand its header.
     for readable in [false, true] {
         let cells = vec![
             user("Question"),
@@ -1330,7 +1223,7 @@ fn conversation_folds_keep_only_users_and_end_of_turn_answers() {
         assert!(header.contains(clock.span().content.trim()), "{before}");
         assert!(header.contains("254"), "{before}");
 
-        click(&mut view, &cells, 0, KeyModifiers::NONE, 1);
+        view.toggle_lens(&cells);
         let after = crate::transcript_view::tests::text(&paint(&mut view, &cells));
         assert_eq!(
             after

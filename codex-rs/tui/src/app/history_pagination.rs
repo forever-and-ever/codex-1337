@@ -239,7 +239,7 @@ impl App {
         visibility: RawReasoningVisibility,
     ) -> Vec<Arc<dyn HistoryCell>> {
         for turn in turns {
-            if let Some(id) = crate::transcript_view::conversation::final_response(turn) {
+            if let Some(id) = crate::transcript_view::dialogue::final_response(turn) {
                 self.transcript_view.record_final_response(id.to_string());
             }
         }

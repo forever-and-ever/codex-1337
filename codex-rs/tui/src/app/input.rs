@@ -759,6 +759,12 @@ impl App {
             return true;
         }
 
+        if self.keymap.app.toggle_dialogue.is_pressed(key_event) {
+            self.transcript_view.toggle_lens(&self.transcript_cells);
+            tui.frame_requester().schedule_frame();
+            return true;
+        }
+
         if self.keymap.app.open_agents.is_pressed(key_event) {
             self.open_agents_overview(app_server);
             return true;

@@ -6,7 +6,7 @@ completed batch
 Buffer {
     area: Rect { x: 0, y: 0, width: 80, height: 12 },
     content: [
-        "        [-] Code Mode (βανζ)           [in [raw] [fmt]] [out]                128",
+        "         ▽  Code Mode (βανζ)           [in [raw] [fmt]] [out]                128",
         "              • MCP tools.inspect({"path":"same"})                              ",
         "              • MCP tools.inspect({"path":"same"})                              ",
         "                                                                                ",

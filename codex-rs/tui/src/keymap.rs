@@ -117,6 +117,8 @@ pub(crate) struct AppKeymap {
     pub(crate) toggle_fast_mode: Vec<KeyBinding>,
     /// Toggle raw scrollback mode for copy-friendly transcript selection.
     pub(crate) toggle_raw_output: Vec<KeyBinding>,
+    /// Toggle dialogue mode, which hides the work between prompts and answers.
+    pub(crate) toggle_dialogue: Vec<KeyBinding>,
     /// Switch between a side conversation and its parent without closing either.
     pub(crate) toggle_side_conversation: Vec<KeyBinding>,
 }
@@ -746,6 +748,11 @@ impl RuntimeKeymap {
                 keymap.global.toggle_raw_output.as_ref(),
                 &defaults.app.toggle_raw_output,
                 "tui.keymap.global.toggle_raw_output",
+            )?,
+            toggle_dialogue: resolve_bindings(
+                keymap.global.toggle_dialogue.as_ref(),
+                &defaults.app.toggle_dialogue,
+                "tui.keymap.global.toggle_dialogue",
             )?,
             toggle_side_conversation: if side_toggle_default_is_shadowed {
                 Vec::new()
@@ -1475,6 +1482,10 @@ impl RuntimeKeymap {
                 app.toggle_raw_output.as_slice(),
             ),
             (
+                keymap.global.toggle_dialogue.as_ref(),
+                app.toggle_dialogue.as_slice(),
+            ),
+            (
                 keymap.global.toggle_side_conversation.as_ref(),
                 app.toggle_side_conversation.as_slice(),
             ),
@@ -1672,6 +1683,7 @@ impl RuntimeKeymap {
                 toggle_vim_mode: default_bindings![],
                 toggle_fast_mode: default_bindings![],
                 toggle_raw_output: default_bindings![alt(KeyCode::Char('r'))],
+                toggle_dialogue: default_bindings![alt(KeyCode::Char('w'))],
                 toggle_side_conversation: default_bindings![ctrl(KeyCode::Char('/'))],
             },
             chords: Arc::default(),

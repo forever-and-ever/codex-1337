@@ -115,7 +115,11 @@ fn file_disclosures_are_independent_and_not_copied() {
     let layout = paint(&mut view, 104, "second file");
     assert!(layout.text().contains("+beta body"));
     assert!(!layout.text().contains("+alpha body"));
-    assert!(!layout.text().contains("[+]"));
+    assert!(
+        !layout
+            .text()
+            .contains(crate::render::disclosure::glyph(false).trim())
+    );
     assert_eq!(layout.text(), layout.rewrap(40).text());
     for panel in [
         Panel::Visible(OutputMode::Raw),
