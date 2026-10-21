@@ -896,20 +896,21 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
             announced_at_ms: CLOCK_MS,
             kind,
             source: codex_protocol::step_admission::ArrivalSource::Captured {
-                blocks: vec![format!("body:{id}")],
+                blocks: vec![format!("**body:{id}**")],
             },
             label: id.into(),
             text: None,
         }))
     }
+    const MESSAGE: &str = "**body:second**\n\n- first item\n- second item\n\n[notes](/var/log/agent-notes.md)\n\n```rust\nfn report() {\n    println!(\"ready\");\n}\n```";
     let mut cells = vec![
         arrival("first", ArrivalKind::InterAgent),
-        Arc::new(crate::history_cell::DelegatedMessageCell(
+        Arc::new(crate::history_cell::DelegatedMessageCell::new(
             crate::dynamic_tools::DelegatedMessage {
                 source_thread_id: "sender-thread".into(),
                 source_thread_name: Some("TEST_AGENT".into()),
                 sent_at: Some(CLOCK_MS),
-                input: "body:second".into(),
+                input: MESSAGE.into(),
             },
         )),
         arrival("injected", ArrivalKind::Injection),
@@ -943,6 +944,51 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
                 .content
                 .trim()
         )
+    );
+    assert!(!text.contains("**body:first**"));
+    assert!(!text.contains("**body:second**"));
+    assert!(text.contains("first item"));
+    assert!(text.contains("second item"));
+    assert!(text.contains("/var/log/agent-notes.md"));
+    assert!(text.contains("fn report()"));
+    let message = feed_entry(cells[1].as_ref()).unwrap();
+    assert!(matches!(
+        message.feed_kind(),
+        EntryKind::Arrival(ArrivalKind::InterAgent)
+    ));
+    assert_eq!(
+        cells[1]
+            .raw_lines()
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        MESSAGE
+    );
+    let lines = message
+        .feed_body(
+            40,
+            &FoldState::default(),
+            crate::history_cell::output_provenance::OutputMode::Raw,
+        )
+        .lines;
+    assert!(
+        lines
+            .iter()
+            .filter_map(|line| line.source.as_ref())
+            .any(|source| {
+                source.bracket == Some(crate::warpaint::Bracket::Message)
+                    && source.copy.as_ref().is_some_and(|copy| !copy.code)
+            })
+    );
+    assert!(
+        lines
+            .iter()
+            .filter_map(|line| line.source.as_ref())
+            .any(|source| {
+                source.text.contains("    println!(\"ready\");")
+                    && source.copy.as_ref().is_some_and(|copy| copy.code)
+            })
     );
     let click =
         |view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>], index: usize, modifiers| {

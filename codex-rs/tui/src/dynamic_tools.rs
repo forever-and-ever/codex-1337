@@ -18,7 +18,9 @@ pub(crate) fn unsolicited_tool_output(
     output: &FunctionCallOutputBody,
 ) -> Option<Box<dyn crate::history_cell::HistoryCell>> {
     if let Some(message) = DelegatedMessage::from_tool_output(name, namespace, output) {
-        return Some(Box::new(crate::history_cell::DelegatedMessageCell(message)));
+        return Some(Box::new(crate::history_cell::DelegatedMessageCell::new(
+            message,
+        )));
     }
     if call_id.is_none() {
         codex_app_server_protocol::alarm_sounding::AlarmSounding::from_tool_output(

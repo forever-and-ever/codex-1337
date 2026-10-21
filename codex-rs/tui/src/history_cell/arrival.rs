@@ -7,8 +7,10 @@ use super::HistoryCell;
 use super::HistoryTimestamp;
 use super::activity_parts::ActivityHeader;
 use super::activity_parts::ActivityParts;
+use super::markdown_render_cache::MarkdownRenderCache;
 use super::sanitize_user_text;
 use crate::history_cell::activity_parts::FoldState;
+use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::visible_lines;
 use crate::transcript_view::FeedEntry;
@@ -25,6 +27,7 @@ mod message;
 pub(crate) struct ArrivalCell {
     item: ArrivalItem,
     estimated_tokens: Option<u64>,
+    rendered_message: MarkdownRenderCache,
 }
 
 impl ArrivalCell {
@@ -35,6 +38,7 @@ impl ArrivalCell {
         Self {
             item,
             estimated_tokens,
+            rendered_message: MarkdownRenderCache::default(),
         }
     }
 
@@ -175,7 +179,11 @@ impl FeedEntry for ArrivalCell {
         use super::output_provenance::mark_lines;
         if self.item.kind == ArrivalKind::InterAgent {
             return ActivityParts {
-                lines: self.context_lines(width, super::output_provenance::OutputMode::Raw),
+                lines: self
+                    .rendered_message
+                    .render(width, ListSpacing::Uniform, || {
+                        message::body(&self.item, width)
+                    }),
                 ..ActivityParts::default()
             };
         }

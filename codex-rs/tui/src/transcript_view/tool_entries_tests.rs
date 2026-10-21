@@ -454,7 +454,7 @@ fn captured_output_modes_preserve_blocks_lexemes_and_wrapped_copy() {
                     .map(|line| line.line.to_string())
                     .collect::<Vec<_>>()
                     .join("\n"),
-                payload
+                payload.trim()
             );
         }
         assert_eq!(
