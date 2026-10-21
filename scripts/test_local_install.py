@@ -21,25 +21,30 @@ class LocalInstallTest(unittest.TestCase):
         self,
     ) -> None:
         # PID 1 can belong to the sandbox, and non-dumpable same-user processes
-        # can have root-owned proc directories. Neither is evidence of absence.
+        # hide their executables. Neither is evidence of absence, but only a
+        # process named like a shipped executable can be an older TUI.
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             distributions, proc = root / "distributions", root / "proc"
             for name in ("current-release", "previous", "live", "unused", "unowned"):
                 bundle = distributions / name
                 (bundle / "bin").mkdir(parents=True)
+                (bundle / "bin/codex").touch()
                 if name != "unowned":
                     (bundle / "distribution").touch()
             (distributions / "current").symlink_to("current-release")
             (distributions / "alias").symlink_to("unused")
-            (proc / "self/ns").mkdir(parents=True)
-            (proc / "self/ns/pid").touch()
-            (proc / "7/ns").mkdir(parents=True)
-            (proc / "7/ns/pid").hardlink_to(proc / "self/ns/pid")
+            owner = "Uid:" + f"\t{os.getuid()}" * 4 + "\n"
+            for entry, name, nspid in (
+                ("self", "python3", os.getpid()),
+                ("7", "codex", 7),
+                ("9", "ssh-agent", 9),
+            ):
+                (proc / entry).mkdir(parents=True)
+                (proc / entry / "status").write_text(
+                    f"Name:\t{name}\n{owner}NSpid:\t{nspid}\n"
+                )
             (proc / "7/exe").symlink_to(distributions / "live/bin/codex")
-            (proc / "7/status").write_text(
-                f"Uid:\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\n"
-            )
             device = proc.stat().st_dev
             mountinfo = (
                 f"1 0 {os.major(device)}:{os.minor(device)} / /proc rw - proc proc rw\n"
@@ -59,12 +64,13 @@ class LocalInstallTest(unittest.TestCase):
                     self.assertTrue((distributions / "unused").exists())
                 credentials.return_value = struct.pack("3i", 7, os.getuid(), 0)
 
-                (proc / "7/ns/pid").unlink()
-                (proc / "7/ns/pid").touch()
+                status = (proc / "7/status").read_text()
+                (proc / "7/status").write_text(
+                    status.replace("NSpid:\t7", "NSpid:\t1\t7")
+                )
                 local_integration.prune_distributions(distributions, "previous")
                 self.assertTrue((distributions / "unused").exists())
-                (proc / "7/ns/pid").unlink()
-                (proc / "7/ns/pid").hardlink_to(proc / "self/ns/pid")
+                (proc / "7/status").write_text(status)
 
                 for restricted in (
                     mountinfo.rstrip() + ",hidepid=4\n",
@@ -84,9 +90,20 @@ class LocalInstallTest(unittest.TestCase):
                 self.assertTrue((distributions / "unused").exists())
                 manager.connect.side_effect = None
 
-                # A process disappearing during enumeration is not hidden.
+                # A process disappearing during enumeration is not hidden, and a
+                # non-dumpable agent is no shipped executable.
                 (proc / "8").mkdir()
-                local_integration.prune_distributions(distributions, "previous")
+                readlink = Path.readlink
+
+                def hide_agent(path: Path) -> Path:
+                    if path == proc / "9/exe":
+                        raise PermissionError(path)
+                    return readlink(path)
+
+                with patch.object(
+                    Path, "readlink", autospec=True, side_effect=hide_agent
+                ):
+                    local_integration.prune_distributions(distributions, "previous")
                 manager.connect.assert_called_with(
                     f"/run/user/{os.getuid()}/systemd/private"
                 )

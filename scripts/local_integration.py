@@ -20,7 +20,14 @@ STAGING_UNIT = "codex-app-server-staging.service"
 STAGING_LAUNCHER = "codex-staging"
 
 
-def host_live_binaries() -> set[Path]:
+def nspid(process: Path) -> list[str]:
+    for line in (process / "status").read_text().splitlines():
+        if line.startswith("NSpid:"):
+            return line.split()[1:]
+    raise OSError(f"cannot read PID namespaces: {process}")
+
+
+def host_live_binaries(shipped: set[str]) -> set[Path]:
     # The host user manager is the existing local integration boundary. Two
     # processes inside a sandbox (including its PID 1) prove nothing about it.
     # SO_PEERCRED reports PID 0 when that manager is outside our PID namespace.
@@ -33,10 +40,13 @@ def host_live_binaries() -> set[Path]:
             ),
         )
         proc = Path("/proc")
+        # NSpid, unlike ns/pid, stays readable for the non-dumpable manager. A
+        # single entry places a process in the namespace this procfs serves.
         if (
             pid <= 0
             or uid != os.getuid()
-            or not (proc / "self/ns/pid").samefile(proc / str(pid) / "ns/pid")
+            or nspid(proc / "self") != [str(os.getpid())]
+            or nspid(proc / str(pid)) != [str(pid)]
         ):
             raise OSError("host user manager is outside the visible PID namespace")
 
@@ -78,32 +88,44 @@ def host_live_binaries() -> set[Path]:
             continue
         except PermissionError:
             try:
-                owners = next(
-                    (
-                        line.split()[1:]
-                        for line in (process / "status").read_text().splitlines()
-                        if line.startswith("Uid:")
-                    ),
-                    (),
-                )
-                if not owners:
-                    raise OSError(f"cannot determine executable owner: {process}")
-                if str(os.getuid()) not in owners:
-                    continue
+                status = (process / "status").read_text().splitlines()
             except FileNotFoundError:
                 continue
-            # A hidden same-user executable could be an older installed TUI.
+            owners = next(
+                (line.split()[1:] for line in status if line.startswith("Uid:")), ()
+            )
+            if not owners:
+                raise OSError(f"cannot determine executable owner: {process}")
+            name = next(
+                (
+                    line.removeprefix("Name:").strip()
+                    for line in status
+                    if line.startswith("Name:")
+                ),
+                None,
+            )
+            # A non-dumpable same-user process hides its executable; one named
+            # like a shipped executable could be an older installed TUI.
+            if str(os.getuid()) not in owners or name not in (shipped | {None}):
+                continue
             raise
     return binaries
 
 
 def prune_distributions(distributions: Path, previous: str) -> None:
+    distributions = distributions.resolve(strict=True)
+    # Process names keep at most TASK_COMM_LEN - 1 bytes.
+    shipped = {STAGING_LAUNCHER[:15]} | {
+        executable.name[:15]
+        for bundle in distributions.iterdir()
+        if (bundle / "bin").is_dir()
+        for executable in (bundle / "bin").iterdir()
+    }
     try:
-        binaries = host_live_binaries()
+        binaries = host_live_binaries(shipped)
     except OSError as error:
         print(f"skipping bundle pruning: {error}", file=sys.stderr)
         return
-    distributions = distributions.resolve(strict=True)
     current = (distributions / "current").readlink().name
     for candidate in distributions.iterdir():
         if (
