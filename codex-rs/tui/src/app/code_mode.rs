@@ -49,6 +49,7 @@ impl App {
         if projection.opens_live {
             self.chat_widget.seal_code_mode_stream();
         }
+        crate::shimmers::observe(notification);
         self.chat_widget
             .observe_code_mode_notification(notification.native_notification());
         // The seal's ordinary history events precede the newly opened block.

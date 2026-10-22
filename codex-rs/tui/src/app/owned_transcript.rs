@@ -124,6 +124,10 @@ impl App {
         tui: &mut tui::Tui,
         screen_size: Size,
     ) -> Result<Rect> {
+        crate::shimmers::follow_thread(
+            self.chat_widget.thread_id(),
+            self.chat_widget.is_agent_turn_running(),
+        );
         let preparation_stage =
             crate::ui_latency::enter(crate::ui_latency::Stage::FramePreparation);
         self.prepare_live_work();

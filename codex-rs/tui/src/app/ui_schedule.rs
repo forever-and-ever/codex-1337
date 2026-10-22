@@ -357,7 +357,7 @@ impl App {
     ) -> Result<AppRunControl> {
         if matches!(&event, TuiEvent::Resume) {
             let previous = tui.presentation_mode();
-            tui.note_terminal_input();
+            tui.note_terminal_input(tui::Witness::Keyboard);
             self.apply_presentation_transition(tui, previous)?;
         }
         if (matches!(&event, TuiEvent::Key(key)

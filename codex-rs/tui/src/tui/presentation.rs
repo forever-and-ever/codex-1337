@@ -14,6 +14,15 @@ pub(crate) struct DesktopAttention {
     pub(crate) focused: Option<bool>,
 }
 
+/// What terminal input proves about the window it reached.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum Witness {
+    /// Keys, pastes, focus and resumption: the window is shown and holds the keyboard.
+    Keyboard,
+    /// The pointer, which crosses windows whether or not they hold the keyboard.
+    Pointer,
+}
+
 /// What a scheduled draw paints in the current presentation mode.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ScheduledPaint {
@@ -58,16 +67,20 @@ impl Tui {
         self.frame_requester.set_mode(mode);
     }
 
-    pub(crate) fn note_terminal_input(&mut self) {
-        // Terminal input or focus proves the observer's old hidden/idle report is stale.
-        // Never block the user's input on a desktop query or await the next i3 event.
-        if self.desktop_idle
-            || self.window_visible == Some(false)
-            || self.window_focused == Some(false)
-        {
+    pub(crate) fn note_terminal_input(&mut self, witness: Witness) {
+        // Input proves the observer's hidden or idle report stale, and keyboard input its unfocused
+        // one too; a pointer crosses unfocused windows. Never block the user's input on a desktop
+        // query or await the next i3 event.
+        let hidden = self.window_visible == Some(false);
+        let unfocused = witness == Witness::Keyboard && self.window_focused == Some(false);
+        if self.desktop_idle || hidden || unfocused {
             self.desktop_idle = false;
-            self.window_visible = None;
-            self.window_focused = None;
+            if hidden {
+                self.window_visible = Some(true);
+            }
+            if unfocused {
+                self.window_focused = None;
+            }
             self.reconcile_presentation();
         }
     }

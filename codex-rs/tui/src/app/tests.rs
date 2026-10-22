@@ -10654,7 +10654,7 @@ async fn observer_freeze_retires_presentation_clocks_without_suspending_input() 
     );
 
     let previous = tui.presentation_mode();
-    tui.note_terminal_input();
+    tui.note_terminal_input(tui::Witness::Keyboard);
     app.apply_presentation_transition(&mut tui, previous)?;
     assert_eq!(tui.presentation_mode(), tui::PresentationMode::Normal);
 

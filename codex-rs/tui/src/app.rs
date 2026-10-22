@@ -896,7 +896,11 @@ impl App {
             TuiEvent::Key(_) | TuiEvent::Mouse(_) | TuiEvent::Paste(_)
         ) {
             let previous = tui.presentation_mode();
-            tui.note_terminal_input();
+            tui.note_terminal_input(if matches!(&event, TuiEvent::Mouse(_)) {
+                tui::Witness::Pointer
+            } else {
+                tui::Witness::Keyboard
+            });
             self.apply_presentation_transition(tui, previous)?;
             if tui.presentation_mode().throttles_content()
                 && (matches!(&event, TuiEvent::Key(_) | TuiEvent::Paste(_))
@@ -1149,7 +1153,7 @@ impl App {
             }
             TuiEvent::FocusGained => {
                 let previous = tui.presentation_mode();
-                tui.note_terminal_input();
+                tui.note_terminal_input(tui::Witness::Keyboard);
                 tui.reconcile_presentation();
                 self.apply_presentation_transition(tui, previous)?;
                 self.recap.note_focus_gained();
@@ -1277,6 +1281,10 @@ impl App {
         if tui.is_owned_screen() {
             return self.render_owned_transcript(tui, screen_size);
         }
+        crate::shimmers::follow_thread(
+            self.chat_widget.thread_id(),
+            self.chat_widget.is_agent_turn_running(),
+        );
         self.chat_widget
             .empty_state_animation
             .borrow_mut()

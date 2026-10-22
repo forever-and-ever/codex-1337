@@ -88,6 +88,7 @@ mod panic_tests;
 mod presentation;
 pub(crate) use presentation::DesktopAttention;
 pub(crate) use presentation::ScheduledPaint;
+pub(crate) use presentation::Witness;
 mod screen_size;
 mod scrollback;
 mod selection_clipboard;

@@ -17,6 +17,7 @@ pub(crate) use live::bullet;
 pub(crate) use live::dress_status;
 pub(crate) use live::engage_random;
 pub(crate) use live::follow_presentation;
+pub(crate) use live::follow_thread;
 pub(crate) use live::observe;
 pub(crate) use live::shade_status;
 pub(crate) use picker::picker;

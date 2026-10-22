@@ -71,7 +71,7 @@ async fn desktop_attention_recovers_on_input_and_fails_open() {
         tui.presentation_mode(),
         super::super::PresentationMode::Frozen
     );
-    tui.note_terminal_input();
+    tui.note_terminal_input(super::super::Witness::Keyboard);
     assert_eq!(
         tui.presentation_mode(),
         super::super::PresentationMode::Normal
@@ -85,7 +85,7 @@ async fn desktop_attention_recovers_on_input_and_fails_open() {
         tui.presentation_mode(),
         super::super::PresentationMode::Frozen
     );
-    tui.note_terminal_input();
+    tui.note_terminal_input(super::super::Witness::Keyboard);
     assert_eq!(
         tui.presentation_mode(),
         super::super::PresentationMode::Normal
@@ -101,10 +101,28 @@ async fn desktop_attention_recovers_on_input_and_fails_open() {
         tui.presentation_mode(),
         super::super::PresentationMode::Peripheral
     );
-    tui.note_terminal_input();
+    // A pointer crosses unfocused windows, so it proves this one shown but not focused.
+    tui.note_terminal_input(super::super::Witness::Pointer);
+    assert_eq!(
+        tui.presentation_mode(),
+        super::super::PresentationMode::Peripheral
+    );
+    tui.note_terminal_input(super::super::Witness::Keyboard);
     assert_eq!(
         tui.presentation_mode(),
         super::super::PresentationMode::Normal
+    );
+
+    // A pointer also proves a stale hidden report wrong, leaving the unfocused one standing.
+    tui.set_desktop_attention(DesktopAttention {
+        visible: Some(false),
+        focused: Some(false),
+        ..Default::default()
+    });
+    tui.note_terminal_input(super::super::Witness::Pointer);
+    assert_eq!(
+        tui.presentation_mode(),
+        super::super::PresentationMode::Peripheral
     );
 
     tui.set_desktop_attention(DesktopAttention {

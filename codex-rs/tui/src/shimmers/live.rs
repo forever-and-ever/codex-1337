@@ -8,8 +8,11 @@ use std::sync::PoisonError;
 use std::time::Duration;
 use std::time::Instant;
 
+use codex_app_server_protocol::CodeModeOwnedNotification;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_protocol::ThreadId;
+use codex_protocol::code_mode::CodeModeEvent;
 use libshimmer::Glyphs;
 use libshimmer::Intensity;
 use libshimmer::Motion;
@@ -87,6 +90,13 @@ impl Live {
             .is_some_and(|frames| frames.mode().glints())
     }
 
+    /// Tells the shimmer its bout ended.
+    fn idle(&mut self) {
+        if let Act::Running { shimmer, .. } = &mut self.act {
+            shimmer.set_spell(Spell::Idle);
+        }
+    }
+
     /// The running shimmer, advanced up to now.
     fn current(&mut self) -> Option<&mut Shimmer> {
         if !self.glints() {
@@ -158,15 +168,23 @@ pub(super) fn engaged() -> Option<&'static Recipe> {
     }
 }
 
-/// Feeds the shimmer from a live notification of the displayed thread.
+/// Feeds the shimmer from a live notification, which bears on it only from the displayed thread.
 pub(crate) fn observe(notification: &ServerNotification) {
-    if let Some((thread, event)) = event(notification) {
-        let mut live = live();
-        if live.feed.observe(thread, event, Instant::now())
-            && let Act::Running { shimmer, .. } = &mut live.act
-        {
-            shimmer.set_spell(Spell::Idle);
-        }
+    let Some((thread, event)) = event(notification) else {
+        return;
+    };
+    let mut live = live();
+    if live.feed.follows(thread) && live.feed.observe(event, Instant::now()) {
+        live.idle();
+    }
+}
+
+/// Follows the displayed thread and whether its turn runs, as its chat widget knows them before
+/// each frame: a replay or a switch restores a turn no live notification announced.
+pub(crate) fn follow_thread(thread: Option<ThreadId>, running: bool) {
+    let mut live = live();
+    if live.feed.display(thread, running, Instant::now()) {
+        live.idle();
     }
 }
 
@@ -219,24 +237,28 @@ pub(crate) fn bullet() -> Option<Span<'static>> {
 
 /// The displayed thread's context inflow, the tokens entering its context, measured for the shimmer.
 ///
-/// Usage reports count those tokens exactly, but only as each model response ends. Between reports
-/// the feed estimates: while the model works it forecasts output at the rate recent responses
-/// sustained, and a finished tool's result enters at its serialized size. Each report settles the
-/// estimates since the one before against the response's output and the context's growth: a
-/// shortfall joins the reservoir, which drains over four seconds, and an excess is taken back
-/// from it. Inflow the stage did not see, while nothing was drawn, is forgotten, not replayed.
+/// Usage reports count those tokens exactly, but only as each model response ends, once the calls it
+/// made have answered. Between reports the feed estimates: while the model works it forecasts output
+/// at the rate recent responses sustained; while tool calls hold the turn, their commands' output
+/// enters as it streams, and a finished tool's result at its serialized size, less what streamed. A
+/// Code Mode cell holds the turn as a call too, whose result only the next report measures. Each
+/// report settles the estimates since the one before against the response's output and the
+/// context's growth: a shortfall joins the reservoir, which drains over four seconds, and an excess
+/// stays shown, since taking it back would still the stage after every response slow to start.
+/// Inflow the stage did not see, while nothing was drawn, is forgotten, not replayed.
 struct Feed {
-    /// The thread that fed this last; another thread's notification starts the feed over.
-    thread: String,
+    /// The displayed thread, whose notifications alone feed this.
+    thread: Option<ThreadId>,
     phase: Phase,
-    /// The last usage report, against which the next one settles; none after the feed forgets.
-    usage: Option<Usage>,
+    books: Books,
     /// Seconds the model worked since the last usage report.
     worked: f64,
     /// Output tokens forecast since the last usage report.
     forecast: f64,
     /// Result tokens estimated since the last usage report.
     estimated: f64,
+    /// Tokens each call's output stream let in this turn, which its result must not count again.
+    streamed: HashMap<String, f64>,
     /// Output tokens a second while the model works.
     rate: f64,
     /// Tokens yet to drain into the stage.
@@ -246,12 +268,13 @@ struct Feed {
 impl Default for Feed {
     fn default() -> Self {
         Self {
-            thread: String::new(),
+            thread: None,
             phase: Phase::Idle,
-            usage: None,
+            books: Books::Unopened,
             worked: 0.0,
             forecast: 0.0,
             estimated: 0.0,
+            streamed: HashMap::new(),
             rate: RATE,
             reservoir: Reservoir::default(),
         }
@@ -264,8 +287,22 @@ enum Phase {
     Idle,
     /// The model works, as it has since `since`.
     Busy { since: Instant },
-    /// Tools run, each with its serialized size when it started.
-    Wait { tools: HashMap<String, usize> },
+    /// Tool calls hold the turn, by call id, each with its item's serialized size when it started,
+    /// which its result grows; a Code Mode cell, and a wait on one, has none.
+    Wait {
+        calls: HashMap<String, Option<usize>>,
+    },
+}
+
+/// The usage reports the feed has read.
+#[derive(Clone, Copy)]
+enum Books {
+    /// None since the feed followed its thread.
+    Unopened,
+    /// The next report settles against this one.
+    Open(Usage),
+    /// The stage forgot what was pending since this report, so the next one settles nothing.
+    Forgotten(Usage),
 }
 
 /// One model response's usage.
@@ -280,63 +317,113 @@ struct Usage {
 }
 
 /// A notification's bearing on the feed.
-enum Event {
+#[derive(Clone, Copy)]
+enum Event<'n> {
     TurnStarted,
     TurnCompleted,
-    ToolStarted { id: String, size: usize },
-    ToolCompleted { id: String, size: usize },
+    /// A tool call began holding the turn, `size` as for [`Phase::Wait`].
+    ToolStarted {
+        id: &'n str,
+        size: Option<usize>,
+    },
+    /// A command's output streamed `bytes` more under the call `id`.
+    ToolOutput {
+        id: &'n str,
+        bytes: usize,
+    },
+    ToolCompleted {
+        id: &'n str,
+        size: Option<usize>,
+    },
     Usage(Usage),
 }
 
 impl Feed {
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "Byte counts become approximate visual token estimates, capped by RESULT_CAP; exact accounting remains upstream."
-    )]
-    fn observe(&mut self, thread: &str, event: Event, now: Instant) -> bool {
-        let ended = self.thread == thread
-            && !matches!(self.phase, Phase::Idle)
-            && matches!(event, Event::TurnCompleted);
+    /// Whether `thread` names the displayed thread.
+    fn follows(&self, thread: &str) -> bool {
+        self.thread.is_some() && ThreadId::from_string(thread).ok() == self.thread
+    }
+
+    /// Follows the displayed `thread`, starting over when it is another, and whether its turn
+    /// runs. True when that ends a bout.
+    fn display(&mut self, thread: Option<ThreadId>, running: bool, now: Instant) -> bool {
         if self.thread != thread {
             *self = Feed {
-                thread: thread.to_owned(),
+                thread,
                 rate: self.rate,
                 ..Feed::default()
             };
         }
-        if let Phase::Busy { since } = &mut self.phase {
+        let bout = !matches!(self.phase, Phase::Idle);
+        if running && !bout {
+            self.phase = Phase::Busy { since: now };
+        }
+        let ended = bout && !running;
+        if ended {
+            self.phase = Phase::Idle;
+        }
+        ended
+    }
+
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "Byte counts become approximate visual token estimates, capped by RESULT_CAP; exact accounting remains upstream."
+    )]
+    fn observe(&mut self, event: Event<'_>, now: Instant) -> bool {
+        let ended = !matches!(self.phase, Phase::Idle) && matches!(event, Event::TurnCompleted);
+        // A turn's start proves any bout the feed still believed in over, not worked.
+        if !matches!(event, Event::TurnStarted)
+            && let Phase::Busy { since } = &mut self.phase
+        {
             self.worked += now.saturating_duration_since(*since).as_secs_f64();
             *since = now;
         }
         match event {
-            Event::TurnStarted => self.phase = Phase::Busy { since: now },
+            Event::TurnStarted => {
+                self.streamed.clear();
+                self.phase = Phase::Busy { since: now };
+            }
             Event::TurnCompleted => self.phase = Phase::Idle,
-            // A tool runs only within a turn, even one that started before the feed did.
+            // A tool call holds only a bout's turn.
             Event::ToolStarted { id, size } => match &mut self.phase {
-                Phase::Wait { tools } => {
-                    tools.insert(id, size);
-                }
-                Phase::Idle | Phase::Busy { .. } => {
+                Phase::Idle => {}
+                Phase::Busy { .. } => {
                     self.phase = Phase::Wait {
-                        tools: HashMap::from([(id, size)]),
+                        calls: HashMap::from([(id.to_owned(), size)]),
                     };
                 }
+                Phase::Wait { calls } => {
+                    calls.insert(id.to_owned(), size);
+                }
             },
+            Event::ToolOutput { id, bytes } => {
+                if matches!(self.phase, Phase::Wait { .. }) {
+                    let streamed = self.streamed.entry(id.to_owned()).or_default();
+                    let tokens = (bytes as f64 / BYTES_PER_TOKEN).min(RESULT_CAP - *streamed);
+                    *streamed += tokens;
+                    self.estimated += tokens;
+                    self.reservoir.pour(tokens);
+                }
+            }
             Event::ToolCompleted { id, size } => {
-                let Phase::Wait { tools } = &mut self.phase else {
+                let Phase::Wait { calls } = &mut self.phase else {
                     return false;
                 };
-                if let Some(started) = tools.remove(&id) {
+                if let Some(Some(started)) = calls.remove(id)
+                    && let Some(size) = size
+                {
                     let result =
                         (size.saturating_sub(started) as f64 / BYTES_PER_TOKEN).min(RESULT_CAP);
-                    self.estimated += result;
-                    self.reservoir.pour(result);
+                    // What streamed while the call ran has entered already.
+                    let rest = (result - self.streamed.remove(id).unwrap_or_default()).max(0.0);
+                    self.estimated += rest;
+                    self.reservoir.pour(rest);
                 }
-                if tools.is_empty() {
+                if calls.is_empty() {
                     self.phase = Phase::Busy { since: now };
                 }
             }
-            Event::Usage(usage) => self.settle(usage),
+            Event::Usage(usage) => self.settle(usage, now),
         }
         ended
     }
@@ -345,20 +432,28 @@ impl Feed {
         clippy::cast_precision_loss,
         reason = "Usage counts only calibrate an approximate animation rate; no accounting depends on these floating-point estimates."
     )]
-    fn settle(&mut self, usage: Usage) {
-        if self.usage.is_some_and(|last| last.total == usage.total) {
-            return;
+    fn settle(&mut self, usage: Usage, now: Instant) {
+        let last = match self.books {
+            Books::Open(last) | Books::Forgotten(last) if last.total == usage.total => return,
+            Books::Open(last) => Some(last),
+            Books::Unopened | Books::Forgotten(_) => None,
+        };
+        // Core reports a response's usage only once its calls answered: one still open was
+        // backgrounded, and the model samples again.
+        if matches!(self.phase, Phase::Wait { .. }) {
+            self.phase = Phase::Busy { since: now };
         }
         let output = usage.output as f64;
-        if let Some(last) = self.usage {
+        if let Some(last) = last {
             let growth = (usage.context - last.context - last.output).max(0) as f64;
+            // A shortfall joins the reservoir; an excess the stage already showed stays shown.
             self.reservoir
-                .pour(output - self.forecast + growth - self.estimated);
+                .pour((output - self.forecast + growth - self.estimated).max(0.0));
         }
         if self.worked >= 1.0 {
             self.rate += LEARN * (output / self.worked - self.rate);
         }
-        self.usage = Some(usage);
+        self.books = Books::Open(usage);
         self.worked = 0.0;
         self.forecast = 0.0;
         self.estimated = 0.0;
@@ -366,7 +461,9 @@ impl Feed {
 
     /// Drops what the stage has not yet seen, as when the shimmer's clock restarts.
     fn forget(&mut self) {
-        self.usage = None;
+        if let Books::Open(last) = self.books {
+            self.books = Books::Forgotten(last);
+        }
         self.reservoir = Reservoir::default();
     }
 
@@ -392,22 +489,29 @@ impl Feed {
 }
 
 /// What `notification` tells the feed, and the thread it concerns.
-fn event(notification: &ServerNotification) -> Option<(&str, Event)> {
+fn event(notification: &ServerNotification) -> Option<(&str, Event<'_>)> {
     Some(match notification {
         ServerNotification::TurnStarted(turn) => (turn.thread_id.as_str(), Event::TurnStarted),
         ServerNotification::TurnCompleted(turn) => (turn.thread_id.as_str(), Event::TurnCompleted),
         ServerNotification::ItemStarted(started) if waits(&started.item) => (
             started.thread_id.as_str(),
             Event::ToolStarted {
-                id: started.item.id().to_owned(),
-                size: size(&started.item),
+                id: started.item.id(),
+                size: Some(size(&started.item)),
             },
         ),
         ServerNotification::ItemCompleted(completed) if waits(&completed.item) => (
             completed.thread_id.as_str(),
             Event::ToolCompleted {
-                id: completed.item.id().to_owned(),
-                size: size(&completed.item),
+                id: completed.item.id(),
+                size: Some(size(&completed.item)),
+            },
+        ),
+        ServerNotification::CommandExecutionOutputDelta(delta) => (
+            delta.thread_id.as_str(),
+            Event::ToolOutput {
+                id: &delta.item_id,
+                bytes: delta.delta.len(),
             },
         ),
         ServerNotification::ThreadTokenUsageUpdated(updated) => (
@@ -418,8 +522,59 @@ fn event(notification: &ServerNotification) -> Option<(&str, Event)> {
                 total: updated.token_usage.total.total_tokens,
             }),
         ),
+        ServerNotification::CodeModeOwned(owned) => return cell(owned),
         _ => return None,
     })
+}
+
+/// What a Code Mode cell's notification tells the feed: the cell, and each wait the model calls on
+/// one, holds the turn as a call, and the output of its commands streams under the cell's call.
+fn cell(owned: &CodeModeOwnedNotification) -> Option<(&str, Event<'_>)> {
+    match owned.payload().as_ref() {
+        ServerNotification::CommandExecutionOutputDelta(delta) => Some((
+            delta.thread_id.as_str(),
+            Event::ToolOutput {
+                id: &owned.owner.exec_call_id,
+                bytes: delta.delta.len(),
+            },
+        )),
+        ServerNotification::ItemCompleted(completed) => {
+            let ThreadItem::CodeMode(fact) = &completed.item else {
+                return None;
+            };
+            let event = match &fact.event {
+                CodeModeEvent::Started { .. } => Event::ToolStarted {
+                    id: &fact.exec_call_id,
+                    size: None,
+                },
+                // A wait the model called holds the turn; a cell's own wait on a process does not.
+                CodeModeEvent::WaitStarted {
+                    call_id,
+                    target: None,
+                } => Event::ToolStarted {
+                    id: call_id,
+                    size: None,
+                },
+                CodeModeEvent::WaitCompleted {
+                    call_id,
+                    target: None,
+                } => Event::ToolCompleted {
+                    id: call_id,
+                    size: None,
+                },
+                CodeModeEvent::Finished { .. } => Event::ToolCompleted {
+                    id: &fact.exec_call_id,
+                    size: None,
+                },
+                CodeModeEvent::Allocated
+                | CodeModeEvent::ToolCall { .. }
+                | CodeModeEvent::WaitStarted { .. }
+                | CodeModeEvent::WaitCompleted { .. } => return None,
+            };
+            Some((completed.thread_id.as_str(), event))
+        }
+        _ => None,
+    }
 }
 
 /// The length of `item`'s JSON, tallied without building it.
@@ -443,8 +598,7 @@ fn size(item: &ThreadItem) -> usize {
 fn waits(item: &ThreadItem) -> bool {
     matches!(
         item,
-        ThreadItem::CodeMode(_)
-            | ThreadItem::CommandExecution { .. }
+        ThreadItem::CommandExecution { .. }
             | ThreadItem::FileChange { .. }
             | ThreadItem::McpToolCall { .. }
             | ThreadItem::DynamicToolCall { .. }
@@ -472,7 +626,7 @@ mod tests {
             frames: Some(frames.clone()),
             ..Live::default()
         };
-        live.feed.observe("thread", Event::TurnStarted, before);
+        live.feed.observe(Event::TurnStarted, before);
         // Content can still repaint an inactive window; painting must not run its clock or feed.
         for mode in [PresentationMode::Reduced, PresentationMode::Frozen] {
             frames.set_mode(mode);
@@ -510,8 +664,7 @@ mod tests {
         let start = Instant::now();
         let at = |secs: f64| start + Duration::from_secs_f64(secs);
         let mut feed = Feed::default();
-        let thread = "thread";
-        feed.observe(thread, Event::TurnStarted, at(/*secs*/ 0.0));
+        feed.observe(Event::TurnStarted, at(/*secs*/ 0.0));
         // The first report has nothing earlier to settle against: it teaches the forecast's rate and
         // opens the books, and only the inflow after it is checked.
         run(&mut feed, /*secs*/ 10.0);
@@ -520,19 +673,25 @@ mod tests {
             output: 900,
             total: 10_900,
         };
-        feed.observe(thread, Event::Usage(first), at(/*secs*/ 10.0));
+        feed.observe(Event::Usage(first), at(/*secs*/ 10.0));
         let started = Event::ToolStarted {
-            id: "tool".to_owned(),
-            size: 200,
+            id: "tool",
+            size: Some(200),
         };
-        feed.observe(thread, started, at(/*secs*/ 10.0));
+        feed.observe(started, at(/*secs*/ 10.0));
+        // Output streams in as the command runs, and its result then lets in only the rest.
+        let output = Event::ToolOutput {
+            id: "tool",
+            bytes: 2_400,
+        };
+        feed.observe(output, at(/*secs*/ 12.0));
         let mut inflow = run(&mut feed, /*secs*/ 5.0);
         // The result is estimated at 1000 tokens and enters the context as 1500.
         let completed = Event::ToolCompleted {
-            id: "tool".to_owned(),
-            size: 4_200,
+            id: "tool",
+            size: Some(4_200),
         };
-        feed.observe(thread, completed, at(/*secs*/ 15.0));
+        feed.observe(completed, at(/*secs*/ 15.0));
         inflow += run(&mut feed, /*secs*/ 10.0);
         let second = Usage {
             context: 12_400,
@@ -541,10 +700,10 @@ mod tests {
         };
         // A repeated report, as a rate-limit update sends, settles nothing twice.
         for _ in 0..2 {
-            feed.observe(thread, Event::Usage(second), at(/*secs*/ 25.0));
+            feed.observe(Event::Usage(second), at(/*secs*/ 25.0));
         }
-        assert!(feed.observe(thread, Event::TurnCompleted, at(/*secs*/ 25.0)));
-        assert!(!feed.observe(thread, Event::TurnCompleted, at(/*secs*/ 25.0)));
+        assert!(feed.observe(Event::TurnCompleted, at(/*secs*/ 25.0)));
+        assert!(!feed.observe(Event::TurnCompleted, at(/*secs*/ 25.0)));
         inflow += run(&mut feed, /*secs*/ 60.0);
         // What the second report says entered: 500 tokens written and 1500 grown.
         assert!((inflow - 2_000.0).abs() < 1.0, "{inflow}");
