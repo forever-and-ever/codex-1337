@@ -194,6 +194,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("eclipse", include_str!("packs/eclipse.toml")),
     ("magnetar", include_str!("packs/magnetar.toml")),
     ("prominence", include_str!("packs/prominence.toml")),
+    ("pyrope", include_str!("packs/pyrope.toml")),
     ("shadow-play", include_str!("packs/shadow-play.toml")),
     ("slag", include_str!("packs/slag.toml")),
     ("sodium", include_str!("packs/sodium.toml")),

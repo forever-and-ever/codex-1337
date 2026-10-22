@@ -211,7 +211,7 @@ doctrine, or a capture shows chrome no pack paints: a literal color, or bold def
 client's grounds. When the TUI's painting changes, `just warpaint-capture` re-exports the captures.
 
 A new pack is a spec file and an entry in `EMBEDDED` in `warpaint/pack.rs`; the
-`embedded_packs_are_the_pack_directory` test fails until both exist. Eight packs ship:
-crucible, eclipse, magnetar, prominence, shadow-play, slag, sodium and uranium. The default is
+`embedded_packs_are_the_pack_directory` test fails until both exist. Nine packs ship: crucible,
+eclipse, magnetar, prominence, pyrope, shadow-play, slag, sodium and uranium. The default is
 `slag`; a default that names no embedded pack fails the build, and an embedded pack that fails
 to parse stops the TUI at startup rather than leave it wearing a pack nobody chose.

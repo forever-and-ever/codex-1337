@@ -1,0 +1,73 @@
+stance = """
+Pyrope, the fire-eyed garnet of mourning jewellery: blood-dark stones set in old gold on a black altar. Every answer bleeds down its margin; the keywords are the stones, the names their setting, and everything else is bone.
+"""
+
+[ground]
+hue = 12
+colorfulness = 6.0
+lightness = 9.0
+
+[ink]
+contrast = 87
+
+[voice]
+colorfulness = 26
+lean = 0.5
+naturalism = 0.35
+
+[hues]
+accent = 8
+link = 70
+success = 155
+caution = 95
+failure = 30
+info = 240
+keyword = 18
+function = 88
+type = 70
+string = 70
+number = 22
+attribute = 90
+comment = 12
+constant = 18
+code = 70
+
+[livery]
+count = 7
+arcs = [[325, 65]]
+
+[brackets]
+response = 22
+lc = 40
+
+[ranks.garnet]
+members = ["keyword", "constant", "number"]
+lc = 40
+gain = 3.0
+naturalism = 0.05
+least = 0
+
+[ranks.gilt]
+members = ["function"]
+lc = 66
+gain = 0.45
+naturalism = 0.3
+
+[ranks.bone]
+members = ["type", "string", "attribute"]
+lc = 62
+gain = 0.1
+naturalism = 0.05
+least = 0
+
+[gain]
+code = 0.35
+comment = 0.25
+
+[label]
+hue = 15
+colorfulness = 16
+contrast = 84
+
+[style]
+keyword = ["bold"]
