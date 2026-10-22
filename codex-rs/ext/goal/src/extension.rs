@@ -42,6 +42,7 @@ use crate::analytics::GoalAnalytics;
 use crate::api::GoalService;
 use crate::events::GoalEventEmitter;
 use crate::metrics::GoalMetrics;
+use crate::opening::ContinuationOpening;
 use crate::runtime::ActiveGoalStopReason;
 use crate::runtime::GoalRuntimeConfig;
 use crate::runtime::GoalRuntimeHandle;
@@ -197,7 +198,10 @@ where
                 }
                 accounting.finish_turn(&turn_id);
             }
-            if let Err(err) = runtime.continue_if_idle().await {
+            if let Err(err) = runtime
+                .continue_if_idle(ContinuationOpening::Reminder)
+                .await
+            {
                 tracing::warn!(
                     "failed to continue active goal for idle thread {}: {err}",
                     runtime.thread_id()

@@ -13,6 +13,7 @@ use codex_protocol::protocol::ThreadGoalUpdatedEvent;
 use codex_protocol::protocol::validate_thread_goal_objective;
 use codex_rollout::RolloutItem;
 
+use crate::opening::ContinuationOpening;
 use crate::runtime::GoalRuntimeHandle;
 use crate::runtime::PreviousGoalSnapshot;
 use crate::tool::fill_empty_thread_preview_if_possible;
@@ -73,10 +74,18 @@ impl GoalSetOutcome {
         }))
     }
 
-    pub async fn apply_runtime_effects(&self, goal_service: &GoalService) {
+    pub async fn apply_runtime_effects(
+        &self,
+        goal_service: &GoalService,
+        opening: ContinuationOpening,
+    ) {
         if let Some(runtime) = goal_service.runtime_for_thread(self.goal.thread_id)
             && let Err(err) = runtime
-                .apply_external_goal_set(self.state_goal.clone(), self.previous_goal.clone())
+                .apply_external_goal_set(
+                    self.state_goal.clone(),
+                    self.previous_goal.clone(),
+                    opening,
+                )
                 .await
         {
             tracing::warn!("failed to apply external goal status runtime effects: {err}");

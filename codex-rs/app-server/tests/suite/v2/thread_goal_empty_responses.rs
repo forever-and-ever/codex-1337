@@ -117,7 +117,11 @@ async fn empty_goal_continuations_block_after_three_without_activity(
     let mut config = MockResponsesConfig::new(&server.uri())
         .with_model("gpt-5.4")
         .enable_feature(Feature::Goals)
-        .with_root_config("model_auto_compact_token_limit = 50000\nmodel_post_turn_compact_threshold_percent = 0\ncompact_prompt = \"GOAL_COMPACTION_PROMPT\"")
+        .with_root_config(if recovery == Some("interrupt") {
+            "model_auto_compact_token_limit = 200000\nmodel_post_turn_compact_threshold_percent = 0"
+        } else {
+            "model_auto_compact_token_limit = 50000\nmodel_post_turn_compact_threshold_percent = 0\ncompact_prompt = \"GOAL_COMPACTION_PROMPT\""
+        })
         .with_root_config(if matches!(context, ReminderContext::WithoutUpdatePlan) {
             "tools.update_plan.enabled = false"
         } else {
@@ -127,13 +131,10 @@ async fn empty_goal_continuations_block_after_three_without_activity(
     if recovery == Some("interrupt") {
         config = config
             .enable_feature(Feature::CodexHooks)
-            .with_root_config(
-                "model_auto_compact_token_limit = 200000\nmodel_post_turn_compact_threshold_percent = 0",
-            )
             .with_extra_config(
                 r#"
 [[hooks.PreCompact]]
-matcher = "auto"
+selector = { type = "event_value", pattern = "auto" }
 [[hooks.PreCompact.hooks]]
 type = "command"
 command = """printf '%s' '{"continue":false}'"""
@@ -176,7 +177,11 @@ command_windows = """Write-Output '{"continue":false}'"""
     let request = mcp
         .send_raw_request(
             "thread/goal/set",
-            Some(json!({"threadId": thread.id, "objective": "Finish <the> & update_plan work"})),
+            Some(json!({
+                "threadId": thread.id,
+                "objective": "Finish <the> & update_plan work",
+                "origin": "user",
+            })),
         )
         .await?;
     let _: ThreadGoalSetResponse = mcp.read_response(request).await?;
@@ -224,10 +229,13 @@ command_windows = """Write-Output '{"continue":false}'"""
         requests.remove(1);
         assert!(requests[1].body_contains_text("GOAL_COMPACTION_SUMMARY"));
     }
-    assert_eq!(
-        requests.len(),
-        turns + usize::from(recovery == Some("tool"))
-    );
+    let sampled = match recovery {
+        // Blocked pre-turn compaction interrupts every later turn before it samples.
+        Some("interrupt") => 1,
+        Some("tool") => turns + 1,
+        _ => turns,
+    };
+    assert_eq!(requests.len(), sampled);
     for (index, request) in requests.iter().enumerate() {
         let texts = request.message_input_texts("user");
         let rules = texts
@@ -243,6 +251,19 @@ command_windows = """Write-Output '{"continue":false}'"""
             .iter()
             .filter(|text| text.contains("Continue working toward the active thread goal."))
             .collect::<Vec<_>>();
+        assert!(
+            reminders
+                .iter()
+                .all(|text| !text.contains("Completion audit:"))
+        );
+        if index == 0 {
+            // The user's recorded instruction states the objective, so no reminder repeats it.
+            assert!(reminders.is_empty());
+            assert!(texts.iter().any(|text| {
+                text.contains(r#"User set the goal: "Finish <the> & update_plan work""#)
+            }));
+            continue;
+        }
         let latest = reminders.last().expect("goal reminder");
         assert!(
             latest.contains("<objective>\nFinish &lt;the&gt; &amp; update_plan work\n</objective>")
@@ -250,16 +271,7 @@ command_windows = """Write-Output '{"continue":false}'"""
         assert!(latest.contains(
             "The full goal-continuation instructions earlier in this context still apply."
         ));
-        assert!(
-            reminders
-                .iter()
-                .all(|text| !text.contains("Completion audit:"))
-        );
-        if index == 0 {
-            assert!(latest.contains("Tokens used: 0\n"));
-        } else {
-            assert!(!latest.contains("Tokens used: 0\n"));
-        }
+        assert!(!latest.contains("Tokens used: 0\n"));
     }
     Ok(())
     })

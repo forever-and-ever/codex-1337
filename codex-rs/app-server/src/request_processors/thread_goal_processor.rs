@@ -4,6 +4,7 @@ use super::thread_input::ensure_direct_input_allowed;
 use super::*;
 use codex_app_server_protocol::ThreadGoalMutationOrigin;
 use codex_core::context::UserGoalUpdate;
+use codex_goal_extension::ContinuationOpening;
 use codex_goal_extension::GoalObjectiveUpdate;
 use codex_goal_extension::GoalService;
 use codex_goal_extension::GoalServiceError;
@@ -178,6 +179,13 @@ impl ThreadGoalRequestProcessor {
         };
         let status = params.status.map(ThreadGoalStatus::to_core);
         let objective = params.objective.as_deref().map(str::trim);
+        let instruction = (params.origin == Some(ThreadGoalMutationOrigin::User)
+            && (objective.is_some() || status.is_some()))
+        .then(|| UserGoalUpdate::Set {
+            objective: objective.map(str::to_owned),
+            status,
+        });
+        let opening = ContinuationOpening::after(instruction.as_ref());
 
         let outcome = self
             .goal_service
@@ -196,17 +204,8 @@ impl ThreadGoalRequestProcessor {
                     max_goal_token_budget,
                 },
                 Box::pin(async {
-                    if params.origin == Some(ThreadGoalMutationOrigin::User)
-                        && (objective.is_some() || status.is_some())
-                    {
-                        self.record_user_goal_update(
-                            thread_id,
-                            UserGoalUpdate::Set {
-                                objective: objective.map(str::to_owned),
-                                status,
-                            },
-                        )
-                        .await?;
+                    if let Some(instruction) = instruction {
+                        self.record_user_goal_update(thread_id, instruction).await?;
                     }
                     Ok(())
                 }),
@@ -247,7 +246,9 @@ impl ThreadGoalRequestProcessor {
             .await;
         self.emit_thread_goal_updated_ordered(thread_id, goal, listener_command_tx)
             .await;
-        outcome.apply_runtime_effects(&self.goal_service).await;
+        outcome
+            .apply_runtime_effects(&self.goal_service, opening)
+            .await;
         Ok(())
     }
 

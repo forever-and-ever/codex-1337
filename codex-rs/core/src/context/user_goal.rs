@@ -10,6 +10,8 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::ThreadGoalStatus;
 use std::collections::HashSet;
 
+mod statement;
+
 const MAX_OBJECTIVE_BYTES: usize = 700;
 
 /// An explicit goal mutation accepted from the user-facing goal API.

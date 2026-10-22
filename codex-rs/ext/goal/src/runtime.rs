@@ -5,8 +5,6 @@ use std::sync::atomic::Ordering;
 
 use codex_core::StartIfIdleSubmission;
 use codex_core::ThreadManager;
-use codex_core::TurnInput;
-use codex_core::TurnInputRequest;
 use codex_core::TurnStartOptions;
 use codex_protocol::ThreadId;
 use codex_protocol::models::ResponseItem;
@@ -18,7 +16,7 @@ use crate::analytics::GoalAnalytics;
 use crate::analytics::GoalEventAttribution;
 use crate::events::GoalEventEmitter;
 use crate::metrics::GoalMetrics;
-use crate::steering::continuation_steering_item;
+use crate::opening::ContinuationOpening;
 use crate::steering::objective_updated_steering_item;
 use crate::tool::protocol_goal_from_state;
 use tokio::sync::Semaphore;
@@ -192,6 +190,7 @@ impl GoalRuntimeHandle {
         &self,
         goal: codex_state::ThreadGoal,
         previous_goal: Option<PreviousGoalSnapshot>,
+        opening: ContinuationOpening,
     ) -> Result<(), String> {
         if !self.is_enabled() {
             return Ok(());
@@ -238,7 +237,7 @@ impl GoalRuntimeHandle {
                     let item = objective_updated_steering_item(&protocol_goal_from_state(goal));
                     self.inject_active_turn_steering(item).await;
                 }
-                self.continue_if_idle().await?;
+                self.continue_if_idle(opening).await?;
             }
             codex_state::ThreadGoalStatus::BudgetLimited => {
                 if self.inner.accounting_state.current_turn_id().is_none() {
@@ -433,7 +432,10 @@ impl GoalRuntimeHandle {
         Ok(())
     }
 
-    pub(crate) async fn continue_if_idle(&self) -> Result<(), String> {
+    pub(crate) async fn continue_if_idle(
+        &self,
+        opening: ContinuationOpening,
+    ) -> Result<(), String> {
         if !self.tools_available() {
             self.inner.accounting_state.clear_active_goal();
             return Ok(());
@@ -490,15 +492,13 @@ impl GoalRuntimeHandle {
             .get::<TurnStartOptions>()
             .map(|options| options.as_ref().clone())
             .unwrap_or_default();
-        let item = continuation_steering_item(&protocol_goal_from_state(goal));
+        let request = opening.turn_input(&protocol_goal_from_state(goal));
 
         match thread
-            .start_turn_if_idle(
-                TurnInputRequest::new(TurnInput::ResponseItem(item)).on_start(TurnStartOptions {
-                    turn_trigger: Some("goal".to_string()),
-                    ..start_options
-                }),
-            )
+            .start_turn_if_idle(request.on_start(TurnStartOptions {
+                turn_trigger: Some("goal".to_string()),
+                ..start_options
+            }))
             .await
         {
             Ok(StartIfIdleSubmission::Started { turn_id, .. }) => {

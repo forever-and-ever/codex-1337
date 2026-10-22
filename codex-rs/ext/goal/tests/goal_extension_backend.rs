@@ -27,6 +27,7 @@ use codex_extension_api::ToolPayload;
 use codex_extension_api::TurnErrorInput;
 use codex_extension_api::TurnStartInput;
 use codex_extension_api::TurnStopInput;
+use codex_goal_extension::ContinuationOpening;
 use codex_goal_extension::GoalExtensionConfig;
 use codex_goal_extension::GoalObjectiveUpdate;
 use codex_goal_extension::GoalRuntimeHandle;
@@ -1361,7 +1362,9 @@ async fn goal_service_external_set_active_preserves_concurrent_usage() -> anyhow
     child
         .record_token_usage_with_last("child-turn", &child_usage, &child_usage)
         .await;
-    outcome.apply_runtime_effects(&harness.goal_service).await;
+    outcome
+        .apply_runtime_effects(&harness.goal_service, ContinuationOpening::Reminder)
+        .await;
 
     harness
         .record_token_usage(
