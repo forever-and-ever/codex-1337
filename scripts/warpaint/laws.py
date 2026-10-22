@@ -17,7 +17,6 @@ from appearance import (
     Swatch,
     apca,
     cusp,
-    distance,
     elevated,
     least_lightness,
     paint,
@@ -118,12 +117,16 @@ BRACKET_HUES: dict[Paint, float] = {
     Bracket.PROMPT: 240.0,
     Bracket.HARNESS: 300.0,
 }
-"""The hue each bracket is chosen nearest, in the order the brackets go round the circle. The
-model's span runs from green, its words to the user, through yellow toward red as its words fall
-farther from the user: to other agents, to its tools, to itself. The user's span runs from blue,
-the user's own words, to purple, what the harness says in the user's stead."""
+"""The hue each bracket is chosen nearest, in the order the brackets go round the circle, unless a
+spec authors it. The model's span runs from green, its words to the user, through yellow toward red
+as its words fall farther from the user: to other agents, to its tools, to itself. The user's span
+runs from blue, the user's own words, to purple, what the harness says in the user's stead."""
 BRACKET_COLORFUL = 12.0
 """Least M of an identity a bracket may take: a paler one reads as ink, not as a speaker."""
+
+SATURATE = 150.0
+"""More M than the sRGB gamut holds anywhere: asking it takes all the colorfulness a hue has at a
+lightness."""
 
 WINDOWS: dict[Paint, Arc] = {
     Figure.FAILURE: (345.0, 30.0),
@@ -314,7 +317,15 @@ def composition(spec: Spec) -> dict[Paint, Floors]:
             body - 12,
         ),
         **{role: code for role in SYNTAX_VOICE},
-        **{bracket: ((Ground.CANVAS, VOICE),) for bracket in Bracket},
+        **{
+            bracket: (
+                (
+                    Ground.CANVAS,
+                    spec.brackets.lc if bracket in spec.brackets.hues else VOICE,
+                ),
+            )
+            for bracket in Bracket
+        },
         Syntax.COMMENT: tuple((g, COMMENT) for g, _ in code),
         Syntax.PUNCTUATION: tuple((g, secondary - 6) for g, _ in code),
         Syntax.VARIABLE: tuple((g, body - 10) for g, _ in code),
@@ -407,6 +418,16 @@ class Rank:
 
 
 @dataclass(frozen=True, slots=True)
+class BracketSpec:
+    """The bracket hues a spec authors rather than seeks, and the Lc they read at over the canvas,
+    the voice's unless stated. Each is as colorful as the gamut allows there and joins the livery
+    where the spec puts it."""
+
+    hues: dict[Bracket, float]
+    lc: float = VOICE
+
+
+@dataclass(frozen=True, slots=True)
 class Gain:
     """The colorfulness each family asks, as a multiple of the voice's: status, diff ink, tool
     output, comments and inline code."""
@@ -468,6 +489,7 @@ class Spec:
     hues: dict[Paint, float]
     livery: int
     arcs: tuple[Arc, ...]
+    brackets: BracketSpec
     ranks: tuple[Rank, ...]
     gain: Gain
     surfaces: Surfaces
@@ -505,6 +527,7 @@ class Spec:
             "voice",
             "hues",
             "livery",
+            "brackets",
             "ranks",
             "gain",
             "surfaces",
@@ -547,6 +570,15 @@ class Spec:
             return float(value) % 360
 
         livery = table("livery", ("count", "arcs"), ("count",))
+        named = {bracket.name.lower(): bracket for bracket in Bracket}
+        bracketed = table("brackets", (*named, "lc"), ())
+        bracket_hues: dict[Bracket, float] = {}
+        for name, value in bracketed.items():
+            if name == "lc":
+                continue
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise Invalid(f"{where}: [brackets] {name} must be a hue")
+            bracket_hues[named[name]] = float(value) % 360
         hued = {role.value: role for role in AUTHORED}
         authored = {hued[name]: hue(name, value) for name, value in hues.items()}
         defaults = {
@@ -629,6 +661,7 @@ class Spec:
             hues=defaults | authored,
             livery=int(livery["count"]),
             arcs=tuple((float(a), float(b)) for a, b in livery.get("arcs", [[0, 360]])),
+            brackets=BracketSpec(bracket_hues, float(bracketed.get("lc", VOICE))),
             ranks=tuple(ranks),
             gain=Gain(**{key: float(value) for key, value in gain.items()}),
             surfaces=Surfaces(**{key: float(value) for key, value in surfaces.items()}),
@@ -688,7 +721,7 @@ def smelt(spec: Spec) -> Pack:
         (
             Ground.PROMPT,
             surfaces.prompt_rise,
-            BRACKET_HUES[Bracket.PROMPT],
+            spec.brackets.hues.get(Bracket.PROMPT, BRACKET_HUES[Bracket.PROMPT]),
             surfaces.prompt_tint,
         ),
     ):
@@ -806,18 +839,23 @@ def smelt(spec: Spec) -> Pack:
     )
     terminal_ring, terminal_ramp = terminal(spec, roles)
     rings.append(terminal_ring)
-    ramp = livery(spec, roles, rings[0].level)
-    roles.update(brackets(spec, ramp))
+    pins = {b: text(b, SATURATE, hue) for b, hue in spec.brackets.hues.items()}
+    ramp = livery(spec, roles, rings[0].level, tuple(pins.values()))
+    roles.update(brackets(spec, ramp, pins))
     return Pack(spec, roles, ramp, heat(roles), terminal_ramp, tuple(rings))
 
 
-def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch, ...]:
+def livery(
+    spec: Spec, roles: dict[Paint, Swatch], level: float, pins: tuple[Swatch, ...]
+) -> tuple[Swatch, ...]:
     """Identities as far apart as the panel allows, and apart from the status colors.
 
     Identity is the one family where distinctness outranks the voice: two agents that look alike
     are a lie about the screen. Each identity takes all the colorfulness the gamut gives, up to a
     fifth again the voice's, at any lightness from the least that clears the voice floor to
-    LIVERY_RISE above it, and the hues maximize the least pairwise distance."""
+    LIVERY_RISE above it, and the hues maximize the least pairwise distance. The brackets a spec
+    authors are identities already, fixed where it puts them: the rest stand apart from them as
+    from each other, and only the rest keep from the status colors."""
     canvas = roles[Ground.CANVAS].array
     cap = spec.voice.colorfulness * 1.2
     hues = np.arange(0.0, 360.0, 1.0)
@@ -837,7 +875,14 @@ def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch
         np.linalg.norm(grid[:, :, None] - repellers[None, None], axis=-1) / reach,
         axis=-1,
     )
-    count = spec.livery
+    count = spec.livery - len(pins)
+    if count < 0:
+        raise Invalid(
+            f"{spec.name}: {len(pins)} authored brackets outnumber {spec.livery} identities"
+        )
+    if count == 0:
+        return tuple(sorted(pins, key=lambda s: s.hue))
+    fixed = ucs(np.array([pin.rgb for pin in pins])) if pins else np.zeros((0, 3))
 
     def score(h: np.ndarray, r: np.ndarray) -> tuple[float, float]:
         if not allowed[h].all():
@@ -846,7 +891,8 @@ def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch
         d = np.linalg.norm(points[:, None] - points[None], axis=-1)[
             np.triu_indices(count, 1)
         ]
-        ordered = np.sort(np.concatenate([d, repel[h, r]]))
+        tied = np.linalg.norm(points[:, None] - fixed[None], axis=-1).ravel()
+        ordered = np.sort(np.concatenate([d, tied, repel[h, r]]))
         return (float(ordered[0]), float(ordered[1]))
 
     best: tuple[tuple[float, float], np.ndarray, np.ndarray] | None = None
@@ -878,17 +924,27 @@ def livery(spec: Spec, roles: dict[Paint, Swatch], level: float) -> tuple[Swatch
     if best is None:
         raise Invalid(f"{spec.name}: no livery fits the permitted arcs")
     _, h, r = best
-    return tuple(Swatch.of(grid_rgb[h[i], r[i]], cap) for i in np.argsort(h))
+    free = tuple(Swatch.of(grid_rgb[h[i], r[i]], cap) for i in np.argsort(h))
+    return tuple(sorted((*free, *pins), key=lambda s: s.hue)) if pins else free
 
 
-def brackets(spec: Spec, ramp: tuple[Swatch, ...]) -> dict[Paint, Swatch]:
-    """Each bracket's identity: a palette marks its speakers only in colors it already has. The
-    brackets keep BRACKET_HUES's order round the hue circle among the identities BRACKET_COLORFUL
-    admits, and of the assignments that keep it, take the one whose hues stray least, summed, from
-    the hues they are chosen nearest."""
-    order = tuple(BRACKET_HUES)
+def brackets(
+    spec: Spec, ramp: tuple[Swatch, ...], pins: dict[Bracket, Swatch]
+) -> dict[Paint, Swatch]:
+    """Each bracket's identity: a palette marks its speakers only in colors it already has. A
+    bracket the spec authors wears its own; the rest keep BRACKET_HUES's order round the hue circle
+    among the other identities BRACKET_COLORFUL admits, and of the assignments that keep it, take
+    the one whose hues stray least, summed, from the hues they are chosen nearest."""
+    order = tuple(b for b in BRACKET_HUES if b not in pins)
+    if not order:
+        return dict(pins)
     admitted = sorted(
-        (s for s in ramp if s.colorfulness >= BRACKET_COLORFUL), key=lambda s: s.hue
+        (
+            s
+            for s in ramp
+            if s.colorfulness >= BRACKET_COLORFUL and s not in pins.values()
+        ),
+        key=lambda s: s.hue,
     )
     if len(admitted) < len(order):
         raise Invalid(
@@ -906,7 +962,7 @@ def brackets(spec: Spec, ramp: tuple[Swatch, ...]) -> dict[Paint, Swatch]:
         for chosen in itertools.combinations(admitted, len(order))
         for turn in range(len(order))
     )
-    return dict(zip(order, min(rings, key=stray), strict=True))
+    return pins | dict(zip(order, min(rings, key=stray), strict=True))
 
 
 def heat(roles: dict[Paint, Swatch]) -> tuple[Swatch, ...]:

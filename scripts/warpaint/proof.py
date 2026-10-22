@@ -25,6 +25,7 @@ from laws import (
     SIGNAL_RING,
     TEXT_RING,
     VALUE_STEP,
+    VOICE,
     WINDOWS,
     Distinct,
     Gain,
@@ -210,17 +211,27 @@ def _brackets(pack: Pack) -> list[str]:
         "| bracket | identity | hex | M | h | sought |",
         "|---|---|---|---|---|---|",
     ]
+    authored = pack.spec.brackets
     for bracket, sought in BRACKET_HUES.items():
         s = roles[bracket]
+        mark = (
+            f"{authored.hues[bracket]:.0f}, authored"
+            if bracket in authored.hues
+            else f"{sought:.0f}"
+        )
         lines.append(
-            f"| {bracket} | {slot[s.hex]} | `{s.hex}` | {s.colorfulness:.1f} | {s.hue:.0f} | {sought:.0f} |"
+            f"| {bracket} | {slot[s.hex]} | `{s.hex}` | {s.colorfulness:.1f} | {s.hue:.0f} | {mark} |"
         )
     prompt = roles[Ground.PROMPT]
     lines += [
         "",
         f"- the prompt ground rises {surfaces.prompt_rise:g} J' and leans M {surfaces.prompt_tint:g} toward h "
-        f"{BRACKET_HUES[Bracket.PROMPT]:.0f}: `{prompt.hex}`, dE {distance(prompt.rgb, canvas.rgb):.1f} off the canvas",
+        f"{authored.hues.get(Bracket.PROMPT, BRACKET_HUES[Bracket.PROMPT]):.0f}: `{prompt.hex}`, dE {distance(prompt.rgb, canvas.rgb):.1f} off the canvas",
     ]
+    if authored.hues:
+        lines.append(
+            f"- authored brackets read at Lc {authored.lc:g} over the canvas, as colorful as the gamut allows there"
+        )
     return lines
 
 
@@ -372,6 +383,7 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
             advisories.append(
                 f"{text} is solved over {ground}, where the TUI never paints it"
             )
+    pinned = {roles[b].hex: b for b in spec.brackets.hues}
     for ramp, members in (
         ("livery", dict(enumerate(pack.livery))),
         ("heat", {k + 1: s for k, s in enumerate(pack.heat)}),
@@ -383,7 +395,10 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
         held = dict(RAMP_FLOORS[ramp])
         for ground in RAMP_PAIRS[ramp]:
             for index, swatch in members.items():
-                contrast(f"{ramp} {index}", swatch, ground, held.get(ground))
+                floor = held.get(ground)
+                if ramp == "livery" and swatch.hex in pinned and floor is not None:
+                    floor -= VOICE - spec.brackets.lc
+                contrast(f"{ramp} {index}", swatch, ground, floor)
 
     lines += ["", "## distinctness", ""]
     lc = {
@@ -441,6 +456,15 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
                 f"heat step {rise[1] + 1} over {ground} is dE {rise[0]:.1f} from the last, below {HEAT_LEAST:.0f}"
             )
     ramp = pack.livery
+    for s in ramp:
+        if s.hex in pinned:
+            reach, status = min(
+                (distance(s.rgb, roles[r].rgb) / REPELLERS[r], r) for r in REPELLERS
+            )
+            if reach < LIVERY_LEAST * 0.9:
+                advisories.append(
+                    f"the authored {pinned[s.hex]} stands {reach:.1f} reach-scaled dE from {status}, nearer than an identity may"
+                )
     pair = min(
         (distance(ramp[i].rgb, ramp[j].rgb), i, j)
         for i in range(len(ramp))
@@ -449,6 +473,7 @@ def prove(pack: Pack) -> tuple[str, list[str]]:
     near = min(
         (distance(s.rgb, roles[r].rgb) / REPELLERS[r], i, r)
         for i, s in enumerate(ramp)
+        if s.hex not in pinned
         for r in REPELLERS
     )
     lines.append(

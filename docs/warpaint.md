@@ -126,6 +126,7 @@ each restatement beside the doctrine's value:
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6) |
 | `[surfaces]` | the elevations `dais`, `selection_rise` and `prompt_rise` (5, 9, 9.5 J') and the tints `selection_tint`, `diff_tint` and `prompt_tint` (9, 22, 2.25 M) |
 | `[label]` | the label's `hue`, `colorfulness` and `contrast` |
+| `[brackets]` | a bracket's hue, authored rather than sought, and `lc`, the Lc authored brackets read at over the canvas (55): each is as colorful as the gamut allows there and joins the livery where the spec puts it, while the other brackets keep their order round the circle among the rest |
 | `[tab]` | the open tab's `hue`, `colorfulness` and `contrast` |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |
 | `[style]` | modifiers, `bold` or `italic`, for syntax classes; the pack carries them for the binder |
@@ -194,7 +195,8 @@ light text on a dark ground correctly.
   eye can tell apart.
 - Tool output's sixteen colors keep their meaning, red is red and cyan is cyan, but are solved
   against the pack's grounds; the neutrals are the pack's own grounds and inks.
-- The livery maximizes its least pairwise distance and keeps away from the status colors.
+- The livery maximizes its least pairwise distance and keeps away from the status colors. A bracket
+  a spec authors joins it where the spec puts it, and the proof advises when that is near one.
 - The canvas may be tinted, analogous to the accent or not, up to a colorfulness ceiling that
   admits the canonical dark grounds.
 
