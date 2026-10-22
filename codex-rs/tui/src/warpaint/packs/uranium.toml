@@ -2,20 +2,20 @@
 # Edit the spec and re-smelt; a hand edit here is unprovable and the next smelt erases it.
 # One fluorescent reagent in a dark laboratory: the accent and a single syntax rank at extreme colorfulness; everything else falls back to nearly grey.
 livery = [
-  "#ffc99b",
-  "#ffa10a",
-  "#b8c700",
-  "#52e017",
-  "#00c1b8",
-  "#0ac6ff",
-  "#7da9ff",
-  "#cebdff",
+  "#ffcca2",
+  "#ffa334",
+  "#d3d400",
+  "#7be000",
+  "#00c3ba",
+  "#00cafa",
+  "#87a9ff",
+  "#bd97ff",
 ]
 heat = [
-  "#48582e",
-  "#63842c",
-  "#7db023",
-  "#97dd00",
+  "#48582d",
+  "#63852c",
+  "#7eb223",
+  "#99df00",
 ]
 terminal = [
   "#051607",
@@ -41,8 +41,8 @@ canvas = "#000b01"
 dais = "#051607"
 selection = "#0c2100"
 prompt = "#001e15"
-added = "#000f01"
-removed = "#18000d"
+added = "#002207"
+removed = "#320020"
 
 [figure]
 ink = "#d9d9d9"
@@ -50,34 +50,34 @@ ink_muted = "#b4b4b4"
 ink_faint = "#969696"
 ink_selected = "#d6d6d6"
 rule = "#485746"
-accent = "#97dd00"
-link = "#00c5eb"
+accent = "#99df00"
+link = "#00c7ee"
 code = "#cbd29b"
 success = "#87c49c"
 caution = "#d1b65b"
 failure = "#d9809c"
 info = "#58adda"
-added = "#9dd39d"
-removed = "#e491ba"
+added = "#9fd59f"
+removed = "#e693bc"
 label = "#f3ccb0"
 tab = "#e4aa7a"
 
 [syntax]
 keyword = "#c9e500"
-function = "#eac000"
-type = "#dfcc00"
-string = "#f9af00"
-number = "#d1a4bb"
-comment = "#8d9288"
-punctuation = "#adadad"
-variable = "#d1cdab"
+function = "#ecc200"
+type = "#e1ce00"
+string = "#fbb100"
+number = "#d3a6bd"
+comment = "#8e9289"
+punctuation = "#aeaeae"
+variable = "#d2ceac"
 constant = "#00ed64"
-attribute = "#00c8e6"
+attribute = "#00cbe9"
 
 [bracket]
-response = "#52e017"
-message = "#b8c700"
-call = "#ffa10a"
-reasoning = "#ffc99b"
-prompt = "#0ac6ff"
-harness = "#cebdff"
+response = "#7be000"
+message = "#d3d400"
+call = "#ffa334"
+reasoning = "#ffcca2"
+prompt = "#00cafa"
+harness = "#bd97ff"

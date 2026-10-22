@@ -17,8 +17,8 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | ground.dais | `#0e1223` | 15.5 | 5.0 | 4.9 | 275 | 233 |
 | ground.selection | `#150a3d` | 18.4 | 14.3 | 14.4 | 294 | 17 |
 | ground.prompt | `#0a1934` | 18.8 | 8.1 | 7.9 | 267 | 234 |
-| ground.added | `#0f1400` | 12.9 | 3.5 | 7.0 | 124 | 233 |
-| ground.removed | `#1d0014` | 13.0 | 6.4 | 7.0 | 345 | 232 |
+| ground.added | `#1d2700` | 19.1 | 6.5 | 22.0 | 125 | 235 |
+| ground.removed | `#370029` | 19.2 | 11.8 | 22.0 | 345 | 53 |
 | figure.ink | `#d9d9d9` | 87.2 | 1.3 | 0.0 | 209 | 253 |
 | figure.ink_muted | `#b4b4b4` | 73.0 | 1.1 | 0.0 | 209 | 249 |
 | figure.ink_faint | `#969696` | 61.6 | 0.9 | 0.0 | 209 | 246 |
@@ -88,20 +88,20 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | figure.ink | ground.dais | 82.9 | 79 |
 | figure.ink | ground.selection | 82.5 | 73 |
 | figure.ink | ground.prompt | 82.1 | 79 |
-| figure.ink | ground.added | 82.9 | 78 |
-| figure.ink | ground.removed | 83.1 | 78 |
+| figure.ink | ground.added | 80.8 | 78 |
+| figure.ink | ground.removed | 81.6 | 78 |
 | figure.ink_muted | ground.canvas | 61.6 | 61 |
 | figure.ink_muted | ground.dais | 61.1 | 57 |
 | figure.ink_muted | ground.selection | 60.7 | 51 |
 | figure.ink_muted | ground.prompt | 60.4 | 57 |
-| figure.ink_muted | ground.added | 61.2 | 56 |
-| figure.ink_muted | ground.removed | 61.3 | 56 |
+| figure.ink_muted | ground.added | 59.0 | 56 |
+| figure.ink_muted | ground.removed | 59.8 | 56 |
 | figure.ink_faint | ground.canvas | 45.5 | 45 |
 | figure.ink_faint | ground.dais | 45.0 | 41 |
 | figure.ink_faint | ground.selection | 44.6 | 35 |
 | figure.ink_faint | ground.prompt | 44.2 | 41 |
-| figure.ink_faint | ground.added | 45.0 | 40 |
-| figure.ink_faint | ground.removed | 45.2 | 40 |
+| figure.ink_faint | ground.added | 42.9 | 40 |
+| figure.ink_faint | ground.removed | 43.7 | 40 |
 | figure.ink_selected | ground.selection | 80.1 | 80 |
 | figure.rule | ground.canvas | 15.2 | 15 |
 | figure.rule | ground.dais | 14.6 | 8 |
@@ -113,13 +113,13 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | figure.link | ground.dais | 68.5 | 51 |
 | figure.link | ground.selection | 68.1 | 45 |
 | figure.link | ground.prompt | 67.7 | 51 |
-| figure.link | ground.added | 68.5 | 51 |
-| figure.link | ground.removed | 68.7 | 51 |
+| figure.link | ground.added | 66.4 | 51 |
+| figure.link | ground.removed | 67.2 | 51 |
 | figure.code | ground.canvas | 76.3 | 76 |
 | figure.code | ground.dais | 75.8 | 72 |
 | figure.code | ground.prompt | 75.1 | 72 |
-| figure.code | ground.added | 75.9 | 72 |
-| figure.code | ground.removed | 76.0 | 72 |
+| figure.code | ground.added | 73.7 | 72 |
+| figure.code | ground.removed | 74.5 | 72 |
 | figure.success | ground.canvas | 59.8 | 47 |
 | figure.success | ground.dais | 59.2 | 43 |
 | figure.success | ground.selection | 58.9 | 37 |
@@ -128,26 +128,26 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | figure.caution | ground.dais | 58.1 | 43 |
 | figure.caution | ground.selection | 57.7 | 37 |
 | figure.caution | ground.prompt | 57.4 | 43 |
-| figure.caution | ground.added | 58.2 | 43 |
-| figure.caution | ground.removed | 58.3 | 43 |
+| figure.caution | ground.added | 56.0 | 43 |
+| figure.caution | ground.removed | 56.8 | 43 |
 | figure.failure | ground.canvas | 48.0 | 47 |
 | figure.failure | ground.dais | 47.5 | 43 |
 | figure.failure | ground.selection | 47.1 | 37 |
 | figure.failure | ground.prompt | 46.8 | 43 |
-| figure.failure | ground.added | 47.6 | 43 |
-| figure.failure | ground.removed | 47.7 | 43 |
+| figure.failure | ground.added | 45.4 | 43 |
+| figure.failure | ground.removed | 46.2 | 43 |
 | figure.info | ground.canvas | 51.7 | 47 |
 | figure.info | ground.dais | 51.2 | 43 |
 | figure.info | ground.selection | 50.8 | 37 |
 | figure.info | ground.prompt | 50.5 | 43 |
 | figure.added | ground.canvas | 78.1 | 55 |
 | figure.added | ground.prompt | 76.8 | 51 |
-| figure.added | ground.added | 77.6 | 55 |
-| figure.added | ground.removed | 77.8 | 51 |
+| figure.added | ground.added | 75.5 | 55 |
+| figure.added | ground.removed | 76.2 | 51 |
 | figure.removed | ground.canvas | 62.2 | 55 |
 | figure.removed | ground.prompt | 60.9 | 51 |
-| figure.removed | ground.added | 61.7 | 51 |
-| figure.removed | ground.removed | 61.9 | 55 |
+| figure.removed | ground.added | 59.6 | 51 |
+| figure.removed | ground.removed | 60.3 | 55 |
 | figure.label | ground.canvas | 80.2 | 80 |
 | figure.label | ground.dais | 79.6 | 76 |
 | figure.label | ground.selection | 79.3 | 70 |
@@ -155,44 +155,44 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 | figure.tab | ground.canvas | 62.7 | 63 |
 | syntax.keyword | ground.canvas | 55.0 | 54 |
 | syntax.keyword | ground.prompt | 53.8 | 50 |
-| syntax.keyword | ground.added | 54.6 | 50 |
-| syntax.keyword | ground.removed | 54.7 | 50 |
+| syntax.keyword | ground.added | 52.4 | 50 |
+| syntax.keyword | ground.removed | 53.2 | 50 |
 | syntax.function | ground.canvas | 70.7 | 54 |
 | syntax.function | ground.prompt | 69.4 | 50 |
-| syntax.function | ground.added | 70.2 | 50 |
-| syntax.function | ground.removed | 70.4 | 50 |
+| syntax.function | ground.added | 68.1 | 50 |
+| syntax.function | ground.removed | 68.8 | 50 |
 | syntax.type | ground.canvas | 55.8 | 44 |
 | syntax.type | ground.prompt | 54.5 | 40 |
-| syntax.type | ground.added | 55.3 | 40 |
-| syntax.type | ground.removed | 55.5 | 40 |
+| syntax.type | ground.added | 53.2 | 40 |
+| syntax.type | ground.removed | 54.0 | 40 |
 | syntax.string | ground.canvas | 76.4 | 66 |
 | syntax.string | ground.prompt | 75.2 | 62 |
-| syntax.string | ground.added | 76.0 | 62 |
-| syntax.string | ground.removed | 76.1 | 62 |
+| syntax.string | ground.added | 73.8 | 62 |
+| syntax.string | ground.removed | 74.6 | 62 |
 | syntax.number | ground.canvas | 67.0 | 66 |
 | syntax.number | ground.prompt | 65.8 | 62 |
-| syntax.number | ground.added | 66.5 | 62 |
-| syntax.number | ground.removed | 66.7 | 62 |
+| syntax.number | ground.added | 64.4 | 62 |
+| syntax.number | ground.removed | 65.2 | 62 |
 | syntax.comment | ground.canvas | 45.0 | 44 |
 | syntax.comment | ground.prompt | 43.7 | 40 |
-| syntax.comment | ground.added | 44.5 | 40 |
-| syntax.comment | ground.removed | 44.7 | 40 |
+| syntax.comment | ground.added | 42.4 | 40 |
+| syntax.comment | ground.removed | 43.2 | 40 |
 | syntax.punctuation | ground.canvas | 56.6 | 44 |
 | syntax.punctuation | ground.prompt | 55.3 | 40 |
-| syntax.punctuation | ground.added | 56.1 | 40 |
-| syntax.punctuation | ground.removed | 56.3 | 40 |
+| syntax.punctuation | ground.added | 54.0 | 40 |
+| syntax.punctuation | ground.removed | 54.8 | 40 |
 | syntax.variable | ground.canvas | 56.6 | 44 |
 | syntax.variable | ground.prompt | 55.3 | 40 |
-| syntax.variable | ground.added | 56.1 | 40 |
-| syntax.variable | ground.removed | 56.3 | 40 |
+| syntax.variable | ground.added | 54.0 | 40 |
+| syntax.variable | ground.removed | 54.8 | 40 |
 | syntax.constant | ground.canvas | 67.0 | 66 |
 | syntax.constant | ground.prompt | 65.8 | 62 |
-| syntax.constant | ground.added | 66.5 | 62 |
-| syntax.constant | ground.removed | 66.7 | 62 |
+| syntax.constant | ground.added | 64.4 | 62 |
+| syntax.constant | ground.removed | 65.2 | 62 |
 | syntax.attribute | ground.canvas | 58.8 | 54 |
 | syntax.attribute | ground.prompt | 57.5 | 50 |
-| syntax.attribute | ground.added | 58.3 | 50 |
-| syntax.attribute | ground.removed | 58.5 | 50 |
+| syntax.attribute | ground.added | 56.2 | 50 |
+| syntax.attribute | ground.removed | 57.0 | 50 |
 | bracket.response | ground.canvas | 63.6 | 55 |
 | bracket.message | ground.canvas | 56.0 | 55 |
 | bracket.call | ground.canvas | 71.1 | 55 |
@@ -245,7 +245,7 @@ The label reads at Lc 80.2 over the canvas, ceiling 95; an open tab at Lc 62.7, 
 - status: least dE 16.6, floor 14
 - accent against status: least dE 16.6, floor 10
 - diff ink: least dE 34.2, floor 18
-- diff band: least dE 29.3, floor 6
+- diff band: least dE 41.9, floor 6
 - syntax in rank body: least dE 10.5, floor 9
 - syntax in rank flame: least dE 22.2, floor 9
 - syntax across levels: least dE 8.6, floor 9; nearer pairs stand apart in level by 5.8 Lc or more, floor 5

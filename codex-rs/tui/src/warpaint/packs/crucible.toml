@@ -2,20 +2,20 @@
 # Edit the spec and re-smelt; a hand edit here is unprovable and the next smelt erases it.
 # Most of the code sinks into the green bath; only constants burn bright at the bottom. Ordinary code is darker than prose, and the precious roles are the only metal left molten.
 livery = [
-  "#ffb78f",
-  "#eb972a",
+  "#ffb896",
+  "#ef9433",
   "#bfce20",
   "#70bc4a",
   "#11cabf",
   "#00b8e2",
   "#9db7ff",
-  "#bb9af1",
+  "#c397ef",
 ]
 heat = [
-  "#6a4b42",
-  "#9c614f",
-  "#ce765d",
-  "#ff8c6a",
+  "#694c43",
+  "#9c6352",
+  "#cd7b62",
+  "#ff9271",
 ]
 terminal = [
   "#051607",
@@ -41,8 +41,8 @@ canvas = "#000b01"
 dais = "#051607"
 selection = "#2c1900"
 prompt = "#001e15"
-added = "#000f01"
-removed = "#18000d"
+added = "#002207"
+removed = "#320020"
 
 [figure]
 ink = "#d9d9d9"
@@ -50,15 +50,15 @@ ink_muted = "#b4b4b4"
 ink_faint = "#969696"
 ink_selected = "#d7d7d7"
 rule = "#485746"
-accent = "#ff8c6a"
-link = "#80ced6"
+accent = "#ff9271"
+link = "#83d1d9"
 code = "#e2caa8"
 success = "#74ca96"
 caution = "#d9b639"
 failure = "#e7769c"
 info = "#1eafea"
-added = "#8ed892"
-removed = "#f188be"
+added = "#91db95"
+removed = "#f48ac1"
 label = "#fbc8ba"
 tab = "#efa38d"
 
@@ -69,7 +69,7 @@ type = "#a7a078"
 string = "#af9875"
 number = "#ad869b"
 comment = "#92a08e"
-punctuation = "#adadad"
+punctuation = "#aeaeae"
 variable = "#bcb86f"
 constant = "#ffcae5"
 attribute = "#89b0ba"
@@ -77,10 +77,10 @@ attribute = "#89b0ba"
 [bracket]
 response = "#70bc4a"
 message = "#bfce20"
-call = "#eb972a"
-reasoning = "#ffb78f"
+call = "#ef9433"
+reasoning = "#ffb896"
 prompt = "#00b8e2"
-harness = "#bb9af1"
+harness = "#c397ef"
 
 [style]
 constant = ["bold"]

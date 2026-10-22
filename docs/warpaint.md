@@ -124,7 +124,7 @@ each restatement beside the doctrine's value:
 | `[ranks.<name>]` | syntax classes `members` re-levelled out of the voice: read at `lc` over their own ground where the voice reads at 55, asking `gain` times the voice's colorfulness, with their own `naturalism`. `least` is the dE the rank's voice classes stand apart, 9 unless stated; at 0 the rank is one tone, told from the others by level alone. |
 | `[voice] least` | the dE the voice classes no rank holds stand apart, 9 unless stated |
 | `[gain]` | each family's colorfulness: `signal`, `diff`, `terminal`, `comment` and `code` as multiples of the voice's (1, 1, 1, 0.4, 0.6) |
-| `[surfaces]` | the elevations `dais`, `selection_rise` and `prompt_rise` (5, 9, 9.5 J') and the tints `selection_tint`, `diff_tint` and `prompt_tint` (9, 7, 2.25 M) |
+| `[surfaces]` | the elevations `dais`, `selection_rise` and `prompt_rise` (5, 9, 9.5 J') and the tints `selection_tint`, `diff_tint` and `prompt_tint` (9, 22, 2.25 M) |
 | `[label]` | the label's `hue`, `colorfulness` and `contrast` |
 | `[tab]` | the open tab's `hue`, `colorfulness` and `contrast` |
 | `[terminal] least` | the dE tool output's hues, and their brights, stand apart (10) |

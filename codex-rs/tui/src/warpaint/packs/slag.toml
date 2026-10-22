@@ -2,20 +2,20 @@
 # Edit the spec and re-smelt; a hand edit here is unprovable and the next smelt erases it.
 # Slag: amber constants burn bold at the bottom; the rest of the code sinks below the grey prose.
 livery = [
-  "#feaf5e",
-  "#cfab21",
-  "#9ebd3b",
-  "#67bc79",
-  "#1ebbbd",
-  "#65bfff",
-  "#97a6ef",
-  "#d8b7ff",
+  "#e59f41",
+  "#c7b826",
+  "#7ebd5d",
+  "#51bc9a",
+  "#00bac9",
+  "#55c1ff",
+  "#91a7f0",
+  "#d4b8ff",
 ]
 heat = [
-  "#664e36",
-  "#996b3b",
-  "#cc893f",
-  "#ffa640",
+  "#654e37",
+  "#996c3d",
+  "#cc8a43",
+  "#ffa846",
 ]
 terminal = [
   "#140d0a",
@@ -41,8 +41,8 @@ canvas = "#0a0503"
 dais = "#140d0a"
 selection = "#271300"
 prompt = "#19191c"
-added = "#070a00"
-removed = "#0f0009"
+added = "#161d00"
+removed = "#29001e"
 
 [figure]
 ink = "#dcdcdc"
@@ -50,15 +50,15 @@ ink_muted = "#b6b6b6"
 ink_faint = "#989898"
 ink_selected = "#d9d9d9"
 rule = "#5a514d"
-accent = "#ffa640"
-link = "#ffa045"
+accent = "#ffa846"
+link = "#ffa24b"
 code = "#e9cabc"
 success = "#a6c9a9"
 caution = "#d1c184"
 failure = "#c98996"
 info = "#80afcd"
-added = "#c8e17d"
-removed = "#e58ec2"
+added = "#c9e27e"
+removed = "#e690c3"
 label = "#f5d0b1"
 tab = "#e4ae79"
 
@@ -69,18 +69,18 @@ type = "#a59188"
 string = "#a59188"
 number = "#a59487"
 comment = "#a59188"
-punctuation = "#afafaf"
+punctuation = "#b0b0b0"
 variable = "#c3a48a"
 constant = "#ffcc9c"
 attribute = "#c4a18b"
 
 [bracket]
-response = "#67bc79"
-message = "#9ebd3b"
-call = "#cfab21"
-reasoning = "#feaf5e"
-prompt = "#65bfff"
-harness = "#d8b7ff"
+response = "#51bc9a"
+message = "#7ebd5d"
+call = "#c7b826"
+reasoning = "#e59f41"
+prompt = "#55c1ff"
+harness = "#d4b8ff"
 
 [style]
 constant = ["bold"]

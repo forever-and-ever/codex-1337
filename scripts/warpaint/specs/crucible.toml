@@ -60,7 +60,7 @@ naturalism = 0.1
 code = 0.35
 
 [surfaces]
-diff_tint = 8.5
+diff_tint = 26.5
 
 [style]
 constant = ["bold"]

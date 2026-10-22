@@ -61,18 +61,19 @@ COMMENT = 41.0
 RULE = 16.0
 
 DAIS = 5.0
-DIFF_BAND = 1.5
+DIFF_BAND = 10.0
 SELECTION_RISE = 9.0
 PROMPT_RISE = 9.5
 """Elevations in CAM16-UCS J' from the canvas. A surface is the ground's material raised at
 constant hue and saturation, so a lit surface reads as the same paint in more light rather than as
-a different paint. A spec's `[surfaces]` may move the dais, the selection bar and the prompt."""
+a different paint. A diff band rises as far as the selection bar: on the bare canvas, a band
+lit any less is lost. A spec's `[surfaces]` may move the dais, the selection bar and the prompt."""
 
 SELECTION_TINT = 9.0
 """Colorfulness the selection bar adds toward the accent, as a vector in the appearance plane: the
 bar keeps the colors of the row it selects, so it is a lit band of the ground and never a light
 chip. A spec's `[surfaces]` may move it."""
-DIFF_TINT = 7.0
+DIFF_TINT = 22.0
 """Colorfulness of a diff band, which takes its ink's hue outright: a removed line must read as
 the removed hue on every ground, not as that hue mixed with the page. A spec's `[surfaces]`
 may move it."""

@@ -41,8 +41,8 @@ canvas = "#060816"
 dais = "#0e1223"
 selection = "#150a3d"
 prompt = "#0a1934"
-added = "#0f1400"
-removed = "#1d0014"
+added = "#1d2700"
+removed = "#370029"
 
 [figure]
 ink = "#d9d9d9"
