@@ -380,6 +380,7 @@ impl App {
         if self.scrollback_has_older_history
             && (continue_to_start
                 || self.browsing_needs_history()
+                || self.rewind_needs_history()
                 || self.transcript_view.needs_history(&self.transcript_cells))
             && self.request_older_history_page(app_server, thread_id)
         {

@@ -135,7 +135,7 @@ impl FooterKeyHints {
             queue: Some(key_hint::plain(KeyCode::Tab).into()),
             insert_newline: Some(key_hint::ctrl(KeyCode::Char('j')).into()),
             external_editor: Some(key_hint::ctrl(KeyCode::Char('g')).into()),
-            edit_previous: Some(key_hint::plain(KeyCode::Esc).into()),
+            edit_previous: Some(key_hint::alt(KeyCode::Char('z')).into()),
             show_transcript: Some(key_hint::ctrl(KeyCode::Char('t')).into()),
             find_transcript: Some(key_hint::plain(KeyCode::F(3)).into()),
             focus_activity: Some(key_hint::plain(KeyCode::F(4)).into()),

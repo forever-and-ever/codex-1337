@@ -808,6 +808,7 @@ impl ChatComposer {
                     .primary_hint(KeymapContext::Global, "open_warnings"),
                 show_transcript_key: default_keymap
                     .primary_hint(KeymapContext::Global, "open_transcript"),
+                rewind_key: default_keymap.primary_hint(KeymapContext::Global, "rewind"),
                 find_transcript_key: default_keymap
                     .primary_hint(KeymapContext::Global, "find_transcript"),
                 focus_activity_key: default_keymap
@@ -1094,6 +1095,7 @@ impl ChatComposer {
         self.footer.show_warnings_key = keymap.primary_hint(KeymapContext::Global, "open_warnings");
         self.footer.show_transcript_key =
             keymap.primary_hint(KeymapContext::Global, "open_transcript");
+        self.footer.rewind_key = keymap.primary_hint(KeymapContext::Global, "rewind");
         self.footer.find_transcript_key =
             keymap.primary_hint(KeymapContext::Global, "find_transcript");
         self.footer.focus_activity_key =

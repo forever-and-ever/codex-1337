@@ -286,6 +286,7 @@ mod server_queue;
 mod turn_submissions;
 pub(crate) use server_queue::queued_message_text;
 mod reconnect;
+mod rewind;
 use self::input_queue::InputQueueState;
 mod farm;
 mod idle_restart;
@@ -1804,10 +1805,6 @@ impl ChatWidget {
 
     pub(crate) fn has_active_modal(&self) -> bool {
         self.bottom_pane.has_active_modal()
-    }
-
-    pub(crate) fn show_esc_backtrack_hint(&mut self) {
-        self.bottom_pane.show_esc_backtrack_hint();
     }
 
     pub(crate) fn clear_esc_backtrack_hint(&mut self) {

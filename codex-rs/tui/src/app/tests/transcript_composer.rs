@@ -4,7 +4,6 @@
 //! Analytics also preserves the composer and stays separate from transcript backtracking.
 
 use super::*;
-use crate::pager_overlay::TranscriptHistoryState;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -218,8 +217,8 @@ async fn analytics_keeps_queued_and_late_startup_history_out_of_the_overlay() ->
 }
 
 #[tokio::test]
-async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
-    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+async fn transcript_flag_off_preserves_viewer() -> Result<()> {
+    let (mut app, _app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let keymap_config = toml::from_str("[composer]\nsubmit = [\"ctrl-x enter\"]")?;
     app.keymap =
         crate::keymap::RuntimeKeymap::from_config(&keymap_config).expect("valid composer chord");
@@ -270,41 +269,6 @@ async fn transcript_flag_off_preserves_viewer_and_backtracking() -> Result<()> {
     };
     overlay.render(area, &mut buffer);
     insta::assert_snapshot!("transcript_flag_off_viewer", buffer_text(&buffer));
-    for (key, selected) in [
-        (KeyCode::Esc, 1),
-        (KeyCode::Left, 0),
-        (KeyCode::Right, 1),
-        (KeyCode::Right, 1),
-    ] {
-        if let Some(Overlay::Transcript(overlay)) = app.overlay.as_mut() {
-            overlay.set_history_state(TranscriptHistoryState::LoadingBeginning);
-            overlay.render(area, &mut buffer);
-            assert_eq!(
-                overlay.set_history_state(TranscriptHistoryState::LoadingBeginning),
-                TranscriptHistoryState::LoadingBeginning,
-            );
-        }
-        press_key(&mut app, &mut tui, &mut app_server, key).await?;
-        let Some(Overlay::Transcript(overlay)) = app.overlay.as_mut() else {
-            panic!("viewer closed")
-        };
-        assert_eq!(
-            overlay.set_history_state(TranscriptHistoryState::Complete),
-            TranscriptHistoryState::LoadingOlder,
-        );
-        assert_eq!(app.backtrack.nth_user_message, selected);
-    }
-    press_key(&mut app, &mut tui, &mut app_server, KeyCode::Enter).await?;
-    assert!(app.overlay.is_none());
-    assert!(
-        std::iter::from_fn(|| app_event_rx.try_recv().ok()).any(|event| matches!(
-            event,
-            AppEvent::RevertSessionForPromptEdit {
-                selected_cell,
-                ..
-            } if Arc::ptr_eq(&selected_cell, &app.transcript_cells[crate::app_backtrack::nth_user_position(&app.transcript_cells, /*nth*/ 1).unwrap()])
-        ))
-    );
     Ok(())
 }
 

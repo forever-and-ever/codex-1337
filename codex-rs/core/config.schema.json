@@ -5023,6 +5023,7 @@
               "open_external_editor": null,
               "open_transcript": null,
               "queue": null,
+              "rewind": null,
               "submit": null,
               "toggle_dialogue": null,
               "toggle_fast_mode": null,
@@ -5873,6 +5874,14 @@
           ],
           "description": "Queue the current composer draft while a task is running."
         },
+        "rewind": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            }
+          ],
+          "description": "Rewind the conversation to an earlier prompt."
+        },
         "submit": {
           "allOf": [
             {
@@ -6051,6 +6060,7 @@
             "open_external_editor": null,
             "open_transcript": null,
             "queue": null,
+            "rewind": null,
             "submit": null,
             "toggle_dialogue": null,
             "toggle_fast_mode": null,

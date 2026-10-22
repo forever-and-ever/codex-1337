@@ -73,6 +73,11 @@ impl TranscriptView {
         self.set_lens(cells, lens);
     }
 
+    /// Rewind chooses among prompts, so it hides the work between them; the lens outlives it.
+    pub(crate) fn show_dialogue(&mut self, cells: &[Arc<dyn HistoryCell>]) {
+        self.set_lens(cells, Lens::Dialogue);
+    }
+
     pub(super) fn set_lens(&mut self, cells: &[Arc<dyn HistoryCell>], lens: Lens) {
         if self.lens == lens {
             return;
