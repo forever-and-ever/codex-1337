@@ -3997,13 +3997,6 @@ async fn select_ultra_with_multi_agent_thread_limit(max_threads: usize) -> (bool
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
-    let advanced_preset = std::iter::from_fn(|| rx.try_recv().ok()).find_map(|event| match event {
-        AppEvent::OpenAdvancedReasoningPopup { model } => Some(model),
-        _ => None,
-    });
-    chat.open_advanced_reasoning_popup(advanced_preset.expect("advanced reasoning popup"));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
-
     let mut selected_ultra = false;
     let mut warnings = Vec::new();
     while let Ok(event) = rx.try_recv() {
@@ -4303,7 +4296,7 @@ async fn reasoning_up_shortcut_does_not_silently_enter_ultra() {
         insta::allow_duplicates! {
             insta::assert_snapshot!(
                 messages.join("").replace(model_path, "<model path>"),
-                @"• Ultra is available under /model → <model path> → More reasoning…"
+                @"• Ultra is available under /model → <model path>"
             );
         }
     }

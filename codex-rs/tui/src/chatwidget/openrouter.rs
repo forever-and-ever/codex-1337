@@ -7,7 +7,6 @@ use super::Instant;
 use super::KeyCode;
 use super::ModelPreset;
 use super::PlainHistoryCell;
-use super::ReasoningEffortConfig;
 use super::SelectionItem;
 use super::SelectionViewParams;
 use super::ThreadId;
@@ -36,20 +35,6 @@ pub(super) struct OpenRouterUi {
 }
 
 impl ChatWidget {
-    pub(super) fn partition_reasoning_choices(
-        &self,
-        choices: Vec<ReasoningEffortConfig>,
-    ) -> (Vec<ReasoningEffortConfig>, Vec<ReasoningEffortConfig>) {
-        match self.config.model_provider.adapter {
-            // OpenRouter's max is a wire effort, not the fork's ChatGPT usage mode.
-            codex_model_provider_info::ModelProviderAdapter::OpenRouter => (choices, Vec::new()),
-            codex_model_provider_info::ModelProviderAdapter::OpenaiCompatible
-            | codex_model_provider_info::ModelProviderAdapter::ClaudeSubscription => choices
-                .into_iter()
-                .partition(|effort| !Self::is_advanced_reasoning_effort(effort)),
-        }
-    }
-
     pub(super) fn on_openrouter(&self) -> bool {
         self.config.model_provider_id == codex_model_provider_info::OPENROUTER_PROVIDER_ID
     }

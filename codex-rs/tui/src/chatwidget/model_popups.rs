@@ -484,8 +484,8 @@ impl ChatWidget {
 
     /// Open a popup to choose the standard reasoning effort for the given model.
     ///
-    /// Max and Ultra require an explicit second step so expensive efforts cannot
-    /// be selected accidentally while moving through the normal effort scale.
+    /// Max and Ultra close the list, and a lone Max or Ultra still waits for an
+    /// explicit Enter, so expensive efforts cannot be selected accidentally.
     pub(crate) fn open_reasoning_popup(&mut self, preset: ModelPreset) {
         let default_effort = preset.default_reasoning_effort.clone();
         let supported = &preset.supported_reasoning_efforts;
@@ -520,9 +520,19 @@ impl ChatWidget {
         if all_choices.is_empty() {
             all_choices.push(default_effort.clone());
         }
-        let (choices, advanced_choices) = self.partition_reasoning_choices(all_choices);
+        // Fork: Max, then Ultra, close the one flat menu instead of hiding behind "More reasoning…".
+        let mut choices = all_choices;
+        choices.sort_by_key(|effort| {
+            (
+                Self::is_advanced_reasoning_effort(effort),
+                matches!(effort, ReasoningEffortConfig::Ultra),
+            )
+        });
+        let advanced_choices = Vec::new();
 
-        if choices.len() == 1 && advanced_choices.is_empty() {
+        if let [only] = choices.as_slice()
+            && !Self::is_advanced_reasoning_effort(only)
+        {
             let selected_effort = choices.first().cloned();
             let selected_model = preset.model;
             if self
