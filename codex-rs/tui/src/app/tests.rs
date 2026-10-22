@@ -28,8 +28,6 @@ mod backend_banner_startup_tests;
 mod background_exit_tests;
 #[path = "tests/background_task_defaults_tests.rs"]
 mod background_task_defaults_tests;
-#[path = "tests/browsing_pagination_tests.rs"]
-mod browsing_pagination_tests;
 #[path = "tests/buffered_replay.rs"]
 mod buffered_replay;
 #[path = "tests/connector_policy.rs"]
@@ -6815,6 +6813,7 @@ async fn make_test_app() -> Box<App> {
         side_threads: HashMap::new(),
         active_export: None,
         pending_revert: None,
+        rewind: None,
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         active_thread_rx: None,
@@ -6945,6 +6944,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             side_threads: HashMap::new(),
             active_export: None,
             pending_revert: None,
+            rewind: None,
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,
@@ -10601,29 +10601,6 @@ async fn side_conversations_reject_backtrack_esc_without_stealing_vim_insert_esc
     assert!(!app.should_reject_side_backtrack_esc(esc));
 }
 
-#[tokio::test]
-async fn side_backtrack_rejection_reports_unavailable_message_snapshot() {
-    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-    app.backtrack.primed = true;
-
-    app.reject_side_backtrack_esc();
-
-    assert!(!app.backtrack.primed);
-    let cell = match app_event_rx.try_recv() {
-        Ok(AppEvent::InsertHistoryCell(cell)) => cell,
-        other => panic!("expected InsertHistoryCell event, got {other:?}"),
-    };
-    let rendered = cell
-        .display_lines(/*width*/ 80)
-        .into_iter()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert_app_snapshot!(
-        "side_backtrack_rejection_reports_unavailable_message",
-        rendered
-    );
-}
 async fn start_config_write_test_app_server(app: &App) -> Result<AppServerSession> {
     Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await
 }

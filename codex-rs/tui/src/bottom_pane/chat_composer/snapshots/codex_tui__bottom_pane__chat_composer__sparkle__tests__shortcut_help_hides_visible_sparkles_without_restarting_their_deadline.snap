@@ -11,21 +11,21 @@ initial:
 shortcut help:
   Keyboard shortcuts
 
-  Compose                       Session
-  /        Commands             tab      Send message
-  @        Mention files        ⌥,       Less reasoning
-  !        Shell command        ⌥.       More reasoning
-  ⌃j       New line             ⌥← / ⌥→  Subagents (empty prompt)
-  ⌃v       Paste image          f4       Inspect activity
-  ⌃g       External editor      ⌃c       Quit
-  ⌃r       Search history
-  esc esc  Edit last message    Transcript (open first)
-                                ⌃t            Open transcript
-                                f3            Find text
-                                pgup / pgdn   Scroll
-                                ⌃space        Start selection
-                                ⌃home / ⌃end  Top / latest
-                                ⇧⌥, / ⇧⌥.     Top / latest
+  Compose                Session
+  /   Commands           tab      Send message
+  @   Mention files      ⌥,       Less reasoning
+  !   Shell command      ⌥.       More reasoning
+  ⌃j  New line           ⌥← / ⌥→  Subagents (empty prompt)
+  ⌃v  Paste image        f4       Inspect activity
+  ⌃g  External editor    ⌃c       Quit
+  ⌃r  Search history
+  ⌥z  Rewind             Transcript (open first)
+                         ⌃t            Open transcript
+                         f3            Find text
+                         pgup / pgdn   Scroll
+                         ⌃space        Start selection
+                         ⌃home / ⌃end  Top / latest
+                         ⇧⌥, / ⇧⌥.     Top / latest
 
   /keymap customize
 
@@ -47,21 +47,21 @@ initial:
 shortcut help:
   Keyboard shortcuts
 
-  Compose                       Session
-  /        Commands             tab      Send message
-  @        Mention files        ⌥,       Less reasoning
-  !        Shell command        ⌥.       More reasoning
-  ⌃j       New line             ⌥← / ⌥→  Subagents (empty prompt)
-  ⌃v       Paste image          f4       Inspect activity
-  ⌃g       External editor      ⌃c       Quit
-  ⌃r       Search history
-  esc esc  Edit last message    Transcript (open first)
-                                ⌃t            Open transcript
-                                f3            Find text
-                                pgup / pgdn   Scroll
-                                ⌃space        Start selection
-                                ⌃home / ⌃end  Top / latest
-                                ⇧⌥, / ⇧⌥.     Top / latest
+  Compose                Session
+  /   Commands           tab      Send message
+  @   Mention files      ⌥,       Less reasoning
+  !   Shell command      ⌥.       More reasoning
+  ⌃j  New line           ⌥← / ⌥→  Subagents (empty prompt)
+  ⌃v  Paste image        f4       Inspect activity
+  ⌃g  External editor    ⌃c       Quit
+  ⌃r  Search history
+  ⌥z  Rewind             Transcript (open first)
+                         ⌃t            Open transcript
+                         f3            Find text
+                         pgup / pgdn   Scroll
+                         ⌃space        Start selection
+                         ⌃home / ⌃end  Top / latest
+                         ⇧⌥, / ⇧⌥.     Top / latest
 
   /keymap customize
 

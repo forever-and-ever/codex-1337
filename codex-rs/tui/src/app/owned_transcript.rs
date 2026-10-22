@@ -47,6 +47,7 @@ impl App {
     }
 
     fn sync_owned_transcript(&mut self, width: u16) -> bool {
+        self.sync_rewind();
         let chat_widget = &self.chat_widget;
         let transcript_width = width.max(1);
         let view = &mut self.transcript_view;
@@ -774,7 +775,7 @@ impl App {
         if !self.scrollback_has_older_history {
             return;
         }
-        let browsing_needs_history = self.browsing_needs_history();
+        let browsing_needs_history = self.browsing_needs_history() || self.rewind_needs_history();
         let view = &mut self.transcript_view;
         if !browsing_needs_history
             && !view.needs_history(&self.transcript_cells)

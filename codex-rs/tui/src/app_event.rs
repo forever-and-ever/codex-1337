@@ -684,6 +684,8 @@ pub(crate) enum AppEvent {
         selected_cell: Arc<dyn HistoryCell>,
         prompt: UserMessage,
     },
+    /// A key from the composer's stand-in while rewinding (`app/rewind.rs`).
+    Rewind(crate::bottom_pane::RewindInput),
     FinishPromptRevert {
         thread_id: ThreadId,
         selected_cell: Arc<dyn HistoryCell>,

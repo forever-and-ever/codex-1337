@@ -93,6 +93,7 @@ pub(crate) use multi_select_picker::MultiSelectPicker;
 mod question_tests;
 mod questions;
 mod request_user_input;
+mod rewind_view;
 mod status_line_setup;
 mod status_line_style;
 mod status_surface_preview;
@@ -122,6 +123,7 @@ pub(crate) use async_questions::QuestionSubmission;
 pub(crate) use mcp_server_elicitation::McpServerElicitationFormRequest;
 pub(crate) use mcp_server_elicitation::McpServerElicitationOverlay;
 pub(crate) use request_user_input::RequestUserInputOverlay;
+pub(crate) use rewind_view::RewindInput;
 pub(crate) use status_line_style::status_line_from_segments;
 pub(crate) use voice_strip::VoiceStripPhase;
 pub(crate) use voice_strip::VoiceStripState;
@@ -1361,12 +1363,6 @@ impl BottomPane {
     #[cfg(test)]
     pub(crate) fn status_line_text(&self) -> Option<String> {
         self.composer.status_line_text()
-    }
-
-    pub(crate) fn show_esc_backtrack_hint(&mut self) {
-        self.esc_backtrack_hint = true;
-        self.composer.set_esc_backtrack_hint(/*show*/ true);
-        self.request_redraw();
     }
 
     pub(crate) fn clear_esc_backtrack_hint(&mut self) {

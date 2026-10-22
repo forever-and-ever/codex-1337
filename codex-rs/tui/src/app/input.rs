@@ -5,7 +5,6 @@
 //! Escape recovery for the active composer or command-center rename editor.
 
 use super::*;
-use crate::app_backtrack::SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE;
 use crate::keymap::bindings_for_action;
 use crate::keymap::keymap_action_ids;
 
@@ -765,6 +764,11 @@ impl App {
             return true;
         }
 
+        if self.keymap.app.rewind.is_pressed(key_event) {
+            self.begin_rewind(tui, app_server);
+            return true;
+        }
+
         if self.keymap.app.open_agents.is_pressed(key_event) {
             self.open_agents_overview(app_server);
             return true;
@@ -830,10 +834,9 @@ impl App {
             && !self.chat_widget.should_handle_vim_insert_escape(key_event)
     }
 
+    /// Inert stub: Escape no longer edits prompts, so a side conversation has nothing to refuse.
     pub(super) fn reject_side_backtrack_esc(&mut self) {
         self.reset_backtrack_state();
-        self.chat_widget
-            .add_error_message(SIDE_EDIT_PREVIOUS_UNAVAILABLE_MESSAGE.to_string());
     }
 
     fn app_keymap_shortcuts_available(&self) -> bool {

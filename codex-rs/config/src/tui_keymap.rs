@@ -164,6 +164,8 @@ pub struct TuiGlobalKeymap {
     pub toggle_raw_output: Option<KeybindingsSpec>,
     /// Toggle dialogue mode, which hides the work between prompts and answers.
     pub toggle_dialogue: Option<KeybindingsSpec>,
+    /// Rewind the conversation to an earlier prompt.
+    pub rewind: Option<KeybindingsSpec>,
     /// Switch between a side conversation and its parent without closing either.
     pub toggle_side_conversation: Option<KeybindingsSpec>,
 }

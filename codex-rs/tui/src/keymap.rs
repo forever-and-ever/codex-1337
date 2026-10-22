@@ -119,6 +119,8 @@ pub(crate) struct AppKeymap {
     pub(crate) toggle_raw_output: Vec<KeyBinding>,
     /// Toggle dialogue mode, which hides the work between prompts and answers.
     pub(crate) toggle_dialogue: Vec<KeyBinding>,
+    /// Rewind the conversation to an earlier prompt.
+    pub(crate) rewind: Vec<KeyBinding>,
     /// Switch between a side conversation and its parent without closing either.
     pub(crate) toggle_side_conversation: Vec<KeyBinding>,
 }
@@ -753,6 +755,11 @@ impl RuntimeKeymap {
                 keymap.global.toggle_dialogue.as_ref(),
                 &defaults.app.toggle_dialogue,
                 "tui.keymap.global.toggle_dialogue",
+            )?,
+            rewind: resolve_bindings(
+                keymap.global.rewind.as_ref(),
+                &defaults.app.rewind,
+                "tui.keymap.global.rewind",
             )?,
             toggle_side_conversation: if side_toggle_default_is_shadowed {
                 Vec::new()
@@ -1485,6 +1492,7 @@ impl RuntimeKeymap {
                 keymap.global.toggle_dialogue.as_ref(),
                 app.toggle_dialogue.as_slice(),
             ),
+            (keymap.global.rewind.as_ref(), app.rewind.as_slice()),
             (
                 keymap.global.toggle_side_conversation.as_ref(),
                 app.toggle_side_conversation.as_slice(),
@@ -1684,6 +1692,7 @@ impl RuntimeKeymap {
                 toggle_fast_mode: default_bindings![],
                 toggle_raw_output: default_bindings![alt(KeyCode::Char('r'))],
                 toggle_dialogue: default_bindings![alt(KeyCode::Char('w'))],
+                rewind: default_bindings![alt(KeyCode::Char('z'))],
                 toggle_side_conversation: default_bindings![ctrl(KeyCode::Char('/'))],
             },
             chords: Arc::default(),

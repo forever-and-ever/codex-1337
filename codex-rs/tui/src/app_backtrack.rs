@@ -13,6 +13,9 @@
 //! - Left/Right choose prompts, Ctrl+T toggles details, and Esc restores the browsing origin.
 //! - `Enter` requests a revert before the selected prompt and reopens it for editing.
 //!
+//! This fork retires the Escape entry: `prime_backtrack` and `begin_overlay_backtrack_preview`
+//! are inert stubs, and the `rewind` shortcut (`Alt+Z`) replaces them (`app/rewind.rs`).
+//!
 //! Owned sessions use the shared transcript viewport for `Ctrl+T`; inline sessions retain the
 //! overlay. Both render committed cells and a live tail from the current `ChatWidget.active_cell`.
 //!
@@ -229,14 +232,9 @@ impl App {
         }
     }
 
-    /// Initialize backtrack state and show composer hint.
+    /// Inert stub: Escape no longer primes a rewind, so drop the origin just remembered.
     fn prime_backtrack(&mut self) {
-        self.backtrack.primed = true;
-        self.backtrack.nth_user_message = usize::MAX;
-        self.backtrack.base_id = self.chat_widget.thread_id();
-        if has_backtrack_target(&self.transcript_cells) {
-            self.chat_widget.show_esc_backtrack_hint();
-        }
+        self.reset_backtrack_state();
     }
 
     /// Open overlay and begin backtrack preview flow (first step + highlight).
@@ -257,27 +255,9 @@ impl App {
         self.step_backtrack_and_highlight(tui);
     }
 
-    /// When overlay is already open, begin preview mode and select latest user message.
+    /// Inert stub: Escape closes the detailed transcript instead of browsing its prompts.
     fn begin_overlay_backtrack_preview(&mut self, tui: &mut tui::Tui) {
-        if !has_backtrack_target(&self.transcript_cells) && !self.scrollback_has_older_history {
-            self.close_transcript_overlay(tui);
-            self.chat_widget
-                .add_info_message(NO_PREVIOUS_MESSAGE_TO_EDIT.to_string(), /*hint*/ None);
-            tui.frame_requester().schedule_frame();
-            return;
-        }
-
-        self.remember_browsing_origin(tui);
-        self.backtrack.nth_user_message = usize::MAX;
-        self.backtrack.primed = true;
-        self.backtrack.base_id = self.chat_widget.thread_id();
-        self.backtrack.overlay_preview_active = true;
-        self.set_browsing_details(/*detailed*/ false);
-        let count = user_count(&self.transcript_cells);
-        if let Some(last) = count.checked_sub(1) {
-            self.apply_backtrack_selection_internal(last);
-        }
-        tui.frame_requester().schedule_frame();
+        self.close_transcript_overlay(tui);
     }
 
     /// Step selection to the next older user message and update overlay.

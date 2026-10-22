@@ -1,0 +1,17 @@
+---
+source: tui/src/app/rewind_tests.rs
+expression: buffer_text(last_rendered_buffer(&tui.terminal))
+---
+         ▽  User
+        (   first question
+         ▽  User
+        (   second question
+         ▽  User
+        (   third question
+
+
+
+
+
+
+  Rewinding  ↑↓ prompt · enter rewind · esc cancel

@@ -44,17 +44,7 @@ pub(super) fn lines(props: &FooterProps, width: u16) -> Vec<Line<'static>> {
     ));
     compose.push(hints.external_editor, "External editor");
     compose.push(hints.history_search, "Search history");
-    if let Some(key) = hints.edit_previous {
-        let label = key.display_label();
-        compose.entries.push(Shortcut {
-            key: if props.esc_backtrack_hint {
-                label
-            } else {
-                format!("{label} {label}")
-            },
-            action: "Edit last message",
-        });
-    }
+    compose.push(hints.edit_previous, "Rewind");
 
     let mut session = Group {
         title: "Session",

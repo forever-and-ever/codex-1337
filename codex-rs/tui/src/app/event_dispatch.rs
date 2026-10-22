@@ -430,6 +430,7 @@ impl App {
                 self.start_prompt_revert(app_server, thread_id, selected_cell, prompt).await;
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::Rewind(input) => self.handle_rewind_input(tui, app_server, input),
             AppEvent::FinishPromptRevert {
                 thread_id,
                 selected_cell,

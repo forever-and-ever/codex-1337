@@ -70,6 +70,11 @@ qualified forms.
   work is everything else the transcript shows of it. Dialogue mode (Alt+W,
   `tui.keymap.global.toggle_dialogue`) hides the work in the main transcript; detailed and raw
   views always show it.
+- rewind, revert: a rewind is the user choosing an earlier prompt (Alt+Z,
+  `tui.keymap.global.rewind`; arrows choose, Enter confirms, Alt+Z or Esc leaves) in the
+  dialogue lens, which stays on afterwards; the revert is the thread operation the confirmed
+  rewind requests, which drops that prompt's turn and everything after it and returns the
+  prompt to the composer. Upstream's Esc-Esc backtracking is retired.
 - beat, glint, peripheral: the beat is the clock every TUI animation shares
   (`libshimmer::TICK`, 32 ms), so concurrent motion paints in one frame; it is no
   heartbeat. A glint repaints only the status row over the last full frame and writes the

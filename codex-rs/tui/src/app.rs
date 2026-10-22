@@ -284,6 +284,7 @@ mod reconnect;
 mod replay_filter;
 mod resize_reflow;
 mod resume_config;
+mod rewind;
 pub(crate) use mouse_paste::PasteEnvironment;
 mod safety_buffering;
 mod server_version_notice;
@@ -715,6 +716,7 @@ pub(crate) struct App {
     _test_codex_home: Option<tempfile::TempDir>,
     active_export: Option<transcript_export::ActiveExport>,
     pending_revert: Option<prompt_revert::PendingRevert>,
+    rewind: Option<rewind::Rewind>,
     model_selection_generation: thread_settings::ModelSelectionGeneration,
 }
 
