@@ -1058,7 +1058,7 @@ fn grouped_folds_follow_history_arrivals_without_changing_other_kinds() {
 }
 
 #[test]
-fn dialogue_mode_keeps_only_users_and_end_of_turn_answers() {
+fn dialogue_mode_keeps_prompts_and_replies() {
     use crate::history_cell::UserHistoryCell;
     use crate::prompt_order::UserPromptIdentity;
 
@@ -1170,6 +1170,31 @@ fn dialogue_mode_keeps_only_users_and_end_of_turn_answers() {
             .unwrap()
             .text()
             .contains("Later final")
+    );
+    // Until a final answer supersedes it, what the agent says after a prompt is its reply.
+    cells.push(user("Steer"));
+    cells.push(message("progress", "Still digging."));
+    paint(&mut view, &cells);
+    assert!(
+        view.current_layout(&cells, cells.len() - 1)
+            .unwrap()
+            .text()
+            .contains("Still digging")
+    );
+    view.record_final_response("closing".into());
+    cells.push(message("closing", "Dug out."));
+    paint(&mut view, &cells);
+    assert_eq!(
+        view.current_layout(&cells, cells.len() - 2)
+            .unwrap()
+            .row_count(),
+        0
+    );
+    assert!(
+        view.current_layout(&cells, cells.len() - 1)
+            .unwrap()
+            .text()
+            .contains("Dug out")
     );
     view.toggle_lens(&cells);
     assert!(!view.dialogue_only());

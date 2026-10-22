@@ -1,5 +1,7 @@
-//! The dialogue is the user's prompts and each turn's final answer; everything else a turn shows
-//! is its work, which dialogue mode hides from the compact transcript.
+//! The dialogue is the user's prompts and the agent's replies; everything else a turn shows is
+//! its work, which dialogue mode hides from the compact transcript. A final answer is a reply,
+//! and so is any message no final answer follows before the next prompt: what a running,
+//! interrupted or steered turn has said stands until an answer supersedes it.
 //! Completion evidence is independent of rendering: a prepared answer may arrive later.
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -42,13 +44,31 @@ pub(super) struct Dialogue {
 }
 
 impl Dialogue {
-    pub(super) fn admits(&self, cell: &dyn HistoryCell) -> bool {
-        cell.as_any().is::<UserHistoryCell>()
-            || cell
-                .as_any()
-                .downcast_ref::<AgentMarkdownCell>()
-                .and_then(|reply| reply.item_id.as_ref())
-                .is_some_and(|id| self.answers.contains(id))
+    /// Whether this is a final answer, which supersedes the messages before it.
+    pub(super) fn closes(&self, cell: &dyn HistoryCell) -> bool {
+        cell.as_any()
+            .downcast_ref::<AgentMarkdownCell>()
+            .and_then(|reply| reply.item_id.as_ref())
+            .is_some_and(|id| self.answers.contains(id))
+    }
+
+    /// Which cells the lens keeps: prompts, final answers, and the messages no final answer
+    /// follows before the next prompt.
+    pub(super) fn keeps(&self, cells: &[Arc<dyn HistoryCell>]) -> Vec<bool> {
+        let mut answered = false;
+        let mut kept = vec![false; cells.len()];
+        for (index, cell) in cells.iter().enumerate().rev() {
+            let any = cell.as_any();
+            if any.is::<UserHistoryCell>() {
+                answered = false;
+                kept[index] = true;
+            } else if any.is::<AgentMarkdownCell>() {
+                let closes = self.closes(cell.as_ref());
+                kept[index] = closes || !answered;
+                answered |= closes;
+            }
+        }
+        kept
     }
 }
 
@@ -96,8 +116,8 @@ impl TranscriptView {
             && !cells
                 .get(index)
                 .is_some_and(|cell| status_output::matches(cell.as_ref()))
-            && !cells
-                .get(self.feed.response_owner(index).unwrap_or(index))
-                .is_some_and(|cell| self.dialogue.admits(cell.as_ref()))
+            && !self
+                .feed
+                .in_dialogue(self.feed.response_owner(index).unwrap_or(index))
     }
 }

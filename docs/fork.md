@@ -66,10 +66,11 @@ qualified forms.
   without detaching its server connection. An idle restart replaces it after five
   quiet minutes when a newer installation exists, through the reload host when one
   is present (hosted) and by `exec` otherwise (unhosted).
-- dialogue, work: a turn's dialogue is the user's prompt and the agent's final answer; its
-  work is everything else the transcript shows of it. Dialogue mode (Alt+W,
-  `tui.keymap.global.toggle_dialogue`) hides the work in the main transcript; detailed and raw
-  views always show it.
+- dialogue, work: the dialogue is the user's prompts and the agent's replies: its final
+  answers, and any message no final answer follows before the next prompt, so a running,
+  interrupted or steered turn keeps what it said. Work is everything else the transcript
+  shows. Dialogue mode (Alt+W, `tui.keymap.global.toggle_dialogue`) hides the work in the
+  main transcript; detailed and raw views always show it.
 - rewind, revert: a rewind is the user choosing an earlier prompt (Alt+Z,
   `tui.keymap.global.rewind`; arrows choose, Enter confirms, Alt+Z or Esc leaves) in the
   dialogue lens, which stays on afterwards; the revert is the thread operation the confirmed

@@ -133,6 +133,8 @@ pub(super) struct FeedIndex {
     /// A rebuild counter would invalidate pending layouts each time navigation switches sources.
     pub(super) revision: u64,
     roles: Vec<Role>,
+    /// Which cells the dialogue lens keeps (`Dialogue::keeps`).
+    dialogue: Vec<bool>,
     items: Vec<Item>,
     folds: HashMap<String, usize>,
     /// How many of each step's user inputs the feed placed on users' own items.
@@ -184,7 +186,7 @@ impl Contribution {
                 Self::Silent
             }
         } else if any.is::<AgentMarkdownCell>() {
-            if dialogue.admits(cell) {
+            if dialogue.closes(cell) {
                 Self::FinalResponse
             } else {
                 Self::Message
@@ -729,12 +731,18 @@ impl FeedIndex {
         let mut hasher = DefaultHasher::new();
         self.cells.hash(&mut hasher);
         for cell in cells {
-            dialogue.admits(cell.as_ref()).hash(&mut hasher);
+            dialogue.closes(cell.as_ref()).hash(&mut hasher);
         }
         self.revision = hasher.finish();
         self.roles = roles;
+        self.dialogue = dialogue.keeps(cells);
         self.items = items;
         self.placed_users = placed_users;
+    }
+
+    /// Whether the dialogue lens keeps the cell at `index`.
+    pub(super) fn in_dialogue(&self, index: usize) -> bool {
+        self.dialogue.get(index) == Some(&true)
     }
 
     /// Thought and accounting rows are part of their answer, not the preceding gap.
