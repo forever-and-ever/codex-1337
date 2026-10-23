@@ -697,7 +697,7 @@ fn transcript_overlay_consolidation_remaps_highlight_after_range() {
         .filter(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
         .map(ratatui::buffer::Cell::symbol)
         .collect::<String>();
-    assert_eq!(selected, "line6");
+    assert_eq!(selected.trim(), "line6");
 }
 
 #[test]

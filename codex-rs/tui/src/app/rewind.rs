@@ -1,7 +1,8 @@
 //! Rewind: choose an earlier prompt from the dialogue and revert the conversation to before it.
 //!
 //! The `rewind` shortcut (`Alt+Z`) leaves the detailed transcript, shows the dialogue lens and
-//! highlights the latest prompt; the lens stays once the rewind ends. The bottom pane's rewind
+//! highlights the latest prompt, and does nothing while a rewind runs; the lens stays once the
+//! rewind ends. The bottom pane's rewind
 //! view stands in for the composer and turns arrows, Enter and Escape into [`RewindInput`]s.
 //! The selection is the prompt cell's identity, so pagination, prompt reordering and inserted
 //! warnings never move it: each owned draw re-derives the highlighted index from it, and ends the
@@ -38,6 +39,9 @@ pub(super) struct Rewind {
 
 impl App {
     pub(super) fn begin_rewind(&mut self, tui: &mut tui::Tui, app_server: &mut AppServerSession) {
+        if self.rewind.is_some() {
+            return;
+        }
         let thread_id = match self.rewindable_thread(tui) {
             Ok(thread_id) => thread_id,
             Err(refusal) => {
@@ -57,7 +61,7 @@ impl App {
             prompt: None,
             following: self.transcript_view.is_following(),
         });
-        self.chat_widget.show_rewind(self.keymap.app.rewind.clone());
+        self.chat_widget.show_rewind();
         if let Some(index) = latest_prompt(&self.transcript_cells) {
             self.select_rewind_prompt(index);
             if detailed {

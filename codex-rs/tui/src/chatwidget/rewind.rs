@@ -1,12 +1,11 @@
 //! Rewind's stand-in for the composer; `app/rewind.rs` owns the selection.
 
 use super::ChatWidget;
-use crate::key_hint::KeyBinding;
 
 impl ChatWidget {
-    /// Replace the composer with the rewind view; `exit`, the shortcut that opened it, closes it.
-    pub(crate) fn show_rewind(&mut self, exit: Vec<KeyBinding>) {
-        self.bottom_pane.show_rewind(exit);
+    /// Replace the composer with the rewind view.
+    pub(crate) fn show_rewind(&mut self) {
+        self.bottom_pane.show_rewind();
     }
 
     pub(crate) fn dismiss_rewind(&mut self) {

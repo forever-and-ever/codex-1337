@@ -72,7 +72,7 @@ qualified forms.
   shows. Dialogue mode (Alt+W, `tui.keymap.global.toggle_dialogue`) hides the work in the
   main transcript; detailed and raw views always show it.
 - rewind, revert: a rewind is the user choosing an earlier prompt (Alt+Z,
-  `tui.keymap.global.rewind`; arrows choose, Enter confirms, Alt+Z or Esc leaves) in the
+  `tui.keymap.global.rewind`; arrows choose, Enter confirms, Esc leaves) in the
   dialogue lens, which stays on afterwards; the revert is the thread operation the confirmed
   rewind requests, which drops that prompt's turn and everything after it and returns the
   prompt to the composer. Upstream's Esc-Esc backtracking is retired.

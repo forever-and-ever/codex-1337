@@ -11,7 +11,6 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use pretty_assertions::assert_eq;
 use ratatui::layout::Size;
-use ratatui::style::Modifier;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::app::App;
@@ -53,13 +52,30 @@ async fn press(
     Ok(others)
 }
 
-fn highlighted(tui: &Tui) -> String {
-    last_rendered_buffer(&tui.terminal)
+/// The rows painted selected, each of which must be selected edge to edge.
+fn highlighted(tui: &Tui) -> Vec<String> {
+    let buffer = last_rendered_buffer(&tui.terminal);
+    let selection = crate::style::selection_style();
+    let selected = |cell: &ratatui::buffer::Cell| {
+        selection.fg == Some(cell.fg)
+            && selection.bg == Some(cell.bg)
+            && cell.modifier.contains(selection.add_modifier)
+    };
+    buffer
         .content
-        .iter()
-        .filter(|cell| cell.modifier.contains(Modifier::REVERSED))
-        .map(ratatui::buffer::Cell::symbol)
+        .chunks(usize::from(buffer.area.width))
+        .filter(|row| row.iter().any(selected))
+        .map(|row| {
+            assert!(row.iter().all(selected), "a partly selected row");
+            let text: String = row.iter().map(ratatui::buffer::Cell::symbol).collect();
+            text.trim().to_owned()
+        })
         .collect()
+}
+
+/// The dialogue lens's rows for the prompt `text`.
+fn block(text: &str) -> Vec<String> {
+    vec!["▽  User".to_owned(), format!("(   {text}")]
 }
 
 fn answer(text: &str) -> Arc<dyn HistoryCell> {
@@ -82,7 +98,7 @@ async fn rewind_moves_cancels_and_reverts_before_the_chosen_prompt() -> Result<(
     app.render_owned_transcript(&mut tui, SIZE)?;
 
     press(&mut app, &mut tui, &mut server, &mut events, REWIND).await?;
-    assert_eq!(highlighted(&tui), "third question");
+    assert_eq!(highlighted(&tui), block("third question"));
     press(
         &mut app,
         &mut tui,
@@ -91,11 +107,14 @@ async fn rewind_moves_cancels_and_reverts_before_the_chosen_prompt() -> Result<(
         KeyCode::Up.into(),
     )
     .await?;
-    assert_eq!(highlighted(&tui), "second question");
+    assert_eq!(highlighted(&tui), block("second question"));
     insta::assert_snapshot!(
         "rewinding",
         buffer_text(last_rendered_buffer(&tui.terminal))
     );
+    // The shortcut that began the rewind leaves it, and its choice, alone.
+    press(&mut app, &mut tui, &mut server, &mut events, REWIND).await?;
+    assert_eq!(highlighted(&tui), block("second question"));
 
     let others = press(
         &mut app,
@@ -116,7 +135,7 @@ async fn rewind_moves_cancels_and_reverts_before_the_chosen_prompt() -> Result<(
             app.chat_widget.shows_rewind(),
             app.transcript_view.dialogue_only()
         ),
-        (String::new(), false, true)
+        (Vec::<String>::new(), false, true)
     );
 
     for key in [
@@ -174,7 +193,8 @@ async fn rewind_finds_a_prompt_in_older_history_and_keeps_it_through_pages() -> 
     app.transcript_cells
         .splice(0..0, [Arc::clone(&older), user_cell("newer prompt")]);
     app.render_owned_transcript(&mut tui, SIZE)?;
-    assert_eq!(highlighted(&tui), "newer prompt");
+    // Older history arrives above the reading position, which may leave the heading out of view.
+    assert_eq!(highlighted(&tui).last(), block("newer prompt").last());
     assert!(!app.rewind_needs_history());
     press(
         &mut app,
@@ -189,7 +209,7 @@ async fn rewind_finds_a_prompt_in_older_history_and_keeps_it_through_pages() -> 
     app.transcript_cells
         .splice(0..0, [user_cell("oldest prompt"), answer("oldest answer")]);
     app.render_owned_transcript(&mut tui, SIZE)?;
-    assert_eq!(highlighted(&tui), "older prompt");
+    assert_eq!(highlighted(&tui).last(), block("older prompt").last());
 
     app.transcript_cells
         .retain(|cell| !Arc::ptr_eq(cell, &older));

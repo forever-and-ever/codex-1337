@@ -353,14 +353,10 @@ impl TranscriptView {
                 layout.join_brackets(row_area, buf, row, joins);
             }
             self.render_disclosure(&activity_ids, &layout, row, row_area, buf);
+            // A highlighted entry reads as selected whole: every row, edge to edge.
             if self.highlight == Some(index) && self.selection.is_none() && !self.search.is_active()
             {
-                layout.highlight(
-                    layout.content_start()..layout.text().len(),
-                    row_area,
-                    buf,
-                    row,
-                );
+                buf.set_style(row_area, crate::style::selection_style());
             }
             self.visible.push(VisibleRow {
                 index,

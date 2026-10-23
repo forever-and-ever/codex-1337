@@ -1,6 +1,7 @@
 //! The composer's stand-in while rewinding: one line naming the mode and its keys.
 //!
-//! The view holds no selection and never completes itself. Each key becomes a [`RewindInput`]
+//! The view holds no selection and never completes itself, and the shortcut that began the rewind
+//! does nothing here. Each key becomes a [`RewindInput`]
 //! for `App` (`app/rewind.rs`), which owns the selection and dismisses the view when the
 //! rewind ends; every owned draw also checks that the view is still stacked, because a cleared
 //! stack would otherwise strand the rewind.
@@ -24,8 +25,6 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::footer_hint::first_fitting_line;
 use crate::key_hint;
-use crate::key_hint::KeyBinding;
-use crate::key_hint::KeyBindingListExt;
 use crate::render::renderable::Renderable;
 use crate::style::accent_color;
 
@@ -53,8 +52,6 @@ pub(crate) enum RewindInput {
 
 struct RewindView {
     app_event_tx: AppEventSender,
-    /// The shortcut that opened rewind also closes it.
-    exit: Vec<KeyBinding>,
 }
 
 impl RewindView {
@@ -87,9 +84,7 @@ impl BottomPaneView for RewindView {
     fn handle_key_event(&mut self, key: KeyEvent) {
         // Held Enter or Escape must not repeat into the composer the rewind hands back.
         let press = key.kind == KeyEventKind::Press;
-        let input = if press
-            && (self.exit.is_pressed(key) || key_hint::plain(KeyCode::Esc).is_press(key))
-        {
+        let input = if press && key_hint::plain(KeyCode::Esc).is_press(key) {
             RewindInput::Cancel
         } else if press && key_hint::plain(KeyCode::Enter).is_press(key) {
             RewindInput::Confirm
@@ -119,11 +114,10 @@ impl BottomPaneView for RewindView {
 }
 
 impl BottomPane {
-    /// Replace the composer with the rewind view; `exit` is the shortcut that opened it.
-    pub(crate) fn show_rewind(&mut self, exit: Vec<KeyBinding>) {
+    /// Replace the composer with the rewind view.
+    pub(crate) fn show_rewind(&mut self) {
         let view = RewindView {
             app_event_tx: self.app_event_tx.clone(),
-            exit,
         };
         self.show_view(Box::new(view));
     }
