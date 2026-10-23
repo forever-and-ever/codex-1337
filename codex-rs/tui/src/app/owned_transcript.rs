@@ -162,8 +162,7 @@ impl App {
             self.composer_hint(transcript_width)
         };
         let now = Instant::now();
-        let work_hidden = self.transcript_view.dialogue_only();
-        let turn_tip = if work_hidden {
+        let turn_tip = if self.transcript_view.dialogue_only() {
             None
         } else {
             self.turn_tip(transcript_width, now, &tui.frame_requester())
@@ -181,7 +180,7 @@ impl App {
         .then(crate::bottom_pane::ComposerGap::default);
         let mut prompt_footer =
             self.prompt_navigation_footer(screen_size.width.saturating_sub(/*rhs*/ 2));
-        if !work_hidden && let Some(gap) = &mut composer_gap {
+        if let Some(gap) = &mut composer_gap {
             gap.live_height = self.live_work.desired_height(transcript_width);
         }
         let live_work = &mut self.live_work;
@@ -433,7 +432,7 @@ impl App {
                 cursor_style,
             );
             view.capture_painted_frame();
-            live_work.capture_painted_frame(composer_gap.is_some() && !work_hidden);
+            live_work.capture_painted_frame(composer_gap.is_some());
         })?;
         tui.offer_glint(glint);
         if let Some((surface, tip)) = &turn_tip
@@ -458,7 +457,7 @@ impl App {
             tui.frame_requester()
                 .schedule_frame_in(Duration::from_millis(/*millis*/ 50));
         }
-        if !work_hidden && let Some(delay) = self.live_work.refresh_in() {
+        if let Some(delay) = self.live_work.refresh_in() {
             tui.frame_requester().schedule_frame_in(delay);
         }
         self.refresh_link_hover(tui)?;

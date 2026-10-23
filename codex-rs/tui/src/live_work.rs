@@ -1033,7 +1033,7 @@ mod tests {
         let area = Rect::new(2, 3, 24, 10);
         view.render(area, &mut Buffer::empty(area));
         assert_eq!(view.selection.selected_text(&[]).as_deref(), Some(command));
-        // A conversational fold hides this panel while transcript controls occupy its old rows.
+        // An open bottom-pane view hides this panel while its controls occupy the panel's old rows.
         // The hidden text surface must not intercept their clicks, even with a held selection.
         view.render(Rect::default(), &mut Buffer::empty(Rect::default()));
         view.capture_painted_frame(false);
