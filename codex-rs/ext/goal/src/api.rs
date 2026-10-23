@@ -21,6 +21,8 @@ use crate::tool::protocol_goal_from_state;
 use crate::tool::state_status_from_protocol;
 use crate::tool::validate_goal_budget;
 
+mod boxes;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GoalServiceError {
     InvalidRequest(String),
@@ -96,6 +98,7 @@ impl GoalSetOutcome {
 #[derive(Debug, Default)]
 pub struct GoalService {
     runtimes: Mutex<HashMap<String, Weak<GoalRuntimeHandle>>>,
+    box_host: crate::boxes::GoalBoxHostSlot,
 }
 
 impl GoalService {
@@ -187,6 +190,11 @@ impl GoalService {
         }
 
         let runtime = self.runtime_for_thread(thread_id);
+        if status == Some(codex_state::ThreadGoalStatus::Active)
+            && let Some(runtime) = runtime.as_ref()
+        {
+            runtime.refresh_quota_if_boxed().await;
+        }
         // Hold this through the prepare/write window so idle continuation cannot
         // launch from goal state that this external mutation is about to change.
         let _goal_state_permit = match runtime.as_ref() {
@@ -215,6 +223,16 @@ impl GoalService {
             return Err(GoalServiceError::InvalidRequest(format!(
                 "cannot update goal for thread {thread_id}: no goal exists"
             )));
+        }
+        // TELOS(goal-boxes): no goal becomes active past a reached box; resuming never clears it.
+        if status == Some(codex_state::ThreadGoalStatus::Active)
+            && let Some(runtime) = runtime.as_ref()
+            && let Some(halt) = runtime
+                .due_halt()
+                .await
+                .map_err(GoalServiceError::Internal)?
+        {
+            return Err(GoalServiceError::InvalidRequest(halt.refusal()));
         }
         record_user_instruction.await?;
 

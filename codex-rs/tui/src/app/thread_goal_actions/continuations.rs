@@ -229,7 +229,7 @@ impl App {
                     match result {
                         Ok(response) => match response.goal.as_ref() {
                             Some(goal) if should_confirm_before_replacing_goal(goal) => {
-                                app.show_replace_thread_goal_confirmation(thread_id, draft);
+                                app.show_reword_thread_goal_confirmation(thread_id, draft);
                             }
                             existing => app.enqueue_goal_draft(
                                 server,
@@ -264,6 +264,11 @@ impl App {
         let codex_home = server.codex_home_path(&self.config.codex_home);
         let fs = server.file_system();
         let replacing_goal = matches!(mode, ThreadGoalSetMode::ReplaceExisting);
+        let action = match mode {
+            ThreadGoalSetMode::ReplaceExisting => "replace",
+            ThreadGoalSetMode::RewordExisting => "reword",
+            ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::UpdateExisting { .. } => "set",
+        };
         self.request_server(
             server,
             UiRequestScope::DisplayedThread(thread_id),
@@ -281,9 +286,9 @@ impl App {
                         clear_goal(handle.clone(), thread_id).await?;
                     }
                     let (status, token_budget) = match mode {
-                        ThreadGoalSetMode::ConfirmIfExists | ThreadGoalSetMode::ReplaceExisting => {
-                            (ThreadGoalStatus::Active, None)
-                        }
+                        ThreadGoalSetMode::ConfirmIfExists
+                        | ThreadGoalSetMode::ReplaceExisting
+                        | ThreadGoalSetMode::RewordExisting => (ThreadGoalStatus::Active, None),
                         ThreadGoalSetMode::UpdateExisting {
                             status,
                             token_budget,
@@ -308,10 +313,9 @@ impl App {
                         app.chat_widget.maybe_send_next_queued_input();
                     }
                     Ok(Err(error)) => app.chat_widget.add_error_message(error),
-                    Err(error) => app.chat_widget.add_error_message(goal_request_error(
-                        if replacing_goal { "replace" } else { "set" },
-                        error,
-                    )),
+                    Err(error) => app
+                        .chat_widget
+                        .add_error_message(goal_request_error(action, error)),
                 }
                 Ok(())
             },

@@ -16,6 +16,7 @@ use codex_rmcp_client::EnterpriseOAuthCredentialGuard;
 mod enterprise_login;
 mod gateway_oauth;
 mod quota;
+pub(super) use quota::QuotaReader;
 mod quota_cache;
 mod rate_limit_resets;
 mod workspace_routing;
@@ -1171,7 +1172,10 @@ impl AccountRequestProcessor {
                 } else {
                     quota_cache::QuotaFreshness::Refresh
                 };
-                let read = self.read_openai_quota(id, capability, freshness).await?;
+                let read = self
+                    .quota_reader()
+                    .read_openai(id, capability, freshness)
+                    .await?;
                 // This older response has no stale/error envelope. Never turn a retained
                 // window into fresh account readiness or admission permission.
                 if let Some(error) = read.error {

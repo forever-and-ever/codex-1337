@@ -15,6 +15,8 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::WriterLockCoordinator;
 
+#[path = "thread_goal_boxes.rs"]
+mod boxes;
 #[path = "thread_goal_user_context.rs"]
 mod user_context;
 

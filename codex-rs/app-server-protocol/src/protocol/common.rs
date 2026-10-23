@@ -649,6 +649,21 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadGoalClearResponse,
     },
+    ThreadGoalBoxesRead => "thread/goal/boxes/read" {
+        params: v2::ThreadGoalBoxesReadParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadGoalBoxesReadResponse,
+    },
+    ThreadGoalTimeboxSet => "thread/goal/timebox/set" {
+        params: v2::ThreadGoalTimeboxSetParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadGoalTimeboxSetResponse,
+    },
+    ThreadGoalQuotaboxSet => "thread/goal/quotabox/set" {
+        params: v2::ThreadGoalQuotaboxSetParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadGoalQuotaboxSetResponse,
+    },
     #[experimental("thread/queue/add")]
     ThreadQueueAdd => "thread/queue/add" {
         params: v2::ThreadQueueAddParams,

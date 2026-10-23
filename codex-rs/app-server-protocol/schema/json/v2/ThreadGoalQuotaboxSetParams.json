@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Quotabox": {
+      "description": "The level of the root agent's provider quota at which a goal halts.",
+      "oneOf": [
+        {
+          "description": "Percent of a subscription's weekly window left, 1 through 99.",
+          "properties": {
+            "percent": {
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "weeklyPercentLeft"
+              ],
+              "title": "WeeklyPercentLeftQuotaboxType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "percent",
+            "type"
+          ],
+          "title": "WeeklyPercentLeftQuotabox",
+          "type": "object"
+        },
+        {
+          "description": "Dollars an OpenRouter key can still spend.",
+          "properties": {
+            "type": {
+              "enum": [
+                "usdAvailable"
+              ],
+              "title": "UsdAvailableQuotaboxType",
+              "type": "string"
+            },
+            "usd": {
+              "$ref": "#/definitions/Usd"
+            }
+          },
+          "required": [
+            "type",
+            "usd"
+          ],
+          "title": "UsdAvailableQuotabox",
+          "type": "object"
+        }
+      ]
+    },
+    "Usd": {
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "description": "Sets the goal's quotabox, or clears it without one.",
+  "properties": {
+    "quotabox": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Quotabox"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "threadId"
+  ],
+  "title": "ThreadGoalQuotaboxSetParams",
+  "type": "object"
+}

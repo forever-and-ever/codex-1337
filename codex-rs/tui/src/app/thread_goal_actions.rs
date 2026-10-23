@@ -1,3 +1,4 @@
+mod boxes;
 mod continuations;
 
 use super::App;
@@ -74,25 +75,25 @@ impl App {
         self.clear_thread_goal_continuation(app_server, thread_id)
     }
 
-    pub(super) fn show_replace_thread_goal_confirmation(
+    /// TELOS(goal-boxes): `/goal set` rewords an unfinished goal in place, keeping usage and boxes.
+    pub(super) fn show_reword_thread_goal_confirmation(
         &mut self,
         thread_id: ThreadId,
         draft: goal_files::GoalDraft,
     ) {
         let objective = draft.objective.clone();
-        let replace_draft = draft;
-        let replace_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+        let reword_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
             tx.send(AppEvent::SetThreadGoalDraft {
                 thread_id,
-                draft: replace_draft.clone(),
-                mode: ThreadGoalSetMode::ReplaceExisting,
+                draft: draft.clone(),
+                mode: ThreadGoalSetMode::RewordExisting,
             });
         })];
         let items = vec![
             SelectionItem {
-                name: "Replace current goal".to_string(),
-                description: Some("Set the new objective and start it now".to_string()),
-                actions: replace_actions,
+                name: "Reword current goal".to_string(),
+                description: Some("Keep usage and boxes; start the new objective".to_string()),
+                actions: reword_actions,
                 dismiss_on_select: true,
                 ..Default::default()
             },
@@ -104,7 +105,7 @@ impl App {
             },
         ];
         self.chat_widget.show_selection_view(SelectionViewParams {
-            title: Some("Replace goal?".to_string()),
+            title: Some("Reword goal?".to_string()),
             subtitle: Some(format!(
                 "New objective: {}",
                 truncate_text(&objective, /*max_graphemes*/ 200)

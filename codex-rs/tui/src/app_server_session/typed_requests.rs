@@ -54,6 +54,9 @@ typed_requests! {
     thread_goal_get(api::ThreadGoalGetParams) -> api::ThreadGoalGetResponse = ThreadGoalGet;
     thread_goal_set(api::ThreadGoalSetParams) -> api::ThreadGoalSetResponse = ThreadGoalSet;
     thread_goal_clear(api::ThreadGoalClearParams) -> api::ThreadGoalClearResponse = ThreadGoalClear;
+    thread_goal_boxes_read(api::ThreadGoalBoxesReadParams) -> api::ThreadGoalBoxesReadResponse = ThreadGoalBoxesRead;
+    thread_goal_timebox_set(api::ThreadGoalTimeboxSetParams) -> api::ThreadGoalTimeboxSetResponse = ThreadGoalTimeboxSet;
+    thread_goal_quotabox_set(api::ThreadGoalQuotaboxSetParams) -> api::ThreadGoalQuotaboxSetResponse = ThreadGoalQuotaboxSet;
     turn_interrupt(api::TurnInterruptParams) -> api::TurnInterruptResponse = TurnInterrupt;
     #[cfg(test)]
     thread_inject_items(api::ThreadInjectItemsParams) -> api::ThreadInjectItemsResponse = ThreadInjectItems;

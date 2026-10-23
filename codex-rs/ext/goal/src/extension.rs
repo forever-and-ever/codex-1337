@@ -44,6 +44,7 @@ use crate::events::GoalEventEmitter;
 use crate::metrics::GoalMetrics;
 use crate::opening::ContinuationOpening;
 use crate::runtime::ActiveGoalStopReason;
+use crate::runtime::BoxWatch;
 use crate::runtime::GoalRuntimeConfig;
 use crate::runtime::GoalRuntimeHandle;
 use crate::spec::CREATE_GOAL_TOOL_NAME;
@@ -145,6 +146,7 @@ where
                         .root_accounting_state()
                         .unwrap_or_else(|| parent.accounting_state())
                 });
+            let root = !input.session_source.is_non_root_agent();
             let runtime = input.thread_store.get_or_init::<GoalRuntimeHandle>(|| {
                 GoalRuntimeHandle::new(
                     thread_id,
@@ -159,6 +161,7 @@ where
                         tools_available_for_thread,
                         tools_visible_for_thread,
                         root_accounting_state,
+                        box_watch: BoxWatch::new(self.goal_service.box_host_slot(), root),
                     },
                 )
             });
@@ -213,6 +216,7 @@ where
     fn on_thread_stop<'a>(&'a self, input: ThreadStopInput<'a>) -> ExtensionFuture<'a, ()> {
         Box::pin(async move {
             if let Some(runtime) = goal_runtime_handle(input.thread_store) {
+                runtime.disarm_boxes();
                 self.goal_service.unregister_runtime(&runtime);
             }
         })

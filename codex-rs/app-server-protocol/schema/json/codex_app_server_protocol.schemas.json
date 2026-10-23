@@ -643,6 +643,78 @@
             },
             "method": {
               "enum": [
+                "thread/goal/boxes/read"
+              ],
+              "title": "Thread/goal/boxes/readRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadGoalBoxesReadParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/goal/boxes/readRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/goal/timebox/set"
+              ],
+              "title": "Thread/goal/timebox/setRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadGoalTimeboxSetParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/goal/timebox/setRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
+                "thread/goal/quotabox/set"
+              ],
+              "title": "Thread/goal/quotabox/setRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadGoalQuotaboxSetParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/goal/quotabox/setRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/metadata/update"
               ],
               "title": "Thread/metadata/updateRequestMethod",
@@ -14719,6 +14791,52 @@
         },
         "type": "object"
       },
+      "GoalBoxes": {
+        "description": "A goal's boxes; an absent box is not set.",
+        "properties": {
+          "quotabox": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/Quotabox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timebox": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/GoalTimebox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "GoalTimebox": {
+        "description": "The wall-clock span a goal may run, in Unix seconds.",
+        "properties": {
+          "deadline": {
+            "description": "When the goal halts.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When the timebox was set; its reminders halve the time left from here.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deadline",
+          "setAt"
+        ],
+        "type": "object"
+      },
       "GuardianApprovalReview": {
         "description": "[UNSTABLE] Temporary approval auto-review payload used by `item/autoApprovalReview/*` notifications. This shape is expected to change soon.",
         "properties": {
@@ -20753,6 +20871,146 @@
         ],
         "type": "object"
       },
+      "QuotaGauge": {
+        "description": "The quota a goal's quotabox watches, as just read.",
+        "oneOf": [
+          {
+            "properties": {
+              "reading": {
+                "$ref": "#/definitions/v2/QuotaReading"
+              },
+              "type": {
+                "enum": [
+                  "read"
+                ],
+                "title": "ReadQuotaGaugeType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reading",
+              "type"
+            ],
+            "title": "ReadQuotaGauge",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "unavailable"
+                ],
+                "title": "UnavailableQuotaGaugeType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "message",
+              "type"
+            ],
+            "title": "UnavailableQuotaGauge",
+            "type": "object"
+          }
+        ]
+      },
+      "QuotaReading": {
+        "description": "A reading of the quota a quotabox watches.",
+        "oneOf": [
+          {
+            "properties": {
+              "percent": {
+                "format": "double",
+                "type": "number"
+              },
+              "type": {
+                "enum": [
+                  "weeklyPercentLeft"
+                ],
+                "title": "WeeklyPercentLeftQuotaReadingType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "percent",
+              "type"
+            ],
+            "title": "WeeklyPercentLeftQuotaReading",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "type": {
+                "enum": [
+                  "usdAvailable"
+                ],
+                "title": "UsdAvailableQuotaReadingType",
+                "type": "string"
+              },
+              "usd": {
+                "$ref": "#/definitions/v2/Usd"
+              }
+            },
+            "required": [
+              "type",
+              "usd"
+            ],
+            "title": "UsdAvailableQuotaReading",
+            "type": "object"
+          }
+        ]
+      },
+      "Quotabox": {
+        "description": "The level of the root agent's provider quota at which a goal halts.",
+        "oneOf": [
+          {
+            "description": "Percent of a subscription's weekly window left, 1 through 99.",
+            "properties": {
+              "percent": {
+                "format": "uint8",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": {
+                "enum": [
+                  "weeklyPercentLeft"
+                ],
+                "title": "WeeklyPercentLeftQuotaboxType",
+                "type": "string"
+              }
+            },
+            "required": [
+              "percent",
+              "type"
+            ],
+            "title": "WeeklyPercentLeftQuotabox",
+            "type": "object"
+          },
+          {
+            "description": "Dollars an OpenRouter key can still spend.",
+            "properties": {
+              "type": {
+                "enum": [
+                  "usdAvailable"
+                ],
+                "title": "UsdAvailableQuotaboxType",
+                "type": "string"
+              },
+              "usd": {
+                "$ref": "#/definitions/v2/Usd"
+              }
+            },
+            "required": [
+              "type",
+              "usd"
+            ],
+            "title": "UsdAvailableQuotabox",
+            "type": "object"
+          }
+        ]
+      },
       "RateLimitReachedType": {
         "enum": [
           "rate_limit_reached",
@@ -25250,6 +25508,43 @@
         ],
         "type": "object"
       },
+      "ThreadGoalBoxesReadParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadGoalBoxesReadParams",
+        "type": "object"
+      },
+      "ThreadGoalBoxesReadResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "The goal's boxes, with the quota its quotabox would watch when the request read it.",
+        "properties": {
+          "boxes": {
+            "$ref": "#/definitions/v2/GoalBoxes"
+          },
+          "gauge": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/QuotaGauge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "boxes"
+        ],
+        "title": "ThreadGoalBoxesReadResponse",
+        "type": "object"
+      },
       "ThreadGoalClearParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -25338,6 +25633,53 @@
         ],
         "type": "string"
       },
+      "ThreadGoalQuotaboxSetParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Sets the goal's quotabox, or clears it without one.",
+        "properties": {
+          "quotabox": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/Quotabox"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadGoalQuotaboxSetParams",
+        "type": "object"
+      },
+      "ThreadGoalQuotaboxSetResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "boxes": {
+            "$ref": "#/definitions/v2/GoalBoxes"
+          },
+          "gauge": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/QuotaGauge"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "boxes"
+        ],
+        "title": "ThreadGoalQuotaboxSetResponse",
+        "type": "object"
+      },
       "ThreadGoalSetParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -25408,6 +25750,40 @@
           "complete"
         ],
         "type": "string"
+      },
+      "ThreadGoalTimeboxSetParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "description": "Sets the goal's timebox to end at `deadline`, in Unix seconds, or clears it without one.",
+        "properties": {
+          "deadline": {
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadGoalTimeboxSetParams",
+        "type": "object"
+      },
+      "ThreadGoalTimeboxSetResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "boxes": {
+            "$ref": "#/definitions/v2/GoalBoxes"
+          }
+        },
+        "required": [
+          "boxes"
+        ],
+        "title": "ThreadGoalTimeboxSetResponse",
+        "type": "object"
       },
       "ThreadGoalUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",

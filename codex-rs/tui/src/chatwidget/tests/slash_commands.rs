@@ -956,8 +956,8 @@ async fn goal_control_slash_command_without_thread_shows_full_usage() {
     insta::assert_snapshot!(
         lines_to_single_string(&cells[0]),
         @"
-        • Usage: /goal [set <objective>|clear|edit|pause|resume] The session must start
-          before you can change a goal.
+        • Usage: /goal [set <objective>|clear|edit|pause|resume|timebox|quotabox] The
+          session must start before you can change a goal.
         "
     );
 }

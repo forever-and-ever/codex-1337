@@ -2134,6 +2134,20 @@ class GitInfo(BaseModel):
     sha: str | None = None
 
 
+class GoalTimebox(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    deadline: Annotated[int, Field(description="When the goal halts.")]
+    set_at: Annotated[
+        int,
+        Field(
+            alias="setAt",
+            description="When the timebox was set; its reminders halve the time left from here.",
+        ),
+    ]
+
+
 class ApplyPatchGuardianApprovalReviewAction(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -4106,6 +4120,30 @@ class PromptCacheWarming(
     ]
 
 
+class UnavailableQuotaGauge(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    message: str
+    type: Annotated[Literal["unavailable"], Field(title="UnavailableQuotaGaugeType")]
+
+
+class WeeklyPercentLeftQuotaReading(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    percent: float
+    type: Annotated[Literal["weeklyPercentLeft"], Field(title="WeeklyPercentLeftQuotaReadingType")]
+
+
+class WeeklyPercentLeftQuotabox(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    percent: Annotated[int, Field(ge=0)]
+    type: Annotated[Literal["weeklyPercentLeft"], Field(title="WeeklyPercentLeftQuotaboxType")]
+
+
 class RateLimitReachedType(Enum):
     rate_limit_reached = "rate_limit_reached"
     workspace_owner_credits_depleted = "workspace_owner_credits_depleted"
@@ -5973,6 +6011,13 @@ class ThreadForkSnapshot(Enum):
     side = "side"
 
 
+class ThreadGoalBoxesReadParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadGoalClearResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -6006,6 +6051,14 @@ class ThreadGoalStatus(Enum):
     usage_limited = "usageLimited"
     budget_limited = "budgetLimited"
     complete = "complete"
+
+
+class ThreadGoalTimeboxSetParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    deadline: int | None = None
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class ThreadHistoryMode(Enum):
@@ -8045,6 +8098,28 @@ class ThreadGoalGetRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/goal/get"], Field(title="Thread/goal/getRequestMethod")]
     params: ThreadGoalGetParams
+
+
+class ThreadGoalBoxesReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/goal/boxes/read"], Field(title="Thread/goal/boxes/readRequestMethod")
+    ]
+    params: ThreadGoalBoxesReadParams
+
+
+class ThreadGoalTimeboxSetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/goal/timebox/set"], Field(title="Thread/goal/timebox/setRequestMethod")
+    ]
+    params: ThreadGoalTimeboxSetParams
 
 
 class ThreadMetadataUpdateRequest(BaseModel):
@@ -10425,6 +10500,42 @@ class Project(BaseModel):
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
+class UsdAvailableQuotaReading(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["usdAvailable"], Field(title="UsdAvailableQuotaReadingType")]
+    usd: Usd
+
+
+class QuotaReading(RootModel[WeeklyPercentLeftQuotaReading | UsdAvailableQuotaReading]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        WeeklyPercentLeftQuotaReading | UsdAvailableQuotaReading,
+        Field(description="A reading of the quota a quotabox watches."),
+    ]
+
+
+class UsdAvailableQuotabox(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["usdAvailable"], Field(title="UsdAvailableQuotaboxType")]
+    usd: Usd
+
+
+class Quotabox(RootModel[WeeklyPercentLeftQuotabox | UsdAvailableQuotabox]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        WeeklyPercentLeftQuotabox | UsdAvailableQuotabox,
+        Field(description="The level of the root agent's provider quota at which a goal halts."),
+    ]
+
+
 class RateLimitResetCredit(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11534,6 +11645,14 @@ class ThreadGoalGetResponse(BaseModel):
     goal: ThreadGoal | None = None
 
 
+class ThreadGoalQuotaboxSetParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    quotabox: Quotabox | None = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadGoalSetParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12438,6 +12557,17 @@ class ThreadGoalClearRequest(BaseModel):
     params: ThreadGoalClearParams
 
 
+class ThreadGoalQuotaboxSetRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["thread/goal/quotabox/set"], Field(title="Thread/goal/quotabox/setRequestMethod")
+    ]
+    params: ThreadGoalQuotaboxSetParams
+
+
 class ThreadListRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -12967,6 +13097,14 @@ class GetWorkspaceMessagesResponse(BaseModel):
     ]
 
 
+class GoalBoxes(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    quotabox: Quotabox | None = None
+    timebox: GoalTimebox | None = None
+
+
 class HookCompletedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -13209,6 +13347,24 @@ class PluginSummary(BaseModel):
         str | None,
         Field(description="Version advertised by the remote marketplace backend when available."),
     ] = None
+
+
+class ReadQuotaGauge(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    reading: QuotaReading
+    type: Annotated[Literal["read"], Field(title="ReadQuotaGaugeType")]
+
+
+class QuotaGauge(RootModel[ReadQuotaGauge | UnavailableQuotaGauge]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        ReadQuotaGauge | UnavailableQuotaGauge,
+        Field(description="The quota a goal's quotabox watches, as just read."),
+    ]
 
 
 class RawResponseCompletedNotification(BaseModel):
@@ -13607,6 +13763,29 @@ class ThreadContextInventoryResponse(BaseModel):
         populate_by_name=True,
     )
     inventory: ContextInventory
+
+
+class ThreadGoalBoxesReadResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    boxes: GoalBoxes
+    gauge: QuotaGauge | None = None
+
+
+class ThreadGoalQuotaboxSetResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    boxes: GoalBoxes
+    gauge: QuotaGauge | None = None
+
+
+class ThreadGoalTimeboxSetResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    boxes: GoalBoxes
 
 
 class CodeModeThreadItem(BaseModel):
@@ -14275,6 +14454,9 @@ class ClientRequest(
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
         | ThreadGoalClearRequest
+        | ThreadGoalBoxesReadRequest
+        | ThreadGoalTimeboxSetRequest
+        | ThreadGoalQuotaboxSetRequest
         | ThreadMetadataUpdateRequest
         | ThreadAttachmentAddRequest
         | ThreadAttachmentListRequest
@@ -14407,6 +14589,9 @@ class ClientRequest(
         | ThreadGoalSetRequest
         | ThreadGoalGetRequest
         | ThreadGoalClearRequest
+        | ThreadGoalBoxesReadRequest
+        | ThreadGoalTimeboxSetRequest
+        | ThreadGoalQuotaboxSetRequest
         | ThreadMetadataUpdateRequest
         | ThreadAttachmentAddRequest
         | ThreadAttachmentListRequest

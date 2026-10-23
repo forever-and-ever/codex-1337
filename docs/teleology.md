@@ -322,6 +322,14 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Pressure: 0.162 #51415 edits `pending_interactive_replay.rs`; `reconnect.rs` takes 7 upstream commits (#49472, #49715, #49809, #49857, #50148, #50199, #51500).
 - Evidence: b56191783c, 2926fc7aa0, 0aaf58f10c, c201932da2, 9a8bc53195, 8773e03b0d, 13c6bad38d, 6bc6d40a59, 64a630c9f0, cbed4dd438, 186954aa13.
 
+### goal-boxes
+
+- Telos: a user can bound how long, or how far into its provider quota, a root agent pursues a goal, and the bound holds without a frontend.
+- Holds: only a root agent's unfinished goal holds boxes. When its timebox ends or its quota falls to its quotabox, the server pauses the active goal, injects the halt prompt into a running turn and warns the thread's clients; idle continuation never starts past a reached box, and no activation succeeds while one stays reached. Rewording keeps boxes and usage; completion, through a database trigger, and clearing end them. An unreadable quota fails open with one warning per lapse.
+- Owners: `codex-rs/ext/goal/src/boxes.rs`, `codex-rs/ext/goal/src/runtime/boxes.rs`, `codex-rs/ext/goal/src/api/boxes.rs`, `codex-rs/state/src/runtime/goals/boxes.rs`, `codex-rs/state/goals_migrations/0003_thread_goal_boxes.sql`, `codex-rs/protocol/src/goal_boxes.rs`, `codex-rs/app-server-protocol/src/protocol/v2/goal_boxes.rs`, `codex-rs/app-server/src/request_processors/goal_box_host.rs`, `codex-rs/app-server/src/request_processors/thread_goal_boxes.rs`, `codex-rs/tui/src/goal_boxes.rs`, `codex-rs/tui/src/app/thread_goal_actions/boxes.rs`; prompt text remains in `codex-rs/ext/goal/templates/goals/`.
+- Tripwire: `boxes_outlive_rewording_and_end_with_completion` (`codex-rs/state/src/runtime/goals/boxes.rs`), `timebox_reminders_halve_the_time_left_until_ten_minutes_remain` and `embedded_box_prompts_render` (`codex-rs/ext/goal/src/boxes.rs`), `goal_box_grammar` (`codex-rs/tui/src/goal_boxes.rs`); no test drives a halt end to end.
+- Pressure: upstream changes to idle continuation and activation in `codex-rs/ext/goal/src/runtime.rs` and `codex-rs/ext/goal/src/api.rs` must keep the halt checks; `thread_goals` writes must update rows in place, never replace them, or boxes vanish; goal migrations share upstream's version sequence, so a merge may renumber `0003_thread_goal_boxes.sql`.
+
 ## Resilience policy
 
 ### compaction-is-not-input
@@ -621,8 +629,8 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/core/src/tools/runtimes/unified_exec.rs`: local-coprocessor
 - `codex-rs/core/src/tools/spec_plan.rs`: mcp-roster, standing-context-trims, turn-economy, local-coprocessor, response-order-fences
 - `codex-rs/core/src/unified_exec/process_manager.rs`: local-coprocessor
-- `codex-rs/ext/goal/src/extension.rs`: retained-goal-rules
-- `codex-rs/ext/goal/src/runtime.rs`: retained-goal-rules
+- `codex-rs/ext/goal/src/extension.rs`: retained-goal-rules, goal-boxes
+- `codex-rs/ext/goal/src/runtime.rs`: retained-goal-rules, goal-boxes
 - `codex-rs/ext/goal/src/spec.rs`: standing-context-trims
 - `codex-rs/ext/queue/src/service.rs`: server-hosted-agents
 - `codex-rs/model-provider-info/src/lib.rs`: subscription-boundary, adapter-not-transport
@@ -637,10 +645,10 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/transcript_view/layout.rs`: fast-ui-thread
 - `codex-rs/tui/src/custom_terminal.rs`: fast-ui-thread, warpaint, attention-gated-painting
 - `codex-rs/tui/src/streaming/controller.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/event_dispatch.rs`: fast-ui-thread, goal-boxes
 - `codex-rs/tui/src/app_server_session.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/config_persistence.rs`: fast-ui-thread
-- `codex-rs/tui/src/app/thread_goal_actions.rs`: fast-ui-thread
+- `codex-rs/tui/src/app/thread_goal_actions.rs`: fast-ui-thread, goal-boxes
 - `codex-rs/tui/src/goal_files.rs`: fast-ui-thread
 - `codex-rs/tui/src/app/pending_interactive_replay.rs`: durable-approvals-and-queues
 - `codex-rs/tui/src/app/reconnect.rs`: durable-approvals-and-queues
@@ -659,7 +667,7 @@ Upstream files, where merge conflicts arise:
 - `codex-rs/tui/src/exec_cell/compact.rs`: fullscreen-only
 - `codex-rs/tui/src/keymap.rs`: key-doctrine
 - `codex-rs/tui/src/keymap/bindings.rs`: key-doctrine
-- `codex-rs/tui/src/lib.rs`: shared-daemon, warpaint
+- `codex-rs/tui/src/lib.rs`: shared-daemon, warpaint, goal-boxes
 - `codex-rs/tui/src/transcript_view/selection.rs`: key-doctrine
 - `codex-rs/tui/src/tui/frame_requester.rs`: attention-gated-painting, fast-ui-thread
 - `codex-rs/windows-sandbox-rs/Cargo.toml`: removed-stacks
@@ -959,3 +967,18 @@ Fork-owned files, absent upstream:
 - `codex-rs/ansi-escape/src/quarantine.rs`: warpaint
 - `codex-rs/tui/src/app/warpaint_capture.rs`: warpaint
 - `scripts/warpaint/`: warpaint
+- `codex-rs/app-server-protocol/src/protocol/common.rs`: goal-boxes
+- `codex-rs/app-server-protocol/src/protocol/v2/mod.rs`: goal-boxes
+- `codex-rs/app-server/src/message_processor.rs`: goal-boxes
+- `codex-rs/app-server/src/request_processors.rs`: goal-boxes
+- `codex-rs/app-server/src/request_processors/account_processor.rs`: goal-boxes
+- `codex-rs/app-server/src/request_processors/thread_goal_processor.rs`: goal-boxes
+- `codex-rs/ext/goal/src/api.rs`: goal-boxes
+- `codex-rs/ext/goal/src/lib.rs`: goal-boxes
+- `codex-rs/ext/goal/src/steering.rs`: goal-boxes
+- `codex-rs/protocol/src/lib.rs`: goal-boxes
+- `codex-rs/state/src/runtime/goals.rs`: goal-boxes
+- `codex-rs/tui/src/app/owned_transcript_tests.rs`: goal-boxes
+- `codex-rs/tui/src/app/tests.rs`: goal-boxes
+- `codex-rs/tui/src/app_event.rs`: goal-boxes
+- `codex-rs/tui/src/chatwidget/tests/slash_commands.rs`: goal-boxes

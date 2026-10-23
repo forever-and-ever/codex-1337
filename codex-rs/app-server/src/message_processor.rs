@@ -552,6 +552,7 @@ impl MessageProcessor {
         );
         let _ = coordination.set(Arc::downgrade(&thread_coordination));
         let alarm_worker = alarm_worker.start();
+        let goal_box_threads = thread_state_manager.clone();
         let turn_processor = TurnRequestProcessor::new(
             auth_manager,
             Arc::clone(&thread_manager),
@@ -565,6 +566,15 @@ impl MessageProcessor {
             Arc::clone(&skills_watcher),
             turn_cost_worker.as_ref().map(TurnCostWorker::handle),
         );
+        goal_service.install_goal_box_host(Arc::new(
+            crate::request_processors::AppServerGoalBoxHost::new(
+                Arc::downgrade(&thread_manager),
+                account_processor.quota_reader(),
+                turn_processor.openrouter_key_reader(),
+                outgoing.clone(),
+                goal_box_threads,
+            ),
+        ));
         if let Some(startup_config) = plugin_startup_tasks {
             // Keep plugin startup warmups aligned at app-server startup.
             let reload_config = match startup_config {
@@ -1410,6 +1420,21 @@ impl MessageProcessor {
             ClientRequest::ThreadGoalClear { params, .. } => {
                 self.thread_goal_processor
                     .thread_goal_clear(request_id.clone(), params)
+                    .await
+            }
+            ClientRequest::ThreadGoalBoxesRead { params, .. } => {
+                self.thread_goal_processor
+                    .thread_goal_boxes_read(params)
+                    .await
+            }
+            ClientRequest::ThreadGoalTimeboxSet { params, .. } => {
+                self.thread_goal_processor
+                    .thread_goal_timebox_set(params)
+                    .await
+            }
+            ClientRequest::ThreadGoalQuotaboxSet { params, .. } => {
+                self.thread_goal_processor
+                    .thread_goal_quotabox_set(params)
                     .await
             }
             ClientRequest::ThreadQueueAdd { params, .. } => self

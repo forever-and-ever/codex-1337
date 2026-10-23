@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "GoalBoxes": {
+      "description": "A goal's boxes; an absent box is not set.",
+      "properties": {
+        "quotabox": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Quotabox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timebox": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GoalTimebox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "GoalTimebox": {
+      "description": "The wall-clock span a goal may run, in Unix seconds.",
+      "properties": {
+        "deadline": {
+          "description": "When the goal halts.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "setAt": {
+          "description": "When the timebox was set; its reminders halve the time left from here.",
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deadline",
+        "setAt"
+      ],
+      "type": "object"
+    },
+    "Quotabox": {
+      "description": "The level of the root agent's provider quota at which a goal halts.",
+      "oneOf": [
+        {
+          "description": "Percent of a subscription's weekly window left, 1 through 99.",
+          "properties": {
+            "percent": {
+              "format": "uint8",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "weeklyPercentLeft"
+              ],
+              "title": "WeeklyPercentLeftQuotaboxType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "percent",
+            "type"
+          ],
+          "title": "WeeklyPercentLeftQuotabox",
+          "type": "object"
+        },
+        {
+          "description": "Dollars an OpenRouter key can still spend.",
+          "properties": {
+            "type": {
+              "enum": [
+                "usdAvailable"
+              ],
+              "title": "UsdAvailableQuotaboxType",
+              "type": "string"
+            },
+            "usd": {
+              "$ref": "#/definitions/Usd"
+            }
+          },
+          "required": [
+            "type",
+            "usd"
+          ],
+          "title": "UsdAvailableQuotabox",
+          "type": "object"
+        }
+      ]
+    },
+    "Usd": {
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "properties": {
+    "boxes": {
+      "$ref": "#/definitions/GoalBoxes"
+    }
+  },
+  "required": [
+    "boxes"
+  ],
+  "title": "ThreadGoalTimeboxSetResponse",
+  "type": "object"
+}

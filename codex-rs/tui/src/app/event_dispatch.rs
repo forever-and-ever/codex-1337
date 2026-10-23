@@ -1408,6 +1408,9 @@ impl App {
             AppEvent::ClearThreadGoal { thread_id } => {
                 self.clear_thread_goal(app_server, thread_id).await;
             }
+            AppEvent::ThreadGoalBoxes { thread_id, command } => {
+                self.thread_goal_boxes(app_server, thread_id, command);
+            }
             AppEvent::SendAddCreditsNudgeEmail { credit_type } => {
                 if let Some(request_id) = self
                     .chat_widget

@@ -82,6 +82,16 @@ qualified forms.
   cells that changed; a full frame repaints the whole screen. A peripheral window is
   visible but unfocused: its content coalesces and only its status row moves, glinting
   every third beat.
+- goal box, timebox, quotabox, halt, reword: a goal box is a limit the user sets
+  on a root agent's unfinished goal. A timebox ends at a wall-clock deadline and
+  reminds the agent each time its time left halves while at least ten minutes
+  remain; a quotabox is a floor on the quota the root agent's provider account
+  has left: a percent of a subscription's weekly window, or the dollars an
+  OpenRouter key can still spend. A halt is a box being reached: the server
+  pauses the goal and asks the agent to stop work gracefully, on its honor, and
+  no activation succeeds while the box stays reached. To reword is to give an
+  unfinished goal a new objective in place (`/goal set`), keeping its usage and
+  boxes; a goal's boxes end when it completes or is cleared.
 
 ## Build inputs
 

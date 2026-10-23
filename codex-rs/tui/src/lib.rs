@@ -156,6 +156,7 @@ mod file_change_view;
 mod file_search;
 mod get_git_diff;
 mod git_action_directives;
+mod goal_boxes;
 mod goal_display;
 mod goal_files;
 mod history_cell;

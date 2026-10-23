@@ -4169,6 +4169,7 @@ dependencies = [
  "image",
  "insta",
  "itertools 0.14.0",
+ "jiff",
  "lazy_static",
  "libc",
  "libshimmer",

@@ -2,6 +2,9 @@ use super::*;
 use crate::model::ThreadGoalRow;
 use uuid::Uuid;
 
+// TELOS(goal-boxes): goal writes update rows in place; replacing a row would drop its boxes.
+mod boxes;
+
 #[derive(Clone)]
 pub struct GoalStore {
     pool: Arc<SqlitePool>,

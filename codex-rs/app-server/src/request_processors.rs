@@ -712,8 +712,10 @@ fn resolve_runtime_workspace_roots(workspace_roots: Vec<AbsolutePathBuf>) -> Vec
 }
 
 mod config_errors;
+mod goal_box_host;
 mod request_errors;
 mod thread_delete;
+pub(crate) use goal_box_host::AppServerGoalBoxHost;
 mod thread_goal_processor;
 mod thread_lifecycle;
 mod thread_resume_redaction;

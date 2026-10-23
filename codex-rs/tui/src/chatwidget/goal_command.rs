@@ -5,17 +5,19 @@ use super::UserMessage;
 use super::slash_dispatch::SlashCommandDispatchSource;
 use crate::app_event::AppEvent;
 use crate::app_event::ThreadGoalSetMode;
+use crate::goal_boxes::GoalBoxCommand;
 use crate::goal_files::GoalDraft;
 use codex_app_server_protocol::ThreadGoalStatus;
 use codex_features::Feature;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
+use jiff::Zoned;
 use strum_macros::EnumString;
 
-pub(crate) const GOAL_USAGE: &str = "Usage: /goal [set <objective>|clear|edit|pause|resume]";
+pub(crate) const GOAL_USAGE: &str =
+    "Usage: /goal [set <objective>|clear|edit|pause|resume|timebox|quotabox]";
 pub(super) const GOAL_USAGE_HINT: &str = "Example: /goal set improve benchmark coverage";
-pub(crate) const GOAL_DESCRIPTION: &str =
-    "view the goal; /goal set <objective> sets or replaces it";
+pub(crate) const GOAL_DESCRIPTION: &str = "view the goal; /goal set <objective> sets or rewords it";
 
 #[derive(EnumString)]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
@@ -25,6 +27,9 @@ enum GoalVerb {
     Edit,
     Pause,
     Resume,
+    Timebox,
+    Quotabox,
+    Stopat,
 }
 
 enum GoalCommand<'a> {
@@ -36,6 +41,7 @@ enum GoalCommand<'a> {
 enum GoalControl {
     Clear,
     Status(ThreadGoalStatus),
+    Boxes(GoalBoxCommand),
 }
 
 impl<'a> GoalCommand<'a> {
@@ -50,6 +56,10 @@ impl<'a> GoalCommand<'a> {
         match command {
             GoalVerb::Set if payload.is_empty() => Err("Usage: /goal set <objective>".to_string()),
             GoalVerb::Set => Ok(Self::Set(payload)),
+            GoalVerb::Timebox => GoalBoxCommand::timebox(payload, &Zoned::now())
+                .map(|command| Self::Control(GoalControl::Boxes(command))),
+            GoalVerb::Quotabox | GoalVerb::Stopat => GoalBoxCommand::quotabox(payload)
+                .map(|command| Self::Control(GoalControl::Boxes(command))),
             _ if !payload.is_empty() => Err(GOAL_USAGE.to_string()),
             GoalVerb::Edit => Ok(Self::Edit),
             GoalVerb::Clear => Ok(Self::Control(GoalControl::Clear)),
@@ -124,6 +134,10 @@ impl ChatWidget {
                     GoalControl::Status(status) => {
                         self.app_event_tx
                             .send(AppEvent::SetThreadGoalStatus { thread_id, status });
+                    }
+                    GoalControl::Boxes(command) => {
+                        self.app_event_tx
+                            .send(AppEvent::ThreadGoalBoxes { thread_id, command });
                     }
                 }
                 self.append_message_history_entry(format!("/goal {}", args.trim()));

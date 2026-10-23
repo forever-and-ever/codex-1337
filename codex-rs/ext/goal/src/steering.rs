@@ -27,7 +27,7 @@ static OBJECTIVE_UPDATED_PROMPT_TEMPLATE: LazyLock<Template> = LazyLock::new(|| 
     )
 });
 
-fn parse_embedded_template(source: &str, template_name: &str) -> Template {
+pub(crate) fn parse_embedded_template(source: &str, template_name: &str) -> Template {
     match Template::parse(source) {
         Ok(template) => template,
         Err(err) => panic!("embedded template {template_name} is invalid: {err}"),
@@ -46,7 +46,7 @@ pub(crate) fn continuation_steering_item(goal: &ThreadGoal) -> ResponseItem {
     goal_context_input_item(continuation_prompt(goal))
 }
 
-fn goal_context_input_item(prompt: String) -> ResponseItem {
+pub(crate) fn goal_context_input_item(prompt: String) -> ResponseItem {
     ContextualUserFragment::into(InternalModelContextFragment::new(
         InternalContextSource::from_static("goal"),
         prompt,
@@ -121,7 +121,7 @@ fn objective_updated_prompt(goal: &ThreadGoal) -> String {
         })
 }
 
-fn escape_xml_text(input: &str) -> String {
+pub(crate) fn escape_xml_text(input: &str) -> String {
     input
         .replace('&', "&amp;")
         .replace('<', "&lt;")

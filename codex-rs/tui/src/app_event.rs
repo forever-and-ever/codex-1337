@@ -94,6 +94,8 @@ pub(crate) enum AgentsOverviewAction {
 pub(crate) enum ThreadGoalSetMode {
     ConfirmIfExists,
     ReplaceExisting,
+    /// Give the unfinished goal a new objective in place, keeping its usage and boxes.
+    RewordExisting,
     UpdateExisting {
         status: ThreadGoalStatus,
         token_budget: Option<i64>,
@@ -809,6 +811,12 @@ pub(crate) enum AppEvent {
     /// Clear the current thread goal.
     ClearThreadGoal {
         thread_id: ThreadId,
+    },
+
+    /// Show or set the current thread goal's boxes.
+    ThreadGoalBoxes {
+        thread_id: ThreadId,
+        command: crate::goal_boxes::GoalBoxCommand,
     },
 
     /// Result of refreshing rate limits.

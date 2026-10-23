@@ -22,6 +22,9 @@ use crate::tool::protocol_goal_from_state;
 use tokio::sync::Semaphore;
 use tokio::sync::SemaphorePermit;
 
+mod boxes;
+pub(crate) use boxes::BoxWatch;
+
 #[derive(Clone)]
 pub struct GoalRuntimeHandle {
     inner: Arc<GoalRuntimeInner>,
@@ -33,6 +36,7 @@ pub(crate) struct GoalRuntimeConfig {
     pub(crate) tools_available_for_thread: bool,
     pub(crate) tools_visible_for_thread: bool,
     pub(crate) root_accounting_state: Option<Arc<GoalAccountingState>>,
+    pub(crate) box_watch: BoxWatch,
 }
 
 pub(crate) enum ActiveGoalStopReason {
@@ -55,6 +59,7 @@ struct GoalRuntimeInner {
     tools_available_for_thread: bool,
     tools_visible_for_thread: bool,
     goal_state_lock: Semaphore,
+    box_watch: BoxWatch,
 }
 
 pub(crate) struct AccountedGoalProgress {
@@ -109,6 +114,7 @@ impl GoalRuntimeHandle {
                 tools_available_for_thread: config.tools_available_for_thread,
                 tools_visible_for_thread: config.tools_visible_for_thread,
                 goal_state_lock: Semaphore::new(/*permits*/ 1),
+                box_watch: config.box_watch,
             }),
         }
     }
@@ -197,6 +203,7 @@ impl GoalRuntimeHandle {
         }
 
         self.inner.accounting_state.reset_empty_responses();
+        self.arm_boxes();
         let replaced_existing_goal = previous_goal
             .as_ref()
             .is_some_and(|previous_goal| previous_goal.goal_id != goal.goal_id);
@@ -264,6 +271,7 @@ impl GoalRuntimeHandle {
 
         self.inner.analytics.cleared(&goal);
         self.inner.accounting_state.clear_active_goal();
+        self.disarm_boxes();
         Ok(())
     }
 
@@ -429,6 +437,7 @@ impl GoalRuntimeHandle {
             }
             Some(_) | None => self.inner.accounting_state.clear_active_goal(),
         }
+        self.arm_boxes();
         Ok(())
     }
 
@@ -485,6 +494,10 @@ impl GoalRuntimeHandle {
         };
         if goal.status != codex_state::ThreadGoalStatus::Active {
             self.inner.accounting_state.clear_active_goal();
+            return Ok(());
+        }
+        // TELOS(goal-boxes): a goal never continues past a reached box.
+        if self.halt_if_due_locked().await? {
             return Ok(());
         }
         let start_options = thread

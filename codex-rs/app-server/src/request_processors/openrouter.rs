@@ -1,4 +1,5 @@
 use super::TurnRequestProcessor;
+use crate::config_manager::ConfigManager;
 use crate::error_code::internal_error;
 use crate::error_code::invalid_request;
 use crate::models::supported_models;
@@ -33,6 +34,7 @@ use codex_core::CodexThread;
 use codex_core::config::Config;
 use codex_core::config::edit::ConfigEdit;
 use codex_core::config::edit::ConfigEditsBuilder;
+use codex_goal_extension::QuotaError;
 use codex_model_provider::openrouter::Bearer;
 use codex_model_provider::openrouter::Client;
 use codex_model_provider::openrouter::Error;
@@ -48,6 +50,7 @@ use codex_protocol::EndpointSlug;
 use codex_protocol::KeyName;
 use codex_protocol::ModelSlug;
 use codex_protocol::Usd;
+use codex_protocol::goal_boxes::QuotaReading;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -65,6 +68,76 @@ struct CachedKeyStatus {
     base_url: String,
     at: Instant,
     state: OpenRouterKeyState,
+}
+
+impl KeyStatusCache {
+    /// A key's state, fetched at most once per [`STATUS_TTL`].
+    async fn state(&self, client: &Client, url: &str, key: &OpenRouterKey) -> OpenRouterKeyState {
+        let cached = self
+            .0
+            .lock()
+            .await
+            .get(&key.name)
+            .filter(|cached| {
+                cached.path == key.path
+                    && cached.base_url == url
+                    && cached.at.elapsed() < STATUS_TTL
+            })
+            .map(|cached| cached.state.clone());
+        if let Some(state) = cached {
+            return state;
+        }
+        let state = fetch_state(client, &key.path)
+            .await
+            .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
+        self.0.lock().await.insert(
+            key.name.clone(),
+            CachedKeyStatus {
+                path: key.path.clone(),
+                base_url: url.to_owned(),
+                at: Instant::now(),
+                state: state.clone(),
+            },
+        );
+        state
+    }
+}
+
+/// Reads `OpenRouter` key states through the server's shared status cache.
+#[derive(Clone)]
+pub(crate) struct KeyStatusReader {
+    cache: KeyStatusCache,
+    config_manager: ConfigManager,
+}
+
+impl KeyStatusReader {
+    /// What an `OpenRouter` key can still spend: the lesser of its account's balance and what its
+    /// own limit leaves. This is the quota a dollar quotabox watches.
+    pub(crate) async fn usd_available(&self, name: &KeyName) -> Result<QuotaReading, QuotaError> {
+        let unreadable = |error: JSONRPCErrorError| QuotaError::Unreadable(error.message);
+        let config = self
+            .config_manager
+            .load_non_project_config()
+            .await
+            .map_err(|error| QuotaError::Unreadable(error.to_string()))?;
+        let key =
+            key(&preferences(&config).await.map_err(unreadable)?, name).map_err(unreadable)?;
+        let client = client(&config).map_err(unreadable)?;
+        let url = base_url(&config).map_err(unreadable)?;
+        match self.cache.state(&client, url, &key).await {
+            OpenRouterKeyState::Read { balance, limit, .. } => balance
+                .into_iter()
+                .chain(limit.map(|limit| limit.remaining))
+                .min()
+                .map(|usd| QuotaReading::UsdAvailable { usd })
+                .ok_or_else(|| {
+                    QuotaError::Unsupported(format!(
+                        "OpenRouter key {name} reports neither a balance nor a limit."
+                    ))
+                }),
+            OpenRouterKeyState::Failed { error } => Err(QuotaError::Unreadable(error)),
+        }
+    }
 }
 
 fn base_url(config: &Config) -> Result<&str, JSONRPCErrorError> {
@@ -91,7 +164,7 @@ pub(in crate::request_processors) fn catalog(
 
 pub(in crate::request_processors) fn catalog_for_list(
     config: Arc<Config>,
-    config_manager: crate::config_manager::ConfigManager,
+    config_manager: ConfigManager,
 ) -> Result<Option<Arc<crate::model_catalog::ModelCatalog>>, JSONRPCErrorError> {
     match config.model_provider.adapter {
         ModelProviderAdapter::OpenRouter => {
@@ -254,6 +327,13 @@ async fn fetch_state(
 }
 
 impl TurnRequestProcessor {
+    pub(crate) fn openrouter_key_reader(&self) -> KeyStatusReader {
+        KeyStatusReader {
+            cache: self.openrouter_key_cache.clone(),
+            config_manager: self.config_manager.clone(),
+        }
+    }
+
     async fn openrouter_config(&self) -> Result<Arc<Config>, JSONRPCErrorError> {
         self.config_manager
             .load_non_project_config()
@@ -288,34 +368,7 @@ impl TurnRequestProcessor {
             .retain(|name, _| preferences.key_files.contains_key(name));
         let mut statuses = Vec::with_capacity(keys.len());
         for key in keys {
-            let cached = {
-                let cache = self.openrouter_key_cache.0.lock().await;
-                cache
-                    .get(&key.name)
-                    .filter(|cached| {
-                        cached.path == key.path
-                            && cached.base_url == url
-                            && cached.at.elapsed() < STATUS_TTL
-                    })
-                    .map(|cached| cached.state.clone())
-            };
-            let state = if let Some(state) = cached {
-                state
-            } else {
-                let state = fetch_state(&client, &key.path)
-                    .await
-                    .unwrap_or_else(|error| OpenRouterKeyState::Failed { error });
-                self.openrouter_key_cache.0.lock().await.insert(
-                    key.name.clone(),
-                    CachedKeyStatus {
-                        path: key.path.clone(),
-                        base_url: url.to_owned(),
-                        at: Instant::now(),
-                        state: state.clone(),
-                    },
-                );
-                state
-            };
+            let state = self.openrouter_key_cache.state(&client, url, &key).await;
             statuses.push(OpenRouterKeyStatus { key, state });
         }
         Ok(statuses)

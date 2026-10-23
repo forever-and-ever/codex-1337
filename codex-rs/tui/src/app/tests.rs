@@ -7201,9 +7201,9 @@ async fn set_thread_goal_draft_materializes_long_objective_and_confirms_before_p
 }
 
 #[tokio::test]
-async fn replace_goal_confirmation_snapshot() {
+async fn reword_goal_confirmation_snapshot() {
     let mut app = make_test_app().await;
-    app.show_replace_thread_goal_confirmation(
+    app.show_reword_thread_goal_confirmation(
         ThreadId::new(),
         goal_files::GoalDraft {
             objective: "New goal".to_string(),
@@ -7211,7 +7211,7 @@ async fn replace_goal_confirmation_snapshot() {
         },
     );
     assert_app_snapshot!(
-        "replace_goal_confirmation",
+        "reword_goal_confirmation",
         render_bottom_popup(&app.chat_widget, /*width*/ 80)
     );
 }

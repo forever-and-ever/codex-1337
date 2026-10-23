@@ -1,0 +1,1 @@
+Timebox reminder for the active thread goal: {{ left }} of its {{ span }} timebox remain. At {{ deadline }} the system pauses the goal and asks you to stop, so plan to reach a clean stopping point by then.

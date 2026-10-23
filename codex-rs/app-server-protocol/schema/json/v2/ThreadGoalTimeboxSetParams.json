@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Sets the goal's timebox to end at `deadline`, in Unix seconds, or clears it without one.",
+  "properties": {
+    "deadline": {
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "threadId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "threadId"
+  ],
+  "title": "ThreadGoalTimeboxSetParams",
+  "type": "object"
+}

@@ -1322,7 +1322,7 @@ async fn inline_confirmation_preserves_compact_viewport_without_replaying_histor
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(/*owned*/ false)?;
     let size = Size::new(/*width*/ 80, /*height*/ 24);
-    app.show_replace_thread_goal_confirmation(
+    app.show_reword_thread_goal_confirmation(
         ThreadId::new(),
         crate::goal_files::GoalDraft {
             objective: "A replacement goal".to_string(),

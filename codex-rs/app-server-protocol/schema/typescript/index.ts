@@ -46,6 +46,8 @@ export type { GetConversationSummaryResponse } from "./GetConversationSummaryRes
 export type { GitDiffToRemoteParams } from "./GitDiffToRemoteParams";
 export type { GitDiffToRemoteResponse } from "./GitDiffToRemoteResponse";
 export type { GitSha } from "./GitSha";
+export type { GoalBoxes } from "./GoalBoxes";
+export type { GoalTimebox } from "./GoalTimebox";
 export type { HookSelector } from "./HookSelector";
 export type { ImageDetail } from "./ImageDetail";
 export type { ImageGenerationFailure } from "./ImageGenerationFailure";
@@ -75,6 +77,9 @@ export type { PlanType } from "./PlanType";
 export type { PreambleChange } from "./PreambleChange";
 export type { PreamblePart } from "./PreamblePart";
 export type { PreambleSection } from "./PreambleSection";
+export type { QuotaGauge } from "./QuotaGauge";
+export type { QuotaReading } from "./QuotaReading";
+export type { Quotabox } from "./Quotabox";
 export type { RealtimeConversationVersion } from "./RealtimeConversationVersion";
 export type { RealtimeOutputModality } from "./RealtimeOutputModality";
 export type { RealtimeVoice } from "./RealtimeVoice";

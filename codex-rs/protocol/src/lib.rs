@@ -90,6 +90,7 @@ pub mod user_input;
 mod work_status;
 pub use stream_discard::StreamItemsDiscardedEvent;
 
+pub mod goal_boxes;
 pub mod openrouter;
 pub use openrouter::EndpointFilter;
 pub use openrouter::EndpointSet;
