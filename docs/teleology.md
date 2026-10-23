@@ -329,6 +329,7 @@ During a merge, look up each conflicted path in the index at the end and resolve
 - Owners: `codex-rs/ext/goal/src/boxes.rs`, `codex-rs/ext/goal/src/runtime/boxes.rs`, `codex-rs/ext/goal/src/api/boxes.rs`, `codex-rs/state/src/runtime/goals/boxes.rs`, `codex-rs/state/goals_migrations/0003_thread_goal_boxes.sql`, `codex-rs/protocol/src/goal_boxes.rs`, `codex-rs/app-server-protocol/src/protocol/v2/goal_boxes.rs`, `codex-rs/app-server/src/request_processors/goal_box_host.rs`, `codex-rs/app-server/src/request_processors/thread_goal_boxes.rs`, `codex-rs/tui/src/goal_boxes.rs`, `codex-rs/tui/src/app/thread_goal_actions/boxes.rs`; prompt text remains in `codex-rs/ext/goal/templates/goals/`.
 - Tripwire: `boxes_outlive_rewording_and_end_with_completion` (`codex-rs/state/src/runtime/goals/boxes.rs`), `timebox_reminders_halve_the_time_left_until_ten_minutes_remain` and `embedded_box_prompts_render` (`codex-rs/ext/goal/src/boxes.rs`), `goal_box_grammar` (`codex-rs/tui/src/goal_boxes.rs`); no test drives a halt end to end.
 - Pressure: upstream changes to idle continuation and activation in `codex-rs/ext/goal/src/runtime.rs` and `codex-rs/ext/goal/src/api.rs` must keep the halt checks; `thread_goals` writes must update rows in place, never replace them, or boxes vanish; goal migrations share upstream's version sequence, so a merge may renumber `0003_thread_goal_boxes.sql`.
+- Evidence: 788025de66.
 
 ## Resilience policy
 
