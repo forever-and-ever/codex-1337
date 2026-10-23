@@ -25,7 +25,7 @@ use libshimmer::Shimmer;
 use libshimmer::Spell;
 use libshimmer::TICK;
 use libshimmer::stock::ROSTER;
-use rand::Rng as _;
+use rand::seq::IteratorRandom as _;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -139,9 +139,17 @@ pub(crate) fn follow_presentation(frames: FrameRequester) {
     live().frames = Some(frames);
 }
 
-/// Engages a random stock shimmer. Until something does, as in tests, the classic sweep runs.
+/// Engages a random stock shimmer other than the engaged one. Until something does, as in tests,
+/// the classic sweep runs.
 pub(crate) fn engage_random() {
-    engage(&ROSTER[rand::rng().random_range(0..ROSTER.len())]);
+    let engaged = engaged();
+    if let Some(recipe) = ROSTER
+        .iter()
+        .filter(|recipe| !engaged.is_some_and(|engaged| std::ptr::eq(*recipe, engaged)))
+        .choose(&mut rand::rng())
+    {
+        engage(recipe);
+    }
 }
 
 #[expect(

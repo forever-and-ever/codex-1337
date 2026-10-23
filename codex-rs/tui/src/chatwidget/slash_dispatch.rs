@@ -641,6 +641,7 @@ impl ChatWidget {
                     crate::motion::MotionMode::from_animations_enabled(
                         self.local_settings.tui.animations,
                     ),
+                    &self.bottom_pane.list_keymap(),
                 );
                 self.bottom_pane.show_selection_view(picker);
             }

@@ -1,10 +1,12 @@
-//! `/shimmer`: the stock roster beside a live preview of the highlighted shimmer.
+//! `/shimmer`: the stock roster beside a live preview of the highlighted shimmer; `r` engages a
+//! random other one.
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::time::Instant;
 
+use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -26,9 +28,12 @@ use super::live;
 use super::live::GLYPHS;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::SelectionItem;
+use crate::bottom_pane::SelectionSecondaryAction;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::SideContentWidth;
-use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::key_hint;
+use crate::keymap::ListAction;
+use crate::keymap::ListKeymap;
 use crate::motion::MotionMode;
 use crate::render::renderable::Renderable;
 use crate::status_indicator_widget::fmt_elapsed_compact;
@@ -39,7 +44,11 @@ const PREVIEW_WIDTH: u16 = 44;
 /// Rows of the preview: a running tool and its output, a blank row, the status row.
 pub(super) const PREVIEW_ROWS: u16 = 4;
 
-pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionViewParams {
+pub(crate) fn picker(
+    frames: FrameRequester,
+    motion: MotionMode,
+    keymap: &ListKeymap,
+) -> SelectionViewParams {
     let recipes: Vec<_> = ROSTER
         .iter()
         .filter(|recipe| recipe.fits::<Wide>(GLYPHS).is_ok())
@@ -49,6 +58,16 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
             .iter()
             .position(|recipe| std::ptr::eq(*recipe, engaged))
     });
+    let roll = key_hint::plain(KeyCode::Char('r'));
+    let mut hint = Vec::new();
+    if let Some(accept) = keymap.primary_hint(ListAction::Accept) {
+        hint.extend([accept.into(), " select · ".dim()]);
+    }
+    hint.extend([roll.into(), " random".dim()]);
+    if let Some(cancel) = keymap.primary_hint(ListAction::Cancel) {
+        hint.extend([" · ".dim(), cancel.into(), " back".dim()]);
+    }
+    let hint = Line::from(hint);
     let items = recipes
         .iter()
         .copied()
@@ -59,12 +78,16 @@ pub(crate) fn picker(frames: FrameRequester, motion: MotionMode) -> SelectionVie
             is_current: current == Some(index),
             dismiss_on_select: true,
             actions: vec![Box::new(move |_: &AppEventSender| live::engage(recipe))],
+            secondary_action: Some(SelectionSecondaryAction {
+                key: roll,
+                action: Box::new(|_: &AppEventSender| live::engage_random()),
+                footer_hint: hint.clone(),
+            }),
             ..Default::default()
         })
         .collect();
     let params = SelectionViewParams {
         title: Some("Shimmer".to_owned()),
-        footer_hint: Some(standard_popup_hint_line()),
         items,
         initial_selected_idx: current,
         max_visible_rows: recipes.len(),
