@@ -29,7 +29,7 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - After tests, delete only temp paths your run created; shared owner, empty dir, or empty `lsof` ≠ ownership
 - Paste-burst or chat-composer state machine change: keep `chat_composer.rs` and `paste_burst.rs` module docs true to code
 - `feature:` prompts: executor works in new `.worktrees/` worktree; primary fixes data model, placement, names, then reviews design fit
-- Staging only for a major change's trial: after its production install, `systemctl --user disable --now codex-app-server-staging.service`
+- After a user-requested staging trial reaches production, `systemctl --user disable --now codex-app-server-staging.service`
 
 ## routes
 - Merging upstream or resolving merge conflicts → `docs/teleology.md`
@@ -40,5 +40,5 @@ codex-1337: private downstream fork of openai/codex; Linux and fullscreen TUI on
 - Deciding which providers may receive conversation data → `docs/fork.md` Provider data
 
 ## grants
-- Auto-deploy validated merged major changes to staging with `scripts/install-local --staging`
+- Staging only on explicit user request: never deploy (`scripts/install-local --staging`), enable or start it autonomously
 - Auto-deploy validated, merged minor changes to production with `scripts/install-local`; major changes require explicit approval
