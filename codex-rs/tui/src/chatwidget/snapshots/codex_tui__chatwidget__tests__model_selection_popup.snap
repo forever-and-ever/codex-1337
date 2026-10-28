@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/popups_and_settings.rs
-expression: "render_bottom_popup(&chat, 80)"
+expression: popup
 ---
   Select Model and Effort
 
@@ -11,7 +11,7 @@ expression: "render_bottom_popup(&chat, 80)"
   4. GPT-6-Sol              Previous generation workhorse model.
   5. GPT-6-Luna             Fast and affordable model for easier tasks.
   6. GPT-5.6-Sol            Older generation workhorse model.
-  7. GPT-5.6-Terra          Older balanced model for straightforward work.
-  8. GPT-5.6-Luna           Older fast and efficient model.
+  7. GPT-6.1 Terra          GPT-6.1 Terra Codex model.
+  8. GPT-5.6-Terra          Older balanced model for straightforward work.
 ↓
   enter select · esc back

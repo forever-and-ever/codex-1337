@@ -756,6 +756,9 @@ fn configured_disable_vetoes_a_remote_installed_plugin() {
             key.clone(),
             PluginConfig {
                 enabled,
+                remote_plugin_id: None,
+                release_id: None,
+                auto_provision: None,
                 mcp_servers: HashMap::new(),
             },
         )])

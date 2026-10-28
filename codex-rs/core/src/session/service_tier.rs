@@ -62,12 +62,10 @@ impl Session {
         // this selection even before its first turn materializes the rollout.
         self.send_event_raw(Event {
             id: self.next_internal_event_id(),
-            msg: EventMsg::ThreadSettingsApplied(
-                codex_protocol::protocol::ThreadSettingsAppliedEvent {
-                    thread_id: Some(self.thread_id),
-                    thread_settings: snapshot,
-                },
-            ),
+            msg: EventMsg::ThreadSettingsApplied(ThreadSettingsAppliedEvent {
+                thread_id: Some(self.thread_id),
+                thread_settings: snapshot,
+            }),
         })
         .await;
         self.flush_rollout()

@@ -11,13 +11,17 @@ pub(super) async fn observe(
     context: &UnifiedExecContext,
     request: &WriteStdinRequest<'_>,
 ) -> Option<ProcessWait> {
+    let process = request.terminal.process()?;
     let target_call = manager
         .process_store
         .lock()
         .await
         .processes
-        .get(&request.process_id)
-        .filter(|entry| entry.session.ptr_eq(&Arc::downgrade(&context.session)))?
+        .get(&request.terminal.process_id)
+        .filter(|entry| {
+            Arc::ptr_eq(&entry.process, process)
+                && entry.session.ptr_eq(&Arc::downgrade(&context.session))
+        })?
         .call_id
         .clone();
     let service = &context.session.services.code_mode_service;

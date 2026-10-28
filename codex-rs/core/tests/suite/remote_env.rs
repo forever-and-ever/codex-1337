@@ -624,6 +624,7 @@ async fn environment_permissions_follow_configuration_ownership() -> Result<()> 
                 test.config.cwd.clone(),
                 vec![TurnEnvironmentRequest {
                     config: EnvironmentConfigState::Ready(EnvironmentConfig {
+                        environment_hooks: Default::default(),
                         allow_login_shell: test.config.permissions.allow_login_shell,
                         workspace_roots: selection.workspace_roots.clone(),
                         permission_profile: owner_permission_profile,
@@ -1682,6 +1683,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
         for config in [
             EnvironmentConfigState::Pending,
             EnvironmentConfigState::Ready(EnvironmentConfig {
+                environment_hooks: Default::default(),
                 allow_login_shell: false,
                 workspace_roots: selection.workspace_roots.clone(),
                 permission_profile: permission_profile.clone(),
@@ -1724,6 +1726,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
             .start_thread(StartThreadOptions {
                 environments: Some(vec![TurnEnvironmentRequest {
                     config: EnvironmentConfigState::Ready(EnvironmentConfig {
+                        environment_hooks: Default::default(),
                         allow_login_shell: true,
                         workspace_roots: selection.workspace_roots.clone(),
                         permission_profile: permission_profile.clone(),
@@ -1750,6 +1753,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
                     test.config.cwd.clone(),
                     vec![TurnEnvironmentRequest {
                         config: EnvironmentConfigState::Ready(EnvironmentConfig {
+                            environment_hooks: Default::default(),
                             allow_login_shell: false,
                             workspace_roots: selection.workspace_roots.clone(),
                             permission_profile: permission_profile.clone(),
@@ -1811,6 +1815,7 @@ async fn shared_executor_keeps_ready_capability_roots_scoped_to_each_attachment(
                         test.config.cwd.clone(),
                         vec![TurnEnvironmentRequest {
                             config: EnvironmentConfigState::Ready(EnvironmentConfig {
+                                environment_hooks: Default::default(),
                                 allow_login_shell: false,
                                 workspace_roots: selection.workspace_roots.clone(),
                                 permission_profile: permission_profile.clone(),
@@ -1875,6 +1880,7 @@ async fn owner_network_policy_rejects_unsupported_environment_authority() -> Res
         .first()
         .context("thread should select its executor environment")?;
     let owner_config = EnvironmentConfig {
+        environment_hooks: Default::default(),
         allow_login_shell: test.config.permissions.allow_login_shell,
         workspace_roots: selection.workspace_roots.clone(),
         permission_profile: PermissionProfileSnapshot::legacy(PermissionProfile::Disabled),
@@ -1977,6 +1983,7 @@ async fn pending_attachment_installs_configuration_before_waiting_turn_resumes()
             },
         };
         let owner_config = |id: &str, allow_login_shell: bool| EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell,
             workspace_roots: vec![selection.cwd.clone(), owner_workspace_root.clone()],
             permission_profile: PermissionProfileSnapshot::legacy(PermissionProfile::read_only()),
@@ -2422,6 +2429,7 @@ async fn future_pending_environment_can_finish_without_retargeting_the_active_tu
             ..active.clone()
         };
         let owner_config = |selection: &TurnEnvironmentSelection, id: &str| EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: test.config.permissions.allow_login_shell,
             workspace_roots: selection.workspace_roots.clone(),
             permission_profile: PermissionProfileSnapshot::legacy(PermissionProfile::read_only()),
@@ -3147,6 +3155,7 @@ async fn deferred_executor_spawn_agent_inherits_ready_step_environments(
             cwd: PathUri::from_abs_path(&test.config.cwd),
             workspace_roots: vec![PathUri::from_abs_path(&test.config.cwd)],
             config: EnvironmentConfigState::Ready(EnvironmentConfig {
+                environment_hooks: Default::default(),
                 allow_login_shell: test.config.permissions.allow_login_shell,
                 workspace_roots: vec![PathUri::from_abs_path(&test.config.cwd)],
                 permission_profile: PermissionProfileSnapshot::active_with_profile_workspace_roots(

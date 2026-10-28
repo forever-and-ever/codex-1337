@@ -322,9 +322,9 @@ async fn write_stdin(
     input: &str,
     yield_time_ms: u64,
 ) -> Result<ExecCommandToolOutput, UnifiedExecError> {
-    session
-        .services
-        .unified_exec_manager
+    let manager = &session.services.unified_exec_manager;
+    let terminal = manager.resolve_terminal(process_id).await?;
+    manager
         .write_stdin(
             &UnifiedExecContext::new(
                 Arc::clone(session),
@@ -334,7 +334,7 @@ async fn write_stdin(
                 codex_tools::ToolName::plain("write_stdin"),
             ),
             WriteStdinRequest {
-                process_id,
+                terminal: &terminal,
                 input,
                 yield_time_ms,
                 max_output_tokens: None,
@@ -562,7 +562,9 @@ async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -
     )
     .await?;
     let process_id = open_shell.process_id.expect("expected process id");
-    let process = Arc::clone(&manager.process_store.lock().await.processes[&process_id].process);
+    let launched = manager.resolve_terminal(process_id).await?;
+    let original_environment_id = launched.environment_id.clone();
+    let process = Arc::clone(launched.process().expect("live terminal"));
     let waiting = write_stdin(
         &session,
         &turn,
@@ -619,6 +621,10 @@ async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -
     ));
     assert!(manager.process_store.lock().await.processes.is_empty());
 
+    let completed_terminal = manager.resolve_terminal(process_id).await?;
+    assert!(completed_terminal.process().is_none());
+    assert_eq!(completed_terminal.environment_id, original_environment_id);
+    assert_eq!(completed_terminal.call_id, completed.event_call_id);
     let (foreign, foreign_turn) = test_session_and_turn().await;
     let foreign_context = UnifiedExecContext::new(
         foreign,
@@ -632,7 +638,7 @@ async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -
             .completed_poll(
                 &foreign_context,
                 &WriteStdinRequest {
-                    process_id,
+                    terminal: &completed_terminal,
                     input: "",
                     yield_time_ms: 250,
                     max_output_tokens: None,
@@ -655,7 +661,13 @@ async fn completed_process_receipts_preserve_outcome_without_stdin_authority() -
     for _ in 0..64 {
         let id = manager.allocate_process_id().await;
         manager
-            .retain_completion(id, &process, &context, &completed)
+            .retain_completion(
+                id,
+                &completed_terminal.environment_id,
+                &process,
+                &context,
+                &completed,
+            )
             .await;
     }
     assert!(matches!(
@@ -754,8 +766,12 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
     Ok(())
 }
 
+#[test_case::test_case(false; "terminal removed")]
+#[test_case::test_case(true; "session id reused")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Result<()> {
+async fn terminating_during_stdin_poll_returns_exited_response(
+    reuse_id: bool,
+) -> anyhow::Result<()> {
     let (session, turn) = test_session_and_turn().await;
     let manager = &session.services.unified_exec_manager;
     let process_id = manager.allocate_process_id().await;
@@ -829,7 +845,20 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
     .await
     .expect("poll should clone process handles");
 
-    manager.release_process_id(process_id).await;
+    if reuse_id {
+        let replacement = super::process_tests::remote_process(
+            WriteStatus::Accepted,
+            /*terminate_error*/ None,
+            SandboxType::None,
+        )
+        .await;
+        let mut store = manager.process_store.lock().await;
+        let entry = store.processes.get_mut(&process_id).unwrap();
+        entry.process = Arc::new(replacement);
+        entry.call_id = "replacement".into();
+    } else {
+        manager.release_process_id(process_id).await;
+    }
     allow_terminate.notify_one();
     process.terminate_confirmed().await?;
 
@@ -837,8 +866,19 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
         .await
         .expect("poll should finish")
         .expect("poll task should not panic")?;
-    assert_eq!(output.process_id, None);
-    assert!(manager.process_store.lock().await.processes.is_empty());
+    assert_eq!(
+        (output.process_id, output.event_call_id.as_str()),
+        (None, "call")
+    );
+    assert_eq!(
+        manager
+            .process_store
+            .lock()
+            .await
+            .processes
+            .contains_key(&process_id),
+        reuse_id
+    );
 
     Ok(())
 }
@@ -1003,7 +1043,7 @@ async fn stdin_approval_preserves_the_reviewed_terminal() -> anyhow::Result<()> 
     .await?;
     let process_id = opened.process_id.expect("running terminal");
     let cwd = PathUri::parse("file:///C:/workspace")?;
-    let original = {
+    {
         let mut store = manager.process_store.lock().await;
         let entry = store.processes.get_mut(&process_id).unwrap();
         entry.permissions = TerminalPermissions::for_launch(
@@ -1018,15 +1058,42 @@ async fn stdin_approval_preserves_the_reviewed_terminal() -> anyhow::Result<()> 
         );
         entry.environment_id = "unselected-executor".to_string();
         entry.cwd = cwd.clone();
-        Arc::clone(&entry.process)
-    };
-    // Empty polling must complete without an approval response.
-    // The test deadline must allow the minimum empty-poll wait.
-    tokio::time::timeout(
-        Duration::from_millis(MIN_EMPTY_YIELD_TIME_MS) + Duration::from_secs(/*secs*/ 5),
-        write_stdin(&session, &turn, process_id, "", /*yield_time_ms*/ 250),
-    )
-    .await??;
+    }
+    let original = manager.resolve_terminal(process_id).await?;
+    let original_process = Arc::clone(original.process().expect("live terminal"));
+    assert_eq!(original.environment_id, "unselected-executor");
+    // Only collection consumes this wake, after approval selection; a spurious
+    // approval still fails without waiting for the production empty-poll minimum.
+    {
+        let poll_interjection = tokio_util::sync::CancellationToken::new();
+        poll_interjection.cancel();
+        let mut poll_context = UnifiedExecContext::new(
+            Arc::clone(&session),
+            crate::session::step_context::StepContext::for_test(Arc::clone(&turn)),
+            tokio_util::sync::CancellationToken::new(),
+            "write".to_string(),
+            codex_tools::ToolName::plain("write_stdin"),
+        );
+        poll_context.poll_interjection = Some(poll_interjection);
+        let polled = tokio::time::timeout(
+            Duration::from_secs(/*secs*/ 5),
+            manager.write_stdin(
+                &poll_context,
+                WriteStdinRequest {
+                    terminal: &original,
+                    input: "",
+                    yield_time_ms: 250,
+                    max_output_tokens: None,
+                    truncation_policy: TruncationPolicy::Tokens(10_000),
+                    interaction_event: None,
+                },
+            ),
+        )
+        .await??;
+        assert_eq!(polled.process_id, Some(process_id));
+        assert!(!original_process.has_exited());
+        assert!(!poll_context.cancellation_token.is_cancelled());
+    }
     let input = "rejected\n";
     let denied = write_stdin(
         &session, &turn, process_id, input, /*yield_time_ms*/ 250,
@@ -1075,7 +1142,12 @@ async fn stdin_approval_preserves_the_reviewed_terminal() -> anyhow::Result<()> 
                     ),
                     ("call", Some("write"), cwd.clone().into())
                 );
-                assert!(original.interaction_lock().try_lock_owned().is_err());
+                assert!(
+                    original_process
+                        .interaction_lock()
+                        .try_lock_owned()
+                        .is_err()
+                );
                 if input == "replace\n" {
                     let replacement = super::process_tests::remote_process(
                         WriteStatus::Accepted,
@@ -1111,9 +1183,33 @@ async fn stdin_approval_preserves_the_reviewed_terminal() -> anyhow::Result<()> 
                 matches!(result, Err(UnifiedExecError::UnknownProcessId { process_id: id }) if id == process_id)
             ),
         }
-        assert!(original.interaction_lock().try_lock_owned().is_ok());
+        assert!(original_process.interaction_lock().try_lock_owned().is_ok());
     }
-    original.terminate();
+    // Reusing the numeric ID must also reject a subsequent write to the original terminal.
+    let context = UnifiedExecContext::new(
+        Arc::clone(&session),
+        crate::session::step_context::StepContext::for_test(turn),
+        tokio_util::sync::CancellationToken::new(),
+        "stale".to_string(),
+        codex_tools::ToolName::plain("write_stdin"),
+    );
+    let stale = manager
+        .write_stdin(
+            &context,
+            WriteStdinRequest {
+                terminal: &original,
+                input: "",
+                yield_time_ms: 250,
+                max_output_tokens: None,
+                truncation_policy: TruncationPolicy::Tokens(10_000),
+                interaction_event: None,
+            },
+        )
+        .await;
+    assert!(
+        matches!(stale, Err(UnifiedExecError::UnknownProcessId { process_id: id }) if id == process_id)
+    );
+    original_process.terminate();
     assert!(session.terminate_background_terminal(process_id).await);
     Ok(())
 }
@@ -1142,16 +1238,7 @@ async fn stdin_approval_observes_strict_review_enabled_while_queued() -> anyhow:
     )
     .await?;
     let process_id = opened.process_id.expect("running terminal");
-    let process = Arc::clone(
-        &manager
-            .process_store
-            .lock()
-            .await
-            .processes
-            .get(&process_id)
-            .unwrap()
-            .process,
-    );
+    let terminal = manager.resolve_terminal(process_id).await?;
     let context = UnifiedExecContext::new(
         Arc::clone(&session),
         StepContext::for_test(turn),
@@ -1159,11 +1246,12 @@ async fn stdin_approval_observes_strict_review_enabled_while_queued() -> anyhow:
         "write".to_string(),
         codex_tools::ToolName::plain("write_stdin"),
     );
+    let process = terminal.process().expect("live terminal");
     let interaction = process.interaction_lock().lock_owned().await;
     let mut queued = Box::pin(manager.write_stdin(
         &context,
         WriteStdinRequest {
-            process_id,
+            terminal: &terminal,
             // NUL input must be rejected when strict review becomes required.
             input: "\0",
             yield_time_ms: 250,

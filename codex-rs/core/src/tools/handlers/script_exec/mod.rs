@@ -1,7 +1,9 @@
 use crate::function_tool::FunctionCallError;
+use crate::tools::context::ToolEnvironments;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::handlers::resolve_tool_environment;
 use crate::tools::handlers::unified_exec::ExecCommandHandler;
 use crate::tools::handlers::unified_exec::ExecCommandHandlerOptions;
 use crate::tools::registry::CoreToolRuntime;
@@ -135,6 +137,28 @@ impl ToolExecutor<ToolInvocation> for ScriptExecHandler {
 }
 
 impl CoreToolRuntime for ScriptExecHandler {
+    fn environments_for_input(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolEnvironments, FunctionCallError> {
+        let ToolPayload::Custom { input } = &invocation.payload else {
+            return Err(FunctionCallError::RespondToModel(
+                "Raw script execution requires freeform source.".to_string(),
+            ));
+        };
+        let metadata = parser::parse(input)?;
+        if metadata.environment_id.is_some() && !self.options.include_environment_id {
+            return Err(FunctionCallError::RespondToModel(
+                "environment_id is unavailable on this execution surface.".to_string(),
+            ));
+        }
+        resolve_tool_environment(
+            &invocation.step_context.environments,
+            metadata.environment_id.as_deref(),
+        )
+        .map(ToolEnvironments::single_executor)
+    }
+
     fn matches_kind(&self, payload: &ToolPayload) -> bool {
         matches!(payload, ToolPayload::Custom { .. })
     }

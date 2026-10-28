@@ -575,6 +575,7 @@ mod thread_attachments;
 mod thread_enrichment;
 mod thread_fork_goal;
 mod thread_input;
+mod thread_memory;
 mod thread_processor;
 pub(crate) use thread_processor::ThreadCoordinationService;
 mod thread_queue_processor;

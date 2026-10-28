@@ -104,6 +104,7 @@ pub(crate) async fn run_codex_thread_interactive(
     thread_extension_init.insert(isolation);
     let spawn_result = Session::spawn(SessionSpawnArgs {
         prompt_cache_observer: None,
+        attached_thread: false,
         startup: Some(Arc::clone(&startup)),
         config,
         prompt_cache_key: parent_session

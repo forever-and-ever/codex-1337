@@ -145,6 +145,7 @@ fn append_content(
                 }
                 parts.push(signed_payload_ref_part(kind, signature, raw_payload));
                 items.push(NormalizedConversationItem {
+                    responses_item_id: None,
                     role: ConversationRole::Assistant,
                     channel: Some(ConversationChannel::Analysis),
                     kind: ConversationItemKind::Reasoning,

@@ -58,7 +58,10 @@ pub(crate) async fn approve_extension_tool(
         if server_config.is_some_and(|server| {
             matches!(
                 server.disabled_reason,
-                Some(codex_config::McpServerDisabledReason::Requirements { .. })
+                Some(
+                    codex_config::McpServerDisabledReason::Requirements { .. }
+                        | codex_config::McpServerDisabledReason::ExplicitAndRequirements { .. }
+                )
             )
         }) {
             return Err(FunctionCallError::RespondToModel(
@@ -156,6 +159,12 @@ pub(crate) async fn approve_extension_tool(
         .permission_profile_for_server(&invocation.server)
         .filter(|_| !native_policy_owner)
         .unwrap_or(&mcp_config.permission_profile);
+    // Native coordination is controller-owned; a legacy policy keeps its configured owner.
+    let environment_id = server_config
+        .filter(|_| !native_policy_owner)
+        .map_or(codex_exec_server::LOCAL_ENVIRONMENT_ID, |server| {
+            server.environment_id.as_str()
+        });
     let decision = maybe_request_mcp_tool_approval(
         &call.session,
         &call.step_context,
@@ -166,6 +175,7 @@ pub(crate) async fn approve_extension_tool(
         &metadata,
         &mcp_config,
         permission_profile,
+        environment_id,
         policy,
     )
     .await;

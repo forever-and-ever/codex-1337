@@ -98,14 +98,15 @@ Settings:
     </environment_context>
 05:message/user:
     List the available resources and templates, then read the example note.
+06:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-06:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
+07:custom_tool_call/exec:text(describe_tool("list_mcp_resources"));
     text(await tools.list_mcp_resources({"server":"resources"}));
     text(describe_tool("list_mcp_resource_templates"));
     text(await tools.list_mcp_resource_templates({"server":"resources"}));
     text(describe_tool("read_mcp_resource"));
     text(await tools.read_mcp_resource({"server":"resources","uri":"memo://codex/example-note"}));
-07:custom_tool_call_output:Script completed
+08:custom_tool_call_output:Script completed
     Output:
      | Catalog instructions for list_mcp_resources.
 

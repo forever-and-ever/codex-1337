@@ -2076,6 +2076,7 @@ fn thread_list_params(
 ) -> ThreadListParams {
     ThreadListParams {
         excluded_thread_ids: None,
+        attached_to_thread_id: None,
         originators: None,
         cursor,
         limit: Some(PAGE_SIZE as u32),
@@ -2093,13 +2094,6 @@ fn thread_list_params(
         use_state_db_only,
         search_term: None,
     }
-}
-
-pub(crate) fn repository_cwd_filter(
-    cwd: &Path,
-    _uses_remote_filesystem: bool,
-) -> ThreadListCwdFilter {
-    ThreadListCwdFilter::One(cwd.to_string_lossy().into_owned())
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {

@@ -1,3 +1,4 @@
+pub(crate) mod admission;
 mod compact;
 mod lifecycle;
 mod regular;
@@ -38,6 +39,7 @@ use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
 use crate::state::TurnState;
+use admission::TaskAdmission;
 use codex_analytics::TurnProfileFact;
 use codex_analytics::TurnTokenUsageFact;
 use codex_context_fragments::RenderedFragment;
@@ -290,12 +292,14 @@ impl Session {
     pub(crate) async fn start_task<T: SessionTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
-        input: Vec<TurnInput>,
+        input: impl Into<TaskAdmission> + Send,
         task: T,
     ) -> CodexResult<()> {
+        let input = input.into();
         if let Err(error) = self.check_agent_mail_task_start().await {
             let mut active = self.active_turn.lock().await;
             if let Some(turn) = active.as_ref()
+                && input.matches(turn)
                 && turn.task.is_none()
                 && turn.turn_state.lock().await.pending_input.is_empty()
             {
@@ -336,18 +340,6 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
-        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
-        let turn_state = {
-            let mut active = self.active_turn.lock().await;
-            let turn = active.get_or_insert_with(ActiveTurn::default);
-            debug_assert!(turn.task.is_none());
-            turn.finishing = None;
-            Arc::clone(&turn.turn_state)
-        };
-        turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
-        self.input_queue
-            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
-            .await;
         self.emit_turn_start_lifecycle(
             turn_context.as_ref(),
             Some(&token_usage_at_turn_start),
@@ -359,9 +351,18 @@ impl Session {
             .acquire_owned()
             .await
             .unwrap_or_else(|_| unreachable!("account work semaphore is never closed"));
-        let mut active = self.active_turn.lock().await;
-        let turn = active.get_or_insert_with(ActiveTurn::default);
+        let Some(mut active) = input.lock(self).await else {
+            return Ok(());
+        };
+        let turn = active.as_mut().expect("task admission owns an active turn");
         debug_assert!(turn.task.is_none());
+        turn.finishing = None;
+        let turn_state = Arc::clone(&turn.turn_state);
+        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
+        turn_state.lock().await.token_usage_at_turn_start = token_usage_at_turn_start.clone();
+        self.input_queue
+            .extend_pending_input_for_turn_state(turn_state.as_ref(), pending_items)
+            .await;
         // Record lineage only when the task starts: settings changes can invalidate a reservation.
         self.record_started_turn(
             &turn_context.sub_id,
@@ -376,7 +377,7 @@ impl Session {
         let session = Arc::clone(self);
         let ctx = Arc::clone(&turn_context);
         let task_for_run = Arc::clone(&task);
-        let task_input = input;
+        let task_input = input.into_input();
         let task_cancellation_token = cancellation_token.child_token();
         // Task-owned turn spans keep a core-owned span open for the
         // full task lifecycle after the submission dispatch span ends.
@@ -533,16 +534,10 @@ impl Session {
         models_manager
             .refresh_after_auth_change(config.http_client_factory())
             .await;
-        // A completion-triggered wakeup can be interrupted while discovery waits.
-        if self
-            .active_turn
-            .lock()
-            .await
-            .as_ref()
-            .is_none_or(|turn| !Arc::ptr_eq(&turn.turn_state, &turn_state))
-        {
+        let Some(session_configuration) = self.pending_work_turn_configuration(&turn_state).await
+        else {
             return;
-        }
+        };
         let (input, mut start_options) = self.input_queue.pending_mailbox_snapshot().await;
         if !input.iter().any(|mail| mail.trigger_turn) {
             // Ordinary mail resumes the recipient without selecting a new task's settings.
@@ -552,14 +547,12 @@ impl Session {
                 .await
                 .and_then(|context| context.cyber_access_program);
         }
+        let options = NewTurnContextOptions {
+            final_output_json_schema: start_options.final_output_json_schema,
+            cyber_access_program: start_options.cyber_access_program,
+        };
         let turn_context = self
-            .new_turn_with_default_settings(
-                sub_id,
-                NewTurnContextOptions {
-                    final_output_json_schema: start_options.final_output_json_schema,
-                    cyber_access_program: start_options.cyber_access_program,
-                },
-            )
+            .new_turn_with_configuration(sub_id, session_configuration, options)
             .await;
         if let Some(trigger) = start_options.turn_trigger {
             turn_context.turn_metadata_state.set_turn_trigger(trigger);
@@ -594,7 +587,14 @@ impl Session {
             return;
         }
         if let Err(error) = self
-            .start_task(Arc::clone(&turn_context), Vec::new(), RegularTask::new())
+            .start_task(
+                Arc::clone(&turn_context),
+                TaskAdmission::Reserved {
+                    input: Vec::new(),
+                    turn_state: Arc::clone(&turn_state),
+                },
+                RegularTask::new(),
+            )
             .await
         {
             self.send_event(
@@ -970,10 +970,14 @@ impl Session {
         if matches!(
             reason,
             TurnAbortReason::Interrupted | TurnAbortReason::BudgetLimited
-        ) && active
-            .as_ref()
-            .is_some_and(|active_turn| active_turn.task.is_some())
-        {
+        ) && active.as_ref().is_some_and(|turn| {
+            turn.task.is_some()
+                || (self.enabled(Feature::WakeOnAgentMessages) && turn.finishing.is_none())
+        }) {
+            // Message wakes reserve work before registering a task. With the
+            // feature enabled, stopping a reservation must block later mail too.
+            // Finishing turns must retain their status until completion is
+            // persisted, so capacity eviction cannot close their rollout writer.
             self.mark_interrupted();
         }
         active.take()

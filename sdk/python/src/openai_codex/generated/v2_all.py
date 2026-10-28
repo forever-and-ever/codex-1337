@@ -8,16 +8,12 @@ from enum import Enum
 
 
 class CodexAppServerProtocolV2(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
 class AbsolutePathBuf(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str,
         Field(
@@ -161,9 +157,6 @@ class AdmissionPrecision(Enum):
 
 
 class AgentMessageDelivery(RootModel[Literal["async"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["async"]
 
 
@@ -198,16 +191,10 @@ class EncryptedContentAgentMessageInputContent(BaseModel):
 class AgentMessageInputContent(
     RootModel[InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: InputTextAgentMessageInputContent | EncryptedContentAgentMessageInputContent
 
 
 class AgentPath(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
 
 
@@ -237,9 +224,6 @@ class WatchAlarmCondition(BaseModel):
 
 
 class AlarmCondition(RootModel[ClockAlarmCondition | WatchAlarmCondition]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ClockAlarmCondition | WatchAlarmCondition
 
 
@@ -279,7 +263,6 @@ class AppBranding(BaseModel):
 
 
 class AppLinksConfig(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -345,7 +328,6 @@ class AppToolSummary(BaseModel):
 
 
 class AppToolsConfig(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -486,9 +468,6 @@ class UnavailableArrivalSource(BaseModel):
 class ArrivalSource(
     RootModel[LegacyArrivalSource | ArrivalSource1 | ArrivalSource2 | UnavailableArrivalSource]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         LegacyArrivalSource | ArrivalSource1 | ArrivalSource2 | UnavailableArrivalSource,
         Field(
@@ -523,9 +502,6 @@ class GranularAskForApproval(BaseModel):
 
 
 class AskForApproval(RootModel[AskForApprovalValue | GranularAskForApproval]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: AskForApprovalValue | GranularAskForApproval
 
 
@@ -563,9 +539,6 @@ class AutoCompactTokenLimitScope(Enum):
 
 
 class AutoReviewDecisionSource(RootModel[Literal["agent"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         Literal["agent"],
         Field(
@@ -644,9 +617,6 @@ class EnvironmentCapabilityRootLocation(BaseModel):
 
 
 class CapabilityRootLocation(RootModel[EnvironmentCapabilityRootLocation]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         EnvironmentCapabilityRootLocation,
         Field(description="Location used to resolve a selected capability root."),
@@ -654,9 +624,6 @@ class CapabilityRootLocation(RootModel[EnvironmentCapabilityRootLocation]):
 
 
 class CensusCount1(RootModel[int]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         int,
         Field(
@@ -667,9 +634,6 @@ class CensusCount1(RootModel[int]):
 
 
 class CensusOmission(RootModel[Literal["workLimit"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["workLimit"]
 
 
@@ -749,6 +713,7 @@ class CodexErrorInfoValue(str, Enum):
     rate_limit_exceeded = "rateLimitExceeded"
     flex_unavailable = "flexUnavailable"
     server_overloaded = "serverOverloaded"
+    model_not_found = "modelNotFound"
     cyber_policy = "cyberPolicy"
     misalignment_policy_violation = "misalignmentPolicyViolation"
     too_many_denials = "tooManyDenials"
@@ -903,7 +868,6 @@ class CommandExecOutputStream(Enum):
 
 
 class CommandExecResizeResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -950,7 +914,6 @@ class CommandExecTerminateParams(BaseModel):
 
 
 class CommandExecTerminateResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -980,7 +943,6 @@ class CommandExecWriteParams(BaseModel):
 
 
 class CommandExecWriteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1183,9 +1145,6 @@ class ConfigLayerSource(
         | LegacyManagedConfigTomlFromMdmConfigLayerSource
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         PackagedDefaultsConfigLayerSource
         | MdmConfigLayerSource
@@ -1266,9 +1225,6 @@ class ConfiguredHookHandler(
         | AgentConfiguredHookHandler
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         CommandConfiguredHookHandler
         | McpToolConfiguredHookHandler
@@ -1326,8 +1282,8 @@ class OutputTextContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    annotations: list | None = None
-    logprobs: list | None = None
+    annotations: list[Any] | None = None
+    logprobs: list[Any] | None = None
     text: str
     type: Annotated[Literal["output_text"], Field(title="OutputTextContentItemType")]
 
@@ -1358,9 +1314,6 @@ class ContextSource2(BaseModel):
 
 
 class ContextSource(RootModel[ContextSource1 | ContextSource2]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ContextSource1 | ContextSource2,
         Field(
@@ -1402,9 +1355,6 @@ class DeprecationNoticeNotification(BaseModel):
 
 
 class DesktopOnboardingEntrypoint(RootModel[Literal["life_sciences"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["life_sciences"]
 
 
@@ -1445,9 +1395,6 @@ class DynamicToolCallOutputContentItem(
         | InputAudioDynamicToolCallOutputContentItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         InputTextDynamicToolCallOutputContentItem
         | InputImageDynamicToolCallOutputContentItem
@@ -1473,9 +1420,6 @@ class FunctionDynamicToolNamespaceTool(BaseModel):
 
 
 class DynamicToolNamespaceTool(RootModel[FunctionDynamicToolNamespaceTool]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: FunctionDynamicToolNamespaceTool
 
 
@@ -1501,14 +1445,10 @@ class NamespaceDynamicToolSpec(BaseModel):
 
 
 class DynamicToolSpec(RootModel[FunctionDynamicToolSpec | NamespaceDynamicToolSpec]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: FunctionDynamicToolSpec | NamespaceDynamicToolSpec
 
 
 class EndpointFilterAll(BaseModel):
-    pass
     model_config = ConfigDict(
         extra="forbid",
         populate_by_name=True,
@@ -1516,9 +1456,6 @@ class EndpointFilterAll(BaseModel):
 
 
 class EndpointSlug(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str,
         Field(
@@ -1673,9 +1610,6 @@ class ExternalAgentDetectedConnectorSource(Enum):
 
 
 class ExternalAgentImportedConnectorSource(RootModel[Literal["remoteMcpServersConfig"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["remoteMcpServersConfig"]
 
 
@@ -1765,9 +1699,6 @@ class SlashTmpFileSystemSpecialPath(BaseModel):
 
 
 class ForcedChatgptWorkspaceIds(RootModel[str | list[str]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str | list[str],
         Field(
@@ -1813,7 +1744,6 @@ class FsCopyParams(BaseModel):
 
 
 class FsCopyResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1831,7 +1761,6 @@ class FsCreateDirectoryParams(BaseModel):
 
 
 class FsCreateDirectoryResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1941,7 +1870,6 @@ class FsRemoveParams(BaseModel):
 
 
 class FsRemoveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1958,7 +1886,6 @@ class FsUnwatchParams(BaseModel):
 
 
 class FsUnwatchResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1998,7 +1925,6 @@ class FsWriteFileParams(BaseModel):
 
 
 class FsWriteFileResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2050,9 +1976,6 @@ class FuzzyFileSearchParams(BaseModel):
 
 
 class Indice(RootModel[int]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[int, Field(ge=0)]
 
 
@@ -2085,14 +2008,12 @@ class FuzzyFileSearchSessionUpdatedNotification(BaseModel):
 
 
 class GatewayOAuthCancelResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
 class GatewayOAuthLoginResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2303,9 +2224,6 @@ class EventValueHookSelector(BaseModel):
 
 
 class HookSelector(RootModel[ToolHookSelector | EventValueHookSelector]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ToolHookSelector | EventValueHookSelector,
         Field(
@@ -2364,9 +2282,6 @@ class UsageLimitExceededImageGenerationFailure(BaseModel):
 
 
 class ImageGenerationFailure(RootModel[UsageLimitExceededImageGenerationFailure]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: UsageLimitExceededImageGenerationFailure
 
 
@@ -2510,9 +2425,6 @@ class DeletedJiraResult(BaseModel):
 
 
 class KeyName(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str,
         Field(
@@ -2522,9 +2434,6 @@ class KeyName(RootModel[str]):
 
 
 class LegacyAppPathString(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
 
 
@@ -2541,9 +2450,6 @@ class ExecLocalShellAction(BaseModel):
 
 
 class LocalShellAction(RootModel[ExecLocalShellAction]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ExecLocalShellAction
 
 
@@ -2681,9 +2587,6 @@ class LoginAccountResponse(
         | ChatgptAuthTokensLoginAccountResponse
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ClaudeSubscriptionLoginAccountResponse
         | ApiKeyLoginAccountResponse
@@ -2700,7 +2603,6 @@ class LoginAppBrand(Enum):
 
 
 class LogoutAccountResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -2846,7 +2748,7 @@ class McpServerInfo(BaseModel):
         populate_by_name=True,
     )
     description: str | None = None
-    icons: list | None = None
+    icons: list[Any] | None = None
     name: str
     title: str | None = None
     version: str
@@ -2915,16 +2817,12 @@ class McpServerOauthLoginResponse(BaseModel):
 
 
 class McpServerRefreshResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
 class McpServerStartupFailureReason(RootModel[Literal["reauthenticationRequired"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["reauthenticationRequired"]
 
 
@@ -2969,7 +2867,7 @@ class McpServerToolCallResponse(BaseModel):
         populate_by_name=True,
     )
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
-    content: list
+    content: list[Any]
     is_error: Annotated[bool | None, Field(alias="isError")] = None
     structured_content: Annotated[Any | None, Field(alias="structuredContent")] = None
 
@@ -3007,7 +2905,7 @@ class McpToolCallResult(BaseModel):
         populate_by_name=True,
     )
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
-    content: list
+    content: list[Any]
     structured_content: Annotated[Any | None, Field(alias="structuredContent")] = None
 
 
@@ -3099,7 +2997,6 @@ class ModelListParams(BaseModel):
 
 
 class ModelProviderCapabilitiesReadParams(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3122,9 +3019,6 @@ class ModelProviderOption(BaseModel):
 
 
 class ModelRerouteReason(RootModel[Literal["highRiskCyberActivity"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["highRiskCyberActivity"]
 
 
@@ -3162,9 +3056,6 @@ class ModelServiceTier(BaseModel):
 
 
 class ModelSlug(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
 
 
@@ -3186,9 +3077,6 @@ class ModelUpgradeInfo(BaseModel):
 
 
 class ModelVerification(RootModel[Literal["trustedAccessForCyber"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["trustedAccessForCyber"]
 
 
@@ -3215,9 +3103,6 @@ class CustomMultiAgentMode(BaseModel):
 
 
 class MultiAgentMode(RootModel[MultiAgentModeValue | CustomMultiAgentMode]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         MultiAgentModeValue | CustomMultiAgentMode,
         Field(
@@ -3293,6 +3178,13 @@ class NetworkRequirements(BaseModel):
             description="When true, only managed allowlist entries are respected while managed network enforcement is active.",
         ),
     ] = None
+    review_domains: Annotated[
+        list[str] | None,
+        Field(
+            alias="reviewDomains",
+            description="Host patterns routed to network approval before ordinary allow rules.",
+        ),
+    ] = None
     socks_port: Annotated[int | None, Field(alias="socksPort", ge=0)] = None
     unix_sockets: Annotated[
         dict[str, Any] | None,
@@ -3336,16 +3228,10 @@ class NonSteerableTurnKind(Enum):
 
 
 class NullableAccountScopeParams(RootModel[AccountScopeParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[AccountScopeParams | None, Field(title="Nullable_AccountScopeParams")]
 
 
 class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         GetAccountTokenUsageParams | None, Field(title="Nullable_GetAccountTokenUsageParams")
     ]
@@ -3383,7 +3269,6 @@ class OpenRouterKeyRemoveParams(BaseModel):
 
 
 class OpenRouterKeyRemoveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3419,14 +3304,12 @@ class OpenRouterModelForgetParams(BaseModel):
 
 
 class OpenRouterModelForgetResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
 
 
 class OpenRouterModelRouteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3471,16 +3354,10 @@ class UpdatePatchChangeKind(BaseModel):
 class PatchChangeKind(
     RootModel[AddPatchChangeKind | DeletePatchChangeKind | UpdatePatchChangeKind]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: AddPatchChangeKind | DeletePatchChangeKind | UpdatePatchChangeKind
 
 
 class PathUri(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
 
 
@@ -3839,7 +3716,6 @@ class PluginShareDeleteParams(BaseModel):
 
 
 class PluginShareDeleteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3852,7 +3728,6 @@ class PluginShareDiscoverability(Enum):
 
 
 class PluginShareListParams(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -3952,9 +3827,6 @@ class RemotePluginSource(BaseModel):
 class PluginSource(
     RootModel[LocalPluginSource | GitPluginSource | NpmPluginSource | RemotePluginSource]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: LocalPluginSource | GitPluginSource | NpmPluginSource | RemotePluginSource
 
 
@@ -3966,7 +3838,6 @@ class PluginUninstallParams(BaseModel):
 
 
 class PluginUninstallResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -4091,9 +3962,6 @@ class ColdPromptCacheEstimate(BaseModel):
 
 
 class PromptCacheEstimate(RootModel[WarmPromptCacheEstimate | ColdPromptCacheEstimate]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         WarmPromptCacheEstimate | ColdPromptCacheEstimate,
         Field(description="Whether the thread's provider prompt cache is confidently warm."),
@@ -4126,9 +3994,6 @@ class HoldingPromptCacheWarming(BaseModel):
 class PromptCacheWarming(
     RootModel[OffPromptCacheWarming | ArmedPromptCacheWarming | HoldingPromptCacheWarming]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         OffPromptCacheWarming | ArmedPromptCacheWarming | HoldingPromptCacheWarming,
         Field(description="Whether the server is keeping a thread's prompt cache warm."),
@@ -4293,9 +4158,6 @@ class TextReasoningItemContent(BaseModel):
 
 
 class ReasoningItemContent(RootModel[ReasoningTextReasoningItemContent | TextReasoningItemContent]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ReasoningTextReasoningItemContent | TextReasoningItemContent
 
 
@@ -4310,9 +4172,6 @@ class SummaryTextReasoningItemReasoningSummary(BaseModel):
 
 
 class ReasoningItemReasoningSummary(RootModel[SummaryTextReasoningItemReasoningSummary]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: SummaryTextReasoningItemReasoningSummary
 
 
@@ -4323,9 +4182,6 @@ class ReasoningSummaryValue(Enum):
 
 
 class ReasoningSummary(RootModel[ReasoningSummaryValue | Literal["none"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ReasoningSummaryValue | Literal["none"],
         Field(
@@ -4413,9 +4269,6 @@ class RequestHeader(BaseModel):
 
 
 class RequestId(RootModel[str | int]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str | int
 
 
@@ -4445,16 +4298,10 @@ class NewThreadResetCreditScope(BaseModel):
 class ResetCreditScope(
     RootModel[GlobalResetCreditScope | ThreadResetCreditScope | NewThreadResetCreditScope]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: GlobalResetCreditScope | ThreadResetCreditScope | NewThreadResetCreditScope
 
 
 class ResidencyRequirement(RootModel[Literal["us"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Literal["us"]
 
 
@@ -4465,7 +4312,7 @@ class Resource(BaseModel):
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
     annotations: Any | None = None
     description: str | None = None
-    icons: list | None = None
+    icons: list[Any] | None = None
     mime_type: Annotated[str | None, Field(alias="mimeType")] = None
     name: str
     size: int | None = None
@@ -4494,9 +4341,6 @@ class ResourceContent2(BaseModel):
 
 
 class ResourceContent(RootModel[ResourceContent1 | ResourceContent2]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ResourceContent1 | ResourceContent2,
         Field(description="Contents returned when reading a resource from an MCP server."),
@@ -4521,7 +4365,7 @@ class AdditionalToolsResponseItem(BaseModel):
     )
     id: str | None = None
     role: str
-    tools: list
+    tools: list[Any]
     type: Annotated[Literal["additional_tools"], Field(title="AdditionalToolsResponseItemType")]
 
 
@@ -4619,7 +4463,7 @@ class ToolSearchOutputResponseItem(BaseModel):
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     status: str
-    tools: list
+    tools: list[Any]
     type: Annotated[Literal["tool_search_output"], Field(title="ToolSearchOutputResponseItemType")]
 
 
@@ -4652,11 +4496,11 @@ class NativeCompactionResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    id: str | None = None
-    type: Annotated[Literal["native_compaction"], Field(title="NativeCompactionResponseItemType")]
     content: str
     provider: Literal["anthropic"]
     signature: str
+    id: str | None = None
+    type: Annotated[Literal["native_compaction"], Field(title="NativeCompactionResponseItemType")]
 
 
 class CompactionTriggerResponseItem(BaseModel):
@@ -4737,9 +4581,6 @@ class ResponsesApiWebSearchAction(
         | OtherResponsesApiWebSearchAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         SearchResponsesApiWebSearchAction
         | OpenPageResponsesApiWebSearchAction
@@ -4798,9 +4639,6 @@ class ReviewTarget(
         | CustomReviewTarget
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         UncommittedChangesReviewTarget
         | BaseBranchReviewTarget
@@ -4846,7 +4684,9 @@ class WorkspaceWriteSandboxPolicy(BaseModel):
     exclude_tmpdir_env_var: Annotated[bool | None, Field(alias="excludeTmpdirEnvVar")] = False
     network_access: Annotated[bool | None, Field(alias="networkAccess")] = False
     type: Annotated[Literal["workspaceWrite"], Field(title="WorkspaceWriteSandboxPolicyType")]
-    writable_roots: Annotated[list[AbsolutePathBuf] | None, Field(alias="writableRoots")] = []
+    writable_roots: Annotated[
+        list[AbsolutePathBuf] | None, Field(alias="writableRoots", validate_default=True)
+    ] = []
 
 
 class SandboxPolicy(
@@ -4857,9 +4697,6 @@ class SandboxPolicy(
         | WorkspaceWriteSandboxPolicy
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         DangerFullAccessSandboxPolicy
         | ReadOnlySandboxPolicy
@@ -5534,7 +5371,6 @@ class SkillToolDependency(BaseModel):
 
 
 class SkillsChangedNotification(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5564,7 +5400,6 @@ class SkillsExtraRootsSetParams(BaseModel):
 
 
 class SkillsExtraRootsSetResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5793,7 +5628,6 @@ class ThreadApproveGuardianDeniedActionParams(BaseModel):
 
 
 class ThreadApproveGuardianDeniedActionResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5807,7 +5641,6 @@ class ThreadArchiveParams(BaseModel):
 
 
 class ThreadArchiveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5923,7 +5756,6 @@ class ThreadAttachmentRemoveParams(BaseModel):
 
 
 class ThreadAttachmentRemoveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5955,7 +5787,6 @@ class ThreadCompactStartParams(BaseModel):
 
 
 class ThreadCompactStartResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -5976,7 +5807,6 @@ class ThreadDeleteParams(BaseModel):
 
 
 class ThreadDeleteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -6001,7 +5831,6 @@ class ThreadEnvironment(BaseModel):
 
 
 class ThreadExtra(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -6082,9 +5911,6 @@ class ThreadHistoryMode(Enum):
 
 
 class ThreadId(RootModel[str]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str
 
 
@@ -6093,7 +5919,7 @@ class ThreadInjectItemsParams(BaseModel):
         populate_by_name=True,
     )
     items: Annotated[
-        list,
+        list[Any],
         Field(
             description="Raw Responses API items to append to the thread's model-visible history."
         ),
@@ -6102,7 +5928,6 @@ class ThreadInjectItemsParams(BaseModel):
 
 
 class ThreadInjectItemsResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -6353,9 +6178,6 @@ class ItemThreadItemsListAnchor(BaseModel):
 
 
 class ThreadItemsListAnchor(RootModel[ItemThreadItemsListAnchor]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ItemThreadItemsListAnchor,
         Field(description="An exclusive item position within the requested visible turn."),
@@ -6363,9 +6185,6 @@ class ThreadItemsListAnchor(RootModel[ItemThreadItemsListAnchor]):
 
 
 class ThreadItemsListCursor(RootModel[str | ThreadItemsListAnchor]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         str | ThreadItemsListAnchor,
         Field(description="Starting position for an item-history page."),
@@ -6401,9 +6220,6 @@ class ThreadItemsListParams(BaseModel):
 
 
 class ThreadListCwdFilter(RootModel[str | list[str]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str | list[str]
 
 
@@ -6514,9 +6330,6 @@ class FailedThreadPredictionResult(BaseModel):
 class ThreadPredictionResult(
     RootModel[CompletedThreadPredictionResult | FailedThreadPredictionResult]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: CompletedThreadPredictionResult | FailedThreadPredictionResult
 
 
@@ -6599,9 +6412,6 @@ class UnreadThreadReadStateOperation(BaseModel):
 class ThreadReadStateOperation(
     RootModel[ReadThreadReadStateOperation | UnreadThreadReadStateOperation]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ReadThreadReadStateOperation | UnreadThreadReadStateOperation
 
 
@@ -6653,9 +6463,6 @@ class ThreadRealtimeBemItemPresentation(
         | InlineVisualizationThreadRealtimeBemItemPresentation
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         WholeItemThreadRealtimeBemItemPresentation
         | InlineMarkdownThreadRealtimeBemItemPresentation
@@ -6797,9 +6604,6 @@ class ThreadRealtimeStartTransport(
         | ExistingCallThreadRealtimeStartTransport
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         WebsocketThreadRealtimeStartTransport
         | WebrtcThreadRealtimeStartTransport
@@ -6957,7 +6761,6 @@ class ThreadSectionDeleteParams(BaseModel):
 
 
 class ThreadSectionDeleteResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -7000,7 +6803,6 @@ class ThreadSectionMoveParams(BaseModel):
 
 
 class ThreadSectionMoveResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -7107,7 +6909,6 @@ class ThreadShellCommandParams(BaseModel):
 
 
 class ThreadShellCommandResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -7187,9 +6988,6 @@ class ThreadStatus(
         NotLoadedThreadStatus | IdleThreadStatus | SystemErrorThreadStatus | ActiveThreadStatus
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: NotLoadedThreadStatus | IdleThreadStatus | SystemErrorThreadStatus | ActiveThreadStatus
 
 
@@ -7241,9 +7039,6 @@ class TurnThreadUnreadPosition(BaseModel):
 
 
 class ThreadUnreadPosition(RootModel[ThreadStartThreadUnreadPosition | TurnThreadUnreadPosition]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ThreadStartThreadUnreadPosition | TurnThreadUnreadPosition
 
 
@@ -7290,7 +7085,7 @@ class Tool(BaseModel):
     field_meta: Annotated[Any | None, Field(alias="_meta")] = None
     annotations: Any | None = None
     description: str | None = None
-    icons: list | None = None
+    icons: list[Any] | None = None
     input_schema: Annotated[Any, Field(alias="inputSchema")]
     name: str
     output_schema: Annotated[Any | None, Field(alias="outputSchema")] = None
@@ -7325,9 +7120,6 @@ class ToolInputPayload2(BaseModel):
 
 
 class ToolInputPayload(RootModel[ToolInputPayload1 | ToolInputPayload2]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ToolInputPayload1 | ToolInputPayload2
 
 
@@ -7340,9 +7132,6 @@ class ToolName(BaseModel):
 
 
 class ToolPolicyCeiling(RootModel[Literal["noTools"]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         Literal["noTools"],
         Field(
@@ -7384,7 +7173,6 @@ class TurnInterruptParams(BaseModel):
 
 
 class TurnInterruptResponse(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -7448,9 +7236,6 @@ class TurnSteerResponse(BaseModel):
 
 
 class Usd(RootModel[float]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: float
 
 
@@ -7462,7 +7247,8 @@ class TextUserInput(BaseModel):
     text_elements: Annotated[
         list[TextElement] | None,
         Field(
-            description="UI-defined spans within `text` used to render or persist special elements."
+            description="UI-defined spans within `text` used to render or persist special elements.",
+            validate_default=True,
         ),
     ] = []
     type: Annotated[Literal["text"], Field(title="TextUserInputType")]
@@ -7541,9 +7327,6 @@ class UserInput(
         | MentionUserInput
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         TextUserInput
         | ImageUserInput
@@ -7617,9 +7400,6 @@ class WebSearchAction(
         | OtherWebSearchAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         SearchWebSearchAction
         | OpenPageWebSearchAction
@@ -7757,9 +7537,6 @@ class ChatgptAccount(BaseModel):
 
 
 class Account(RootModel[ApiKeyAccount | ChatgptAccount | ClaudeSubscriptionAccount]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ApiKeyAccount | ChatgptAccount | ClaudeSubscriptionAccount
 
 
@@ -8026,9 +7803,6 @@ class CancelLoginAccountResponse(BaseModel):
 
 
 class CensusCount(RootModel[CensusCount1 | CensusOmission]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         CensusCount1 | CensusOmission,
         Field(
@@ -8711,7 +8485,7 @@ class AccountGatewayOAuthReadRequest(BaseModel):
     method: Annotated[
         Literal["account/gatewayOAuth/read"], Field(title="Account/gatewayOAuth/readRequestMethod")
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class AccountGatewayOAuthLoginRequest(BaseModel):
@@ -8723,7 +8497,7 @@ class AccountGatewayOAuthLoginRequest(BaseModel):
         Literal["account/gatewayOAuth/login"],
         Field(title="Account/gatewayOAuth/loginRequestMethod"),
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class AccountGatewayOAuthCancelRequest(BaseModel):
@@ -8735,7 +8509,7 @@ class AccountGatewayOAuthCancelRequest(BaseModel):
         Literal["account/gatewayOAuth/cancel"],
         Field(title="Account/gatewayOAuth/cancelRequestMethod"),
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class ModelProviderCapabilitiesReadRequest(BaseModel):
@@ -8803,7 +8577,7 @@ class ConfigMcpServerReloadRequest(BaseModel):
     method: Annotated[
         Literal["config/mcpServer/reload"], Field(title="Config/mcpServer/reloadRequestMethod")
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class McpServerToolCallRequest(BaseModel):
@@ -8836,7 +8610,7 @@ class WindowsSandboxReadinessRequest(BaseModel):
     method: Annotated[
         Literal["windowsSandbox/readiness"], Field(title="WindowsSandbox/readinessRequestMethod")
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class AccountLoginCancelRequest(BaseModel):
@@ -8865,7 +8639,7 @@ class AccountReloadRequest(BaseModel):
     )
     id: RequestId
     method: Annotated[Literal["account/reload"], Field(title="Account/reloadRequestMethod")]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class OpenrouterKeyAddRequest(BaseModel):
@@ -9022,7 +8796,7 @@ class ExternalAgentConfigImportReadHistoriesRequest(BaseModel):
         Literal["externalAgentConfig/import/readHistories"],
         Field(title="ExternalAgentConfig/import/readHistoriesRequestMethod"),
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class ConfigRequirementsReadRequest(BaseModel):
@@ -9033,7 +8807,7 @@ class ConfigRequirementsReadRequest(BaseModel):
     method: Annotated[
         Literal["configRequirements/read"], Field(title="ConfigRequirements/readRequestMethod")
     ]
-    params: None = None
+    params: Annotated[None, Field(None)] = None
 
 
 class FuzzyFileSearchRequest(BaseModel):
@@ -9091,9 +8865,6 @@ class CodexErrorInfo(
         | dict[str, Any]
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         CodexErrorInfoValue
         | HttpConnectionFailedCodexErrorInfo
@@ -9149,9 +8920,6 @@ class CommandAction(
         ReadCommandAction | ListFilesCommandAction | SearchCommandAction | UnknownCommandAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ReadCommandAction | ListFilesCommandAction | SearchCommandAction | UnknownCommandAction
 
 
@@ -9405,9 +9173,6 @@ class ContentItem(
         | OutputTextContentItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         InputTextContentItem
         | InputImageContentItem
@@ -9619,9 +9384,6 @@ class FileSystemSpecialPath(
         | FileSystemSpecialPath1
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         RootFileSystemSpecialPath
         | MinimalFileSystemSpecialPath
@@ -9672,9 +9434,6 @@ class FunctionCallOutputContentItem(
         | EncryptedContentFunctionCallOutputContentItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         InputTextFunctionCallOutputContentItem
         | InputImageFunctionCallOutputContentItem
@@ -9997,9 +9756,6 @@ class AgentHookMetadata(BaseModel):
 class HookMetadata(
     RootModel[HookMetadata1 | HookMetadata2 | PromptHookMetadata | AgentHookMetadata]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: HookMetadata1 | HookMetadata2 | PromptHookMetadata | AgentHookMetadata
 
 
@@ -10142,9 +9898,6 @@ class LoginAccountParams(
         | ChatgptAuthTokensLoginAccountParams
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ClaudeSubscriptionLoginAccountParams
         | ApiKeyLoginAccountParams
@@ -10159,21 +9912,27 @@ class ManagedHooksRequirements(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    interrupt: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="Interrupt")] = []
+    interrupt: Annotated[
+        list[ConfiguredHookMatcherGroup] | None, Field(alias="Interrupt", validate_default=True)
+    ] = []
     permission_request: Annotated[
         list[ConfiguredHookMatcherGroup], Field(alias="PermissionRequest")
     ]
     post_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostCompact")]
     post_model_request: Annotated[
-        list[ConfiguredHookMatcherGroup] | None, Field(alias="PostModelRequest")
+        list[ConfiguredHookMatcherGroup] | None,
+        Field(alias="PostModelRequest", validate_default=True),
     ] = []
     post_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PostToolUse")]
     pre_compact: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreCompact")]
     pre_model_request: Annotated[
-        list[ConfiguredHookMatcherGroup] | None, Field(alias="PreModelRequest")
+        list[ConfiguredHookMatcherGroup] | None,
+        Field(alias="PreModelRequest", validate_default=True),
     ] = []
     pre_tool_use: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="PreToolUse")]
-    session_end: Annotated[list[ConfiguredHookMatcherGroup] | None, Field(alias="SessionEnd")] = []
+    session_end: Annotated[
+        list[ConfiguredHookMatcherGroup] | None, Field(alias="SessionEnd", validate_default=True)
+    ] = []
     session_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SessionStart")]
     stop: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="Stop")]
     subagent_start: Annotated[list[ConfiguredHookMatcherGroup], Field(alias="SubagentStart")]
@@ -10278,14 +10037,16 @@ class MigrationDetails(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    commands: list[CommandMigration] | None = []
-    hooks: list[HookMigration] | None = []
-    mcp_servers: Annotated[list[McpServerMigration] | None, Field(alias="mcpServers")] = []
+    commands: Annotated[list[CommandMigration] | None, Field(validate_default=True)] = []
+    hooks: Annotated[list[HookMigration] | None, Field(validate_default=True)] = []
+    mcp_servers: Annotated[
+        list[McpServerMigration] | None, Field(alias="mcpServers", validate_default=True)
+    ] = []
     memory: list[str] | None = None
-    plugins: list[PluginsMigration] | None = []
-    sessions: list[SessionMigration] | None = []
-    skills: list[SkillMigration] | None = []
-    subagents: list[SubagentMigration] | None = []
+    plugins: Annotated[list[PluginsMigration] | None, Field(validate_default=True)] = []
+    sessions: Annotated[list[SessionMigration] | None, Field(validate_default=True)] = []
+    skills: Annotated[list[SkillMigration] | None, Field(validate_default=True)] = []
+    subagents: Annotated[list[SubagentMigration] | None, Field(validate_default=True)] = []
 
 
 class MisalignmentErrorDetails(BaseModel):
@@ -10363,7 +10124,9 @@ class Model(BaseModel):
             description="Multi-agent runtime declared by this model, when available.",
         ),
     ] = None
-    service_tiers: Annotated[list[ModelServiceTier] | None, Field(alias="serviceTiers")] = []
+    service_tiers: Annotated[
+        list[ModelServiceTier] | None, Field(alias="serviceTiers", validate_default=True)
+    ] = []
     supported_reasoning_efforts: Annotated[
         list[ReasoningEffortOption], Field(alias="supportedReasoningEfforts")
     ]
@@ -10400,7 +10163,8 @@ class ModelListResponse(BaseModel):
     providers: Annotated[
         list[ModelProviderOption] | None,
         Field(
-            description="Providers available for starting a new conversation, without auth material."
+            description="Providers available for starting a new conversation, without auth material.",
+            validate_default=True,
         ),
     ] = []
 
@@ -10417,18 +10181,12 @@ class NewThreadModelDefaults(BaseModel):
 
 
 class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
     ]
 
 
 class NullableGetWorkspaceMessagesParams(RootModel[GetWorkspaceMessagesParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         GetWorkspaceMessagesParams | None, Field(title="Nullable_GetWorkspaceMessagesParams")
     ]
@@ -10607,9 +10365,6 @@ class UsdAvailableQuotaReading(BaseModel):
 
 
 class QuotaReading(RootModel[WeeklyPercentLeftQuotaReading | UsdAvailableQuotaReading]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         WeeklyPercentLeftQuotaReading | UsdAvailableQuotaReading,
         Field(description="A reading of the quota a quotabox watches."),
@@ -10625,9 +10380,6 @@ class UsdAvailableQuotabox(BaseModel):
 
 
 class Quotabox(RootModel[WeeklyPercentLeftQuotabox | UsdAvailableQuotabox]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         WeeklyPercentLeftQuotabox | UsdAvailableQuotabox,
         Field(description="The level of the root agent's provider quota at which a goal halts."),
@@ -10756,13 +10508,13 @@ class RejectedToolCallResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    id: str | None = None
-    reason: ToolCallRejection | None = None
-    type: Annotated[Literal["rejected_tool_call"], Field(title="RejectedToolCallResponseItemType")]
     call_id: str
     input: Any
     name: str
     provider: Literal["anthropic"]
+    id: str | None = None
+    reason: ToolCallRejection | None = None
+    type: Annotated[Literal["rejected_tool_call"], Field(title="RejectedToolCallResponseItemType")]
 
 
 class ConfigurationUpdateResponseItem(BaseModel):
@@ -10815,9 +10567,6 @@ class ScheduledTaskSchedule(
         | WeeklyScheduledTaskSchedule
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         HourlyScheduledTaskSchedule
         | DailyScheduledTaskSchedule
@@ -11616,9 +11365,6 @@ class ThreadSpawnSubAgentSource(BaseModel):
 class SubAgentSource(
     RootModel[SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: SubAgentSourceValue | ThreadSpawnSubAgentSource | OtherSubAgentSource
 
 
@@ -11807,7 +11553,7 @@ class ArrivalThreadItem(BaseModel):
     response_id: Annotated[
         str, Field(alias="responseId", description="The response whose step admits it.")
     ]
-    source: Annotated[ArrivalSource | None, Field()] = {"kind": "legacy"}
+    source: Annotated[ArrivalSource | None, Field(validate_default=True)] = {"kind": "legacy"}
     text: Annotated[
         str | None,
         Field(
@@ -11987,7 +11733,7 @@ class WebSearchThreadItem(BaseModel):
     id: str
     query: str
     results: Annotated[
-        list | None,
+        list[Any] | None,
         Field(
             description="Structured search results returned out-of-band by standalone web search.\n\nThese stay as opaque JSON at the extension/app-server boundary so new result fields and result types can pass through without a Codex release."
         ),
@@ -12103,9 +11849,6 @@ class ThreadNameConflictThreadNameConflictError(BaseModel):
 
 
 class ThreadNameConflictError(RootModel[ThreadNameConflictThreadNameConflictError]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ThreadNameConflictThreadNameConflictError, Field(title="ThreadNameConflictError")
     ]
@@ -12160,9 +11903,6 @@ class ThreadRealtimeItem(
         | RealtimeSessionClosedThreadRealtimeItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         RealtimeSessionStartedThreadRealtimeItem
         | TranscriptSegmentThreadRealtimeItem
@@ -12553,9 +12293,6 @@ class SealedAdmission(BaseModel):
 
 
 class Admission(RootModel[PendingAdmission | SeveredAdmission | SealedAdmission]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         PendingAdmission | SeveredAdmission | SealedAdmission,
         Field(description="The step's admission, known once the next request completes."),
@@ -12862,9 +12599,6 @@ class CodeModeEvent(
         | FinishedCodeModeEvent
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         StartedCodeModeEvent
         | AllocatedCodeModeEvent
@@ -13011,9 +12745,6 @@ class ContextInventory(BaseModel):
 
 
 class EndpointFilter(RootModel[EndpointFilterAll | EndpointFilterOnly | EndpointFilterIgnore]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         EndpointFilterAll | EndpointFilterOnly | EndpointFilterIgnore,
         Field(description="Which endpoints may serve a saved model."),
@@ -13106,9 +12837,6 @@ class SpecialFileSystemPath(BaseModel):
 class FileSystemPath(
     RootModel[PathFileSystemPath | GlobPatternFileSystemPath | SpecialFileSystemPath]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: PathFileSystemPath | GlobPatternFileSystemPath | SpecialFileSystemPath
 
 
@@ -13121,9 +12849,6 @@ class FileSystemSandboxEntry(BaseModel):
 
 
 class FunctionCallOutputBody(RootModel[str | list[FunctionCallOutputContentItem]]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: str | list[FunctionCallOutputContentItem]
 
 
@@ -13261,9 +12986,6 @@ class DeleteJiraAction(BaseModel):
 
 
 class JiraAction(RootModel[ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ListJiraAction | ReadJiraAction | SaveJiraAction | DeleteJiraAction
 
 
@@ -13284,9 +13006,6 @@ class IssueJiraResult(BaseModel):
 
 
 class JiraResult(RootModel[ListJiraResult | IssueJiraResult | DeletedJiraResult]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ListJiraResult | IssueJiraResult | DeletedJiraResult
 
 
@@ -13325,9 +13044,6 @@ class ReadOpenRouterKeyState(BaseModel):
 
 
 class OpenRouterKeyState(RootModel[ReadOpenRouterKeyState | FailedOpenRouterKeyState]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: ReadOpenRouterKeyState | FailedOpenRouterKeyState
 
 
@@ -13473,9 +13189,6 @@ class ReadQuotaGauge(BaseModel):
 
 
 class QuotaGauge(RootModel[ReadQuotaGauge | UnavailableQuotaGauge]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         ReadQuotaGauge | UnavailableQuotaGauge,
         Field(description="The quota a goal's quotabox watches, as just read."),
@@ -13546,9 +13259,6 @@ class ResponseItem(
         | OtherResponseItem
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         AdditionalToolsResponseItem
         | MessageResponseItem
@@ -13842,9 +13552,6 @@ class SubAgentSessionSource(BaseModel):
 
 
 class SessionSource(RootModel[SessionSourceValue | CustomSessionSource | SubAgentSessionSource]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: SessionSourceValue | CustomSessionSource | SubAgentSessionSource
 
 
@@ -14233,7 +13940,9 @@ class ExternalAgentConfigDetectResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    connectors: list[ExternalAgentDetectedConnectorCandidate] | None = []
+    connectors: Annotated[
+        list[ExternalAgentDetectedConnectorCandidate] | None, Field(validate_default=True)
+    ] = []
     items: list[ExternalAgentConfigMigrationItem]
 
 
@@ -14683,9 +14392,6 @@ class ClientRequest(
         | FuzzyFileSearchRequest
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: Annotated[
         InitializeRequest
         | ThreadStartRequest
@@ -14844,9 +14550,6 @@ class GuardianApprovalReviewAction(
         | RequestPermissionsGuardianApprovalReviewAction
     ]
 ):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
     root: (
         CommandGuardianApprovalReviewAction
         | ExecveGuardianApprovalReviewAction
@@ -14925,7 +14628,8 @@ class PluginInstalledResponse(BaseModel):
         populate_by_name=True,
     )
     marketplace_load_errors: Annotated[
-        list[MarketplaceLoadErrorInfo] | None, Field(alias="marketplaceLoadErrors")
+        list[MarketplaceLoadErrorInfo] | None,
+        Field(alias="marketplaceLoadErrors", validate_default=True),
     ] = []
     marketplaces: list[PluginMarketplaceEntry]
 
@@ -14936,7 +14640,8 @@ class PluginListResponse(BaseModel):
     )
     featured_plugin_ids: Annotated[list[str] | None, Field(alias="featuredPluginIds")] = []
     marketplace_load_errors: Annotated[
-        list[MarketplaceLoadErrorInfo] | None, Field(alias="marketplaceLoadErrors")
+        list[MarketplaceLoadErrorInfo] | None,
+        Field(alias="marketplaceLoadErrors", validate_default=True),
     ] = []
     marketplaces: list[PluginMarketplaceEntry]
 
@@ -15119,207 +14824,6 @@ class ItemCompletedServerNotification(BaseModel):
     ] = None
     method: Annotated[Literal["item/completed"], Field(title="Item/completedNotificationMethod")]
     params: ItemCompletedNotification
-
-
-class ServerNotification(
-    RootModel[
-        CodeModeOwnedServerNotification
-        | ErrorServerNotification
-        | ThreadStartedServerNotification
-        | ThreadStatusChangedServerNotification
-        | ThreadReadStateChangedServerNotification
-        | ThreadArchivedServerNotification
-        | ThreadDeletedServerNotification
-        | ThreadUnarchivedServerNotification
-        | ThreadClosedServerNotification
-        | ThreadRetiredServerNotification
-        | ThreadRevertedServerNotification
-        | SkillsChangedServerNotification
-        | ThreadNameUpdatedServerNotification
-        | ThreadAttachmentUpdatedServerNotification
-        | ThreadGoalUpdatedServerNotification
-        | ThreadPredictionUpdatedServerNotification
-        | ThreadGoalClearedServerNotification
-        | ThreadWorkStatusUpdatedServerNotification
-        | ThreadAlarmsUpdatedServerNotification
-        | ThreadPromptCacheUpdatedServerNotification
-        | ThreadPromptCacheMissedServerNotification
-        | ThreadWarmingStoppedServerNotification
-        | ThreadQueueChangedServerNotification
-        | ProjectChangedServerNotification
-        | ThreadProjectUpdatedServerNotification
-        | ThreadEnvironmentConnectedServerNotification
-        | ThreadEnvironmentDisconnectedServerNotification
-        | ThreadSettingsUpdatedServerNotification
-        | ThreadTokenUsageUpdatedServerNotification
-        | TurnStartedServerNotification
-        | HookStartedServerNotification
-        | TurnCompletedServerNotification
-        | HookCompletedServerNotification
-        | TurnDiffUpdatedServerNotification
-        | TurnPlanUpdatedServerNotification
-        | ItemStreamDiscardedServerNotification
-        | ItemStartedServerNotification
-        | ItemAutoApprovalReviewStartedServerNotification
-        | ItemAutoApprovalReviewCompletedServerNotification
-        | AutoApprovalReviewStrictReviewRequiredServerNotification
-        | ItemCompletedServerNotification
-        | ItemAgentMessageDeltaServerNotification
-        | ItemPlanDeltaServerNotification
-        | CommandExecOutputDeltaServerNotification
-        | ProcessOutputDeltaServerNotification
-        | ProcessExitedServerNotification
-        | ItemCommandExecutionOutputDeltaServerNotification
-        | ItemCommandExecutionTerminalInteractionServerNotification
-        | ItemFileChangeOutputDeltaServerNotification
-        | ItemFileChangePatchUpdatedServerNotification
-        | ServerRequestResolvedServerNotification
-        | ItemMcpToolCallProgressServerNotification
-        | McpServerOauthLoginCompletedServerNotification
-        | McpServerStartupStatusUpdatedServerNotification
-        | McpServerEventStreamNotificationServerNotification
-        | AccountUpdatedServerNotification
-        | AccountGatewayOAuthChangedServerNotification
-        | AccountRateLimitsUpdatedServerNotification
-        | AppListUpdatedServerNotification
-        | RemoteControlStatusChangedServerNotification
-        | ExternalAgentConfigImportProgressServerNotification
-        | ExternalAgentConfigImportCompletedServerNotification
-        | FsChangedServerNotification
-        | ItemReasoningSummaryTextDeltaServerNotification
-        | ItemReasoningSummaryPartAddedServerNotification
-        | ItemReasoningTextDeltaServerNotification
-        | ThreadCompactedServerNotification
-        | ModelReroutedServerNotification
-        | ModelVerificationServerNotification
-        | ModelProviderAuthRecoveryStartedServerNotification
-        | ModelProviderAuthRecoveryCompletedServerNotification
-        | TurnModerationMetadataServerNotification
-        | ModelSafetyBufferingUpdatedServerNotification
-        | WarningServerNotification
-        | GuardianWarningServerNotification
-        | DeprecationNoticeServerNotification
-        | ConfigWarningServerNotification
-        | FuzzyFileSearchSessionUpdatedServerNotification
-        | FuzzyFileSearchSessionCompletedServerNotification
-        | ThreadRealtimeStartedServerNotification
-        | ThreadRealtimeItemAddedServerNotification
-        | ThreadRealtimeItemStartedServerNotification
-        | ThreadRealtimeItemTranscriptDeltaServerNotification
-        | ThreadRealtimeItemCompletedServerNotification
-        | ThreadRealtimeTranscriptDeltaServerNotification
-        | ThreadRealtimeTranscriptDoneServerNotification
-        | ThreadRealtimeOutputAudioDeltaServerNotification
-        | ThreadRealtimeSdpServerNotification
-        | ThreadRealtimeErrorServerNotification
-        | ThreadRealtimeClosedServerNotification
-        | WindowsWorldWritableWarningServerNotification
-        | WindowsSandboxSetupCompletedServerNotification
-        | AccountLoginCompletedServerNotification
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        CodeModeOwnedServerNotification
-        | ErrorServerNotification
-        | ThreadStartedServerNotification
-        | ThreadStatusChangedServerNotification
-        | ThreadReadStateChangedServerNotification
-        | ThreadArchivedServerNotification
-        | ThreadDeletedServerNotification
-        | ThreadUnarchivedServerNotification
-        | ThreadClosedServerNotification
-        | ThreadRetiredServerNotification
-        | ThreadRevertedServerNotification
-        | SkillsChangedServerNotification
-        | ThreadNameUpdatedServerNotification
-        | ThreadAttachmentUpdatedServerNotification
-        | ThreadGoalUpdatedServerNotification
-        | ThreadPredictionUpdatedServerNotification
-        | ThreadGoalClearedServerNotification
-        | ThreadWorkStatusUpdatedServerNotification
-        | ThreadAlarmsUpdatedServerNotification
-        | ThreadPromptCacheUpdatedServerNotification
-        | ThreadPromptCacheMissedServerNotification
-        | ThreadWarmingStoppedServerNotification
-        | ThreadQueueChangedServerNotification
-        | ProjectChangedServerNotification
-        | ThreadProjectUpdatedServerNotification
-        | ThreadEnvironmentConnectedServerNotification
-        | ThreadEnvironmentDisconnectedServerNotification
-        | ThreadSettingsUpdatedServerNotification
-        | ThreadTokenUsageUpdatedServerNotification
-        | TurnStartedServerNotification
-        | HookStartedServerNotification
-        | TurnCompletedServerNotification
-        | HookCompletedServerNotification
-        | TurnDiffUpdatedServerNotification
-        | TurnPlanUpdatedServerNotification
-        | ItemStreamDiscardedServerNotification
-        | ItemStartedServerNotification
-        | ItemAutoApprovalReviewStartedServerNotification
-        | ItemAutoApprovalReviewCompletedServerNotification
-        | AutoApprovalReviewStrictReviewRequiredServerNotification
-        | ItemCompletedServerNotification
-        | ItemAgentMessageDeltaServerNotification
-        | ItemPlanDeltaServerNotification
-        | CommandExecOutputDeltaServerNotification
-        | ProcessOutputDeltaServerNotification
-        | ProcessExitedServerNotification
-        | ItemCommandExecutionOutputDeltaServerNotification
-        | ItemCommandExecutionTerminalInteractionServerNotification
-        | ItemFileChangeOutputDeltaServerNotification
-        | ItemFileChangePatchUpdatedServerNotification
-        | ServerRequestResolvedServerNotification
-        | ItemMcpToolCallProgressServerNotification
-        | McpServerOauthLoginCompletedServerNotification
-        | McpServerStartupStatusUpdatedServerNotification
-        | McpServerEventStreamNotificationServerNotification
-        | AccountUpdatedServerNotification
-        | AccountGatewayOAuthChangedServerNotification
-        | AccountRateLimitsUpdatedServerNotification
-        | AppListUpdatedServerNotification
-        | RemoteControlStatusChangedServerNotification
-        | ExternalAgentConfigImportProgressServerNotification
-        | ExternalAgentConfigImportCompletedServerNotification
-        | FsChangedServerNotification
-        | ItemReasoningSummaryTextDeltaServerNotification
-        | ItemReasoningSummaryPartAddedServerNotification
-        | ItemReasoningTextDeltaServerNotification
-        | ThreadCompactedServerNotification
-        | ModelReroutedServerNotification
-        | ModelVerificationServerNotification
-        | ModelProviderAuthRecoveryStartedServerNotification
-        | ModelProviderAuthRecoveryCompletedServerNotification
-        | TurnModerationMetadataServerNotification
-        | ModelSafetyBufferingUpdatedServerNotification
-        | WarningServerNotification
-        | GuardianWarningServerNotification
-        | DeprecationNoticeServerNotification
-        | ConfigWarningServerNotification
-        | FuzzyFileSearchSessionUpdatedServerNotification
-        | FuzzyFileSearchSessionCompletedServerNotification
-        | ThreadRealtimeStartedServerNotification
-        | ThreadRealtimeItemAddedServerNotification
-        | ThreadRealtimeItemStartedServerNotification
-        | ThreadRealtimeItemTranscriptDeltaServerNotification
-        | ThreadRealtimeItemCompletedServerNotification
-        | ThreadRealtimeTranscriptDeltaServerNotification
-        | ThreadRealtimeTranscriptDoneServerNotification
-        | ThreadRealtimeOutputAudioDeltaServerNotification
-        | ThreadRealtimeSdpServerNotification
-        | ThreadRealtimeErrorServerNotification
-        | ThreadRealtimeClosedServerNotification
-        | WindowsWorldWritableWarningServerNotification
-        | WindowsSandboxSetupCompletedServerNotification
-        | AccountLoginCompletedServerNotification,
-        Field(
-            description="Notification sent from the server to the client.",
-            title="ServerNotification",
-        ),
-    ]
 
 
 class Thread(BaseModel):
@@ -15515,6 +15019,7 @@ class ThreadForkResponse(BaseModel):
         Field(
             alias="instructionSources",
             description="Environment-native paths to instruction source files currently loaded for this thread.",
+            validate_default=True,
         ),
     ] = []
     model: str
@@ -15537,73 +15042,6 @@ class CodeModeOwnedThreadItem(BaseModel):
     owner: CodeModeOwner
     payload: ThreadItem
     type: Annotated[Literal["codeModeOwned"], Field(title="CodeModeOwnedThreadItemType")]
-
-
-class ThreadItem(
-    RootModel[
-        CodeModeOwnedThreadItem
-        | CodeModeThreadItem
-        | ToolInputThreadItem
-        | StepAdmissionThreadItem
-        | ArrivalThreadItem
-        | UserMessageThreadItem
-        | HookPromptThreadItem
-        | AgentMessageThreadItem
-        | FunctionCallOutputThreadItem
-        | ToolOutputTokensThreadItem
-        | PlanThreadItem
-        | ReasoningThreadItem
-        | ThoughtThreadItem
-        | PreambleThreadItem
-        | CommandExecutionThreadItem
-        | FileChangeThreadItem
-        | McpToolCallThreadItem
-        | DynamicToolCallThreadItem
-        | CollabAgentToolCallThreadItem
-        | SubAgentActivityThreadItem
-        | WebSearchThreadItem
-        | ImageViewThreadItem
-        | SleepThreadItem
-        | FileIdThreadItem
-        | ResultThreadItem
-        | EnteredReviewModeThreadItem
-        | ExitedReviewModeThreadItem
-        | ContextCompactionThreadItem
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: (
-        CodeModeOwnedThreadItem
-        | CodeModeThreadItem
-        | ToolInputThreadItem
-        | StepAdmissionThreadItem
-        | ArrivalThreadItem
-        | UserMessageThreadItem
-        | HookPromptThreadItem
-        | AgentMessageThreadItem
-        | FunctionCallOutputThreadItem
-        | ToolOutputTokensThreadItem
-        | PlanThreadItem
-        | ReasoningThreadItem
-        | ThoughtThreadItem
-        | PreambleThreadItem
-        | CommandExecutionThreadItem
-        | FileChangeThreadItem
-        | McpToolCallThreadItem
-        | DynamicToolCallThreadItem
-        | CollabAgentToolCallThreadItem
-        | SubAgentActivityThreadItem
-        | WebSearchThreadItem
-        | ImageViewThreadItem
-        | SleepThreadItem
-        | FileIdThreadItem
-        | ResultThreadItem
-        | EnteredReviewModeThreadItem
-        | ExitedReviewModeThreadItem
-        | ContextCompactionThreadItem
-    )
 
 
 class ThreadItemEntry(BaseModel):
@@ -15716,6 +15154,7 @@ class ThreadResumeResponse(BaseModel):
         Field(
             alias="instructionSources",
             description="Environment-native paths to instruction source files currently loaded for this thread.",
+            validate_default=True,
         ),
     ] = []
     items_backwards_cursor: Annotated[
@@ -15804,6 +15243,7 @@ class ThreadStartResponse(BaseModel):
         Field(
             alias="instructionSources",
             description="Environment-native paths to instruction source files currently loaded for this thread.",
+            validate_default=True,
         ),
     ] = []
     model: str
@@ -15841,26 +15281,6 @@ class ItemThreadTimelineEntry(BaseModel):
     position: Annotated[int, Field(ge=0)]
     turn_id: Annotated[str, Field(alias="turnId")]
     type: Annotated[Literal["item"], Field(title="ItemThreadTimelineEntryType")]
-
-
-class ThreadTimelineEntry(
-    RootModel[
-        ItemThreadTimelineEntry
-        | RealtimeThreadTimelineEntry
-        | TurnStartedThreadTimelineEntry
-        | TurnCompletedThreadTimelineEntry
-    ]
-):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        ItemThreadTimelineEntry
-        | RealtimeThreadTimelineEntry
-        | TurnStartedThreadTimelineEntry
-        | TurnCompletedThreadTimelineEntry,
-        Field(description="EXPERIMENTAL - one item or turn boundary in canonical rollout order."),
-    ]
 
 
 class ThreadTurnsListResponse(BaseModel):
@@ -15970,6 +15390,285 @@ class TurnsPage(BaseModel):
     next_cursor: Annotated[str | None, Field(alias="nextCursor")] = None
 
 
+class ServerNotification(
+    RootModel[
+        CodeModeOwnedServerNotification
+        | ErrorServerNotification
+        | ThreadStartedServerNotification
+        | ThreadStatusChangedServerNotification
+        | ThreadReadStateChangedServerNotification
+        | ThreadArchivedServerNotification
+        | ThreadDeletedServerNotification
+        | ThreadUnarchivedServerNotification
+        | ThreadClosedServerNotification
+        | ThreadRetiredServerNotification
+        | ThreadRevertedServerNotification
+        | SkillsChangedServerNotification
+        | ThreadNameUpdatedServerNotification
+        | ThreadAttachmentUpdatedServerNotification
+        | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
+        | ThreadGoalClearedServerNotification
+        | ThreadWorkStatusUpdatedServerNotification
+        | ThreadAlarmsUpdatedServerNotification
+        | ThreadPromptCacheUpdatedServerNotification
+        | ThreadPromptCacheMissedServerNotification
+        | ThreadWarmingStoppedServerNotification
+        | ThreadQueueChangedServerNotification
+        | ProjectChangedServerNotification
+        | ThreadProjectUpdatedServerNotification
+        | ThreadEnvironmentConnectedServerNotification
+        | ThreadEnvironmentDisconnectedServerNotification
+        | ThreadSettingsUpdatedServerNotification
+        | ThreadTokenUsageUpdatedServerNotification
+        | TurnStartedServerNotification
+        | HookStartedServerNotification
+        | TurnCompletedServerNotification
+        | HookCompletedServerNotification
+        | TurnDiffUpdatedServerNotification
+        | TurnPlanUpdatedServerNotification
+        | ItemStreamDiscardedServerNotification
+        | ItemStartedServerNotification
+        | ItemAutoApprovalReviewStartedServerNotification
+        | ItemAutoApprovalReviewCompletedServerNotification
+        | AutoApprovalReviewStrictReviewRequiredServerNotification
+        | ItemCompletedServerNotification
+        | ItemAgentMessageDeltaServerNotification
+        | ItemPlanDeltaServerNotification
+        | CommandExecOutputDeltaServerNotification
+        | ProcessOutputDeltaServerNotification
+        | ProcessExitedServerNotification
+        | ItemCommandExecutionOutputDeltaServerNotification
+        | ItemCommandExecutionTerminalInteractionServerNotification
+        | ItemFileChangeOutputDeltaServerNotification
+        | ItemFileChangePatchUpdatedServerNotification
+        | ServerRequestResolvedServerNotification
+        | ItemMcpToolCallProgressServerNotification
+        | McpServerOauthLoginCompletedServerNotification
+        | McpServerStartupStatusUpdatedServerNotification
+        | McpServerEventStreamNotificationServerNotification
+        | AccountUpdatedServerNotification
+        | AccountGatewayOAuthChangedServerNotification
+        | AccountRateLimitsUpdatedServerNotification
+        | AppListUpdatedServerNotification
+        | RemoteControlStatusChangedServerNotification
+        | ExternalAgentConfigImportProgressServerNotification
+        | ExternalAgentConfigImportCompletedServerNotification
+        | FsChangedServerNotification
+        | ItemReasoningSummaryTextDeltaServerNotification
+        | ItemReasoningSummaryPartAddedServerNotification
+        | ItemReasoningTextDeltaServerNotification
+        | ThreadCompactedServerNotification
+        | ModelReroutedServerNotification
+        | ModelVerificationServerNotification
+        | ModelProviderAuthRecoveryStartedServerNotification
+        | ModelProviderAuthRecoveryCompletedServerNotification
+        | TurnModerationMetadataServerNotification
+        | ModelSafetyBufferingUpdatedServerNotification
+        | WarningServerNotification
+        | GuardianWarningServerNotification
+        | DeprecationNoticeServerNotification
+        | ConfigWarningServerNotification
+        | FuzzyFileSearchSessionUpdatedServerNotification
+        | FuzzyFileSearchSessionCompletedServerNotification
+        | ThreadRealtimeStartedServerNotification
+        | ThreadRealtimeItemAddedServerNotification
+        | ThreadRealtimeItemStartedServerNotification
+        | ThreadRealtimeItemTranscriptDeltaServerNotification
+        | ThreadRealtimeItemCompletedServerNotification
+        | ThreadRealtimeTranscriptDeltaServerNotification
+        | ThreadRealtimeTranscriptDoneServerNotification
+        | ThreadRealtimeOutputAudioDeltaServerNotification
+        | ThreadRealtimeSdpServerNotification
+        | ThreadRealtimeErrorServerNotification
+        | ThreadRealtimeClosedServerNotification
+        | WindowsWorldWritableWarningServerNotification
+        | WindowsSandboxSetupCompletedServerNotification
+        | AccountLoginCompletedServerNotification
+    ]
+):
+    root: Annotated[
+        CodeModeOwnedServerNotification
+        | ErrorServerNotification
+        | ThreadStartedServerNotification
+        | ThreadStatusChangedServerNotification
+        | ThreadReadStateChangedServerNotification
+        | ThreadArchivedServerNotification
+        | ThreadDeletedServerNotification
+        | ThreadUnarchivedServerNotification
+        | ThreadClosedServerNotification
+        | ThreadRetiredServerNotification
+        | ThreadRevertedServerNotification
+        | SkillsChangedServerNotification
+        | ThreadNameUpdatedServerNotification
+        | ThreadAttachmentUpdatedServerNotification
+        | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
+        | ThreadGoalClearedServerNotification
+        | ThreadWorkStatusUpdatedServerNotification
+        | ThreadAlarmsUpdatedServerNotification
+        | ThreadPromptCacheUpdatedServerNotification
+        | ThreadPromptCacheMissedServerNotification
+        | ThreadWarmingStoppedServerNotification
+        | ThreadQueueChangedServerNotification
+        | ProjectChangedServerNotification
+        | ThreadProjectUpdatedServerNotification
+        | ThreadEnvironmentConnectedServerNotification
+        | ThreadEnvironmentDisconnectedServerNotification
+        | ThreadSettingsUpdatedServerNotification
+        | ThreadTokenUsageUpdatedServerNotification
+        | TurnStartedServerNotification
+        | HookStartedServerNotification
+        | TurnCompletedServerNotification
+        | HookCompletedServerNotification
+        | TurnDiffUpdatedServerNotification
+        | TurnPlanUpdatedServerNotification
+        | ItemStreamDiscardedServerNotification
+        | ItemStartedServerNotification
+        | ItemAutoApprovalReviewStartedServerNotification
+        | ItemAutoApprovalReviewCompletedServerNotification
+        | AutoApprovalReviewStrictReviewRequiredServerNotification
+        | ItemCompletedServerNotification
+        | ItemAgentMessageDeltaServerNotification
+        | ItemPlanDeltaServerNotification
+        | CommandExecOutputDeltaServerNotification
+        | ProcessOutputDeltaServerNotification
+        | ProcessExitedServerNotification
+        | ItemCommandExecutionOutputDeltaServerNotification
+        | ItemCommandExecutionTerminalInteractionServerNotification
+        | ItemFileChangeOutputDeltaServerNotification
+        | ItemFileChangePatchUpdatedServerNotification
+        | ServerRequestResolvedServerNotification
+        | ItemMcpToolCallProgressServerNotification
+        | McpServerOauthLoginCompletedServerNotification
+        | McpServerStartupStatusUpdatedServerNotification
+        | McpServerEventStreamNotificationServerNotification
+        | AccountUpdatedServerNotification
+        | AccountGatewayOAuthChangedServerNotification
+        | AccountRateLimitsUpdatedServerNotification
+        | AppListUpdatedServerNotification
+        | RemoteControlStatusChangedServerNotification
+        | ExternalAgentConfigImportProgressServerNotification
+        | ExternalAgentConfigImportCompletedServerNotification
+        | FsChangedServerNotification
+        | ItemReasoningSummaryTextDeltaServerNotification
+        | ItemReasoningSummaryPartAddedServerNotification
+        | ItemReasoningTextDeltaServerNotification
+        | ThreadCompactedServerNotification
+        | ModelReroutedServerNotification
+        | ModelVerificationServerNotification
+        | ModelProviderAuthRecoveryStartedServerNotification
+        | ModelProviderAuthRecoveryCompletedServerNotification
+        | TurnModerationMetadataServerNotification
+        | ModelSafetyBufferingUpdatedServerNotification
+        | WarningServerNotification
+        | GuardianWarningServerNotification
+        | DeprecationNoticeServerNotification
+        | ConfigWarningServerNotification
+        | FuzzyFileSearchSessionUpdatedServerNotification
+        | FuzzyFileSearchSessionCompletedServerNotification
+        | ThreadRealtimeStartedServerNotification
+        | ThreadRealtimeItemAddedServerNotification
+        | ThreadRealtimeItemStartedServerNotification
+        | ThreadRealtimeItemTranscriptDeltaServerNotification
+        | ThreadRealtimeItemCompletedServerNotification
+        | ThreadRealtimeTranscriptDeltaServerNotification
+        | ThreadRealtimeTranscriptDoneServerNotification
+        | ThreadRealtimeOutputAudioDeltaServerNotification
+        | ThreadRealtimeSdpServerNotification
+        | ThreadRealtimeErrorServerNotification
+        | ThreadRealtimeClosedServerNotification
+        | WindowsWorldWritableWarningServerNotification
+        | WindowsSandboxSetupCompletedServerNotification
+        | AccountLoginCompletedServerNotification,
+        Field(
+            description="Notification sent from the server to the client.",
+            title="ServerNotification",
+        ),
+    ]
+
+
+class ThreadItem(
+    RootModel[
+        CodeModeOwnedThreadItem
+        | CodeModeThreadItem
+        | ToolInputThreadItem
+        | StepAdmissionThreadItem
+        | ArrivalThreadItem
+        | UserMessageThreadItem
+        | HookPromptThreadItem
+        | AgentMessageThreadItem
+        | FunctionCallOutputThreadItem
+        | ToolOutputTokensThreadItem
+        | PlanThreadItem
+        | ReasoningThreadItem
+        | ThoughtThreadItem
+        | PreambleThreadItem
+        | CommandExecutionThreadItem
+        | FileChangeThreadItem
+        | McpToolCallThreadItem
+        | DynamicToolCallThreadItem
+        | CollabAgentToolCallThreadItem
+        | SubAgentActivityThreadItem
+        | WebSearchThreadItem
+        | ImageViewThreadItem
+        | SleepThreadItem
+        | FileIdThreadItem
+        | ResultThreadItem
+        | EnteredReviewModeThreadItem
+        | ExitedReviewModeThreadItem
+        | ContextCompactionThreadItem
+    ]
+):
+    root: (
+        CodeModeOwnedThreadItem
+        | CodeModeThreadItem
+        | ToolInputThreadItem
+        | StepAdmissionThreadItem
+        | ArrivalThreadItem
+        | UserMessageThreadItem
+        | HookPromptThreadItem
+        | AgentMessageThreadItem
+        | FunctionCallOutputThreadItem
+        | ToolOutputTokensThreadItem
+        | PlanThreadItem
+        | ReasoningThreadItem
+        | ThoughtThreadItem
+        | PreambleThreadItem
+        | CommandExecutionThreadItem
+        | FileChangeThreadItem
+        | McpToolCallThreadItem
+        | DynamicToolCallThreadItem
+        | CollabAgentToolCallThreadItem
+        | SubAgentActivityThreadItem
+        | WebSearchThreadItem
+        | ImageViewThreadItem
+        | SleepThreadItem
+        | FileIdThreadItem
+        | ResultThreadItem
+        | EnteredReviewModeThreadItem
+        | ExitedReviewModeThreadItem
+        | ContextCompactionThreadItem
+    )
+
+
+class ThreadTimelineEntry(
+    RootModel[
+        ItemThreadTimelineEntry
+        | RealtimeThreadTimelineEntry
+        | TurnStartedThreadTimelineEntry
+        | TurnCompletedThreadTimelineEntry
+    ]
+):
+    root: Annotated[
+        ItemThreadTimelineEntry
+        | RealtimeThreadTimelineEntry
+        | TurnStartedThreadTimelineEntry
+        | TurnCompletedThreadTimelineEntry,
+        Field(description="EXPERIMENTAL - one item or turn boundary in canonical rollout order."),
+    ]
+
+
 CodeModeOwnedForServerNotification.model_rebuild()
 ItemCompletedNotification.model_rebuild()
 ItemStartedNotification.model_rebuild()
@@ -15979,4 +15678,7 @@ TurnStartedServerNotification.model_rebuild()
 TurnCompletedServerNotification.model_rebuild()
 Thread.model_rebuild()
 CodeModeOwnedThreadItem.model_rebuild()
+ThreadItemEntry.model_rebuild()
+ItemThreadTimelineEntry.model_rebuild()
 ThreadTurnsListResponse.model_rebuild()
+Turn.model_rebuild()

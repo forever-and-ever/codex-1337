@@ -13,6 +13,7 @@ use codex_guardian_reviewer::GuardianReviewError;
 use codex_guardian_reviewer::GuardianReviewOutcome;
 #[cfg(test)]
 use codex_guardian_reviewer::GuardianReviewSessionLimits;
+use codex_guardian_reviewer::ReviewDeadline;
 use codex_guardian_reviewer::ReviewModel;
 #[cfg(test)]
 use codex_guardian_reviewer::run_with_retry;
@@ -25,7 +26,6 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::GuardianNodeReplPolicy;
@@ -183,7 +183,7 @@ pub(super) async fn guardian_review_session_config_for_route(
 pub(super) struct ReviewAttemptOptions {
     pub(super) authorization: Option<ReviewAuthorization>,
     pub(super) external_cancel: Option<CancellationToken>,
-    pub(super) deadline: Instant,
+    pub(super) deadline: ReviewDeadline,
 }
 
 /// Runs the guardian in a locked-down reusable review session.
@@ -277,7 +277,7 @@ pub(super) async fn run_guardian_review_session_with_retry(
         external_cancel,
         GuardianReviewSessionLimits {
             max_attempts,
-            deadline: Instant::now() + GUARDIAN_REVIEW_TIMEOUT,
+            deadline: ReviewDeadline::from_timeout(Some(GUARDIAN_REVIEW_TIMEOUT)),
         },
     )
     .await

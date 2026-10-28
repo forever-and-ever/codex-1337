@@ -16,6 +16,7 @@ use codex_api::AnthropicStreamOptions;
 use codex_api::AnthropicTool;
 use codex_api::AnthropicToolIdentity;
 use codex_api::ApiError;
+use codex_api::AuthError;
 use codex_api::AuthProvider;
 use codex_api::Provider;
 use codex_api::ResponseEvent;
@@ -63,7 +64,9 @@ struct Case {
 
 struct NoAuth;
 impl AuthProvider for NoAuth {
-    fn add_auth_headers(&self, _: &mut HeaderMap) {}
+    fn add_auth_headers(&self, _: &mut HeaderMap) -> Result<(), AuthError> {
+        Ok(())
+    }
 }
 
 struct Offline {

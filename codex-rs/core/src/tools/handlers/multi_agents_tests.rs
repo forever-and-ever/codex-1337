@@ -119,6 +119,7 @@ fn invocation(
             crate::tools::context::ToolCallSource::Direct
         },
         payload,
+        environments: Default::default(),
     }
 }
 

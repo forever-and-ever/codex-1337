@@ -4,13 +4,16 @@ use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_features::Feature;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
+use core_test_support::exec_server::ExecServerProcess;
 use core_test_support::mock_server;
 use core_test_support::responses;
 use core_test_support::responses::ev_assistant_message;
@@ -19,6 +22,7 @@ use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
+use core_test_support::test_codex::environment_config_for_selection;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
@@ -39,14 +43,48 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
     let mut builder = test_codex()
         .with_code_mode_host_program("codex-code-mode-host-does-not-exist".into())
         .with_config(|config| {
+            for feature in [Feature::CodeModeOnly, Feature::CodexHooks] {
+                config.features.enable(feature).expect("enable script hooks");
+            }
             config
-                .features
-                .enable(Feature::CodeModeOnly)
-                .expect("enable code mode only");
+                .set_legacy_sandbox_policy(SandboxPolicy::ReadOnly { network_access: false })
+                .expect("owner environments inherit the reviewed read-only sandbox");
         });
     let test = builder.build_with_auto_env(&server).await?;
     let workdir = create_workspace_directory(&test, "script-cwd").await?;
+    let mut executor = None;
+    let executor_url = if let Some(url) = test.executor_environment().exec_server_url() {
+        url
+    } else {
+        &executor.insert(ExecServerProcess::start().await?).websocket_url
+    };
+    let primary = test.executor_environment().selection().clone();
+    let mut secondary = primary.clone();
+    secondary.environment_id = "script-owner".to_string();
+    test.thread_manager.environment_manager().upsert_environment(
+        secondary.environment_id.clone(),
+        executor_url.to_owned(),
+        /*connect_timeout*/ None,
+    )?;
+    let mut selections = vec![primary, secondary];
+    for (index, selection) in selections.iter_mut().enumerate() {
+        let command = if index == 0 {
+            r#"printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"unrelated executor hook"}}'"#
+        } else {
+            // Echo the hook's actual input: hook processing must preserve the raw metadata's executor.
+            r#"python3 -c 'import json, sys; incoming = json.load(sys.stdin); print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": incoming["tool_input"], "additionalContext": "raw script owner hook"}}))'"#
+        };
+        let mut config = environment_config_for_selection(&test.config, selection);
+        config.environment_hooks = serde_json::from_value(json!({
+            "PreToolUse": [{
+                "selector": {"type": "tool", "namespace": "^functions$", "name": format!("^{language}$")},
+                "hooks": [{"type": "command", "command": command}],
+            }],
+        }))?;
+        selection.config = EnvironmentConfigState::Ready(config);
+    }
     let metadata = json!({
+        "environment_id": selections[1].environment_id,
         "workdir": "script-cwd", "max_output_tokens": 500, "background": background,
         "sandbox_permissions": "require_escalated", "justification": "Review the complete raw script",
     });
@@ -116,6 +154,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
+                environments: Some(TurnEnvironmentSelections::new(test.config.cwd.clone(), selections).into_requests()),
                 approval_policy: Some(AskForApproval::OnRequest),
                 sandbox_policy: Some(SandboxPolicy::ReadOnly {
                     network_access: false,
@@ -176,6 +215,8 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         );
     }
     let request = requests.last().expect("follow-up request");
+    assert!(request.message_input_texts("developer").iter().any(|text| text.contains("raw script owner hook")),
+        "only the metadata-selected executor hook should accept the immutable script");
     for index in 0..invalid.len() {
         let output = request.custom_tool_call_output(&format!("invalid-{index}"));
         assert!(
@@ -220,6 +261,7 @@ async fn raw_script_execution_contract(language: &str, background: bool) -> Resu
         output.output,
         "quote=' double=\" slash=\\ Unicode=λ\nscript-cwd\n"
     );
+    test.codex.shutdown_and_wait().await?;
     Ok(())
     }))
     .await

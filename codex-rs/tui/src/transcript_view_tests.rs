@@ -1,6 +1,7 @@
 //! Viewport behavior and cache lifetime across scrolling, selection, and redraws.
 
 use super::*;
+use crate::history_cell::new_user_prompt;
 use crate::transcript_geometry::GUTTER_COLUMNS;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -39,6 +40,15 @@ pub(super) fn cell(text: impl Into<String>) -> Arc<dyn HistoryCell> {
     })
 }
 
+fn prompt(text: impl Into<String>) -> Arc<dyn HistoryCell> {
+    Arc::new(new_user_prompt(
+        text.into(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    ))
+}
+
 pub(super) fn render(
     view: &mut TranscriptView,
     cells: &[Arc<dyn HistoryCell>],
@@ -62,6 +72,127 @@ pub(super) fn text(buffer: &Buffer) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn consecutive_user_prompts_preserve_owned_headers_and_gaps() {
+    use crate::history_cell::AgentMessageCell;
+    use crate::history_cell::new_spoken_user_prompt;
+    use codex_protocol::user_input::TextElement;
+
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        prompt("First steering message"),
+        prompt("Second steering message"),
+        Arc::new(AgentMessageCell::new(
+            vec!["Assistant response".into()],
+            /*is_first_line*/ true,
+        )),
+        Arc::new(new_spoken_user_prompt(String::new())),
+        Arc::new(new_user_prompt(
+            "   ".into(),
+            vec![TextElement::new((0..3).into(), Some("   ".into()))],
+            Vec::new(),
+            Vec::new(),
+        )),
+        prompt("Later user message"),
+    ];
+    let mut view = TranscriptView::default();
+    let buffer = render(&mut view, &cells, /*width*/ 80, /*height*/ 32);
+    let rendered = text(&buffer);
+    for content in [
+        "First steering message",
+        "Second steering message",
+        "Assistant response",
+        "Later user message",
+    ] {
+        assert!(rendered.contains(content), "{rendered}");
+    }
+    assert_eq!(rendered.matches("User").count(), 5, "{rendered}");
+    assert_eq!(
+        (0..cells.len())
+            .map(|index| view.current_layout(&cells, index).unwrap().separated)
+            .collect::<Vec<_>>(),
+        [false, false, true, true, false, false],
+    );
+    for (index, cell) in cells.iter().enumerate() {
+        let alone = [Arc::clone(cell)];
+        let source = view.current_layout(&alone, 0).unwrap().text().to_owned();
+        let joined = view.current_layout(&cells, index).unwrap();
+        assert_eq!(joined.text(), source, "cell {index}");
+        assert_eq!(joined.rewrap(/*width*/ 18).text(), source, "cell {index}");
+    }
+}
+
+#[test]
+fn prompt_adjacency_uses_cached_retained_presentations() {
+    let renders = Arc::new(AtomicUsize::new(0));
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        Arc::new(TestCell {
+            text: "response".into(),
+            renders: Arc::clone(&renders),
+        }),
+        prompt("steering"),
+    ];
+    let mut view = TranscriptView::default();
+
+    view.current_layout(&cells, /*index*/ 0);
+    view.current_layout(&cells, /*index*/ 1);
+    view.current_layout(&cells, /*index*/ 1);
+
+    assert_eq!(renders.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn joined_prompt_preserves_source_offsets_across_rewrap() {
+    let cells = vec![prompt("older"), prompt("one\n\ntwo")];
+    let mut view = TranscriptView::default();
+    let unjoined = [Arc::clone(&cells[1])];
+    let source = view
+        .current_layout(&unjoined, /*index*/ 0)
+        .unwrap()
+        .text()
+        .to_owned();
+    let joined = view.current_layout(&cells, /*index*/ 1).unwrap();
+
+    assert_eq!(
+        (joined.text(), joined.rewrap(/*width*/ 8).text()),
+        (source.as_str(), source.as_str())
+    );
+}
+
+#[test]
+fn detailed_only_reasoning_separates_user_prompts() {
+    use crate::history_cell::ReasoningSummaryCell;
+    use std::path::Path;
+
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        prompt("first"),
+        Arc::new(ReasoningSummaryCell::new(
+            "Reasoning".into(),
+            "visible detail".into(),
+            Path::new("."),
+            /*transcript_only*/ true,
+        )),
+        prompt("second"),
+    ];
+    let mut detailed = TranscriptView {
+        detailed: true,
+        ..TranscriptView::default()
+    };
+    assert!(
+        detailed
+            .current_layout(&cells, /*index*/ 2)
+            .unwrap()
+            .separated
+    );
+
+    let mut compact = TranscriptView::default();
+    assert!(
+        !compact
+            .entry_layout(&cells, /*index*/ 2, /*full_content*/ true)
+            .unwrap()
+            .separated
+    );
 }
 
 #[test]

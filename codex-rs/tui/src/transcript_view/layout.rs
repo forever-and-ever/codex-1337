@@ -285,6 +285,17 @@ impl TranscriptView {
         let mut candidate = index.min(cells.len());
         while let Some(previous) = candidate.checked_sub(/*rhs*/ 1) {
             candidate = previous;
+            if self.elides_cell(cells, previous) {
+                continue;
+            }
+            // A current Find match explicitly reveals hidden content. Retained reading
+            // layouts carry source identity, not the current lens or feed visibility.
+            if let Some(layout) = self.search.match_layout(EntryKey::cell(&cells[previous])) {
+                if layout.row_count() > 0 {
+                    return Some(previous);
+                }
+                continue;
+            }
             let transcript_only = !self.detailed
                 && self.mode == HistoryRenderMode::Rich
                 && cells[previous]
@@ -292,7 +303,6 @@ impl TranscriptView {
                     .downcast_ref::<ReasoningSummaryCell>()
                     .is_some_and(ReasoningSummaryCell::is_transcript_only);
             if self.eclipsed(cells, previous)
-                || self.elides_cell(cells, previous)
                 || transcript_only
                 || !self.feed_seat(cells, previous).is_visible()
             {

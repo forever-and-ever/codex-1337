@@ -4,7 +4,7 @@ assertion_line: 1297
 expression: rendered
 ---
 ╭─────────────────────────────────────────────────╮
-│ ✨ Update available! 0.164.0 -> 9.9.9           │
+│ ✨ Update available! 0.165.0 -> 9.9.9           │
 │ Run pnpm add -g @openai/codex to update.        │
 │                                                 │
 │ See full release notes:                         │

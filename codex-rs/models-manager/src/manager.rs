@@ -1,4 +1,5 @@
 use super::cache::FileModelsCache;
+use crate::ModelCatalogOriginator;
 use crate::cache::ModelsCache;
 use crate::cache::ModelsCacheEntry;
 use crate::collaboration_mode_presets::builtin_collaboration_mode_presets;
@@ -17,6 +18,7 @@ use codex_protocol::openai_models::ModelPreset;
 use codex_protocol::openai_models::ModelVisibility;
 use codex_protocol::openai_models::ModelsResponse;
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::path::PathBuf;
@@ -49,6 +51,14 @@ pub trait ModelsEndpointClient: fmt::Debug + Send + Sync {
     /// must not inherit bundled GPT choices or merge them into their own catalog.
     fn fallback_models(&self) -> Vec<ModelInfo> {
         load_remote_models_from_file().unwrap_or_default()
+    }
+
+    /// Return an endpoint whose requests and identity use this catalog originator.
+    fn for_originator(
+        &self,
+        _originator: ModelCatalogOriginator,
+    ) -> Option<Arc<dyn ModelsEndpointClient>> {
+        None
     }
 
     /// Opaque identity of the current provider and credentials, without resolving auth.
@@ -136,6 +146,11 @@ pub trait ModelsManager: fmt::Debug + Send + Sync {
     /// Normalization precedes explicit configuration overrides, including context limits.
     fn model_info_normalizer(&self) -> fn(ModelInfo) -> ModelInfo {
         std::convert::identity
+    }
+
+    /// Select an isolated catalog for a supported thread originator. `None` retains this manager.
+    fn for_originator(&self, _originator: &str) -> Option<SharedModelsManager> {
+        None
     }
 
     /// Supply startup API-key discovery policy; live changes require a new session.
@@ -313,11 +328,12 @@ impl CatalogSource {
 #[derive(Debug)]
 pub struct OpenAiModelsManager {
     catalog_refresh: tokio::sync::Semaphore,
+    originator_managers: std::sync::Mutex<HashMap<ModelCatalogOriginator, SharedModelsManager>>,
     remote_models: RwLock<ModelsCacheEntry>,
     cache: Option<Arc<dyn ModelsCache>>,
     endpoint_client: SharedModelsEndpointClient,
     catalog_source: CatalogSource,
-    api_key_model_discovery_enabled: AtomicBool,
+    api_key_model_discovery_enabled: Arc<AtomicBool>,
     auth_manager: Option<Arc<AuthManager>>,
 }
 
@@ -375,6 +391,7 @@ impl OpenAiModelsManager {
         let remote_models = endpoint_client.fallback_models();
         Self {
             catalog_refresh: tokio::sync::Semaphore::new(/*permits*/ 1),
+            originator_managers: std::sync::Mutex::new(HashMap::new()),
             remote_models: RwLock::new(ModelsCacheEntry {
                 fetched_at: Utc::now(),
                 etag: None,
@@ -383,7 +400,7 @@ impl OpenAiModelsManager {
                 models: remote_models,
             }),
             cache,
-            api_key_model_discovery_enabled: AtomicBool::new(false),
+            api_key_model_discovery_enabled: Arc::new(AtomicBool::new(false)),
             endpoint_client,
             catalog_source: CatalogSource::Default,
             auth_manager,
@@ -445,6 +462,32 @@ impl ModelsManager for OpenAiModelsManager {
             };
         })
     }
+
+    fn for_originator(&self, originator: &str) -> Option<SharedModelsManager> {
+        let originator = ModelCatalogOriginator::from_originator(originator)?;
+        let mut managers = self
+            .originator_managers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(manager) = managers.get(&originator) {
+            return Some(Arc::clone(manager));
+        }
+        let endpoint = self.endpoint_client.for_originator(originator)?;
+        // A backend that cannot partition must not overwrite the default catalog.
+        let cache = self
+            .cache
+            .as_ref()
+            .and_then(|cache| cache.for_originator(originator));
+        let mut manager = Self::new_with_optional_cache(cache, endpoint, self.auth_manager.clone());
+        if matches!(self.catalog_source, CatalogSource::ExplicitProvider) {
+            manager = manager.with_provider_catalog();
+        }
+        manager.api_key_model_discovery_enabled = Arc::clone(&self.api_key_model_discovery_enabled);
+        let manager: SharedModelsManager = Arc::new(manager);
+        managers.insert(originator, Arc::clone(&manager));
+        Some(manager)
+    }
+
     fn set_api_key_model_discovery_enabled(&self, enabled: bool) {
         self.api_key_model_discovery_enabled
             .store(enabled, Ordering::SeqCst);

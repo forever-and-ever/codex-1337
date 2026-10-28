@@ -129,6 +129,9 @@ pub struct RemoteNetworkProxyConfig {
     pub dangerously_allow_all_unix_sockets: bool,
     pub mode: NetworkMode,
     pub domains: Option<NetworkDomainPermissions>,
+    /// Clients must require the `networkProxyReviewDomains` executor capability when nonempty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_domains: Vec<String>,
     pub unix_sockets: Option<NetworkUnixSocketPermissions>,
     pub allow_local_binding: bool,
 }
@@ -155,6 +158,7 @@ impl RemoteNetworkProxyConfig {
                 .unwrap_or(false),
             mode: config.mode,
             domains: config.domains.clone(),
+            review_domains: config.review_domains.clone(),
             unix_sockets: config.unix_sockets.clone(),
             allow_local_binding: config.allow_local_binding(),
         })

@@ -1,0 +1,68 @@
+---
+source: core/tests/suite/scenarios_incremental_tools.rs
+expression: "context_snapshot::format_request_history_snapshot(scenario, &requests,\n&ContextSnapshotOptions::default().rewrite_known_segments().include_request_settings(),)"
+---
+Scenario: The prediction fork preserves the parent's complete prefix and tool declarations, then appends one MCP-unavailable notice. Its second turn retains that notice without another update; continuing the parent keeps its original tools.
+
+## Window 1
+Settings:
+  include: ["reasoning.encrypted_content"]
+  model: "gpt-5.4"
+  parallel_tool_calls: false
+  prompt_cache_key: "<PROMPT_CACHE_KEY 1>"
+  reasoning: {"context":"all_turns","effort":"medium"}
+  store: false
+  stream: true
+  text: {"verbosity":"low"}
+  tool_choice: "auto"
+-- request 1 (turn) --
+00:additional_tools/developer (1; hash=b560509a6af12778):
+        - namespace/functions; hash=df1829300f8b8cd4
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
+          - function/request_user_input
+          - function/fence
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+03:message/user:
+    <ENVIRONMENT_CONTEXT>
+04:message/user:
+    Start with the echo service.
+-- request 2 (turn) --
+05:message/developer:
+    <mcp_tools>
+    MCP tools are unavailable for this request.
+    </mcp_tools>
+06:message/user:
+    Predict the next message.
+-- request 3 (turn) --
+07:message/user:
+    Predict again.
+
+## Window 2 (after request 3: input diverged at item 05)
+Settings: same as window 1
+-- request 4 (turn) --
+00:additional_tools/developer (1; hash=b560509a6af12778):
+        - namespace/functions; hash=df1829300f8b8cd4
+          - custom/exec
+          - function/wait
+          - custom/python
+          - custom/bash
+          - function/write_stdin
+          - function/request_user_input
+          - function/fence
+01:message/developer:
+    <MODEL_INSTRUCTIONS>
+02:message/developer:
+    <PERMISSIONS_INSTRUCTIONS>
+03:message/user:
+    <ENVIRONMENT_CONTEXT>
+04:message/user:
+    Start with the echo service.
+05:message/user:
+    Continue using the echo service.

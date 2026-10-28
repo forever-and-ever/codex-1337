@@ -98,18 +98,19 @@ Settings:
     </environment_context>
 06:message/user:
     Check whether the Notes plugin echo tool is available.
+07:configuration_update:reasoning={"effort":"low"}
 -- request 2 (turn) --
-07:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-08:custom_tool_call_output:Script completed
+08:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
+09:custom_tool_call_output:Script completed
     Output:
      | []
 -- request 3 (turn) --
-09:message/assistant:
+10:message/assistant:
     The Notes tool is not installed yet.
-10:additional_tools/developer (1; hash=a3f3d87c7d326ef4):
+11:additional_tools/developer (1; hash=a3f3d87c7d326ef4):
         - namespace/functions: This is an incremental namespace update. Previously declared tools remain available for direct ca...; hash=5f8722a7951daa8e
           - custom/exec
-11:message/developer:
+12:message/developer:
     <skills_instructions>
     ## Skills
     A skill is a `SKILL.md` file of local instructions to follow. Entries give each skill's name, descriptio...; expand the path's alias from the skill roots table. [hash=9b09cf46082eaea7]
@@ -118,9 +119,9 @@ Settings:
     ### Available skills
     - notes:summarize: Summarize team notes (r0/notes/local/skills/summarize/SKILL.md)
     </skills_instructions>
-12:message/user:
-    I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.
 13:message/user:
+    I installed Notes. Use $notes:summarize and the Notes tool to check that Mira owns the kickoff.
+14:message/user:
     <skill>
     <name>notes:summarize</name>
     <path><PLUGINS_CACHE>/test/notes/local/skills/summarize/SKILL.md</path>
@@ -132,28 +133,28 @@ Settings:
     State the owner and date from the notes.
 
     </skill>
-14:message/developer:
+15:message/developer:
     Capabilities from the `notes` plugin:
     - Skills from this plugin are prefixed with `notes:`.
     - MCP servers from this plugin available in this session: `notes`.
     Use these plugin-associated capabilities to help solve the task.
 -- request 4 (turn) --
-15:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
-16:custom_tool_call_output:Script completed
+16:custom_tool_call/exec:text(ALL_TOOLS.filter(({ name }) => name === "mcp__notes__echo").map(({ name }) => name));
+17:custom_tool_call_output:Script completed
     Output:
      | ["mcp__notes__echo"]
 -- request 5 (turn) --
-17:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
-18:custom_tool_call_output:Script completed
+18:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "Mira owns the kickoff" }); text(result.structuredContent?.echo);
+19:custom_tool_call_output:Script completed
     Output:
      | ECHOING: Mira owns the kickoff
 -- request 6 (turn) --
-19:message/assistant:
+20:message/assistant:
     The Notes plugin confirms Mira owns the kickoff.
-20:message/user:
+21:message/user:
     Use the Notes tool again to check that the kickoff is Friday.
 -- request 7 (turn) --
-21:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
-22:custom_tool_call_output:Script completed
+22:custom_tool_call/exec:const result = await tools.mcp__notes__echo({ message: "The kickoff is Friday" }); text(result.structuredContent?.echo);
+23:custom_tool_call_output:Script completed
     Output:
      | ECHOING: The kickoff is Friday

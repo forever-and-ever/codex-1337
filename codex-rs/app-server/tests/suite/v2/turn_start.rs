@@ -4276,6 +4276,7 @@ async fn multi_agent_v2_subagent_text_input_preserves_ownership(
             request_id,
             params: codex_app_server_protocol::ThreadListParams {
                 excluded_thread_ids: None,
+                attached_to_thread_id: None,
                 originators: None,
                 cursor: None,
                 limit: Some(10),

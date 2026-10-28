@@ -64,6 +64,7 @@ pub(super) async fn list(
             search_term: None,
             parent_thread_id: None,
             ancestor_thread_id: None,
+            attached_to_thread_id: None,
         })
         .await
         .map_err(error)?;

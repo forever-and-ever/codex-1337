@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::session::session::Session;
 use codex_guardian_reviewer::GuardianReviewError;
 use codex_guardian_reviewer::GuardianReviewOutcome;
+use codex_guardian_reviewer::ReviewDeadline;
 use codex_guardian_reviewer::ReviewModel;
 use codex_model_provider::DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL;
 use codex_model_provider_info::ModelProviderAdapter;
@@ -227,7 +228,7 @@ pub(super) struct ReviewerRouteUnavailable(String);
 pub(super) async fn run_review_attempt<Run, Attempt>(
     session: &Session,
     context: &GuardianReviewContext,
-    deadline: Instant,
+    deadline: ReviewDeadline,
     route_state: &Mutex<ReviewerRoute>,
     mut run: Run,
 ) -> (
@@ -247,7 +248,7 @@ where
     let mut result = run(route.clone()).await;
     if let Some(reason) = route.fallback(session, &result.0).await {
         *route_state.lock().await = route.clone();
-        if Instant::now() >= deadline {
+        if matches!(deadline, ReviewDeadline::At(at) if Instant::now() >= at) {
             return result;
         }
         let warn = session

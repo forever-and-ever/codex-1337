@@ -5765,6 +5765,7 @@
             "rateLimitExceeded",
             "flexUnavailable",
             "serverOverloaded",
+            "modelNotFound",
             "cyberPolicy",
             "misalignmentPolicyViolation",
             "tooManyDenials",
@@ -14291,6 +14292,16 @@
           "description": "When true, only managed allowlist entries are respected while managed network enforcement is active.",
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "reviewDomains": {
+          "description": "Host patterns routed to network approval before ordinary allow rules.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
             "null"
           ]
         },

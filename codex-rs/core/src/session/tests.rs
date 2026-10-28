@@ -230,6 +230,15 @@ pub(crate) fn mcp_config_for_test(config: &crate::config::Config) -> Arc<codex_m
     ))
 }
 
+pub(crate) fn test_environment_id(turn: &TurnContext) -> &str {
+    &turn
+        .initial_environments
+        .single_local_environment()
+        .expect("test turn should have one local environment")
+        .selection
+        .environment_id
+}
+
 /// Updates both initial/current views before sharing a test turn context.
 pub(crate) fn update_turn_settings_for_test(
     turn: &mut TurnContext,
@@ -2704,7 +2713,26 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
     else {
         panic!("expected resumed rollout")
     };
-    let (mut resumed_session, _resumed_turn_context, _rx) =
+    struct RegistrationPause {
+        entered: Notify,
+        release: Notify,
+    }
+    impl codex_extension_api::TurnLifecycleContributor for RegistrationPause {
+        fn on_turn_start<'a>(
+            &'a self,
+            _input: codex_extension_api::TurnStartInput<'a>,
+        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                self.entered.notify_one();
+                self.release.notified().await;
+            })
+        }
+    }
+    let registration = Arc::new(RegistrationPause {
+        entered: Notify::new(),
+        release: Notify::new(),
+    });
+    let (mut resumed_session, resumed_turn_context, _rx) =
         make_session_and_context_with_auth_and_config_and_rx(
             CodexAuth::from_api_key("Test API Key"),
             Vec::new(),
@@ -2712,6 +2740,9 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         )
         .await;
     let resumed_mut = Arc::get_mut(&mut resumed_session).expect("unique resumed fixture");
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::<Config>::new();
+    extensions.turn_lifecycle_contributor(registration.clone());
+    resumed_mut.services.extensions = Arc::new(extensions.build());
     resumed_mut.thread_id = session.thread_id;
     resumed_mut.services.state_db = Some(reopened.clone());
     resumed_mut.services.live_thread = session.services.live_thread.clone();
@@ -2742,6 +2773,135 @@ async fn record_inter_agent_communication_preserves_item_id_in_rollout_and_resum
         reopened
             .thread_queue()
             .agent_mail(session.thread_id, &uncertain_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Admitted
+    );
+    // Preparation must not transfer accepted mailbox custody. An interrupt at
+    // the last setup wait invalidates only this reservation, not a later wake.
+    let mut deferred = communication.clone();
+    deferred.id = None;
+    deferred.content = "mail held through abandoned registration".into();
+    let deferred_id = ResponseItemId::new("amsg_mail");
+    reopened
+        .thread_queue()
+        .accept_agent_mail(
+            &deferred_id,
+            session.thread_id,
+            sender,
+            session.thread_id,
+            "abandoned registration",
+            &digest,
+            &serde_json::to_string(&deferred).unwrap(),
+        )
+        .await
+        .unwrap();
+    deferred.id = Some(deferred_id.clone());
+    assert!(
+        resumed_session
+            .receive_accepted_agent_mail(&deferred)
+            .await
+            .unwrap()
+    );
+    resumed_session
+        .input_queue
+        .enqueue_mailbox_communication(deferred.clone().into(), Default::default())
+        .await;
+    let (reservation, _) = resumed_session.reserve_pending_work_turn().await.unwrap();
+    let account_work = resumed_session.account_work.acquire().await.unwrap();
+    let mut launch = Box::pin(resumed_session.start_task(
+        Arc::clone(&resumed_turn_context),
+        crate::tasks::admission::TaskAdmission::Reserved {
+            input: Vec::new(),
+            turn_state: Arc::clone(&reservation),
+        },
+        RegularTask::new(),
+    ));
+    tokio::select! {
+        result = &mut launch => panic!("registration completed before its gate: {result:?}"),
+        _ = registration.entered.notified() => {}
+    }
+    assert_eq!(
+        resumed_session
+            .input_queue
+            .pending_mailbox_snapshot()
+            .await
+            .0,
+        vec![deferred.clone().into()]
+    );
+    registration.release.notify_one();
+    assert!(futures::poll!(launch.as_mut()).is_pending());
+    resumed_session
+        .abort_all_tasks(TurnAbortReason::Interrupted)
+        .await;
+    let (replacement, _) = resumed_session.reserve_pending_work_turn().await.unwrap();
+    drop(account_work);
+    launch.await.unwrap();
+    {
+        let active = resumed_session.active_turn.lock().await;
+        let turn = active.as_ref().expect("the replacement owns later work");
+        assert!(Arc::ptr_eq(&turn.turn_state, &replacement));
+        assert!(turn.task.is_none());
+    }
+    assert!(reservation.lock().await.pending_input.is_empty());
+    assert!(replacement.lock().await.pending_input.is_empty());
+    assert_eq!(
+        resumed_session
+            .input_queue
+            .pending_mailbox_snapshot()
+            .await
+            .0,
+        vec![deferred.clone().into()]
+    );
+    assert!(matches!(
+        reopened
+            .thread_queue()
+            .agent_mail(session.thread_id, &deferred_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        codex_state::AgentMailState::Pending(_)
+    ));
+    {
+        let mut active = resumed_session.active_turn.lock().await;
+        assert!(active.as_ref().is_some_and(|turn| {
+            turn.task.is_none() && Arc::ptr_eq(&turn.turn_state, &replacement)
+        }));
+        *active = None;
+    }
+    let queued = resumed_session.input_queue.drain_mailbox().await;
+    assert_eq!(queued.len(), 1);
+    resumed_session
+        .record_accepted_agent_mail(
+            &resumed_turn_context,
+            resumed_turn_context.model_info(),
+            &queued[0].communication,
+        )
+        .await
+        .unwrap();
+    resumed_session.recover_accepted_agent_mail().await.unwrap();
+    assert!(
+        !resumed_session
+            .input_queue
+            .has_pending_mailbox_items()
+            .await
+    );
+    assert_eq!(
+        resumed_session
+            .clone_history()
+            .await
+            .raw_items()
+            .filter(|item| item.id() == Some(&deferred_id))
+            .count(),
+        1
+    );
+    assert_eq!(
+        reopened
+            .thread_queue()
+            .agent_mail(session.thread_id, &deferred_id)
             .await
             .unwrap()
             .unwrap()
@@ -4755,6 +4915,7 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
     let live_thread = LiveThread::create(
         Arc::clone(&session.services.thread_store),
         CreateThreadParams {
+            attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -6714,6 +6875,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         provider_id: config.model_provider_id.clone(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
+        parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
@@ -6912,6 +7074,7 @@ async fn make_session_with_config_and_rx(
     let session = Session::new(
         /*startup*/ None,
         session_configuration,
+        /*attached_thread*/ false,
         PromptCacheKey::default(),
         &default_environments,
         Arc::clone(&config),
@@ -7050,6 +7213,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
     let session = Session::new(
         /*startup*/ None,
         session_configuration,
+        /*attached_thread*/ false,
         PromptCacheKey::default(),
         &default_environments,
         Arc::clone(&config),
@@ -7532,11 +7696,13 @@ async fn request_permissions_tool_resolves_legacy_paths_against_selected_environ
             current_environment.shell,
         )
     };
-    turn_context_mut.initial_environments.environments[0] =
-        TurnEnvironmentState::Ready(environment);
+    turn_context_mut
+        .initial_environments
+        .environments
+        .push(TurnEnvironmentState::Ready(environment));
 
     let call_id = "call-1".to_string();
-    let handler = RequestPermissionsHandler;
+    let registry = ToolRegistry::with_handler_for_test(Arc::new(RequestPermissionsHandler));
     let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
     let handle = tokio::spawn({
@@ -7546,30 +7712,32 @@ async fn request_permissions_tool_resolves_legacy_paths_against_selected_environ
         let tracker = Arc::clone(&tracker);
         let call_id = call_id.clone();
         async move {
-            handler
-                .handle(ToolInvocation {
-                    session,
-                    step_context,
-                    turn: turn_context,
-                    cancellation_token: CancellationToken::new(),
-                    tracker,
-                    call_id,
-                    tool_name: codex_tools::ToolName::plain("request_permissions"),
-                    source: ToolCallSource::Direct,
-                    payload: ToolPayload::Function {
-                        arguments: json!({
-                            "environment_id": "remote",
-                            "reason": "need write",
-                            "permissions": {
-                                "file_system": {
-                                    "read": null,
-                                    "write": ["relative.txt", "~/home-relative.txt"],
-                                },
+            let invocation = ToolInvocation {
+                session,
+                step_context,
+                turn: turn_context,
+                cancellation_token: CancellationToken::new(),
+                tracker,
+                call_id,
+                tool_name: codex_tools::ToolName::plain("request_permissions"),
+                source: ToolCallSource::Direct,
+                environments: Default::default(),
+                payload: ToolPayload::Function {
+                    arguments: json!({
+                        "environment_id": "remote",
+                        "reason": "need write",
+                        "permissions": {
+                            "file_system": {
+                                "read": null,
+                                "write": ["relative.txt", "~/home-relative.txt"],
                             },
-                        })
-                        .to_string(),
-                    },
-                })
+                        },
+                    })
+                    .to_string(),
+                },
+            };
+            registry
+                .dispatch_any_with_state(invocation, /*call_state*/ None)
                 .await
         }
     });
@@ -7630,28 +7798,31 @@ async fn request_permissions_tool_rejects_invalid_requests(
     environment.selection.cwd = PathUri::parse("file:///workspace/%FF").expect("non-UTF8 cwd");
     let turn_context = Arc::new(turn_context);
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
-    let result = RequestPermissionsHandler
-        .handle(ToolInvocation {
-            session: Arc::new(session),
-            step_context,
-            turn: turn_context,
-            cancellation_token: CancellationToken::new(),
-            tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
-            call_id: "call-1".to_string(),
-            tool_name: codex_tools::ToolName::plain("request_permissions"),
-            source: ToolCallSource::Direct,
-            payload: ToolPayload::Function {
-                arguments: json!({
-                    "environment_id": environment_id,
-                    "permissions": {
-                        "file_system": {
-                            "write": ["relative"],
-                        },
+    let registry = ToolRegistry::with_handler_for_test(Arc::new(RequestPermissionsHandler));
+    let invocation = ToolInvocation {
+        session: Arc::new(session),
+        step_context,
+        turn: turn_context,
+        cancellation_token: CancellationToken::new(),
+        tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+        call_id: "call-1".to_string(),
+        tool_name: codex_tools::ToolName::plain("request_permissions"),
+        source: ToolCallSource::Direct,
+        environments: Default::default(),
+        payload: ToolPayload::Function {
+            arguments: json!({
+                "environment_id": environment_id,
+                "permissions": {
+                    "file_system": {
+                        "write": ["relative"],
                     },
-                })
-                .to_string(),
-            },
-        })
+                },
+            })
+            .to_string(),
+        },
+    };
+    let result = registry
+        .dispatch_any_with_state(invocation, /*call_state*/ None)
         .await;
 
     let Err(FunctionCallError::RespondToModel(output)) = result else {
@@ -8146,6 +8317,7 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -8266,6 +8438,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -8749,6 +8922,7 @@ where
         provider_id: config.model_provider_id.clone(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
         tx_event,
+        parent_observer_event_tx: OnceLock::new(),
         agent_status: agent_status_tx,
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
@@ -11338,6 +11512,7 @@ async fn attach_in_memory_thread_store(
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: session.session_id(),
@@ -13012,6 +13187,7 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
             call_id: "exec-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "echo hi",

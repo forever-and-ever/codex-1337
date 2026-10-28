@@ -37,13 +37,15 @@ pub enum SortDirection {
     Desc,
 }
 
-/// Spawn-graph relationship used to filter thread listings.
+/// Thread relationship used to filter thread listings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadRelationFilter {
     /// Return retained children whose immediate parent is the given thread.
     DirectChildrenOf(ThreadId),
     /// Return descendants reached through retained spawn edges only.
     DescendantsOf(ThreadId),
+    /// Return only saved threads attached to this parent.
+    AttachedThreadsOf(ThreadId),
 }
 
 /// A pagination anchor used for keyset pagination.
@@ -124,6 +126,8 @@ pub struct ExtractionOutcome {
 /// Canonical persisted thread metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadMetadata {
+    /// The parent of an attached thread, derived from canonical rollout metadata.
+    pub attached_thread_parent_id: Option<ThreadId>,
     /// Originator recorded at creation, if available.
     pub originator: Option<String>,
     /// ChatGPT user that created the thread, if known.
@@ -300,6 +304,7 @@ impl ThreadMetadataBuilder {
             .unwrap_or(updated_at);
         let guardian_review = crate::is_guardian_review_source(&self.source);
         ThreadMetadata {
+            attached_thread_parent_id: None,
             originator: self.originator.clone(),
             creator_user_id: self.creator_user_id.clone(),
             creator_account_id: self.creator_account_id.clone(),
@@ -512,6 +517,7 @@ fn canonicalize_datetime(dt: DateTime<Utc>) -> DateTime<Utc> {
 
 #[derive(Debug)]
 pub(crate) struct ThreadRow {
+    attached_thread_parent_id: Option<String>,
     originator: Option<String>,
     creator_user_id: Option<String>,
     creator_account_id: Option<String>,
@@ -556,6 +562,7 @@ pub(crate) struct ThreadRow {
 impl ThreadRow {
     pub(crate) fn try_from_row(row: &SqliteRow) -> Result<Self> {
         Ok(Self {
+            attached_thread_parent_id: row.try_get("attached_thread_parent_id")?,
             originator: row.try_get("originator")?,
             creator_user_id: row.try_get("creator_user_id")?,
             creator_account_id: row.try_get("creator_account_id")?,
@@ -604,6 +611,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
 
     fn try_from(row: ThreadRow) -> std::result::Result<Self, Self::Error> {
         let ThreadRow {
+            attached_thread_parent_id,
             originator,
             creator_user_id,
             creator_account_id,
@@ -667,6 +675,9 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
         };
         Ok(Self {
             id: ThreadId::try_from(id)?,
+            attached_thread_parent_id: attached_thread_parent_id
+                .map(ThreadId::try_from)
+                .transpose()?,
             originator,
             creator_user_id,
             creator_account_id,
@@ -789,6 +800,7 @@ mod tests {
 
     fn thread_row(reasoning_effort: Option<&str>) -> ThreadRow {
         ThreadRow {
+            attached_thread_parent_id: None,
             originator: None,
             creator_user_id: None,
             creator_account_id: None,
@@ -833,6 +845,7 @@ mod tests {
 
     fn expected_thread_metadata(reasoning_effort: Option<ReasoningEffort>) -> ThreadMetadata {
         ThreadMetadata {
+            attached_thread_parent_id: None,
             originator: None,
             creator_user_id: None,
             creator_account_id: None,

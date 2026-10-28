@@ -6,6 +6,7 @@ use crate::guardian::GuardianReviewOutcome;
 use crate::guardian::review::run_guardian_review_session_before_deadline;
 use crate::session::tests::make_session_and_context;
 use crate::session::tests::update_turn_settings_for_test;
+use codex_guardian_reviewer::ReviewDeadline;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::NetworkPolicy;
 use codex_http_client::OutboundProxyPolicy;
@@ -168,7 +169,7 @@ async fn claude_subscription_review_spawns_chatgpt_reviewer_with_saved_account()
         crate::guardian::review::ReviewAttemptOptions {
             authorization: None,
             external_cancel: None,
-            deadline: Instant::now() + Duration::from_secs(15),
+            deadline: ReviewDeadline::At(Instant::now() + Duration::from_secs(15)),
         },
         &route,
     ))
@@ -208,7 +209,7 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
 
     // A transport failure is not a verdict. The fallback must preserve the review's
     // route across retries, and an exhausted deadline must not consume its warning.
-    for time_remains in [true, false] {
+    for timeout in [Some(Duration::from_secs(60)), Some(Duration::ZERO), None] {
         let (session, turn, rx) =
             Box::pin(crate::session::tests::make_session_and_context_with_rx()).await;
         let context = GuardianReviewContext::from(turn);
@@ -218,11 +219,8 @@ async fn route_failure_quarantines_and_falls_back_only_with_remaining_time() {
         };
         let route = Mutex::new(chosen.clone());
         let before = Instant::now();
-        let deadline = if time_remains {
-            before + Duration::from_secs(/*secs*/ 60)
-        } else {
-            before - Duration::from_secs(/*secs*/ 1)
-        };
+        let deadline = ReviewDeadline::from_timeout(timeout);
+        let time_remains = timeout != Some(Duration::ZERO);
         let assessment = GuardianAssessment {
             risk_level: GuardianRiskLevel::Low,
             user_authorization: GuardianUserAuthorization::Unknown,

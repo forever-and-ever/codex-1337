@@ -35,8 +35,10 @@ use test_case::test_case;
 use super::super::rmcp_client::remote_aware_environment_id;
 use super::super::rmcp_client::remote_aware_stdio_server_bin;
 
+#[test_case(false; "update MCP declarations by default")]
+#[test_case(true; "preserve inherited declarations when enabled")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prediction_fork_appends_mcp_removal_without_rewriting_history() -> Result<()> {
+async fn prediction_fork_keeps_inherited_tools(preserve_parent_tools: bool) -> Result<()> {
     skip_if_wine_exec!(
         Ok(()),
         "requires a Windows test_stdio_server in the Wine-exec environment"
@@ -44,96 +46,130 @@ async fn prediction_fork_appends_mcp_removal_without_rewriting_history() -> Resu
     skip_if_no_network!(Ok(()));
     let server = core_test_support::responses::start_mock_server().await;
     core_test_support::mock_server::run(&[&server], async {
-    let mcp = serde_json::from_value(json!({
-        "command": remote_aware_stdio_server_bin()?,
-        "environment_id": remote_aware_environment_id(),
-        "enabled_tools": ["echo"],
-        "required": true,
-    }))?;
-    let mut test = test_codex()
-        .with_model_info_override("gpt-5.4", |model| {
-            model.use_responses_lite = true;
-            model.supports_search_tool = false;
-            model.tool_mode = Some(ToolMode::Direct);
-        })
-        .with_config(move |config| {
-            config.workspace_roots = vec![config.cwd.clone()];
-            config.base_instructions = Some("Use the available tools to help the user.".into());
-            config
-                .features
-                .enable(Feature::IncrementalTools)
-                .expect("enable incremental tools");
-            config
-                .mcp_servers
-                .set(std::collections::HashMap::from([(
+        let mcp = serde_json::from_value(json!({
+            "command": remote_aware_stdio_server_bin()?,
+            "environment_id": remote_aware_environment_id(),
+            "enabled_tools": ["echo"],
+            "required": true,
+        }))?;
+        let mut test = test_codex()
+            .with_model_info_override("gpt-5.4", |model| {
+                model.use_responses_lite = true;
+                model.supports_search_tool = false;
+                model.tool_mode = Some(ToolMode::CodeModeOnly);
+            })
+            .with_config(move |config| {
+                config.workspace_roots = vec![config.cwd.clone()];
+                config.base_instructions = Some("Use the available tools to help the user.".into());
+                config.features.enable(Feature::IncrementalTools)
+                    .expect("enable incremental tools");
+                if preserve_parent_tools {
+                    config.features.enable(Feature::PredictionPreserveParentTools)
+                        .expect("enable inherited prediction tools");
+                }
+                config.mcp_servers.set(std::collections::HashMap::from([(
                     "echo_service".into(),
                     mcp,
-                )]))
-                .expect("set MCP server");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    wait_for_mcp_server(&test.codex, "echo_service").await?;
-    let mock = responses::mount_sse_sequence(
-        &server,
-        ["parent", "child", "child-again", "parent-again"]
-            .into_iter()
-            .map(|id| responses::sse(vec![responses::ev_completed(id)]))
-            .collect(),
-    )
-    .await;
-    test.submit_text_turn("Start with the echo service.")
-        .await?;
+                )])).expect("set MCP server");
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        wait_for_mcp_server(&test.codex, "echo_service").await?;
+        let mock = responses::mount_sse_sequence(
+            &server,
+            ["parent", "child", "child-again", "parent-again"]
+                .into_iter()
+                .map(|id| responses::sse(vec![responses::ev_completed(id)]))
+                .collect(),
+        ).await;
+        test.submit_text_turn("Start with the echo service.").await?;
 
-    let parent = std::sync::Arc::clone(&test.codex);
-    parent.flush_rollout().await?;
-    let (mut options, settings) = test
-        .thread_manager
-        .fork_options_from_parent(test.session_configured.thread_id)
-        .await?;
-    // Match experimentalPredictionMode with experimentalDisablePredictionMcp enabled.
-    options.config.ephemeral = true;
-    options
-        .config
-        .features
-        .enable(Feature::ReasoningEffortOverride)?;
-    options.thread_extension_init.insert(AutoCompactionDisabled);
-    options.thread_extension_init.insert(McpServersDisabled);
-    let child = test
-        .thread_manager
-        .fork_legacy_thread(
+        let parent = std::sync::Arc::clone(&test.codex);
+        parent.flush_rollout().await?;
+        let (mut options, settings) = test.thread_manager
+            .fork_options_from_parent(test.session_configured.thread_id).await?;
+        // Match experimentalPredictionMode with experimentalDisablePredictionMcp enabled.
+        options.config.ephemeral = true;
+        options.config.features.enable(Feature::ReasoningEffortOverride)?;
+        options.thread_extension_init.insert(AutoCompactionDisabled);
+        options.thread_extension_init.insert(McpServersDisabled);
+        let child = test.thread_manager.fork_legacy_thread(
             ForkSnapshot::Interrupted,
             options,
             parent.rollout_path().expect("parent rollout"),
-        )
-        .await?;
-    child.thread.restore_thread_settings(settings).await?;
-    test.codex = child.thread;
-    test.submit_text_turn("Predict the next message.").await?;
-    test.submit_text_turn("Predict again.").await?;
-    test.codex = parent;
-    test.submit_text_turn("Continue using the echo service.")
-        .await?;
+        ).await?;
+        child.thread.restore_thread_settings(settings).await?;
+        test.codex = child.thread;
+        test.submit_text_turn("Predict the next message.").await?;
+        test.submit_text_turn("Predict again.").await?;
+        test.codex = parent;
+        test.submit_text_turn("Continue using the echo service.").await?;
 
-    let requests = mock.requests();
-    let parent = requests[0].body_json();
-    let child = requests[1].body_json();
-    let prefix = parent["input"].as_array().expect("parent input");
-    assert_eq!(
-        &child["input"].as_array().expect("child input")[..prefix.len()],
-        prefix
-    );
-    insta::assert_snapshot!(
-        "prediction_fork_mcp_removal",
-        context_snapshot::format_request_history_snapshot(
-            "The prediction fork preserves the incremental parent's complete prefix, then appends MCP removal. Its second turn retains that update; continuing the parent keeps its original tools.",
-            &requests,
-            &ContextSnapshotOptions::default()
-                .rewrite_known_segments()
-                .include_request_settings(),
-        )
-    );
-    Ok(())
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 4);
+        let parent_input = requests[0].input();
+        let child_input = requests[1].input();
+        assert!(child_input.starts_with(&parent_input));
+        assert!(requests[2].input().starts_with(&child_input));
+
+        let inherited = requests[0].inputs_of_type("additional_tools");
+        let exec = inherited.iter()
+            .find_map(|item| responses::namespace_child_tool(item, "functions", "exec"))
+            .expect("parent declares functions.exec");
+        assert!(exec["description"].as_str().expect("exec description")
+            .contains("mcp__echo_service__echo"));
+
+        let child_declarations = requests[1].inputs_of_type("additional_tools");
+        if preserve_parent_tools {
+            assert_eq!(child_declarations, inherited);
+            assert!(!child_input.iter().any(|item|
+                item.to_string().contains("no longer available")
+            ));
+        } else {
+            assert_eq!(child_declarations.len(), inherited.len() + 1);
+            assert_eq!(&child_declarations[..inherited.len()], &inherited);
+            let updated_exec = responses::namespace_child_tool(
+                child_declarations.last().expect("updated declarations"),
+                "functions",
+                "exec",
+            ).expect("prediction updates functions.exec");
+            assert_ne!(updated_exec, exec);
+            assert!(!updated_exec["description"].as_str().expect("updated exec description")
+                .contains("mcp__echo_service__echo"));
+        }
+        assert_eq!(requests[2].inputs_of_type("additional_tools"), child_declarations);
+        assert_eq!(requests[3].inputs_of_type("additional_tools"), inherited);
+
+        let unavailable_notices: Vec<_> = requests.iter().map(|request| {
+            request.message_input_texts("developer").iter().filter(|text|
+                text.contains("MCP tools are unavailable for this request.")
+            ).count()
+        }).collect();
+        let notice_count = usize::from(preserve_parent_tools);
+        assert_eq!(unavailable_notices, [0, notice_count, notice_count, 0]);
+
+        let (snapshot_name, scenario) = if preserve_parent_tools {
+            (
+                "prediction_fork_inherited_tools",
+                "The prediction fork preserves the parent's complete prefix and tool declarations, then appends one MCP-unavailable notice. Its second turn retains that notice without another update; continuing the parent keeps its original tools.",
+            )
+        } else {
+            (
+                "prediction_fork_mcp_removal",
+                "The prediction fork preserves the parent's complete prefix, then updates functions.exec to omit unavailable MCP helpers. Its second turn retains that update without repeating it; continuing the parent keeps its original tools.",
+            )
+        };
+        insta::assert_snapshot!(
+            snapshot_name,
+            context_snapshot::format_request_history_snapshot(
+                scenario,
+                &requests,
+                &ContextSnapshotOptions::default()
+                    .rewrite_known_segments()
+                    .include_request_settings(),
+            )
+        );
+        Ok(())
     }).await
 }
 

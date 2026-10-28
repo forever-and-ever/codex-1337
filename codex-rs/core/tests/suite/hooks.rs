@@ -2796,6 +2796,7 @@ async fn multiple_blocking_stop_hooks_persist_multiple_hook_prompt_fragments() -
     .await
 }
 
+/// A blocked prompt keeps hook context but never reaches the rollout or the model.
 #[tokio::test]
 async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -2816,11 +2817,26 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
             write_user_prompt_submit_hook(home, "blocked first prompt", BLOCKED_PROMPT_CONTEXT)
                 .expect("failed to write user prompt submit hook test fixture");
         })
-        .with_config(trust_discovered_hooks);
+        .with_config(|config| {
+            trust_discovered_hooks(config);
+        });
     let test = builder.build(&server).await?;
 
-    test.submit_turn("blocked first prompt").await?;
+    test.codex
+        .start_turn_if_idle(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "blocked first prompt".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
     test.submit_turn("second prompt").await?;
+
+    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    assert!(!rollout.contains("blocked first prompt"));
+    assert!(rollout.contains("second prompt"));
 
     let request = response.single_request();
     assert!(
@@ -2871,6 +2887,7 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
     Ok(())
 }
 
+/// A later blocked prompt cannot leak or strand earlier accepted input.
 #[tokio::test]
 async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -2964,6 +2981,10 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
     .await;
 
     assert_eq!(requests.len(), 2);
+
+    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    assert!(!rollout.contains("blocked queued prompt"));
+    assert!(rollout.contains("accepted queued prompt"));
 
     let second_user_texts = request_message_input_texts(&requests[1], "user");
     assert!(

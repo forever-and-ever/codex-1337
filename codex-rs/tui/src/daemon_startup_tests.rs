@@ -1,7 +1,7 @@
 //! A selected daemon owns its endpoint, including during connection failures.
 
-use super::*;
 use crate::legacy_core::config::ConfigBuilder;
+use crate::*;
 use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 

@@ -101,6 +101,7 @@ pub(crate) enum ApprovalAction {
     },
     McpToolCall {
         id: String,
+        environment_id: String,
         server: String,
         tool_name: String,
         arguments: Option<serde_json::Value>,
@@ -151,6 +152,17 @@ pub(crate) enum ApprovalCacheKey {
 }
 
 impl ApprovalAction {
+    fn hook_environment_id(&self) -> &str {
+        match self {
+            Self::ExecCommand { environment_id, .. }
+            | Self::WriteStdin { environment_id, .. }
+            | Self::ApplyPatch { environment_id, .. }
+            | Self::McpToolCall { environment_id, .. }
+            | Self::NetworkAccess { environment_id, .. }
+            | Self::RequestPermissions { environment_id, .. } => environment_id,
+        }
+    }
+
     pub(crate) fn permission_request_payload(
         &self,
         tool_name: &ToolName,
@@ -483,6 +495,7 @@ impl Session {
             &ctx.review_context,
             &permission_request_run_id,
             action.permission_request_payload(&ctx.tool_name),
+            action.hook_environment_id(),
         )
         .await
         {

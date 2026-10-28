@@ -1469,6 +1469,7 @@ mod tests {
 
     pub(super) fn test_environment_config() -> EnvironmentConfig {
         EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: true,
             workspace_roots: Vec::new(),
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -1650,6 +1651,7 @@ url = "ws://127.0.0.1:8765"
             shell_path: std::path::PathBuf::from("/configured/zsh"),
         };
         let expected_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: false,
             workspace_roots: Vec::new(),
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -1927,6 +1929,7 @@ url = "ws://127.0.0.1:8765"
         );
         let cwd = AbsolutePathBuf::current_dir().expect("cwd");
         let expected_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: false,
             workspace_roots: Vec::new(),
             windows_sandbox_level: legacy_level,
@@ -2024,6 +2027,7 @@ url = "ws://127.0.0.1:8765"
         assert!(starting.single_local_environment().is_none());
 
         let next_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             permission_profile: PermissionProfileSnapshot::legacy(PermissionProfile::Disabled),
             ..test_environment_config()
         };
@@ -2195,6 +2199,7 @@ url = "ws://127.0.0.1:8765"
             )
             .expect("replacement environment");
         let next_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: false,
             ..test_environment_config()
         };
@@ -2358,6 +2363,7 @@ url = "ws://127.0.0.1:8765"
             )
             .expect("replacement environment");
         let child_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: false,
             workspace_roots: Vec::new(),
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -2437,6 +2443,7 @@ url = "ws://127.0.0.1:8765"
         parent.update_selections(std::slice::from_ref(&selection));
         parent.snapshot().await;
         let parent_owner_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             allow_login_shell: false,
             workspace_roots: selection.workspace_roots.clone(),
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -2482,6 +2489,7 @@ url = "ws://127.0.0.1:8765"
         let child_environment = child_snapshot.primary().expect("child environment");
 
         let cleared_parent_owner_config = EnvironmentConfig {
+            environment_hooks: Default::default(),
             selected_capability_roots: Vec::new(),
             ..parent_owner_config.clone()
         };

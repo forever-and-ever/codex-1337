@@ -40,6 +40,5 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-mxc-sdk = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }

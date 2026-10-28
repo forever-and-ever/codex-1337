@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::Weak;
 use std::time::Duration;
 
+use super::TerminalSession;
 use super::UnifiedExecContext;
 use super::UnifiedExecError;
 use super::UnifiedExecProcess;
@@ -19,12 +20,28 @@ use codex_utils_output_truncation::approx_tokens_from_byte_count;
 const MAX_RECEIPTS: usize = 64;
 const MAX_TAIL_BYTES: usize = 16 * 1024;
 
+#[derive(Clone, Debug)]
+pub(super) enum TerminalState {
+    Live(Arc<UnifiedExecProcess>),
+    Completed,
+}
+
+impl TerminalSession {
+    pub(super) fn process(&self) -> Option<&Arc<UnifiedExecProcess>> {
+        match &self.state {
+            TerminalState::Live(process) => Some(process),
+            TerminalState::Completed => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct CompletionReceipts(VecDeque<(i32, CompletionReceipt)>);
 
 struct CompletionReceipt {
     owner: Weak<Session>,
     call_id: String,
+    environment_id: String,
     chunk_id: String,
     exit_code: Option<i32>,
     tail: Vec<u8>,
@@ -35,6 +52,16 @@ struct CompletionReceipt {
 impl CompletionReceipts {
     pub(super) fn clear(&mut self) {
         self.0.clear();
+    }
+
+    pub(super) fn terminal(&self, process_id: i32) -> Option<TerminalSession> {
+        let (_, receipt) = self.0.iter().find(|(id, _)| *id == process_id)?;
+        Some(TerminalSession {
+            process_id,
+            state: TerminalState::Completed,
+            call_id: receipt.call_id.clone(),
+            environment_id: receipt.environment_id.clone(),
+        })
     }
 
     fn insert(&mut self, id: i32, receipt: CompletionReceipt) {
@@ -54,7 +81,9 @@ impl CompletionReceipts {
             return None;
         }
         let (_, receipt) = self.0.iter().find(|(id, receipt)| {
-            *id == request.process_id && receipt.owner.ptr_eq(&Arc::downgrade(&context.session))
+            *id == request.terminal.process_id
+                && receipt.call_id == request.terminal.call_id
+                && receipt.owner.ptr_eq(&Arc::downgrade(&context.session))
         })?;
         let mut output = receipt.omitted_bytes.map_or_else(Vec::new, |omitted| {
             format!("{}\n", format_output_omission_marker(omitted.get())).into_bytes()
@@ -89,13 +118,14 @@ impl UnifiedExecProcessManager {
             .completions
             .poll(context, request)
             .ok_or(UnifiedExecError::UnknownProcessId {
-                process_id: request.process_id,
+                process_id: request.terminal.process_id,
             })
     }
 
     pub(super) async fn retain_completion(
         &self,
         process_id: i32,
+        environment_id: &str,
         process: &Arc<UnifiedExecProcess>,
         context: &UnifiedExecContext,
         response: &ExecCommandToolOutput,
@@ -111,6 +141,7 @@ impl UnifiedExecProcessManager {
             CompletionReceipt {
                 owner: Arc::downgrade(&context.session),
                 call_id: response.event_call_id.clone(),
+                environment_id: environment_id.to_owned(),
                 chunk_id: response.chunk_id.clone(),
                 exit_code: response.exit_code,
                 tail,

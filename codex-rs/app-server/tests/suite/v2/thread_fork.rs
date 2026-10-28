@@ -116,6 +116,7 @@ async fn list_threads(mcp: &mut TestAppServer) -> Result<ThreadListResponse> {
     let list_id = mcp
         .send_thread_list_request(ThreadListParams {
             excluded_thread_ids: None,
+            attached_to_thread_id: None,
             originators: None,
             cursor: None,
             limit: Some(50),
@@ -3043,22 +3044,24 @@ async fn inheriting_fork_preserves_parent_config(history_mode: ThreadHistoryMode
     Ok(())
 }
 
-#[test_case(ThreadHistoryMode::Legacy, false, true, true; "prediction fork retains MCPs")]
-#[test_case(ThreadHistoryMode::Legacy, true, true, true; "disable MCPs in prediction fork")]
-#[test_case(ThreadHistoryMode::Paginated, true, true, true; "disable MCPs in paginated fork")]
-#[test_case(ThreadHistoryMode::Legacy, true, false, true; "retain MCPs without incremental tools")]
-#[test_case(ThreadHistoryMode::Legacy, true, true, false; "retain MCPs without Responses Lite")]
+#[test_case(ThreadHistoryMode::Legacy, false, true, true, false; "prediction fork retains MCPs")]
+#[test_case(ThreadHistoryMode::Legacy, true, true, true, false; "disable MCPs in prediction fork")]
+#[test_case(ThreadHistoryMode::Paginated, true, true, true, false; "disable MCPs in paginated fork")]
+#[test_case(ThreadHistoryMode::Legacy, true, false, true, false; "retain MCPs without incremental tools")]
+#[test_case(ThreadHistoryMode::Legacy, true, true, false, false; "retain MCPs without Responses Lite")]
+#[test_case(ThreadHistoryMode::Legacy, true, true, true, true; "opt in to inherited MCP declarations")]
 #[tokio::test]
 async fn fork_option_disables_mcp_servers(
     history_mode: ThreadHistoryMode,
     disable_mcp: bool,
     incremental_tools: bool,
     responses_lite: bool,
+    preserve_parent_tools: bool,
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
     let mock = responses::mount_sse_sequence(
         &server,
-        ["parent", "child", "refreshed-child", "continued-parent"]
+        ["parent", "prediction", "continued-parent"]
             .into_iter()
             .map(|id| responses::sse(vec![responses::ev_completed(id)]))
             .collect(),
@@ -3100,7 +3103,11 @@ async fn fork_option_disables_mcp_servers(
     let mut model = construct_model_info_offline("gpt-5.4", &config);
     model.use_responses_lite = responses_lite;
     model.supports_search_tool = false;
-    model.tool_mode = Some(codex_protocol::openai_models::ToolMode::Direct);
+    model.tool_mode = Some(if preserve_parent_tools {
+        codex_protocol::openai_models::ToolMode::CodeMode
+    } else {
+        codex_protocol::openai_models::ToolMode::Direct
+    });
     let catalog = codex_home.path().join("catalog.json");
     std::fs::write(
         &catalog,
@@ -3109,7 +3116,7 @@ async fn fork_option_disables_mcp_servers(
     MockResponsesConfig::new(&server.uri())
         .with_model("gpt-5.4")
         .with_root_config(&format!(
-            "model_catalog_json = {}\nfeatures.incremental_tools = {incremental_tools}",
+            "model_catalog_json = {}\nfeatures.incremental_tools = {incremental_tools}\nfeatures.prediction_preserve_parent_tools = {preserve_parent_tools}",
             serde_json::to_string(&catalog)?
         ))
         .with_extra_config(&format!(
@@ -3149,38 +3156,36 @@ async fn fork_option_disables_mcp_servers(
             },
         })
         .await?;
-    let removes_mcp = disable_mcp && incremental_tools && responses_lite;
-    for (index, thread_id) in [&child.thread.id, &child.thread.id, &parent.thread.id]
-        .into_iter()
-        .enumerate()
-    {
-        if index == 1 {
-            let initializations = mcp_server
-                .received_requests()
-                .await
-                .expect("MCP request recording must be enabled")
-                .iter()
-                .filter(|request| request.method.as_str() == "POST")
-                .filter(|request| {
-                    serde_json::from_slice::<Value>(&request.body)
-                        .expect("MCP request must be valid JSON")["method"]
-                        == "initialize"
-                })
-                .count();
-            if removes_mcp {
-                assert_eq!(initializations, 1, "disabled fork must not connect MCPs");
-            }
-            let _: McpServerRefreshResponse = app
-                .request(|request_id| ClientRequest::McpServerRefresh {
-                    request_id,
-                    params: None,
-                })
-                .await?;
-        }
+    let disables_mcp = disable_mcp && incremental_tools && responses_lite;
+    if disables_mcp {
+        let initializations = mcp_server
+            .received_requests()
+            .await
+            .expect("MCP request recording must be enabled")
+            .iter()
+            .filter(|request| request.method.as_str() == "POST")
+            .filter(|request| {
+                serde_json::from_slice::<Value>(&request.body)
+                    .expect("MCP request must be valid JSON")["method"]
+                    == "initialize"
+            })
+            .count();
+        assert_eq!(initializations, 1, "disabled fork must not connect MCPs");
+    }
+    let _: McpServerRefreshResponse = app
+        .request(|request_id| ClientRequest::McpServerRefresh {
+            request_id,
+            params: None,
+        })
+        .await?;
+    for (thread_id, text) in [
+        (&child.thread.id, "Predict the next message."),
+        (&parent.thread.id, "Continue"),
+    ] {
         app.start_turn_and_wait_for_completion(TurnStartParams {
             thread_id: thread_id.clone(),
             input: vec![UserInput::Text {
-                text: "Continue".into(),
+                text: text.into(),
                 text_elements: vec![],
             }],
             ..Default::default()
@@ -3194,21 +3199,43 @@ async fn fork_option_disables_mcp_servers(
             .to_string()
             .contains("prediction_mcp_lookup")
     );
-    assert_eq!(
-        requests
-            .iter()
-            .map(|request| request.body_json()["input"]
-                .as_array()
-                .expect("input")
+    let declarations = requests[0].inputs_of_type("additional_tools");
+    if disables_mcp && preserve_parent_tools {
+        assert!(
+            declarations
                 .iter()
-                .any(|item| {
-                    let text = item.to_string();
-                    text.contains("namespaces are no longer available")
-                        && text.contains("mcp__fixture")
-                }))
-            .collect::<Vec<_>>(),
-        vec![false, removes_mcp, removes_mcp, false],
+                .any(|item| responses::namespace_child_tool(item, "functions", "exec").is_some())
+        );
+    }
+    let notice_counts: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            request
+                .message_input_texts("developer")
+                .iter()
+                .filter(|text| text.contains("MCP tools are unavailable for this request."))
+                .count()
+        })
+        .collect();
+    assert_eq!(
+        notice_counts,
+        [0, usize::from(disables_mcp && preserve_parent_tools), 0]
     );
+    let removes_mcp = disables_mcp && !preserve_parent_tools;
+    let removal_notices: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            request.input().iter().any(|item| {
+                let text = item.to_string();
+                text.contains("namespaces are no longer available") && text.contains("mcp__fixture")
+            })
+        })
+        .collect();
+    assert_eq!(removal_notices, [false, removes_mcp, false]);
+    if disables_mcp && preserve_parent_tools {
+        assert_eq!(requests[1].inputs_of_type("additional_tools"), declarations);
+    }
+    assert_eq!(requests[2].inputs_of_type("additional_tools"), declarations);
     Ok(())
 }
 

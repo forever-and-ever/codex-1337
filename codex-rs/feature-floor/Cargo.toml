@@ -21,10 +21,5 @@ rmcp = { workspace = true, features = ["elicitation"] }
 scopeguard = { workspace = true }
 similar = { workspace = true, features = ["inline"] }
 
-# Host tools need MXC's build-time API features, not its target JSON number policy.
-[build-dependencies]
-serde_json = { workspace = true, features = ["raw_value"] }
-typenum = { version = "1.20.0", features = ["const-generics"] }
-
 [package.metadata.cargo-shear]
-ignored = ["env_logger", "nix", "p256", "petgraph", "predicates", "rmcp", "scopeguard", "serde_json", "similar", "typenum"]
+ignored = ["env_logger", "nix", "p256", "petgraph", "predicates", "rmcp", "scopeguard", "similar"]

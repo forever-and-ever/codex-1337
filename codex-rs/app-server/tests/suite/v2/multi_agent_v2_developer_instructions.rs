@@ -1155,6 +1155,7 @@ features.shell_tool = false
                 request_id,
                 params: codex_app_server_protocol::ThreadListParams {
                     ancestor_thread_id: Some(thread_id.clone()),
+                    attached_to_thread_id: None,
                     source_kinds: Some(vec![
                         codex_app_server_protocol::ThreadSourceKind::SubAgentThreadSpawn,
                     ]),

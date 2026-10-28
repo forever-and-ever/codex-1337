@@ -371,6 +371,7 @@ impl Session {
             desired.environments.ready_environment_handles(),
         );
         McpRuntimeInput {
+            network_policy_metadata: None,
             startup_policy: if matches!(desired.session_source, SessionSource::SubAgent(_)) {
                 McpStartupPolicy::LazyWhenCached
             } else {

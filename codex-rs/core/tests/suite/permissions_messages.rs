@@ -29,6 +29,7 @@ fn permissions_texts(request: &ResponsesRequest) -> Vec<String> {
         .message_input_texts("developer")
         .into_iter()
         .filter(|text| text.contains("<permissions instructions>"))
+        .map(|text| text.replace("\r\n", "\n"))
         .collect()
 }
 
@@ -250,6 +251,8 @@ async fn catalog_permission_message_is_sent_initially_and_after_model_change() -
             workspace_write: None,
             read_only: Some("model A permissions: {{ network_access }}".to_string()),
             approved_prefixes: None,
+            writable_root: None,
+            writable_roots: None,
         },
     );
     let second = model_with_permission_messages(
@@ -259,6 +262,8 @@ async fn catalog_permission_message_is_sent_initially_and_after_model_change() -
             workspace_write: None,
             read_only: Some("model B permissions: {{ network_access }}".to_string()),
             approved_prefixes: None,
+            writable_root: None,
+            writable_roots: None,
         },
     );
     let mut builder = test_codex()
@@ -325,6 +330,8 @@ async fn empty_catalog_permission_message_preserves_approval_instructions() -> R
             workspace_write: None,
             read_only: Some(String::new()),
             approved_prefixes: None,
+            writable_root: None,
+            writable_roots: None,
         },
     );
     let mut builder = test_codex()

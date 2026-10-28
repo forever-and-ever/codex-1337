@@ -380,8 +380,17 @@ impl TranscriptView {
         if manually_expanded && crate::history_cell::invocation::collect(cell.as_ref()).is_empty() {
             self.disclosure.expanded.extend(ids.iter().cloned());
         }
+        // Adjacent visible rich prompts share their ground; hidden work does not split it.
+        let shares_prompt_background = mode == HistoryRenderMode::Rich
+            && cell.as_any().is::<crate::history_cell::UserHistoryCell>()
+            && previous.is_some_and(|previous| {
+                previous
+                    .as_any()
+                    .is::<crate::history_cell::UserHistoryCell>()
+            });
         // Dialogue mode stacks prompts and answers; with the work shown, blank rows set them apart.
         let separated = !self.dialogue_only()
+            && !shares_prompt_background
             && match &seat.header {
                 Some(header) => {
                     previous_index.is_some()

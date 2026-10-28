@@ -272,7 +272,8 @@ fn matches_name_lookup_filters(
     allowed_sources: &[SessionSource],
     allowed_model_providers: &[String],
 ) -> bool {
-    (allowed_sources.is_empty() || allowed_sources.contains(&meta.meta.source))
+    !meta.meta.attached_thread
+        && (allowed_sources.is_empty() || allowed_sources.contains(&meta.meta.source))
         && meta.meta.model_provider.as_ref().is_none_or(|provider| {
             allowed_model_providers.is_empty() || allowed_model_providers.contains(provider)
         })

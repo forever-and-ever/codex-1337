@@ -4987,6 +4987,7 @@ text("phase 1");
 yield_control();
 {phase_2_wait}
 text((await tools.exec_command({{cmd: "printf 'phase 2'"}})).output);
+yield_control();
 {phase_3_wait}
 text((await tools.exec_command({{cmd: "printf 'phase 3'"}})).output);
 "#

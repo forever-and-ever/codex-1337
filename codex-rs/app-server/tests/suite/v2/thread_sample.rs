@@ -16,6 +16,7 @@ use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadSampleCancelResponse;
 use codex_app_server_protocol::ThreadSampleParams;
 use codex_app_server_protocol::ThreadSampleResponse;
+use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnCompletedNotification;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -304,6 +305,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             expected_turn_id: completed.turn.id.clone(),
             prompt: "Continue identically".to_string(),
             effort: Some(ReasoningEffort::Medium),
+            thread_source: Some(ThreadSource::Feature("composer_predictions".to_string())),
             turn_trigger: Some("composer_predictions".to_string()),
             responsesapi_client_metadata: Some(HashMap::from([
                 (
@@ -390,6 +392,7 @@ async fn sample_preserves_context_and_keeps_source_unchanged(
             .header("x-codex-turn-metadata")
             .expect("turn metadata"),
     )?;
+    assert_eq!(metadata["thread_source"], "composer_predictions");
     assert_eq!(metadata["turn_trigger"], "composer_predictions");
     assert_eq!(metadata["generation_trigger"], "composer_prediction");
     let body_metadata: Value = serde_json::from_str(
@@ -513,6 +516,7 @@ async fn sample_preserves_effort_baseline(
             .header("x-codex-turn-metadata")
             .expect("turn metadata"),
     )?;
+    assert_eq!(metadata["thread_source"], "thread_sample");
     assert!(metadata.get("turn_trigger").is_none());
     Ok(())
 }
@@ -651,13 +655,15 @@ async fn sample_returns_null_for_custom_tool_calls() -> Result<()> {
     Ok(())
 }
 
-#[test_case(false, true; "inherit MCPs by default")]
-#[test_case(true, true; "disable MCPs with incremental tools")]
-#[test_case(true, false; "retain MCPs without incremental tools")]
+#[test_case(false, true, false; "inherit MCPs by default")]
+#[test_case(true, true, false; "disable MCPs with incremental tools")]
+#[test_case(true, false, false; "retain MCPs without incremental tools")]
+#[test_case(true, true, true; "opt in to inherited MCP declarations")]
 #[tokio::test]
 async fn sample_blocks_mcp_execution_without_changing_parent_tools(
     disable_mcp: bool,
     incremental_tools: bool,
+    preserve_parent_tools: bool,
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
     let mcp = wiremock::MockServer::start().await;
@@ -706,6 +712,16 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools(
                 responses::ev_completed("sample-tool"),
             ]),
             responses::sse(vec![responses::ev_completed("prediction-fork")]),
+            responses::sse(vec![
+                responses::ev_function_call_with_namespace(
+                    "continued-parent-call",
+                    "mcp__sample_test",
+                    "probe",
+                    "{}",
+                ),
+                responses::ev_completed("continued-parent-tool"),
+            ]),
+            responses::sse(vec![responses::ev_completed("continued-parent")]),
         ],
     )
     .await;
@@ -725,10 +741,16 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools(
     let (parent_id, turn_id) = ready_parent(
         &mut client,
         ThreadStartParams {
-            config: Some(std::collections::HashMap::from([(
-                "features.incremental_tools".to_string(),
-                json!(incremental_tools),
-            )])),
+            config: Some(std::collections::HashMap::from([
+                (
+                    "features.incremental_tools".to_string(),
+                    json!(incremental_tools),
+                ),
+                (
+                    "features.prediction_preserve_parent_tools".to_string(),
+                    json!(preserve_parent_tools),
+                ),
+            ])),
             ..Default::default()
         },
     )
@@ -750,7 +772,7 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools(
     );
     let fork_id = client
         .send_thread_fork_request(ThreadForkParams {
-            thread_id: parent_id,
+            thread_id: parent_id.clone(),
             experimental_prediction_mode: true,
             experimental_disable_prediction_mcp: disable_mcp,
             ephemeral: true,
@@ -766,20 +788,74 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools(
             ..Default::default()
         })
         .await?;
+    let calls_before_parent_continues = mcp
+        .received_requests()
+        .await
+        .expect("MCP requests")
+        .iter()
+        .filter(|request| {
+            serde_json::from_slice::<Value>(&request.body)
+                .is_ok_and(|body| body["method"] == "tools/call")
+        })
+        .count();
+    assert_eq!(
+        calls_before_parent_continues, 1,
+        "sample and prediction fork must not execute MCP tools"
+    );
+    client
+        .start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: parent_id,
+            input: input("Call the tool again in the parent"),
+            ..Default::default()
+        })
+        .await?;
     let requests = mock.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 6);
     let parent = comparable_request(requests[1].body_json());
     let sample = comparable_request(requests[2].body_json());
     let prefix = parent["input"].as_array().expect("parent input");
     let sample_input = sample["input"].as_array().expect("sample input");
     assert_eq!(&sample_input[..prefix.len()], prefix);
-    let removes_mcp = disable_mcp && incremental_tools;
+    let removes_mcp = disable_mcp && incremental_tools && !preserve_parent_tools;
     assert_eq!(
         sample_input[prefix.len()..].iter().any(|item| {
             let text = item.to_string();
             text.contains("namespaces are no longer available") && text.contains("mcp__sample_test")
         }),
         removes_mcp
+    );
+    let notice_counts: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            request
+                .message_input_texts("developer")
+                .iter()
+                .filter(|text| text.contains("MCP tools are unavailable for this request."))
+                .count()
+        })
+        .collect();
+    let preserves_declarations = disable_mcp && incremental_tools && preserve_parent_tools;
+    assert_eq!(
+        notice_counts,
+        [
+            0,
+            0,
+            usize::from(preserves_declarations),
+            usize::from(preserves_declarations),
+            0,
+            0
+        ]
+    );
+    if preserves_declarations {
+        assert!(
+            !sample_input[prefix.len()..]
+                .iter()
+                .any(|item| item["type"] == "additional_tools")
+        );
+    }
+    assert_eq!(
+        requests[4].inputs_of_type("additional_tools"),
+        requests[1].inputs_of_type("additional_tools")
     );
     assert_eq!(sample, comparable_request(requests[3].body_json()));
     assert_eq!(
@@ -796,8 +872,8 @@ async fn sample_blocks_mcp_execution_without_changing_parent_tools(
                 .is_ok_and(|body| body["method"] == "tools/call")
         })
         .count();
-    // The parent executes the tool; the sample never sends a second MCP call.
-    assert_eq!(calls, 1);
+    // Only the parent executes tools, including after both prediction paths finish.
+    assert_eq!(calls, 2);
     Ok(())
 }
 

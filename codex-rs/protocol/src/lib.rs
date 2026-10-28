@@ -55,6 +55,7 @@ pub use native_execution_result::NativeExecutionResult;
 pub use native_execution_result::SettledExecution;
 pub use native_execution_result::join_execution_sections;
 pub mod agent_wait;
+pub mod hooks;
 pub mod items;
 mod legacy_events;
 pub mod local_media;

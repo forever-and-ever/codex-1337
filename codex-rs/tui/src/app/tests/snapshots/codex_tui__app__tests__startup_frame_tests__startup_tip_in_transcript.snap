@@ -7,7 +7,7 @@ expression: "normalize_snapshot_paths(normalize_agent_center_snapshot(snapshots.
   ? for shortcuts
 ────────────────────────────────────────────────────────────────────────────────
 
-                >_ OpenAI Codex (v0.164.0-1337)
+                >_ OpenAI Codex (v0.165.0-1337)
                    /tmp/project
 
         [   Conversation continues here.

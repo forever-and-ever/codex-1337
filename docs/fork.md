@@ -122,6 +122,11 @@ handoff and advertised UTF-8 aliases. Provenance, local changes, validation and
 removal condition live in `codex-rs/vendor/arboard/DOWNSTREAM.md`. Do not replace
 this patch with build-time edits to Cargo's shared registry cache.
 
+The workspace vendors zip 9.0.0 for one dependency-feature forwarding fix,
+retaining its C bzip2 backend without compiling the unused Rust backend.
+Provenance, the exact metadata delta and removal condition live in
+`codex-rs/vendor/zip/DOWNSTREAM.md`; compiler source and codecs are unchanged.
+
 ## Current X11 clipboard keeper
 
 The optional desktop-wide keeper retains only the current CLIPBOARD offer in

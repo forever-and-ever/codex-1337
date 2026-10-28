@@ -30,15 +30,21 @@ impl ExecServerProcess {
 
     pub async fn start_with_env(env: &[(&str, &str)]) -> Result<Self> {
         let codex_home = TempDir::new()?;
-        let mut child = Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
-            .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
+        let mut command = Command::new(codex_utils_cargo_bin::cargo_bin("exec-server")?);
+        command
             .env("CODEX_HOME", codex_home.path())
             .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+        #[cfg(target_os = "linux")]
+        command.env(
+            "CODEX_TEST_LINUX_SANDBOX_EXE",
+            crate::find_codex_linux_sandbox_exe()
+                .context("should find binary for exec-server Linux sandbox helper")?,
+        );
+        let mut child = command.spawn()?;
         let stdout = child
             .stdout
             .take()

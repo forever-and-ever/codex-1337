@@ -1,5 +1,6 @@
 //! Test-only helpers shared across the TUI crate.
 
+#[path = "test_support/server_requests.rs"]
 mod server_requests;
 pub(crate) use server_requests::thread_goal_get;
 pub(crate) use server_requests::thread_goal_set;

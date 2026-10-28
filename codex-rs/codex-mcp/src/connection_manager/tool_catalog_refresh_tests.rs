@@ -77,6 +77,7 @@ impl MutableCatalog {
             tool_timeout: Some(Duration::from_secs(5)),
             server_instructions: None,
             server_supports_sandbox_state_meta_capability: false,
+            client_supports_network_policy_meta_capability: false,
             codex_apps_tools_cache_context: None,
         };
         let mut connections = McpConnectionSet::empty(/*prefix_mcp_tool_names*/ true);

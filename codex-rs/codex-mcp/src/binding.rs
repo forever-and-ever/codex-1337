@@ -108,6 +108,11 @@ impl McpBinding {
         self.connections.offers_resources()
     }
 
+    /// The environment owning this server in the step's connection set, even if it exposes no tools.
+    pub fn server_environment_id(&self, server: &str) -> Option<&str> {
+        self.connections.server_environment_id(server)
+    }
+
     pub async fn list_resources(
         &self,
         server: &str,
@@ -480,7 +485,17 @@ impl PreparedMcpCall {
                 }
                 self.client
                     .client
-                    .call_tool(tool_name.clone(), arguments, meta, remaining_timeout)
+                    .call_tool(
+                        tool_name.clone(),
+                        arguments,
+                        self.connections.network_policy_meta_for_call(
+                            &self.client,
+                            Some(self.permission_profile()),
+                            self.server_environment_id(),
+                            meta,
+                        ),
+                        remaining_timeout,
+                    )
                     .await
                     .with_context(|| format!("tool call failed for `{}/{tool_name}`", self.server_name))
                 }

@@ -1,5 +1,6 @@
 //! Regression coverage for retry advice carried by failed Responses events.
 
+use super::identity::ResponsesItemIdentity;
 use super::process_responses_event;
 use super::spawn_response_stream;
 use crate::api_bridge::map_api_error;
@@ -58,6 +59,30 @@ async fn flex_failure_with_retry_header_ends_stream_immediately() {
             (CodexErrorInfo::FlexUnavailable, None)
         );
         assert!(stream.next().await.is_none());
+    }
+}
+
+#[test]
+fn statusless_model_errors_have_no_http_status() {
+    let error = json!({"code": "model_not_found"});
+    for event in [
+        json!({"type": "error", "error": error}),
+        json!({"type": "response.failed", "response": {"error": error}}),
+    ] {
+        let event = serde_json::from_value(event).unwrap();
+        let mut identity = ResponsesItemIdentity::default();
+        let error = map_api_error(
+            process_responses_event(event, &mut identity)
+                .unwrap_err()
+                .into_api_error(),
+        );
+        assert_eq!(
+            (
+                error.to_codex_protocol_error(),
+                error.http_status_code_value()
+            ),
+            (CodexErrorInfo::ModelNotFound, None)
+        );
     }
 }
 

@@ -3,6 +3,7 @@ use crate::anthropic::AnthropicClient;
 use crate::anthropic::AnthropicStreamOptions;
 use crate::anthropic::AnthropicTool;
 use crate::anthropic::AnthropicToolIdentity;
+use crate::auth::AuthError;
 use crate::auth::AuthProvider;
 use crate::provider::Provider;
 use crate::provider::RetryConfig;
@@ -190,7 +191,9 @@ async fn stalled_stream_and_dropped_consumer_release_transport() {
 
 struct NoAuth;
 impl AuthProvider for NoAuth {
-    fn add_auth_headers(&self, _: &mut HeaderMap) {}
+    fn add_auth_headers(&self, _: &mut HeaderMap) -> Result<(), AuthError> {
+        Ok(())
+    }
 }
 
 struct UncertainTransport(Arc<AtomicUsize>);

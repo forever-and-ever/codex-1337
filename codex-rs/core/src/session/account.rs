@@ -302,11 +302,10 @@ impl Session {
     async fn persist_account_binding(&self, id: &str) -> std::io::Result<EventMsg> {
         let mut snapshot = self.thread_settings_snapshot().await;
         snapshot.account_id = Some(id.to_owned());
-        let msg =
-            EventMsg::ThreadSettingsApplied(codex_protocol::protocol::ThreadSettingsAppliedEvent {
-                thread_id: Some(self.thread_id()),
-                thread_settings: snapshot,
-            });
+        let msg = EventMsg::ThreadSettingsApplied(ThreadSettingsAppliedEvent {
+            thread_id: Some(self.thread_id()),
+            thread_settings: snapshot,
+        });
         if let Some(live) = self.live_thread() {
             live.append_items(&[RolloutItem::EventMsg(msg.clone())])
                 .await

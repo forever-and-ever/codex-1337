@@ -346,9 +346,9 @@ async fn thread_attachment_migration_preserves_existing_data() {
     .await
     .expect("existing attachment should be inserted using the released schema");
 
-    // The fork has released IDs through 65. Upstream later reused 60/61: do not
-    // renumber applied fork migrations or silently overwrite their checksums.
-    migrator_through(/*version*/ 65)
+    // The fork has released IDs through 67. Append upstream migrations without
+    // renumbering applied fork migrations or overwriting their checksums.
+    migrator_through(/*version*/ 67)
         .run(&pool)
         .await
         .expect("released fork migrations should apply");
@@ -362,12 +362,28 @@ async fn thread_attachment_migration_preserves_existing_data() {
         .await
         .expect("upstream migrations should preserve the released fork schema");
     let preserved: Vec<(i64, Vec<u8>)> = sqlx::query_as(
-        "SELECT version, checksum FROM _sqlx_migrations WHERE version <= 65 ORDER BY version",
+        "SELECT version, checksum FROM _sqlx_migrations WHERE version <= 67 ORDER BY version",
     )
     .fetch_all(&pool)
     .await
     .unwrap();
     assert_eq!(released, preserved);
+    let attached_parent: Option<String> =
+        sqlx::query_scalar("SELECT attached_thread_parent_id FROM threads WHERE id = ?")
+            .bind(thread_id)
+            .fetch_one(&pool)
+            .await
+            .expect("new attachment relationship should leave existing threads ordinary");
+    assert_eq!(attached_parent, None);
+    assert!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_threads_attached_parent'"
+        )
+        .fetch_optional(&pool)
+        .await
+        .unwrap()
+        .is_some()
+    );
     for table in [
         "thread_farm_requests",
         "guardian_review_feedback",

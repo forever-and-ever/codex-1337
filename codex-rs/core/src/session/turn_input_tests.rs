@@ -884,12 +884,12 @@ async fn start_only_rejects_pending_trigger_turn_without_injecting() {
     assert_eq!(session.collaboration_mode().await.mode, ModeKind::Plan);
 }
 
-/// Queue-only agent mail respects stop, Plan mode, and inherited child configuration.
+/// Discovery revalidation preserves mailbox custody across settings and reservation changes.
 #[test_case(SessionSource::Exec, true, ModeKind::Default; "interrupted_root")]
 #[test_case(SessionSource::Exec, false, ModeKind::Plan; "plan_root")]
 #[test_case(SessionSource::SubAgent(SubAgentSource::Review), false, ModeKind::Default; "inherited_child_flag")]
 #[tokio::test]
-async fn agent_message_wake_reservation_preserves_existing_boundaries(
+async fn mailbox_wake_revalidates_reservation_and_captures_current_settings(
     source: SessionSource,
     interrupted: bool,
     mode: ModeKind,
@@ -921,7 +921,55 @@ async fn agent_message_wake_reservation_preserves_existing_boundaries(
         .enqueue_mailbox_communication(communication.clone().into(), Default::default())
         .await;
 
-    assert!(session.reserve_pending_work_turn().await.is_none());
+    let (reservation, _) = session
+        .reserve_pending_work_turn()
+        .await
+        .expect("ordinary mail reserves family-capacity work");
+    // Model discovery can yield while settings change or an interrupt replaces
+    // this reservation. Capture the current configuration without taking mail.
+    let selected_mode = if mode == ModeKind::Plan {
+        ModeKind::Default
+    } else {
+        ModeKind::Plan
+    };
+    {
+        let mut state = session.state.lock().await;
+        Arc::make_mut(&mut state.session_configuration.step_settings)
+            .collaboration_mode
+            .mode = selected_mode;
+    }
+    let configuration = session
+        .pending_work_turn_configuration(&reservation)
+        .await
+        .expect("the live reservation selects settings");
+    assert_eq!(
+        configuration.step_settings.collaboration_mode.mode,
+        selected_mode
+    );
+    session.clear_reserved_idle_turn(&reservation).await;
+    assert!(
+        session
+            .pending_work_turn_configuration(&reservation)
+            .await
+            .is_none()
+    );
+    let (replacement, _) = session
+        .reserve_pending_work_turn()
+        .await
+        .expect("unconsumed mail can reserve later work");
+    assert!(
+        session
+            .pending_work_turn_configuration(&reservation)
+            .await
+            .is_none()
+    );
+    assert!(
+        session
+            .pending_work_turn_configuration(&replacement)
+            .await
+            .is_some()
+    );
+    session.clear_reserved_idle_turn(&replacement).await;
     assert!(session.active_turn.lock().await.is_none());
     assert_eq!(
         session.input_queue.drain_mailbox_input_items().await.0,

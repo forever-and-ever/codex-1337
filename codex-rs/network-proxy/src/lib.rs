@@ -126,6 +126,7 @@ pub fn reject_proxy_configuration(config: &NetworkProxyConfig) -> std::io::Resul
         || config.dangerously_allow_plaintext_credential_injection
         || config.mode != NetworkMode::Full
         || config.domains.is_some()
+        || !config.review_domains.is_empty()
         || config.unix_sockets.is_some()
         || config.dangerously_allow_all_unix_sockets.is_some()
         || config.allow_local_binding.is_some()
